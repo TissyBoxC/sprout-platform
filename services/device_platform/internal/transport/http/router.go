@@ -143,7 +143,10 @@ func NewRouter(options RouterOptions) http.Handler {
 			)
 		}
 		if options.RuntimeService != nil {
-			runtimeHandler := deviceRuntimeHandler{service: options.RuntimeService}
+			runtimeHandler := deviceRuntimeHandler{
+				service:       options.RuntimeService,
+				policyService: options.ParentPolicyService,
+			}
 			mux.HandleFunc(
 				"GET /api/v1/devices/status",
 				authHandler.requireAuthentication(runtimeHandler.listForParent),
@@ -159,6 +162,10 @@ func NewRouter(options RouterOptions) http.Handler {
 			mux.HandleFunc(
 				"GET /api/v1/devices/{device_id}/runtime/commands",
 				runtimeHandler.listDeviceCommands,
+			)
+			mux.HandleFunc(
+				"GET /api/v1/devices/{device_id}/runtime/parent-policy",
+				runtimeHandler.getParentPolicy,
 			)
 			mux.HandleFunc(
 				"POST /api/v1/devices/{device_id}/runtime/commands/{command_id}/ack",

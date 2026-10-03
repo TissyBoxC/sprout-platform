@@ -190,6 +190,44 @@ func TestListDeviceStatusesReturnsOnlineAndMissingRuntimeStates(t *testing.T) {
 	}
 }
 
+func TestResolveDeviceFamilyRequiresSessionOwnedPathDevice(t *testing.T) {
+	t.Parallel()
+	service, err := New(Options{
+		Repository: newMemoryRepository(),
+		BindingService: &memoryBindingReader{
+			deviceID: "device_test_001",
+			bindings: []bindingdomain.Binding{
+				{
+					ParentAccountID: "parent-001",
+					DeviceID:        "device_test_001",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+
+	familyID, err := service.ResolveDeviceFamily(
+		context.Background(),
+		"session",
+		"device_test_001",
+	)
+	if err != nil {
+		t.Fatalf("resolve device family: %v", err)
+	}
+	if familyID != "parent-001" {
+		t.Fatalf("expected parent-001, got %q", familyID)
+	}
+	if _, err := service.ResolveDeviceFamily(
+		context.Background(),
+		"session",
+		"device_other_001",
+	); err != bindingdomain.ErrInvalidDeviceProof {
+		t.Fatalf("expected a mismatched path device to be rejected, got %v", err)
+	}
+}
+
 type fixedClock struct {
 	now time.Time
 }
@@ -208,6 +246,18 @@ func (reader *memoryBindingReader) VerifyDeviceSession(
 	string,
 ) (string, error) {
 	return reader.deviceID, nil
+}
+
+func (reader *memoryBindingReader) GetByDeviceID(
+	_ context.Context,
+	deviceID string,
+) (*bindingdomain.Binding, error) {
+	for index := range reader.bindings {
+		if reader.bindings[index].DeviceID == deviceID {
+			return &reader.bindings[index], nil
+		}
+	}
+	return nil, bindingdomain.ErrDeviceNotFound
 }
 
 func (reader *memoryBindingReader) List(

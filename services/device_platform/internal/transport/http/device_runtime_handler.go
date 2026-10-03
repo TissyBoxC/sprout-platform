@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -9,10 +10,16 @@ import (
 	bindingdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
+	policydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/domain"
 )
 
 type deviceRuntimeHandler struct {
-	service *runtimeservice.Service
+	service       *runtimeservice.Service
+	policyService deviceRuntimePolicyService
+}
+
+type deviceRuntimePolicyService interface {
+	List(ctx context.Context, familyID string) ([]policydomain.Policy, error)
 }
 
 type recordHeartbeatRequest struct {
@@ -264,6 +271,45 @@ func (handler deviceRuntimeHandler) acknowledgeCommand(
 		return
 	}
 	writeSuccess(response, request, http.StatusOK, map[string]any{"acknowledged": true})
+}
+
+// getParentPolicy returns the current guardian policy for the authenticated
+// device's family. The path device id is checked against the session owner so
+// one device cannot read another family's policy by changing the path.
+func (handler deviceRuntimeHandler) getParentPolicy(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	if handler.policyService == nil {
+		writeError(response, request, http.StatusServiceUnavailable, "service_unavailable", "家长策略暂时无法读取")
+		return
+	}
+	deviceSessionToken, ok := bearerToken(request)
+	if !ok {
+		writeError(response, request, http.StatusUnauthorized, "device_session_expired", "设备登录已过期，请重新连接")
+		return
+	}
+	deviceID, err := handler.service.ResolveDeviceFamily(
+		request.Context(),
+		deviceSessionToken,
+		strings.TrimSpace(request.PathValue("device_id")),
+	)
+	if err != nil {
+		writeDeviceRuntimeError(response, request, err)
+		return
+	}
+	policies, err := handler.policyService.List(request.Context(), deviceID)
+	if err != nil {
+		writeDeviceRuntimeError(response, request, err)
+		return
+	}
+	result := make([]map[string]any, 0, len(policies))
+	for index := range policies {
+		result = append(result, parentPolicyResponse(&policies[index]))
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"policies": result,
+	})
 }
 
 func runtimeStatusResponse(status *domain.RuntimeStatus) map[string]any {

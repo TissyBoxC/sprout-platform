@@ -44,10 +44,11 @@ func (r *PostgresRepository) Create(ctx context.Context, child *domain.Child) er
 			content_categories,
 			guardian_consent_version,
 			guardian_consented_at,
+			source,
 			created_at,
 			updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`,
 		child.ID,
 		child.FamilyID,
@@ -57,6 +58,7 @@ func (r *PostgresRepository) Create(ctx context.Context, child *domain.Child) er
 		child.ContentCategories,
 		child.GuardianConsentVersion,
 		child.GuardianConsentedAt,
+		child.Source,
 		child.CreatedAt,
 		child.UpdatedAt,
 	)
@@ -171,6 +173,7 @@ const childProfileSelect = `
 		content_categories,
 		guardian_consent_version,
 		guardian_consented_at,
+		source,
 		created_at,
 		updated_at
 	FROM child_profiles
@@ -192,6 +195,7 @@ func scanChild(row rowScanner) (*domain.Child, error) {
 		&child.ContentCategories,
 		&child.GuardianConsentVersion,
 		&guardianConsentedAt,
+		&child.Source,
 		&child.CreatedAt,
 		&child.UpdatedAt,
 	); err != nil {

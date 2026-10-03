@@ -100,6 +100,15 @@ func (p *memoryPolicyProvisioner) DeleteForChild(
 	return nil
 }
 
+func (p *memoryPolicyProvisioner) SyncDefaultCategories(
+	_ context.Context,
+	_ string,
+	_ string,
+	_ []string,
+) error {
+	return nil
+}
+
 type fixedClock struct{}
 
 func (fixedClock) Now() time.Time {
@@ -206,5 +215,53 @@ func TestDeleteRemovesDependentPolicy(t *testing.T) {
 	if len(provisioner.deletedChildIDs) != 1 ||
 		provisioner.deletedChildIDs[0] != child.ID {
 		t.Fatalf("expected dependent policy removal, got %v", provisioner.deletedChildIDs)
+	}
+}
+
+func TestSyncRegistrationProfileCreatesAndUpdatesOneProfile(t *testing.T) {
+	repository := newMemoryChildRepository()
+	provisioner := &memoryPolicyProvisioner{}
+	service, err := New(Options{
+		Repository:        repository,
+		PolicyProvisioner: provisioner,
+		Clock:             fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	created, err := service.SyncRegistrationProfile(
+		context.Background(),
+		"family_1",
+		"小芽",
+		"2022-08-01",
+		"2026-01",
+	)
+	if err != nil {
+		t.Fatalf("sync registration profile: %v", err)
+	}
+	if created == nil || created.AgeTier != domain.AgeTier3To4 {
+		t.Fatalf("expected birthday to select the age 3-4 tier, got %#v", created)
+	}
+	if len(provisioner.createdChildIDs) != 1 {
+		t.Fatalf("expected one default policy, got %v", provisioner.createdChildIDs)
+	}
+
+	updated, err := service.SyncRegistrationProfile(
+		context.Background(),
+		"family_1",
+		"小树",
+		"2019-02-01",
+		"2026-01",
+	)
+	if err != nil {
+		t.Fatalf("update registration profile: %v", err)
+	}
+	if updated.ID != created.ID || updated.Nickname != "小树" ||
+		updated.AgeTier != domain.AgeTier7To8 {
+		t.Fatalf("expected one updated profile, got %#v", updated)
+	}
+	if len(provisioner.createdChildIDs) != 1 {
+		t.Fatalf("registration retry must not create a second policy: %v", provisioner.createdChildIDs)
 	}
 }

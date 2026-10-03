@@ -15,6 +15,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/repository"
+	childdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/domain"
 	operationsdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/security"
@@ -50,17 +51,18 @@ type AIAccountProvisioner interface {
 
 // Service owns parent registration, login, token rotation, and account reads.
 type Service struct {
-	repository      repository.Repository
-	tokenIssuer     security.TokenIssuer
-	aiProvisioner   AIAccountProvisioner
-	mfaCipher       MFACipher
-	phoneVerifier   PhoneVerifier
-	overviewReader  ParentOverviewReader
-	policyReader    RegistrationPolicyReader
-	timeSource      clock.Clock
-	accessTTL       time.Duration
-	refreshTTL      time.Duration
-	mfaChallengeTTL time.Duration
+	repository       repository.Repository
+	tokenIssuer      security.TokenIssuer
+	aiProvisioner    AIAccountProvisioner
+	childProvisioner ChildAccountProvisioner
+	mfaCipher        MFACipher
+	phoneVerifier    PhoneVerifier
+	overviewReader   ParentOverviewReader
+	policyReader     RegistrationPolicyReader
+	timeSource       clock.Clock
+	accessTTL        time.Duration
+	refreshTTL       time.Duration
+	mfaChallengeTTL  time.Duration
 }
 
 // ParentOverviewReader supplies the guardian dashboard projection.
@@ -81,6 +83,19 @@ type RegistrationPolicyReader interface {
 	RuntimePolicy(ctx context.Context) (*operationsdomain.RuntimePolicy, error)
 }
 
+// ChildAccountProvisioner stores the optional child details entered during
+// guardian registration. It is deliberately narrow so authentication does not
+// depend on the child repository or its policy implementation.
+type ChildAccountProvisioner interface {
+	SyncRegistrationProfile(
+		ctx context.Context,
+		familyID string,
+		nickname string,
+		birthday string,
+		guardianConsentVersion string,
+	) (*childdomain.Child, error)
+}
+
 // PhoneVerifier sends and validates guardian mobile verification codes.
 //
 // The local verifier is enabled only through an explicit development setting.
@@ -99,17 +114,18 @@ type MFACipher interface {
 
 // Options contains authentication service dependencies and policies.
 type Options struct {
-	Repository      repository.Repository
-	TokenIssuer     security.TokenIssuer
-	AIProvisioner   AIAccountProvisioner
-	MFACipher       MFACipher
-	PhoneVerifier   PhoneVerifier
-	OverviewReader  ParentOverviewReader
-	PolicyReader    RegistrationPolicyReader
-	MFAChallengeTTL time.Duration
-	Clock           clock.Clock
-	AccessTTL       time.Duration
-	RefreshTTL      time.Duration
+	Repository       repository.Repository
+	TokenIssuer      security.TokenIssuer
+	AIProvisioner    AIAccountProvisioner
+	ChildProvisioner ChildAccountProvisioner
+	MFACipher        MFACipher
+	PhoneVerifier    PhoneVerifier
+	OverviewReader   ParentOverviewReader
+	PolicyReader     RegistrationPolicyReader
+	MFAChallengeTTL  time.Duration
+	Clock            clock.Clock
+	AccessTTL        time.Duration
+	RefreshTTL       time.Duration
 }
 
 // New creates the parent authentication service.
@@ -132,17 +148,18 @@ func New(options Options) (*Service, error) {
 		timeSource = clock.SystemClock{}
 	}
 	return &Service{
-		repository:      options.Repository,
-		tokenIssuer:     options.TokenIssuer,
-		aiProvisioner:   options.AIProvisioner,
-		mfaCipher:       options.MFACipher,
-		phoneVerifier:   options.PhoneVerifier,
-		overviewReader:  options.OverviewReader,
-		policyReader:    options.PolicyReader,
-		timeSource:      timeSource,
-		accessTTL:       options.AccessTTL,
-		refreshTTL:      options.RefreshTTL,
-		mfaChallengeTTL: mfaChallengeTTL,
+		repository:       options.Repository,
+		tokenIssuer:      options.TokenIssuer,
+		aiProvisioner:    options.AIProvisioner,
+		childProvisioner: options.ChildProvisioner,
+		mfaCipher:        options.MFACipher,
+		phoneVerifier:    options.PhoneVerifier,
+		overviewReader:   options.OverviewReader,
+		policyReader:     options.PolicyReader,
+		timeSource:       timeSource,
+		accessTTL:        options.AccessTTL,
+		refreshTTL:       options.RefreshTTL,
+		mfaChallengeTTL:  mfaChallengeTTL,
 	}, nil
 }
 
@@ -156,6 +173,12 @@ func (s *Service) SetOverviewReader(reader ParentOverviewReader) {
 // SetPolicyReader wires the operations policy after both modules are built.
 func (s *Service) SetPolicyReader(reader RegistrationPolicyReader) {
 	s.policyReader = reader
+}
+
+// SetChildProvisioner wires the child profile module after construction so
+// authentication can stay independently removable and testable.
+func (s *Service) SetChildProvisioner(provisioner ChildAccountProvisioner) {
+	s.childProvisioner = provisioner
 }
 
 // ParentOverview returns the authenticated guardian's dashboard counters.
@@ -237,6 +260,20 @@ func (s *Service) Register(
 	}
 	if err := s.repository.CreateParentAccount(ctx, account); err != nil {
 		return nil, nil, nil, err
+	}
+	if s.childProvisioner != nil && input.ChildNickname != "" {
+		if _, err := s.childProvisioner.SyncRegistrationProfile(
+			ctx,
+			account.ID,
+			input.ChildNickname,
+			input.ChildBirthday,
+			input.GuardianConsentVersion,
+		); err != nil {
+			// The account and child profile are one user-visible registration.
+			// Do not leave a guardian without the requested child profile.
+			_ = s.repository.DeleteParentAccount(ctx, account.ID)
+			return nil, nil, nil, err
+		}
 	}
 
 	tokenPair, err := s.issueSession(ctx, account.ID)

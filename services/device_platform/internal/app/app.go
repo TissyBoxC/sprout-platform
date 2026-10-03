@@ -135,6 +135,7 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create child profile service: %w", err)
 	}
+	parentAuthService.SetChildProvisioner(childProfileService)
 	deviceBindingService, err := bindingService.New(bindingService.Options{
 		Repository:    bindingRepository.NewPostgresRepository(databaseStore.Pool()),
 		TokenTTL:      15 * time.Minute,

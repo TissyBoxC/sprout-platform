@@ -26,6 +26,7 @@ var runtimeIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:_[a-z0-9]+)
 // tables directly.
 type BindingReader interface {
 	VerifyDeviceSession(ctx context.Context, token string) (string, error)
+	GetByDeviceID(ctx context.Context, deviceID string) (*bindingdomain.Binding, error)
 	List(ctx context.Context, parentAccountID string) ([]bindingdomain.Binding, error)
 	ListAllForAdmin(ctx context.Context) ([]bindingdomain.Binding, error)
 }
@@ -372,6 +373,28 @@ func (s *Service) AcknowledgeCommand(
 		status,
 		strings.TrimSpace(resultCode),
 	)
+}
+
+// ResolveDeviceFamily verifies that the path device id belongs to the
+// authenticated device session and returns the owning parent account id. The
+// binding lookup is server-side; a client cannot choose a family id.
+func (s *Service) ResolveDeviceFamily(
+	ctx context.Context,
+	deviceSessionToken string,
+	pathDeviceID string,
+) (string, error) {
+	deviceID, err := s.bindingReader.VerifyDeviceSession(ctx, deviceSessionToken)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(pathDeviceID) != deviceID {
+		return "", bindingdomain.ErrInvalidDeviceProof
+	}
+	binding, err := s.bindingReader.GetByDeviceID(ctx, deviceID)
+	if err != nil {
+		return "", err
+	}
+	return binding.ParentAccountID, nil
 }
 
 // OfflineThreshold returns the server-side online threshold for contracts.

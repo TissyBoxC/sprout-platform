@@ -6,6 +6,7 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/repository"
@@ -25,6 +26,12 @@ type PolicyProvisioner interface {
 		contentCategories []string,
 	) error
 	DeleteForChild(ctx context.Context, childID string) error
+	SyncDefaultCategories(
+		ctx context.Context,
+		familyID string,
+		childID string,
+		contentCategories []string,
+	) error
 }
 
 // Service owns child profile validation and persistence.
@@ -67,6 +74,103 @@ func (s *Service) Create(
 	input domain.ProfileInput,
 	guardianConsentVersion string,
 ) (*domain.Child, error) {
+	return s.createWithSource(
+		ctx,
+		familyID,
+		input,
+		guardianConsentVersion,
+		domain.SourceGuardian,
+	)
+}
+
+// SyncRegistrationProfile creates or updates the one child profile captured
+// from guardian registration. A missing birthday falls back to the oldest tier
+// because the account registration form does not require a child birthday;
+// guardians can correct the profile immediately from the child page.
+func (s *Service) SyncRegistrationProfile(
+	ctx context.Context,
+	familyID string,
+	nickname string,
+	birthday string,
+	guardianConsentVersion string,
+) (*domain.Child, error) {
+	nickname = strings.TrimSpace(nickname)
+	if nickname == "" {
+		return nil, nil
+	}
+	ageTier, err := ageTierForBirthday(strings.TrimSpace(birthday), s.timeSource.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	input := domain.ProfileInput{
+		Nickname:          nickname,
+		AgeTier:           ageTier,
+		Interests:         []string{},
+		ContentCategories: append([]string(nil), domain.ContentCategories...),
+	}
+	existing, err := s.repository.ListByFamilyID(ctx, familyID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range existing {
+		if existing[index].Source != domain.SourceRegistration {
+			continue
+		}
+		updated, updateErr := s.Update(ctx, familyID, existing[index].ID, input)
+		if updateErr != nil {
+			return nil, updateErr
+		}
+		if s.policyProvisioner != nil {
+			if policyErr := s.policyProvisioner.SyncDefaultCategories(
+				ctx,
+				familyID,
+				updated.ID,
+				updated.ContentCategories,
+			); policyErr != nil {
+				return nil, policyErr
+			}
+		}
+		return updated, nil
+	}
+	return s.createWithSource(
+		ctx,
+		familyID,
+		input,
+		guardianConsentVersion,
+		domain.SourceRegistration,
+	)
+}
+
+func ageTierForBirthday(birthday string, now time.Time) (string, error) {
+	if birthday == "" {
+		return domain.AgeTier7To8, nil
+	}
+	birthdayTime, err := time.Parse("2006-01-02", birthday)
+	if err != nil || birthdayTime.After(now) {
+		return "", domain.ErrInvalidAgeTier
+	}
+	age := now.Year() - birthdayTime.Year()
+	if now.Month() < birthdayTime.Month() ||
+		(now.Month() == birthdayTime.Month() && now.Day() < birthdayTime.Day()) {
+		age--
+	}
+	switch {
+	case age <= 4:
+		return domain.AgeTier3To4, nil
+	case age <= 6:
+		return domain.AgeTier5To6, nil
+	default:
+		return domain.AgeTier7To8, nil
+	}
+}
+
+func (s *Service) createWithSource(
+	ctx context.Context,
+	familyID string,
+	input domain.ProfileInput,
+	guardianConsentVersion string,
+	source string,
+) (*domain.Child, error) {
 	nickname, ageTier, interests, categories, err := validateProfile(input)
 	if err != nil {
 		return nil, err
@@ -84,6 +188,7 @@ func (s *Service) Create(
 		ContentCategories:      categories,
 		GuardianConsentVersion: strings.TrimSpace(guardianConsentVersion),
 		GuardianConsentedAt:    now,
+		Source:                 source,
 		CreatedAt:              now,
 		UpdatedAt:              now,
 	}

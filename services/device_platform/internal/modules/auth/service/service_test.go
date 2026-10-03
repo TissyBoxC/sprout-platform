@@ -8,6 +8,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/repository"
+	childdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/domain"
 	operationsdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/security"
 	"golang.org/x/crypto/bcrypt"
@@ -63,6 +64,66 @@ func TestRegisterAllowsOptionalGuardianAndChildFields(t *testing.T) {
 	}
 	if pair == nil || pair.AccessToken == "" || pair.RefreshToken == "" {
 		t.Fatal("expected a complete session token pair")
+	}
+}
+
+func TestRegisterCreatesChildProfileWhenNicknameIsProvided(t *testing.T) {
+	repository := &memoryRepository{}
+	childProvisioner := &memoryChildProvisioner{}
+	service, err := New(Options{
+		Repository:       repository,
+		TokenIssuer:      mustTokenIssuer(t),
+		PhoneVerifier:    noOpPhoneVerifier{},
+		ChildProvisioner: childProvisioner,
+		AccessTTL:        time.Minute,
+		RefreshTTL:       time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("create authentication service: %v", err)
+	}
+
+	_, _, _, err = service.Register(context.Background(), domain.RegisterInput{
+		Phone:                  "13800138000",
+		PhoneVerificationCode:  "000000",
+		Password:               "sprout123",
+		ChildNickname:          "小芽",
+		ChildBirthday:          "2022-08-01",
+		GuardianConsentVersion: defaultConsent,
+	})
+	if err != nil {
+		t.Fatalf("register with child profile: %v", err)
+	}
+	if childProvisioner.createdProfiles != 1 {
+		t.Fatalf("expected one child profile, got %d", childProvisioner.createdProfiles)
+	}
+}
+
+func TestRegisterRollsBackParentWhenChildProfileFails(t *testing.T) {
+	repository := &memoryRepository{}
+	service, err := New(Options{
+		Repository:       repository,
+		TokenIssuer:      mustTokenIssuer(t),
+		PhoneVerifier:    noOpPhoneVerifier{},
+		ChildProvisioner: &memoryChildProvisioner{fail: true},
+		AccessTTL:        time.Minute,
+		RefreshTTL:       time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("create authentication service: %v", err)
+	}
+
+	_, _, _, err = service.Register(context.Background(), domain.RegisterInput{
+		Phone:                  "13800138000",
+		PhoneVerificationCode:  "000000",
+		Password:               "sprout123",
+		ChildNickname:          "小芽",
+		GuardianConsentVersion: defaultConsent,
+	})
+	if err == nil {
+		t.Fatal("expected child profile failure")
+	}
+	if repository.account != nil {
+		t.Fatal("expected the parent account to be rolled back")
 	}
 }
 
@@ -238,6 +299,35 @@ func (r *memoryRepository) CreateParentAccount(
 	return nil
 }
 
+func (r *memoryRepository) DeleteParentAccount(
+	_ context.Context,
+	accountID string,
+) error {
+	if r.account != nil && r.account.ID == accountID {
+		r.account = nil
+	}
+	return nil
+}
+
+type memoryChildProvisioner struct {
+	createdProfiles int
+	fail            bool
+}
+
+func (p *memoryChildProvisioner) SyncRegistrationProfile(
+	_ context.Context,
+	_ string,
+	_ string,
+	_ string,
+	_ string,
+) (*childdomain.Child, error) {
+	if p.fail {
+		return nil, errors.New("child profile failed")
+	}
+	p.createdProfiles++
+	return &childdomain.Child{}, nil
+}
+
 func (r *memoryRepository) GetParentAccountByEmail(
 	_ context.Context,
 	email string,
@@ -397,6 +487,7 @@ func (r *memoryRepository) ConsumePhoneVerificationCode(
 }
 
 var _ repository.Repository = (*memoryRepository)(nil)
+var _ ChildAccountProvisioner = (*memoryChildProvisioner)(nil)
 
 type noOpPhoneVerifier struct{}
 

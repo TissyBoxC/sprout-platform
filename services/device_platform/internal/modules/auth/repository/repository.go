@@ -17,6 +17,7 @@ import (
 // Repository defines persistence operations for parent authentication.
 type Repository interface {
 	CreateParentAccount(ctx context.Context, account *domain.ParentAccount) error
+	DeleteParentAccount(ctx context.Context, accountID string) error
 	GetParentAccountByEmail(ctx context.Context, email string) (*domain.ParentAccount, error)
 	GetParentAccountByPhone(ctx context.Context, phone string) (*domain.ParentAccount, error)
 	GetParentAccountByID(ctx context.Context, accountID string) (*domain.ParentAccount, error)
@@ -127,6 +128,21 @@ func (r *PostgresRepository) CreateParentAccount(
 			return domain.ErrEmailExists
 		}
 		return fmt.Errorf("insert parent account: %w", err)
+	}
+	return nil
+}
+
+// DeleteParentAccount removes an account created by a failed registration
+// transaction. The caller must only use this immediately after creation.
+func (r *PostgresRepository) DeleteParentAccount(
+	ctx context.Context,
+	accountID string,
+) error {
+	if _, err := r.pool.Exec(ctx, `
+		DELETE FROM parent_accounts
+		WHERE id = $1
+	`, accountID); err != nil {
+		return fmt.Errorf("delete parent account after failed registration: %w", err)
 	}
 	return nil
 }

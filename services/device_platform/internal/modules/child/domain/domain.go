@@ -45,6 +45,7 @@ type Child struct {
 	ContentCategories      []string
 	GuardianConsentVersion string
 	GuardianConsentedAt    time.Time
+	Source                 string
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
 }
@@ -56,3 +57,8 @@ type ProfileInput struct {
 	Interests         []string
 	ContentCategories []string
 }
+
+const (
+	SourceGuardian     = "guardian"
+	SourceRegistration = "registration"
+)

@@ -145,6 +145,28 @@ func (s *Service) Update(
 	return policy, nil
 }
 
+// SyncDefaultCategories keeps the registration-created policy aligned with
+// the child profile while preserving the guardian's other limits.
+func (s *Service) SyncDefaultCategories(
+	ctx context.Context,
+	familyID string,
+	childID string,
+	contentCategories []string,
+) error {
+	policy, err := s.repository.GetByFamilyID(ctx, familyID, childID)
+	if err != nil {
+		return err
+	}
+	categories, err := validateCategories(contentCategories)
+	if err != nil {
+		return err
+	}
+	policy.AllowedCategories = categories
+	policy.PolicyVersion++
+	policy.UpdatedAt = s.timeSource.Now().UTC()
+	return s.repository.Update(ctx, policy)
+}
+
 func normalizeCategories(values []string) []string {
 	categories, err := validateCategories(values)
 	if err != nil {

@@ -62,6 +62,18 @@ func (s *Service) CreateParent(
 	if err := s.repository.CreateParentAccount(ctx, account); err != nil {
 		return nil, nil, err
 	}
+	if s.childProvisioner != nil && account.ChildNickname != "" {
+		if _, err := s.childProvisioner.SyncRegistrationProfile(
+			ctx,
+			account.ID,
+			account.ChildNickname,
+			account.ChildBirthday,
+			account.GuardianConsentVersion,
+		); err != nil {
+			_ = s.repository.DeleteParentAccount(ctx, account.ID)
+			return nil, nil, err
+		}
+	}
 
 	var summary *domain.AIAccountSummary
 	if s.aiProvisioner != nil {

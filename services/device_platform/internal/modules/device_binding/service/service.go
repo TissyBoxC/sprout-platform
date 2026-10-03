@@ -19,6 +19,29 @@ import (
 
 var deviceIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`)
 
+// Keep this set in lockstep with common.schema.json::device_capability and the
+// firmware device_capabilities component. Unknown capabilities are rejected
+// at registration so clients never render an unreviewed feature or hardware
+// claim.
+var deviceCapabilities = map[string]struct{}{
+	"audio_input":     {},
+	"audio_output":    {},
+	"wifi":            {},
+	"camera":          {},
+	"display":         {},
+	"touch":           {},
+	"led":             {},
+	"battery":         {},
+	"cellular_4g":     {},
+	"motion":          {},
+	"bluetooth_audio": {},
+	"video_call":      {},
+	"location":        {},
+	"geofence":        {},
+	"sos":             {},
+	"multi_device":    {},
+}
+
 // DeviceProofVerifier validates a device signature over a platform nonce.
 // Implementations must reject malformed keys and never trust device metadata.
 type DeviceProofVerifier interface {
@@ -187,6 +210,9 @@ func (s *Service) RegisterDevice(
 	if len([]rune(credential.HardwareModel)) > 64 ||
 		len([]rune(credential.FirmwareVersion)) > 64 ||
 		len(credential.PublicKey) > 4096 {
+		return nil, domain.ErrInvalidDeviceID
+	}
+	if len(credential.CapabilitySet) == 0 {
 		return nil, domain.ErrInvalidDeviceID
 	}
 	if err := s.proofVerifier.ValidatePublicKey(credential.PublicKey); err != nil {
@@ -491,7 +517,7 @@ func normalizeCapabilities(capabilities []string) []string {
 	seen := make(map[string]struct{}, len(capabilities))
 	for _, capability := range capabilities {
 		capability = strings.TrimSpace(capability)
-		if capability == "" || len(capability) > 64 {
+		if _, supported := deviceCapabilities[capability]; !supported {
 			continue
 		}
 		if _, exists := seen[capability]; exists {

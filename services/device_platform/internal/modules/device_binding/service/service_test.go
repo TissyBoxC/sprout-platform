@@ -60,8 +60,9 @@ func TestDeviceRegistrationAndAuthenticationFlow(t *testing.T) {
 		context.Background(),
 		registrationToken,
 		domain.DeviceRegistrationInput{
-			DeviceID:  "device_test_001",
-			PublicKey: base64.StdEncoding.EncodeToString(publicKey),
+			DeviceID:     "device_test_001",
+			Capabilities: []string{"wifi"},
+			PublicKey:    base64.StdEncoding.EncodeToString(publicKey),
 		},
 	); !errors.Is(err, domain.ErrRegistrationTokenConsumed) {
 		t.Fatalf("expected consumed registration token, got %v", err)
@@ -102,6 +103,50 @@ func TestDeviceRegistrationAndAuthenticationFlow(t *testing.T) {
 	}
 	if provisioningToken == "" {
 		t.Fatal("expected a provisioning token")
+	}
+}
+
+func TestRegisterDeviceRejectsUnknownAndEmptyCapabilities(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		capabilities []string
+	}{
+		{name: "empty", capabilities: nil},
+		{name: "unknown only", capabilities: []string{"teleportation"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			repository := newMemoryRepository()
+			service, err := New(Options{
+				Repository:    repository,
+				ProofVerifier: security.ECDSAProofVerifier{},
+				TokenTTL:      time.Minute,
+			})
+			if err != nil {
+				t.Fatalf("create service: %v", err)
+			}
+			registrationToken, _, err := service.CreateRegistrationToken(
+				context.Background(),
+				"device_test_002",
+			)
+			if err != nil {
+				t.Fatalf("create registration token: %v", err)
+			}
+			if _, err := service.RegisterDevice(
+				context.Background(),
+				registrationToken,
+				domain.DeviceRegistrationInput{
+					DeviceID:     "device_test_002",
+					PublicKey:    "capability-validation-runs-before-key-validation",
+					Capabilities: test.capabilities,
+				},
+			); !errors.Is(err, domain.ErrInvalidDeviceID) {
+				t.Fatalf("expected invalid device error, got %v", err)
+			}
+		})
 	}
 }
 

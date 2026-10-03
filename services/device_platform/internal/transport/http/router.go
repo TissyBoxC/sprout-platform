@@ -192,6 +192,7 @@ func NewRouter(options RouterOptions) http.Handler {
 				serviceVersionService: options.ServiceVersionService,
 				releaseStoreService:   options.ReleaseStoreService,
 				deviceStatusService:   options.RuntimeService,
+				deviceBindingService:  options.BindingService,
 				childService:          options.ChildService,
 				policyService:         options.ParentPolicyService,
 			}
@@ -222,6 +223,10 @@ func NewRouter(options RouterOptions) http.Handler {
 			mux.HandleFunc(
 				"GET /api/v1/admin/families/{parent_account_id}/devices",
 				authHandler.requireAdmin(adminHandler.listParentDevices),
+			)
+			mux.HandleFunc(
+				"DELETE /api/v1/admin/families/{parent_account_id}/devices/{device_id}",
+				authHandler.requireAdmin(adminHandler.unbindParentDevice),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/families/{parent_account_id}/children",

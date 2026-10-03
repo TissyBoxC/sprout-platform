@@ -29,6 +29,11 @@ type Repository interface {
 	ListAllBindings(ctx context.Context) ([]domain.Binding, error)
 	GetByDeviceID(ctx context.Context, deviceID string) (*domain.Binding, error)
 	Delete(ctx context.Context, parentAccountID string, deviceID string) error
+	RevokeDeviceSessionsAndDeleteBinding(
+		ctx context.Context,
+		parentAccountID string,
+		deviceID string,
+	) error
 	CreateRegistrationToken(ctx context.Context, token *domain.RegistrationToken) error
 	GetRegistrationTokenByHash(
 		ctx context.Context,
@@ -332,6 +337,39 @@ func (r *PostgresRepository) Delete(
 		return domain.ErrDeviceNotFound
 	}
 	return nil
+}
+
+// RevokeDeviceSessionsAndDeleteBinding removes one guardian-owned binding and
+// revokes every session for that device in one transaction. Revoking first
+// closes the race where an in-flight device request could observe the old
+// binding after the guardian has already removed it.
+func (r *PostgresRepository) RevokeDeviceSessionsAndDeleteBinding(
+	ctx context.Context,
+	parentAccountID string,
+	deviceID string,
+) error {
+	return withTransaction(ctx, r.pool, func(transaction pgx.Tx) error {
+		if _, err := transaction.Exec(ctx, `
+			UPDATE device_sessions
+			SET revoked_at = NOW()
+			WHERE device_id = $1
+			  AND revoked_at IS NULL
+		`, deviceID); err != nil {
+			return fmt.Errorf("revoke device sessions: %w", err)
+		}
+		tag, err := transaction.Exec(ctx, `
+			DELETE FROM device_bindings
+			WHERE parent_account_id = $1
+			  AND device_id = $2
+		`, parentAccountID, deviceID)
+		if err != nil {
+			return fmt.Errorf("delete device binding: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return domain.ErrDeviceNotFound
+		}
+		return nil
+	})
 }
 
 // CreateRegistrationToken stores one hashed, single-use device registration token.

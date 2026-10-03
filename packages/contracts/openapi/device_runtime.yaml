@@ -211,6 +211,45 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/admin/families/{parent_account_id}/devices/{device_id}:
+    delete:
+      operationId: unbindAdminFamilyDevice
+      summary: Unbind one device from a family
+      description: |
+        Removes the guardian-device binding and revokes all active device
+        sessions. The parent account id is part of the lookup so an operator
+        cannot unbind an unrelated device by guessing its id.
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/ParentAccountID'
+        - $ref: '#/components/parameters/DeviceID'
+      responses:
+        '200':
+          description: Device unbound
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required:
+                          - unbound
+                        properties:
+                          unbound:
+                            type: boolean
+                            const: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
         '422':
           $ref: '#/components/responses/Unprocessable'
     get:
@@ -255,6 +294,13 @@ components:
       schema:
         type: string
         pattern: '^[a-z][a-z0-9]*(?:_[a-z0-9]+){1,7}$'
+    ParentAccountID:
+      name: parent_account_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     CommandID:
       name: command_id
       in: path
@@ -358,6 +404,7 @@ components:
         - hardware_model
         - firmware_version
         - capabilities
+        - lifecycle_status
         - bound_at
         - updated_at
         - runtime
@@ -374,6 +421,10 @@ components:
           type: array
           items:
             type: string
+        lifecycle_status:
+          type: string
+          enum:
+            - active
         bound_at:
           type: string
           format: date-time

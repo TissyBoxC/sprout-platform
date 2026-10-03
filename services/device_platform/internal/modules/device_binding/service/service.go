@@ -479,7 +479,11 @@ func (s *Service) Delete(
 	if !deviceIDPattern.MatchString(deviceID) {
 		return domain.ErrInvalidDeviceID
 	}
-	return s.repository.Delete(ctx, parentAccountID, deviceID)
+	return s.repository.RevokeDeviceSessionsAndDeleteBinding(
+		ctx,
+		parentAccountID,
+		deviceID,
+	)
 }
 
 func normalizeCapabilities(capabilities []string) []string {

@@ -185,6 +185,7 @@ func (s *Service) GetDeviceStatus(
 			HardwareModel:   bindings[index].HardwareModel,
 			FirmwareVersion: bindings[index].FirmwareVersion,
 			Capabilities:    append([]string(nil), bindings[index].Capabilities...),
+			LifecycleStatus: "active",
 			BoundAt:         bindings[index].BoundAt,
 			UpdatedAt:       bindings[index].UpdatedAt,
 		}
@@ -231,6 +232,7 @@ func (s *Service) ListDeviceStatuses(
 			HardwareModel:   bindings[index].HardwareModel,
 			FirmwareVersion: bindings[index].FirmwareVersion,
 			Capabilities:    append([]string(nil), bindings[index].Capabilities...),
+			LifecycleStatus: "active",
 			BoundAt:         bindings[index].BoundAt,
 			UpdatedAt:       bindings[index].UpdatedAt,
 		}
@@ -269,6 +271,7 @@ func (s *Service) ListAllDeviceStatuses(
 			HardwareModel:   bindings[index].HardwareModel,
 			FirmwareVersion: bindings[index].FirmwareVersion,
 			Capabilities:    append([]string(nil), bindings[index].Capabilities...),
+			LifecycleStatus: "active",
 			BoundAt:         bindings[index].BoundAt,
 			UpdatedAt:       bindings[index].UpdatedAt,
 		}

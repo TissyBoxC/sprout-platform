@@ -177,6 +177,7 @@ type DeviceStatus struct {
 	HardwareModel   string
 	FirmwareVersion string
 	Capabilities    []string
+	LifecycleStatus string
 	BoundAt         time.Time
 	UpdatedAt       time.Time
 	Runtime         *RuntimeStatus

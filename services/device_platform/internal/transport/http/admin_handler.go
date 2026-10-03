@@ -28,6 +28,7 @@ type adminHandler struct {
 	serviceVersionService serviceVersionAdminService
 	releaseStoreService   releaseStoreAdminService
 	deviceStatusService   adminDeviceStatusService
+	deviceBindingService  adminDeviceManagementService
 	childService          adminChildService
 	policyService         adminPolicyService
 }
@@ -187,6 +188,12 @@ type adminDeviceStatusService interface {
 		ctx context.Context,
 		parentAccountID string,
 	) ([]deviceruntimedomain.DeviceStatus, error)
+}
+
+// adminDeviceManagementService is the destructive support surface for device
+// lifecycle operations. Every method must verify the parent-device relation.
+type adminDeviceManagementService interface {
+	Delete(ctx context.Context, parentAccountID string, deviceID string) error
 }
 
 // adminChildService is the management-facing child profile read surface.
@@ -410,6 +417,38 @@ func (handler adminHandler) listParentDevices(
 	}
 	writeSuccess(response, request, http.StatusOK, map[string]any{
 		"devices": devices,
+	})
+}
+
+// unbindParentDevice removes one device from a family and revokes its
+// sessions. The parent account is part of the lookup, so an operator cannot
+// unbind a device by supplying an unrelated device id.
+func (handler adminHandler) unbindParentDevice(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	parentAccountID := strings.TrimSpace(
+		request.PathValue("parent_account_id"),
+	)
+	deviceID := strings.TrimSpace(request.PathValue("device_id"))
+	if parentAccountID == "" || deviceID == "" {
+		writeError(response, request, http.StatusBadRequest, "invalid_request", "请检查要解绑的设备")
+		return
+	}
+	if handler.deviceBindingService == nil {
+		writeError(response, request, http.StatusServiceUnavailable, "service_unavailable", "设备信息暂时无法处理，请稍后重试")
+		return
+	}
+	if err := handler.deviceBindingService.Delete(
+		request.Context(),
+		parentAccountID,
+		deviceID,
+	); err != nil {
+		writeDeviceBindingError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"unbound": true,
 	})
 }
 

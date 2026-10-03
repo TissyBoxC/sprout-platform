@@ -382,6 +382,7 @@ func deviceStatusResponse(status *domain.DeviceStatus) map[string]any {
 		"hardware_model":   status.HardwareModel,
 		"firmware_version": status.FirmwareVersion,
 		"capabilities":     status.Capabilities,
+		"lifecycle_status": status.LifecycleStatus,
 		"bound_at":         status.BoundAt,
 		"updated_at":       status.UpdatedAt,
 		"runtime":          runtimeStatusResponse(status.Runtime),

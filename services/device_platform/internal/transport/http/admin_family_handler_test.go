@@ -10,6 +10,7 @@ import (
 
 	authdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
 	authservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
+	bindingdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/domain"
 	deviceruntimedomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
 )
 
@@ -79,6 +80,12 @@ type stubAdminDeviceStatusService struct {
 	err             error
 }
 
+type stubAdminDeviceManagementService struct {
+	parentAccountID string
+	deviceID        string
+	err             error
+}
+
 func (stub *stubAdminDeviceStatusService) ListDeviceStatuses(
 	_ context.Context,
 	parentAccountID string,
@@ -88,6 +95,16 @@ func (stub *stubAdminDeviceStatusService) ListDeviceStatuses(
 		return nil, stub.err
 	}
 	return stub.statuses, nil
+}
+
+func (stub *stubAdminDeviceManagementService) Delete(
+	_ context.Context,
+	parentAccountID string,
+	deviceID string,
+) error {
+	stub.parentAccountID = parentAccountID
+	stub.deviceID = deviceID
+	return stub.err
 }
 
 func TestUpdateParentProfileHandlerPassesEditableFields(t *testing.T) {
@@ -211,5 +228,53 @@ func TestListParentDevicesHandlerReportsServiceUnavailableWithoutRuntime(t *test
 
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, recorder.Code)
+	}
+}
+
+func TestUnbindParentDeviceHandlerVerifiesFamilyScope(t *testing.T) {
+	deviceService := &stubAdminDeviceManagementService{}
+	handler := adminHandler{deviceBindingService: deviceService}
+	request := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/v1/admin/families/parent-001/devices/sprout_device_001",
+		nil,
+	)
+	request.SetPathValue("parent_account_id", "parent-001")
+	request.SetPathValue("device_id", "sprout_device_001")
+	recorder := httptest.NewRecorder()
+
+	handler.unbindParentDevice(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	if deviceService.parentAccountID != "parent-001" ||
+		deviceService.deviceID != "sprout_device_001" {
+		t.Fatalf(
+			"expected parent-scoped delete, got parent=%q device=%q",
+			deviceService.parentAccountID,
+			deviceService.deviceID,
+		)
+	}
+}
+
+func TestUnbindParentDeviceHandlerReportsMissingDevice(t *testing.T) {
+	deviceService := &stubAdminDeviceManagementService{
+		err: bindingdomain.ErrDeviceNotFound,
+	}
+	handler := adminHandler{deviceBindingService: deviceService}
+	request := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/v1/admin/families/parent-001/devices/sprout_device_001",
+		nil,
+	)
+	request.SetPathValue("parent_account_id", "parent-001")
+	request.SetPathValue("device_id", "sprout_device_001")
+	recorder := httptest.NewRecorder()
+
+	handler.unbindParentDevice(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
 	}
 }

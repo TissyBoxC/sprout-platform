@@ -105,6 +105,46 @@ func TestDeviceRegistrationAndAuthenticationFlow(t *testing.T) {
 	}
 }
 
+func TestDeleteRevokesDeviceSessions(t *testing.T) {
+	t.Parallel()
+	repository := newMemoryRepository()
+	service, err := New(Options{
+		Repository:    repository,
+		ProofVerifier: security.ECDSAProofVerifier{},
+		TokenTTL:      time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	repository.bindings["device_test_001"] = &domain.Binding{
+		ID:              "binding-001",
+		ParentAccountID: "parent-001",
+		DeviceID:        "device_test_001",
+	}
+	repository.sessions["session-hash"] = &domain.DeviceSession{
+		ID:        "session-001",
+		DeviceID:  "device_test_001",
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}
+
+	if err := service.Delete(
+		context.Background(),
+		"parent-001",
+		"device_test_001",
+	); err != nil {
+		t.Fatalf("delete binding: %v", err)
+	}
+
+	session := repository.sessions["session-hash"]
+	if session == nil || session.RevokedAt == nil {
+		t.Fatal("expected the device session to be revoked")
+	}
+	if _, exists := repository.bindings["device_test_001"]; exists {
+		t.Fatal("expected the device binding to be removed")
+	}
+}
+
 type memoryRepository struct {
 	registrationTokens map[string]*domain.RegistrationToken
 	credentials        map[string]*domain.DeviceCredential
@@ -185,6 +225,26 @@ func (r *memoryRepository) GetByDeviceID(
 }
 
 func (r *memoryRepository) Delete(context.Context, string, string) error {
+	return nil
+}
+
+func (r *memoryRepository) RevokeDeviceSessionsAndDeleteBinding(
+	_ context.Context,
+	parentAccountID string,
+	deviceID string,
+) error {
+	for tokenHash, session := range r.sessions {
+		if session.DeviceID == deviceID {
+			now := time.Now().UTC()
+			session.RevokedAt = &now
+			r.sessions[tokenHash] = session
+		}
+	}
+	binding := r.bindings[deviceID]
+	if binding == nil || binding.ParentAccountID != parentAccountID {
+		return domain.ErrDeviceNotFound
+	}
+	delete(r.bindings, deviceID)
 	return nil
 }
 

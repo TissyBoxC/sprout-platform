@@ -119,6 +119,13 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
                     ),
                   ),
                   const SizedBox(height: 8),
+                  AppReveal(
+                    delay: const Duration(milliseconds: 90),
+                    child: _FamilyToolsCard(
+                      onChildProfiles: () => context.push('/me/children'),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
                   devices.when(
                     loading: () => const _DeviceLoadingCard(),
                     error: (error, _) => _InlineError(
@@ -161,6 +168,25 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+class _FamilyToolsCard extends StatelessWidget {
+  const _FamilyToolsCard({required this.onChildProfiles});
+
+  final VoidCallback onChildProfiles;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.child_care_rounded),
+        title: const Text('儿童档案'),
+        subtitle: const Text('管理宝贝年龄、兴趣、内容和使用边界'),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: onChildProfiles,
       ),
     );
   }

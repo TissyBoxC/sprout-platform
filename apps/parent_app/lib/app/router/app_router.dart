@@ -6,14 +6,16 @@ import '../../features/auth/application/auth_controller.dart';
 import '../../features/auth/presentation/bind_email_page.dart';
 import '../../features/auth/presentation/login_page.dart';
 import '../../features/auth/presentation/register_page.dart';
+import '../../features/child_profile/presentation/child_profile_page.dart';
 import '../../features/device/presentation/device_list_page.dart';
 import '../../features/device/domain/device_payload.dart';
 import '../../features/device/presentation/device_provisioning_page.dart';
 import '../../features/device/presentation/device_qr_scan_page.dart';
-import '../../shared/widgets/parent_shell.dart';
 import '../../features/family/presentation/family_home_page.dart';
 import '../../features/ota/presentation/app_update_page.dart';
+import '../../features/parent_policy/presentation/parent_policy_page.dart';
 import '../../features/profile/presentation/profile_page.dart';
+import '../../shared/widgets/parent_shell.dart';
 
 /// Creates the application router with authentication-aware redirects.
 GoRouter createAppRouter(ProviderContainer container) {
@@ -55,6 +57,20 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/update',
         builder: (context, state) => const AppUpdatePage(),
+      ),
+      GoRoute(
+        path: '/me/children',
+        builder: (context, state) => const ChildProfilePage(),
+      ),
+      GoRoute(
+        path: '/me/children/:childId/policy',
+        builder: (context, state) {
+          final childId = state.pathParameters['childId'];
+          if (childId == null || childId.isEmpty) {
+            return const _RouteNotFoundPage();
+          }
+          return ParentPolicyPage(childId: childId);
+        },
       ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) =>

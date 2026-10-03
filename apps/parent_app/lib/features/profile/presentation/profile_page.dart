@@ -72,6 +72,7 @@ class ProfilePage extends ConsumerWidget {
                   delay: const Duration(milliseconds: 160),
                   child: _SettingsCard(
                     account: account,
+                    onChildren: () => context.push('/me/children'),
                     onEmail: () => context.push('/account/email'),
                     onUpdate: () => context.push('/me/update'),
                     onLogout: () => _confirmLogout(context, ref),
@@ -399,12 +400,14 @@ class _SummaryMetric extends StatelessWidget {
 class _SettingsCard extends StatelessWidget {
   const _SettingsCard({
     required this.account,
+    required this.onChildren,
     required this.onEmail,
     required this.onUpdate,
     required this.onLogout,
   });
 
   final ParentAccount account;
+  final VoidCallback onChildren;
   final VoidCallback onEmail;
   final VoidCallback onUpdate;
   final VoidCallback onLogout;
@@ -416,6 +419,14 @@ class _SettingsCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
+          ListTile(
+            leading: const Icon(Icons.child_care_rounded),
+            title: const Text('儿童档案'),
+            subtitle: const Text('管理宝贝资料、兴趣和使用边界'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onChildren,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(
             leading: const Icon(Icons.mark_email_read_outlined),
             title: Text(hasEmail ? account.email : '绑定登录邮箱'),

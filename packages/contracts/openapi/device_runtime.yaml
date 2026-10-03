@@ -97,6 +97,32 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '409':
           $ref: '#/components/responses/Conflict'
+  /api/v1/devices/{device_id}/runtime/parent-policy:
+    get:
+      operationId: getEffectiveDeviceParentPolicy
+      summary: Read the effective guardian policy for an authenticated device
+      description: |
+        Resolves the device session owner and returns one conservative policy
+        aggregated from every child profile in that guardian account. The
+        response never exposes child identifiers. A device bound to a family
+        with no child policies receives parent_policy_not_found.
+      security:
+        - deviceSession: []
+      parameters:
+        - $ref: '#/components/parameters/DeviceID'
+      responses:
+        '200':
+          description: Effective family policy for the device
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EffectiveParentPolicyEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/devices/status:
     get:
       operationId: listParentDeviceStatuses
@@ -247,6 +273,13 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/RuntimeStatus'
+    EffectiveParentPolicyEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '../schemas/parent_policy_effective.schema.json'
     DeviceStatusEnvelope:
       allOf:
         - $ref: '#/components/schemas/SuccessEnvelope'

@@ -22,6 +22,10 @@ type Repository interface {
 		childID string,
 	) (*domain.Policy, error)
 	ListByFamilyID(ctx context.Context, familyID string) ([]domain.Policy, error)
+	ListByFamilyIDWithRevision(
+		ctx context.Context,
+		familyID string,
+	) ([]domain.Policy, int64, error)
 	Update(ctx context.Context, policy *domain.Policy) error
 	DeleteByChildID(ctx context.Context, childID string) error
 }
@@ -194,6 +198,66 @@ func (r *PostgresRepository) DeleteByChildID(
 		return fmt.Errorf("delete parent policy: %w", err)
 	}
 	return nil
+}
+
+// ListByFamilyIDWithRevision returns policies and their revision from one
+// repeatable-read snapshot. Reading them separately could pair old policy
+// content with a newer revision and cause a device to skip the next update.
+func (r *PostgresRepository) ListByFamilyIDWithRevision(
+	ctx context.Context,
+	familyID string,
+) ([]domain.Policy, int64, error) {
+	transaction, err := r.pool.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel:   pgx.RepeatableRead,
+		AccessMode: pgx.ReadOnly,
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("begin parent policy snapshot: %w", err)
+	}
+	defer func() {
+		_ = transaction.Rollback(ctx)
+	}()
+
+	rows, err := transaction.Query(ctx, parentPolicySelect+`
+		WHERE family_id = $1
+		ORDER BY created_at ASC
+	`, familyID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list parent policy snapshot: %w", err)
+	}
+	policies := make([]domain.Policy, 0)
+	for rows.Next() {
+		policy, scanErr := scanPolicy(rows)
+		if scanErr != nil {
+			rows.Close()
+			return nil, 0, scanErr
+		}
+		policies = append(policies, *policy)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, 0, fmt.Errorf("iterate parent policy snapshot: %w", err)
+	}
+	rows.Close()
+	if len(policies) == 0 {
+		return nil, 0, domain.ErrPolicyNotFound
+	}
+
+	var revision int64
+	if err := transaction.QueryRow(ctx, `
+		SELECT revision
+		FROM parent_policy_revisions
+		WHERE family_id = $1
+	`, familyID).Scan(&revision); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, 0, domain.ErrPolicyNotFound
+		}
+		return nil, 0, fmt.Errorf("read parent policy revision: %w", err)
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return nil, 0, fmt.Errorf("commit parent policy snapshot: %w", err)
+	}
+	return policies, revision, nil
 }
 
 const parentPolicySelect = `

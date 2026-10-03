@@ -15,6 +15,20 @@ var (
 	ErrInvalidVolume        = errors.New("invalid maximum volume")
 )
 
+// EffectivePolicy is the most restrictive runtime policy for every child in
+// one guardian account. A device is bound to a guardian account rather than a
+// child, so the platform resolves the shared executing policy once and all
+// clients consume the same snapshot.
+type EffectivePolicy struct {
+	PolicyVersion     int64
+	DailyLimitMinutes int
+	AllowedCategories []string
+	DisabledPeriods   []DisabledPeriod
+	MaxVolumePercent  int
+	SourceChildCount  int
+	UpdatedAt         time.Time
+}
+
 // DisabledPeriod is one local-time window when the device must stay quiet.
 // A period may cross midnight; start equals end is rejected as ambiguous.
 type DisabledPeriod struct {

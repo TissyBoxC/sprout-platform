@@ -11,6 +11,12 @@ service.
 - `mqtt/` contains device topic and payload contracts.
 - `capabilities/` contains optional hardware capability identifiers.
 
+`schemas/parent_policy.schema.json` describes one child's guardian-editable
+policy. `schemas/parent_policy_effective.schema.json` describes the single
+most-restrictive policy a family-bound device executes after the platform
+aggregates every child policy. Device clients must consume the effective
+contract and must not choose a child identifier.
+
 ## Rules
 
 - Use `schema_version` on every breaking contract change.

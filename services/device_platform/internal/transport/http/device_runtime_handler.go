@@ -19,7 +19,10 @@ type deviceRuntimeHandler struct {
 }
 
 type deviceRuntimePolicyService interface {
-	List(ctx context.Context, familyID string) ([]policydomain.Policy, error)
+	GetEffective(
+		ctx context.Context,
+		familyID string,
+	) (*policydomain.EffectivePolicy, error)
 }
 
 type recordHeartbeatRequest struct {
@@ -298,18 +301,39 @@ func (handler deviceRuntimeHandler) getParentPolicy(
 		writeDeviceRuntimeError(response, request, err)
 		return
 	}
-	policies, err := handler.policyService.List(request.Context(), deviceID)
+	effective, err := handler.policyService.GetEffective(
+		request.Context(),
+		deviceID,
+	)
 	if err != nil {
 		writeDeviceRuntimeError(response, request, err)
 		return
 	}
-	result := make([]map[string]any, 0, len(policies))
-	for index := range policies {
-		result = append(result, parentPolicyResponse(&policies[index]))
+	writeSuccess(response, request, http.StatusOK, effectivePolicyResponse(effective))
+}
+
+func effectivePolicyResponse(policy *policydomain.EffectivePolicy) map[string]any {
+	if policy == nil {
+		return nil
 	}
-	writeSuccess(response, request, http.StatusOK, map[string]any{
-		"policies": result,
-	})
+	disabledPeriods := make([]map[string]string, 0, len(policy.DisabledPeriods))
+	for _, period := range policy.DisabledPeriods {
+		disabledPeriods = append(disabledPeriods, map[string]string{
+			"start_time": period.StartTime,
+			"end_time":   period.EndTime,
+		})
+	}
+	return map[string]any{
+		"schema_version":      "1.0.0",
+		"policy_version":      policy.PolicyVersion,
+		"daily_limit_minutes": policy.DailyLimitMinutes,
+		"allowed_categories":  policy.AllowedCategories,
+		"disabled_periods":    disabledPeriods,
+		"max_volume_percent":  policy.MaxVolumePercent,
+		"source_child_count":  policy.SourceChildCount,
+		"aggregation_mode":    "most_restrictive",
+		"updated_at":          policy.UpdatedAt.UTC(),
+	}
 }
 
 func runtimeStatusResponse(status *domain.RuntimeStatus) map[string]any {
@@ -396,6 +420,10 @@ func writeDeviceRuntimeError(
 		writeError(response, request, http.StatusNotFound, "device_not_found", "没有找到这台设备")
 	case errors.Is(err, domain.ErrCommandNotFound):
 		writeError(response, request, http.StatusConflict, "command_already_handled", "这个操作已经处理过")
+	case errors.Is(err, policydomain.ErrPolicyNotFound):
+		writeError(response, request, http.StatusNotFound, "parent_policy_not_found", "家长策略不存在")
+	case errors.Is(err, policydomain.ErrInvalidCategories):
+		writeError(response, request, http.StatusConflict, "parent_policy_conflict", "家长策略冲突，请检查儿童内容设置")
 	case errors.Is(err, bindingdomain.ErrDeviceSessionExpired),
 		errors.Is(err, bindingdomain.ErrDeviceSessionNotFound):
 		writeError(response, request, http.StatusUnauthorized, "device_session_expired", "设备登录已过期，请重新连接")

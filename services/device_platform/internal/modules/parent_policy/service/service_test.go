@@ -11,6 +11,7 @@ import (
 
 type memoryPolicyRepository struct {
 	policies map[string]*domain.Policy
+	revision int64
 }
 
 func newMemoryPolicyRepository() *memoryPolicyRepository {
@@ -23,6 +24,7 @@ func (r *memoryPolicyRepository) Create(
 ) error {
 	copyPolicy := *policy
 	r.policies[policy.ChildID] = &copyPolicy
+	r.revision++
 	return nil
 }
 
@@ -74,6 +76,7 @@ func (r *memoryPolicyRepository) Update(
 	}
 	copyPolicy := *policy
 	r.policies[policy.ChildID] = &copyPolicy
+	r.revision++
 	return nil
 }
 
@@ -82,7 +85,22 @@ func (r *memoryPolicyRepository) DeleteByChildID(
 	childID string,
 ) error {
 	delete(r.policies, childID)
+	r.revision++
 	return nil
+}
+
+func (r *memoryPolicyRepository) ListByFamilyIDWithRevision(
+	_ context.Context,
+	familyID string,
+) ([]domain.Policy, int64, error) {
+	policies, err := r.ListByFamilyID(context.Background(), familyID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(policies) == 0 {
+		return nil, 0, domain.ErrPolicyNotFound
+	}
+	return policies, r.revision, nil
 }
 
 type fixedClock struct{}
@@ -198,5 +216,88 @@ func TestUpdateRejectsInvalidLimits(t *testing.T) {
 	)
 	if !errors.Is(err, domain.ErrInvalidCategories) {
 		t.Fatalf("expected invalid categories, got %v", err)
+	}
+}
+
+func TestGetEffectiveUsesMostRestrictiveFamilyPolicy(t *testing.T) {
+	repository := newMemoryPolicyRepository()
+	service, err := New(Options{Repository: repository, Clock: fixedClock{}})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	for childID, dailyLimit := range map[string]int{
+		"child_1": 120,
+		"child_2": 30,
+	} {
+		if err := service.CreateDefaultForChild(
+			context.Background(),
+			"family_1",
+			childID,
+			nil,
+		); err != nil {
+			t.Fatalf("create policy %s: %v", childID, err)
+		}
+		if _, err := service.Update(
+			context.Background(),
+			"family_1",
+			childID,
+			domain.PolicyInput{
+				DailyLimitMinutes: dailyLimit,
+				AllowedCategories: []string{
+					"story",
+					"nursery_rhyme",
+				},
+				DisabledPeriods: []domain.DisabledPeriod{
+					{StartTime: "21:00", EndTime: "07:00"},
+				},
+				MaxVolumePercent: 60,
+			},
+		); err != nil {
+			t.Fatalf("update policy %s: %v", childID, err)
+		}
+	}
+
+	effective, err := service.GetEffective(context.Background(), "family_1")
+	if err != nil {
+		t.Fatalf("get effective policy: %v", err)
+	}
+	if effective.DailyLimitMinutes != 30 {
+		t.Fatalf("expected most restrictive daily limit, got %d", effective.DailyLimitMinutes)
+	}
+	if effective.SourceChildCount != 2 {
+		t.Fatalf("expected two source children, got %d", effective.SourceChildCount)
+	}
+	if effective.PolicyVersion != 4 {
+		t.Fatalf("expected revision 4, got %d", effective.PolicyVersion)
+	}
+	if len(effective.AllowedCategories) != 2 {
+		t.Fatalf("expected category intersection, got %v", effective.AllowedCategories)
+	}
+}
+
+func TestGetEffectiveRejectsDisjointCategoryPolicy(t *testing.T) {
+	repository := newMemoryPolicyRepository()
+	service, err := New(Options{Repository: repository, Clock: fixedClock{}})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	for childID, category := range map[string]string{
+		"child_1": "story",
+		"child_2": "poetry",
+	} {
+		if err := service.CreateDefaultForChild(
+			context.Background(),
+			"family_1",
+			childID,
+			[]string{category},
+		); err != nil {
+			t.Fatalf("create policy %s: %v", childID, err)
+		}
+	}
+	if _, err := service.GetEffective(
+		context.Background(),
+		"family_1",
+	); !errors.Is(err, domain.ErrInvalidCategories) {
+		t.Fatalf("expected invalid category intersection, got %v", err)
 	}
 }

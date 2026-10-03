@@ -8,6 +8,7 @@ Versioned HTTP schemas exposed by Sprout services live here.
 
 - authenticated device heartbeat submission;
 - device-side command polling and acknowledgement;
+- effective parent-policy delivery for a bound device;
 - guardian runtime status for owned devices;
 - operations-console device listing and maintenance commands.
 

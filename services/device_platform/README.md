@@ -7,6 +7,7 @@ Game console business service for 如此萌屋 · 芽系列·初芽.
 - parent, family, and child accounts
 - device registration and binding
 - parent policies and content permissions
+- effective family policy delivery to a bound device
 - content package metadata
 - OTA release and upgrade tasks
 - telemetry, audit, and notifications

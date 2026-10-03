@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"sort"
 	"strings"
 
 	childdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/domain"
@@ -107,6 +108,28 @@ func (s *Service) List(
 	return s.repository.ListByFamilyID(ctx, familyID)
 }
 
+// GetEffective returns the shared policy a family-bound device must execute.
+// It is intentionally read-only and derives the result from the family's
+// current child policies so a device never selects or exposes a child id.
+func (s *Service) GetEffective(
+	ctx context.Context,
+	familyID string,
+) (*domain.EffectivePolicy, error) {
+	policies, revision, err := s.repository.ListByFamilyIDWithRevision(
+		ctx,
+		familyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	effective := aggregateMostRestrictive(policies)
+	if len(effective.AllowedCategories) == 0 {
+		return nil, domain.ErrInvalidCategories
+	}
+	effective.PolicyVersion = revision
+	return &effective, nil
+}
+
 // Update validates and replaces one policy, bumping its version so devices
 // can detect that their cached limits are stale.
 func (s *Service) Update(
@@ -173,6 +196,70 @@ func normalizeCategories(values []string) []string {
 		return []string{}
 	}
 	return categories
+}
+
+func aggregateMostRestrictive(policies []domain.Policy) domain.EffectivePolicy {
+	allowed := append([]string(nil), policies[0].AllowedCategories...)
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, category := range allowed {
+		allowedSet[category] = struct{}{}
+	}
+	periodSet := make(map[string]domain.DisabledPeriod)
+	dailyLimit := policies[0].DailyLimitMinutes
+	maxVolume := policies[0].MaxVolumePercent
+	updatedAt := policies[0].UpdatedAt
+	for _, policy := range policies {
+		for category := range allowedSet {
+			if !containsString(policy.AllowedCategories, category) {
+				delete(allowedSet, category)
+			}
+		}
+		for _, period := range policy.DisabledPeriods {
+			periodSet[period.StartTime+"-"+period.EndTime] = period
+		}
+		if policy.DailyLimitMinutes < dailyLimit {
+			dailyLimit = policy.DailyLimitMinutes
+		}
+		if policy.MaxVolumePercent < maxVolume {
+			maxVolume = policy.MaxVolumePercent
+		}
+		if policy.UpdatedAt.After(updatedAt) {
+			updatedAt = policy.UpdatedAt
+		}
+	}
+	allowed = allowed[:0]
+	for _, category := range policies[0].AllowedCategories {
+		if _, ok := allowedSet[category]; ok {
+			allowed = append(allowed, category)
+		}
+	}
+	periods := make([]domain.DisabledPeriod, 0, len(periodSet))
+	for _, period := range periodSet {
+		periods = append(periods, period)
+	}
+	sort.Slice(periods, func(left int, right int) bool {
+		if periods[left].StartTime != periods[right].StartTime {
+			return periods[left].StartTime < periods[right].StartTime
+		}
+		return periods[left].EndTime < periods[right].EndTime
+	})
+	return domain.EffectivePolicy{
+		DailyLimitMinutes: dailyLimit,
+		AllowedCategories: allowed,
+		DisabledPeriods:   periods,
+		MaxVolumePercent:  maxVolume,
+		SourceChildCount:  len(policies),
+		UpdatedAt:         updatedAt,
+	}
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func validateCategories(values []string) ([]string, error) {

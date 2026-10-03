@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprout.example/contracts/schemas/parent_policy_effective.schema.json",
+  "title": "Effective parent policy contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "policy_version",
+    "daily_limit_minutes",
+    "allowed_categories",
+    "disabled_periods",
+    "max_volume_percent",
+    "source_child_count",
+    "aggregation_mode",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "policy_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "daily_limit_minutes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 720
+    },
+    "allowed_categories": {
+      "type": "array",
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/content_category"
+      }
+    },
+    "disabled_periods": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "start_time",
+          "end_time"
+        ],
+        "properties": {
+          "start_time": {
+            "type": "string",
+            "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+          },
+          "end_time": {
+            "type": "string",
+            "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+          }
+        }
+      }
+    },
+    "max_volume_percent": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "source_child_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "aggregation_mode": {
+      "type": "string",
+      "const": "most_restrictive"
+    },
+    "updated_at": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    }
+  }
+}

@@ -260,7 +260,28 @@ class DeviceBindingController extends AsyncNotifier<DeviceBindingState> {
   }
 
   Future<void> remove(String deviceId) async {
-    await _api.remove(deviceId);
+    final previous = state.value;
+    final cached = previous?.bindings ?? const <BoundDevice>[];
+    if (previous != null) {
+      // Remove the device immediately so the confirmation cannot be followed
+      // by a stale row if the refresh request is slow or briefly unavailable.
+      state = AsyncData(
+        previous.copyWith(
+          bindings: cached
+              .where((device) => device.deviceId != deviceId)
+              .toList(growable: false),
+          errorMessage: null,
+        ),
+      );
+    }
+    try {
+      await _api.remove(deviceId);
+    } on Object {
+      if (previous != null) {
+        state = AsyncData(previous);
+      }
+      rethrow;
+    }
     await refresh();
   }
 }

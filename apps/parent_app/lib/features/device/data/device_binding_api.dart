@@ -8,6 +8,7 @@ class BoundDevice {
     required this.hardwareModel,
     required this.firmwareVersion,
     required this.capabilities,
+    required this.lifecycleStatus,
     required this.boundAt,
     required this.runtime,
   });
@@ -17,6 +18,7 @@ class BoundDevice {
   final String hardwareModel;
   final String firmwareVersion;
   final List<String> capabilities;
+  final String lifecycleStatus;
   final DateTime boundAt;
   final DeviceRuntimeStatus? runtime;
 
@@ -29,6 +31,7 @@ class BoundDevice {
       hardwareModel: _asString(json['hardware_model']),
       firmwareVersion: _asString(json['firmware_version']),
       capabilities: _stringList(json['capabilities']),
+      lifecycleStatus: _asString(json['lifecycle_status']),
       boundAt: boundAtValue is String
           ? DateTime.tryParse(boundAtValue) ?? DateTime.now()
           : DateTime.now(),

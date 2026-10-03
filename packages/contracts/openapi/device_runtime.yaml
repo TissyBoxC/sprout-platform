@@ -250,8 +250,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/Unprocessable'
-        '422':
-          $ref: '#/components/responses/Unprocessable'
+  /api/v1/admin/devices/{device_id}/commands:
     get:
       operationId: listAdminDeviceCommands
       summary: List recent maintenance commands for one device
@@ -399,6 +398,7 @@ components:
       type: object
       additionalProperties: false
       required:
+        - parent_account_id
         - device_id
         - device_name
         - hardware_model
@@ -409,6 +409,9 @@ components:
         - updated_at
         - runtime
       properties:
+        parent_account_id:
+          type: string
+          format: uuid
         device_id:
           type: string
         device_name:

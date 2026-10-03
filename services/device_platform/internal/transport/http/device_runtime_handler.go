@@ -377,6 +377,7 @@ func deviceStatusResponse(status *domain.DeviceStatus) map[string]any {
 		return nil
 	}
 	return map[string]any{
+		"parent_account_id": status.ParentAccountID,
 		"device_id":        status.DeviceID,
 		"device_name":      status.DeviceName,
 		"hardware_model":   status.HardwareModel,

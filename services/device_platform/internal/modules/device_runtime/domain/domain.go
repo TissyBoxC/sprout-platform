@@ -172,6 +172,7 @@ type HeartbeatInput struct {
 // DeviceStatus is the guardian-facing combination of a binding and the
 // latest runtime snapshot. Runtime is nil until the device reports once.
 type DeviceStatus struct {
+	ParentAccountID string
 	DeviceID        string
 	DeviceName      string
 	HardwareModel   string

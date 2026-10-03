@@ -180,6 +180,7 @@ func (s *Service) GetDeviceStatus(
 			continue
 		}
 		status := &domain.DeviceStatus{
+			ParentAccountID: bindings[index].ParentAccountID,
 			DeviceID:        bindings[index].DeviceID,
 			DeviceName:      bindings[index].DeviceName,
 			HardwareModel:   bindings[index].HardwareModel,
@@ -227,6 +228,7 @@ func (s *Service) ListDeviceStatuses(
 	result := make([]domain.DeviceStatus, 0, len(bindings))
 	for index := range bindings {
 		status := domain.DeviceStatus{
+			ParentAccountID: bindings[index].ParentAccountID,
 			DeviceID:        bindings[index].DeviceID,
 			DeviceName:      bindings[index].DeviceName,
 			HardwareModel:   bindings[index].HardwareModel,
@@ -266,6 +268,7 @@ func (s *Service) ListAllDeviceStatuses(
 	result := make([]domain.DeviceStatus, 0, len(bindings))
 	for index := range bindings {
 		status := domain.DeviceStatus{
+			ParentAccountID: bindings[index].ParentAccountID,
 			DeviceID:        bindings[index].DeviceID,
 			DeviceName:      bindings[index].DeviceName,
 			HardwareModel:   bindings[index].HardwareModel,

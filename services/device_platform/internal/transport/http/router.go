@@ -14,9 +14,11 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/config"
 	gatewayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/service"
 	authservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
+	childservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
 	operationsservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
+	policeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
 	releasestoreservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
 	serviceversionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
 )
@@ -26,6 +28,8 @@ type RouterOptions struct {
 	Logger                *slog.Logger
 	InternalAPIConfig     config.InternalAPIConfig
 	AuthService           *authservice.Service
+	ChildService          *childservice.Service
+	ParentPolicyService   *policeservice.Service
 	AIService             *gatewayservice.Service
 	OperationsService     *operationsservice.Service
 	BindingService        *bindingservice.Service
@@ -73,6 +77,36 @@ func NewRouter(options RouterOptions) http.Handler {
 			"GET /api/v1/auth/me",
 			authHandler.requireAuthentication(authHandler.me),
 		)
+		if options.ChildService != nil && options.ParentPolicyService != nil {
+			childHandler := childHandler{
+				service:       options.ChildService,
+				policyService: options.ParentPolicyService,
+			}
+			mux.HandleFunc(
+				"GET /api/v1/children",
+				authHandler.requireAuthentication(childHandler.list),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/children",
+				authHandler.requireAuthentication(childHandler.create),
+			)
+			mux.HandleFunc(
+				"PUT /api/v1/children/{child_id}",
+				authHandler.requireAuthentication(childHandler.update),
+			)
+			mux.HandleFunc(
+				"DELETE /api/v1/children/{child_id}",
+				authHandler.requireAuthentication(childHandler.delete),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/children/{child_id}/policy",
+				authHandler.requireAuthentication(childHandler.getPolicy),
+			)
+			mux.HandleFunc(
+				"PUT /api/v1/children/{child_id}/policy",
+				authHandler.requireAuthentication(childHandler.updatePolicy),
+			)
+		}
 		if options.BindingService != nil {
 			bindingHandler := deviceBindingHandler{service: options.BindingService}
 			mux.HandleFunc(
@@ -151,6 +185,8 @@ func NewRouter(options RouterOptions) http.Handler {
 				serviceVersionService: options.ServiceVersionService,
 				releaseStoreService:   options.ReleaseStoreService,
 				deviceStatusService:   options.RuntimeService,
+				childService:          options.ChildService,
+				policyService:         options.ParentPolicyService,
 			}
 			mux.HandleFunc(
 				"PUT /api/v1/auth/ai-models",
@@ -179,6 +215,10 @@ func NewRouter(options RouterOptions) http.Handler {
 			mux.HandleFunc(
 				"GET /api/v1/admin/families/{parent_account_id}/devices",
 				authHandler.requireAdmin(adminHandler.listParentDevices),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/admin/families/{parent_account_id}/children",
+				authHandler.requireAdmin(adminHandler.listFamilyChildren),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/ai-accounts",

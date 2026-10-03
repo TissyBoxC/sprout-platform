@@ -12,8 +12,10 @@ import (
 	gatewayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/service"
 	authdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
 	authservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
+	childdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/domain"
 	deviceruntimedomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
 	operationsdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/domain"
+	policydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/domain"
 	releaseStoredomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/domain"
 	serviceversiondomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/domain"
 	serviceversionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
@@ -26,6 +28,8 @@ type adminHandler struct {
 	serviceVersionService serviceVersionAdminService
 	releaseStoreService   releaseStoreAdminService
 	deviceStatusService   adminDeviceStatusService
+	childService          adminChildService
+	policyService         adminPolicyService
 }
 
 type parentAccountService interface {
@@ -183,6 +187,17 @@ type adminDeviceStatusService interface {
 		ctx context.Context,
 		parentAccountID string,
 	) ([]deviceruntimedomain.DeviceStatus, error)
+}
+
+// adminChildService is the management-facing child profile read surface.
+type adminChildService interface {
+	List(ctx context.Context, familyID string) ([]childdomain.Child, error)
+	Get(ctx context.Context, familyID string, childID string) (*childdomain.Child, error)
+}
+
+// adminPolicyService is the management-facing parent policy read surface.
+type adminPolicyService interface {
+	Get(ctx context.Context, familyID string, childID string) (*policydomain.Policy, error)
 }
 
 type aiAccountDefaultsResponse struct {
@@ -395,6 +410,49 @@ func (handler adminHandler) listParentDevices(
 	}
 	writeSuccess(response, request, http.StatusOK, map[string]any{
 		"devices": devices,
+	})
+}
+
+// listFamilyChildren returns the child profiles of one guardian, including
+// the current parent policy, so operators can answer support questions. The
+// endpoint stays read-only because only the guardian may change consent or
+// limits through the parent application.
+func (handler adminHandler) listFamilyChildren(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	parentAccountID := strings.TrimSpace(request.PathValue("parent_account_id"))
+	if parentAccountID == "" {
+		writeError(response, request, http.StatusBadRequest, "invalid_request", "请选择要查看的家长账号")
+		return
+	}
+	if handler.childService == nil {
+		writeError(response, request, http.StatusServiceUnavailable, "service_unavailable", "儿童档案暂时无法读取，请稍后重试")
+		return
+	}
+	children, err := handler.childService.List(request.Context(), parentAccountID)
+	if err != nil {
+		writeError(response, request, http.StatusInternalServerError, "service_error", "暂时无法读取儿童档案")
+		return
+	}
+	result := make([]map[string]any, 0, len(children))
+	for index := range children {
+		child := &children[index]
+		record := childProfileResponse(child)
+		if handler.policyService != nil {
+			policy, policyErr := handler.policyService.Get(
+				request.Context(),
+				parentAccountID,
+				child.ID,
+			)
+			if policyErr == nil {
+				record["policy"] = parentPolicyResponse(policy)
+			}
+		}
+		result = append(result, record)
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"children": result,
 	})
 }
 

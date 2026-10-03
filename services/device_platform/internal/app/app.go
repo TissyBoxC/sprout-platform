@@ -19,12 +19,16 @@ import (
 	aiService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/service"
 	authRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/repository"
 	authService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
+	childRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/repository"
+	childService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
 	bindingRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/repository"
 	bindingService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 	runtimeRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/repository"
 	runtimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
 	operationsRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/repository"
 	operationsService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
+	policyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/repository"
+	policyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
 	releaseStoreService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
 	serviceVersionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/repository"
 	serviceVersionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
@@ -118,6 +122,19 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create authentication service: %w", err)
 	}
+	parentPolicyService, err := policyService.New(policyService.Options{
+		Repository: policyRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
+	if err != nil {
+		return fmt.Errorf("create parent policy service: %w", err)
+	}
+	childProfileService, err := childService.New(childService.Options{
+		Repository:        childRepository.NewPostgresRepository(databaseStore.Pool()),
+		PolicyProvisioner: parentPolicyService,
+	})
+	if err != nil {
+		return fmt.Errorf("create child profile service: %w", err)
+	}
 	deviceBindingService, err := bindingService.New(bindingService.Options{
 		Repository:    bindingRepository.NewPostgresRepository(databaseStore.Pool()),
 		TokenTTL:      15 * time.Minute,
@@ -177,6 +194,8 @@ func Run() error {
 			Logger:                logger,
 			InternalAPIConfig:     cfg.Internal,
 			AuthService:           parentAuthService,
+			ChildService:          childProfileService,
+			ParentPolicyService:   parentPolicyService,
 			AIService:             aiAccountService,
 			OperationsService:     operations,
 			BindingService:        deviceBindingService,

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	gatewayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/service"
 	bindingdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/domain"
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
+	policydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/domain"
 	releaseStoredomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/domain"
 )
 
@@ -18,7 +20,19 @@ import (
 type internalHandler struct {
 	bindingService      *bindingservice.Service
 	aiService           *gatewayservice.Service
+	policyService       internalPolicyService
 	releaseStoreService releaseStoreAdminService
+}
+
+// internalPolicyService resolves the effective parent policy for the device
+// and relay path. It is separate from the guardian-facing edit surface.
+type internalPolicyService interface {
+	GetForFamily(
+		ctx context.Context,
+		familyID string,
+		childID string,
+	) (*policydomain.Policy, error)
+	List(ctx context.Context, familyID string) ([]policydomain.Policy, error)
 }
 
 // uploadReleaseFile lets the release pipeline publish one artifact through
@@ -132,6 +146,36 @@ func (handler internalHandler) aiCredential(
 		"device_id":           binding.DeviceID,
 		"provider_account_id": credential.ProviderAccountID,
 		"api_key":             credential.APIKey,
+	})
+}
+
+// effectivePolicies returns every parent policy owned by one family. The
+// device runtime uses this to enforce limits locally without receiving any
+// guardian or provider identity.
+func (handler internalHandler) effectivePolicies(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	if handler.policyService == nil {
+		writeError(response, request, http.StatusServiceUnavailable, "service_unavailable", "家长策略暂时无法读取")
+		return
+	}
+	familyID := strings.TrimSpace(request.URL.Query().Get("family_id"))
+	if familyID == "" {
+		writeError(response, request, http.StatusBadRequest, "invalid_request", "请指定家长账号")
+		return
+	}
+	policies, err := handler.policyService.List(request.Context(), familyID)
+	if err != nil {
+		writeError(response, request, http.StatusInternalServerError, "service_error", "暂时无法读取家长策略")
+		return
+	}
+	result := make([]map[string]any, 0, len(policies))
+	for index := range policies {
+		result = append(result, parentPolicyResponse(&policies[index]))
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"policies": result,
 	})
 }
 

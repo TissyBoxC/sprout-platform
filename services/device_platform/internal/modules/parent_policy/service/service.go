@@ -88,6 +88,17 @@ func (s *Service) Get(
 	return s.repository.GetByFamilyID(ctx, familyID, childID)
 }
 
+// GetForFamily is the internal read path used by the device runtime. It takes
+// the same family-scoped lookup as the guardian path so a forged child id can
+// never cross family boundaries.
+func (s *Service) GetForFamily(
+	ctx context.Context,
+	familyID string,
+	childID string,
+) (*domain.Policy, error) {
+	return s.repository.GetByFamilyID(ctx, familyID, childID)
+}
+
 // List returns every policy owned by one guardian.
 func (s *Service) List(
 	ctx context.Context,

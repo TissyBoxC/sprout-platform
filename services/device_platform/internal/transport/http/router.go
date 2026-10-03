@@ -376,6 +376,18 @@ func NewRouter(options RouterOptions) http.Handler {
 				),
 			)
 		}
+		if options.ParentPolicyService != nil {
+			internalHandler := internalHandler{
+				policyService: options.ParentPolicyService,
+			}
+			mux.Handle(
+				"GET /internal/v1/parent-policies",
+				requireServiceToken(
+					options.InternalAPIConfig.AuthToken,
+					http.HandlerFunc(internalHandler.effectivePolicies),
+				),
+			)
+		}
 		if options.ReleaseStoreService != nil &&
 			strings.TrimSpace(options.InternalAPIConfig.ReleaseUploadToken) != "" {
 			internalHandler := internalHandler{

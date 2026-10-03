@@ -5,6 +5,7 @@ import DevicePage from '@/features/device/presentation/DevicePage.vue'
 import UITextPage from '@/features/ui_text/presentation/UITextPage.vue'
 import LoginPage from '@/features/auth/presentation/LoginPage.vue'
 import FamilyAccountsPage from '@/features/family/presentation/FamilyAccountsPage.vue'
+import ChildProfilesPage from '@/features/child/presentation/ChildProfilesPage.vue'
 import ReleasePage from '@/features/ota/presentation/ReleasePage.vue'
 import SystemSettingsPage from '@/features/system/presentation/SystemSettingsPage.vue'
 import VersionManagementPage from '@/features/version_management/presentation/VersionManagementPage.vue'
@@ -32,6 +33,11 @@ export function createAdminRouter() {
         path: '/families',
         name: 'families',
         component: FamilyAccountsPage,
+      },
+      {
+        path: '/children',
+        name: 'children',
+        component: ChildProfilesPage,
       },
       {
         path: '/ai-accounts',

@@ -39,6 +39,10 @@ async function logout(): Promise<void> {
           <span class="nav-dot" aria-hidden="true"></span>
           家长账号
         </RouterLink>
+        <RouterLink to="/children">
+          <span class="nav-dot" aria-hidden="true"></span>
+          儿童档案
+        </RouterLink>
         <RouterLink to="/devices">
           <span class="nav-dot" aria-hidden="true"></span>
           设备管理

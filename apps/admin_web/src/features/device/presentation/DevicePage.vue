@@ -63,6 +63,29 @@ function lifecycleStatusLabel(value: string): string {
   )
 }
 
+function capabilityLabel(value: string): string {
+  return (
+    {
+      audio_input: '麦克风',
+      audio_output: '扬声器',
+      wifi: '无线网络',
+      camera: '摄像头',
+      display: '屏幕',
+      touch: '触摸',
+      led: '指示灯',
+      battery: '电池',
+      cellular_4g: '移动网络',
+      motion: '动作感应',
+      bluetooth_audio: '蓝牙音频',
+      video_call: '视频通话',
+      location: '定位',
+      geofence: '电子围栏',
+      sos: '紧急求助',
+      multi_device: '多设备协同',
+    }[value] ?? value
+  )
+}
+
 function networkQualityLabel(value: string): string {
   return (
     {
@@ -235,6 +258,17 @@ function formatTime(value: string): string {
               <dd>{{ formatTime(selectedDevice.runtime?.receivedAt ?? '') }}</dd>
             </div>
           </dl>
+          <div class="capability-panel">
+            <h3>设备能力</h3>
+            <div v-if="selectedDevice.capabilities.length === 0" class="command-empty">
+              这台设备还没有上报可用能力。
+            </div>
+            <div v-else class="capability-list">
+              <span v-for="capability in selectedDevice.capabilities" :key="capability">
+                {{ capabilityLabel(capability) }}
+              </span>
+            </div>
+          </div>
           <label>
             <span>维护操作</span>
             <select v-model="activeCommand">
@@ -510,6 +544,30 @@ td small {
   margin: 4px 0 0;
   color: #4a2e3b;
   font-weight: 700;
+}
+
+.capability-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.capability-panel h3 {
+  margin: 0;
+}
+
+.capability-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.capability-list span {
+  padding: 6px 10px;
+  border: 1px solid #f2bfcb;
+  border-radius: 999px;
+  background: #fff8fa;
+  color: #6b4f5a;
+  font-size: 12px;
 }
 
 .dialog label {

@@ -6,10 +6,8 @@ import { createHttpClient } from '@/api/httpClient'
 import {
   parseChildProfiles,
   parseParentAccountOptions,
-  parseParentPolicy,
   type ChildProfile,
   type ParentAccountOption,
-  type ParentPolicy,
 } from '@/features/child/domain/childProfile'
 
 // This is a read-only support view, so the store intentionally keeps the
@@ -19,9 +17,6 @@ export const useChildProfileStore = defineStore('admin-child-profiles', () => {
   const families = ref<ParentAccountOption[]>([])
   const childrenByFamily = ref<Record<string, ChildProfile[]>>({})
   const childrenErrorsByFamily = ref<Record<string, ApiError | null>>({})
-  const policyByChild = ref<Record<string, ParentPolicy | null>>({})
-  const policyErrorsByChild = ref<Record<string, ApiError | null>>({})
-  const policyLoadingByChild = ref<Record<string, boolean>>({})
   const isLoadingFamilies = ref(false)
   const childrenLoadingFamilyId = ref('')
   const error = ref<ApiError | null>(null)
@@ -72,46 +67,6 @@ export const useChildProfileStore = defineStore('admin-child-profiles', () => {
     }
   }
 
-  async function loadPolicy(childId: string): Promise<ApiError | null> {
-    policyLoadingByChild.value = {
-      ...policyLoadingByChild.value,
-      [childId]: true,
-    }
-    policyErrorsByChild.value = {
-      ...policyErrorsByChild.value,
-      [childId]: null,
-    }
-    try {
-      const response = await httpClient.get(
-        `/api/v1/admin/children/${encodeURIComponent(childId)}/policy`,
-      )
-      policyByChild.value = {
-        ...policyByChild.value,
-        [childId]: parseParentPolicy(response.data?.data?.policy),
-      }
-      return null
-    } catch (caught: unknown) {
-      const mapped = mapApiError(caught)
-      if (mapped.kind === 'not_found') {
-        policyByChild.value = {
-          ...policyByChild.value,
-          [childId]: null,
-        }
-        return null
-      }
-      policyErrorsByChild.value = {
-        ...policyErrorsByChild.value,
-        [childId]: mapped,
-      }
-      return mapped
-    } finally {
-      policyLoadingByChild.value = {
-        ...policyLoadingByChild.value,
-        [childId]: false,
-      }
-    }
-  }
-
   function childrenFor(parentAccountId: string): ChildProfile[] {
     return childrenByFamily.value[parentAccountId] ?? []
   }
@@ -124,21 +79,6 @@ export const useChildProfileStore = defineStore('admin-child-profiles', () => {
     return childrenLoadingFamilyId.value === parentAccountId
   }
 
-  function policyFor(child: ChildProfile): ParentPolicy | null {
-    if (Object.prototype.hasOwnProperty.call(policyByChild.value, child.childId)) {
-      return policyByChild.value[child.childId] ?? null
-    }
-    return child.policy
-  }
-
-  function policyErrorFor(childId: string): ApiError | null {
-    return policyErrorsByChild.value[childId] ?? null
-  }
-
-  function isPolicyLoading(childId: string): boolean {
-    return policyLoadingByChild.value[childId] ?? false
-  }
-
   return {
     childrenErrorFor,
     childrenFor,
@@ -146,11 +86,7 @@ export const useChildProfileStore = defineStore('admin-child-profiles', () => {
     families,
     isChildrenLoading,
     isLoadingFamilies,
-    isPolicyLoading,
     loadChildren,
     loadFamilies,
-    loadPolicy,
-    policyErrorFor,
-    policyFor,
   }
 })

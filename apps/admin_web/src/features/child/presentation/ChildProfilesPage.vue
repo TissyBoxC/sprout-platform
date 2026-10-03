@@ -1,14 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
-import type { ApiError } from '@/api/apiError'
 import { useChildProfileStore } from '@/features/child/application/childProfileStore'
-import type {
-  AgeTier,
-  ChildProfile,
-  DisabledPeriod,
-  ParentPolicy,
-} from '@/features/child/domain/childProfile'
+import type { AgeTier, ChildProfile, DisabledPeriod } from '@/features/child/domain/childProfile'
 
 const store = useChildProfileStore()
 const selectedParentAccountId = ref('')
@@ -48,14 +42,13 @@ async function selectFamily(parentAccountId: string): Promise<void> {
   await store.loadChildren(parentAccountId)
 }
 
-async function toggleChild(child: ChildProfile): Promise<void> {
+function toggleChild(child: ChildProfile): void {
   if (expandedChildId.value === child.childId) {
     expandedChildId.value = ''
     return
   }
 
   expandedChildId.value = child.childId
-  await store.loadPolicy(child.childId)
 }
 
 async function reloadChildren(): Promise<void> {
@@ -68,14 +61,6 @@ async function reloadChildren(): Promise<void> {
 
 function isExpanded(childId: string): boolean {
   return expandedChildId.value === childId
-}
-
-function policyFor(child: ChildProfile): ParentPolicy | null {
-  return store.policyFor(child)
-}
-
-function policyErrorFor(childId: string): ApiError | null {
-  return store.policyErrorFor(childId)
 }
 
 function ageTierLabel(value: AgeTier): string {
@@ -337,63 +322,41 @@ function formatDate(value: string): string {
                     <h3>家长策略</h3>
                     <p>家长在应用中设置的时长、内容和免打扰规则。</p>
                   </div>
-                  <span v-if="policyFor(child)" class="policy-version">
-                    第 {{ policyFor(child)?.policyVersion }} 版
+                  <span v-if="child.policy" class="policy-version">
+                    第 {{ child.policy.policyVersion }} 版
                   </span>
                 </div>
 
-                <div
-                  v-if="store.isPolicyLoading(child.childId) && !policyFor(child)"
-                  class="inline-state"
-                >
-                  正在读取家长策略…
-                </div>
-                <div v-else-if="policyErrorFor(child.childId)" class="inline-state error">
-                  <span>{{ policyErrorFor(child.childId)?.message }}</span>
-                  <button
-                    type="button"
-                    class="text-button"
-                    @click="store.loadPolicy(child.childId)"
-                  >
-                    重新加载策略
-                  </button>
-                </div>
-                <div v-else-if="!policyFor(child)" class="inline-state">
-                  家长还没有设置守护策略。家长保存后，这里会显示最新规则。
+                <div v-if="!child.policy" class="inline-state">
+                  监护人尚未设置时间与内容策略。监护人保存后，这里会显示最新规则。
                 </div>
                 <template v-else>
                   <div class="policy-grid">
                     <div>
                       <span>每日使用时长</span>
                       <strong>
-                        {{ dailyLimitLabel(policyFor(child)?.dailyLimitMinutes ?? 0) }}
+                        {{ dailyLimitLabel(child.policy.dailyLimitMinutes) }}
                       </strong>
                     </div>
                     <div>
                       <span>最大音量</span>
-                      <strong>{{ policyFor(child)?.maxVolumePercent ?? 0 }}%</strong>
+                      <strong>{{ child.policy.maxVolumePercent }}%</strong>
                     </div>
                     <div class="wide-field">
                       <span>允许内容</span>
                       <strong>
-                        {{
-                          contentCategoryLabels(policyFor(child)?.allowedCategories ?? []).join(
-                            '、',
-                          )
-                        }}
+                        {{ contentCategoryLabels(child.policy.allowedCategories).join('、') }}
                       </strong>
                     </div>
                     <div class="wide-field">
                       <span>免打扰时段</span>
-                      <strong v-if="policyFor(child)?.disabledPeriods.length">
-                        {{ policyFor(child)?.disabledPeriods.map(disabledPeriodLabel).join('；') }}
+                      <strong v-if="child.policy.disabledPeriods.length">
+                        {{ child.policy.disabledPeriods.map(disabledPeriodLabel).join('；') }}
                       </strong>
                       <strong v-else>未设置免打扰时段</strong>
                     </div>
                   </div>
-                  <p class="policy-updated">
-                    策略更新于 {{ formatDate(policyFor(child)?.updatedAt ?? '') }}
-                  </p>
+                  <p class="policy-updated">策略更新于 {{ formatDate(child.policy.updatedAt) }}</p>
                 </template>
               </section>
             </div>

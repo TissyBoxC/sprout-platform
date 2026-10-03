@@ -15,6 +15,8 @@ const onlineCount = computed(
   () => store.devices.filter((device) => device.runtime?.isOnline).length,
 )
 
+const canUnbindSelectedDevice = computed(() => Boolean(selectedDevice.value?.parentAccountId))
+
 onMounted(() => {
   void store.load()
 })
@@ -29,6 +31,36 @@ async function sendCommand(): Promise<void> {
     return
   }
   await store.sendCommand(selectedDevice.value.deviceId, activeCommand.value)
+}
+
+async function unbindSelectedDevice(): Promise<void> {
+  const device = selectedDevice.value
+  if (device === null || !device.parentAccountId) {
+    return
+  }
+
+  const confirmed = window.confirm(
+    `确定解除“${device.deviceName || device.deviceId}”的绑定吗？解除后设备将失去与当前家长账号的关联，并需要重新绑定。`,
+  )
+  if (!confirmed) {
+    return
+  }
+
+  const succeeded = await store.unbind(device.parentAccountId, device.deviceId)
+  if (succeeded) {
+    selectedDevice.value = null
+  }
+}
+
+function lifecycleStatusLabel(value: string): string {
+  return (
+    {
+      active: '已绑定',
+      inactive: '已解绑',
+      pending: '待绑定',
+      revoked: '已解除',
+    }[value] ?? '未知状态'
+  )
 }
 
 function networkQualityLabel(value: string): string {
@@ -101,14 +133,16 @@ function formatTime(value: string): string {
           查看每台设备的联网状态和最后连接时间，并在需要时发送维护操作。
         </p>
       </div>
-      <button type="button" :disabled="store.isLoading" @click="store.load">
-        重新加载
-      </button>
+      <button type="button" :disabled="store.isLoading" @click="store.load">重新加载</button>
     </header>
 
     <div class="summary">
-      <span><strong>{{ store.devices.length }}</strong> 台已绑定设备</span>
-      <span><strong>{{ onlineCount }}</strong> 台在线</span>
+      <span
+        ><strong>{{ store.devices.length }}</strong> 台已绑定设备</span
+      >
+      <span
+        ><strong>{{ onlineCount }}</strong> 台在线</span
+      >
     </div>
 
     <Transition name="toast">
@@ -135,6 +169,7 @@ function formatTime(value: string): string {
             <tr>
               <th>设备</th>
               <th>状态</th>
+              <th>生命周期</th>
               <th>网络</th>
               <th>时间</th>
               <th>最后连接</th>
@@ -151,13 +186,13 @@ function formatTime(value: string): string {
                 </span>
               </td>
               <td>
-                <span
-                  :class="[
-                    'status',
-                    device.runtime?.isOnline ? 'online' : 'offline',
-                  ]"
-                >
+                <span :class="['status', device.runtime?.isOnline ? 'online' : 'offline']">
                   {{ device.runtime?.isOnline ? '在线' : '离线' }}
+                </span>
+              </td>
+              <td>
+                <span class="lifecycle-status">
+                  {{ lifecycleStatusLabel(device.lifecycleStatus) }}
                 </span>
               </td>
               <td>
@@ -190,6 +225,16 @@ function formatTime(value: string): string {
         <section class="dialog">
           <h2>{{ selectedDevice.deviceName || '未命名设备' }}</h2>
           <p class="device-id">{{ selectedDevice.deviceId }}</p>
+          <dl class="detail-grid">
+            <div>
+              <dt>绑定状态</dt>
+              <dd>{{ lifecycleStatusLabel(selectedDevice.lifecycleStatus) }}</dd>
+            </div>
+            <div>
+              <dt>最近上报</dt>
+              <dd>{{ formatTime(selectedDevice.runtime?.receivedAt ?? '') }}</dd>
+            </div>
+          </dl>
           <label>
             <span>维护操作</span>
             <select v-model="activeCommand">
@@ -210,10 +255,7 @@ function formatTime(value: string): string {
             还没有维护记录。
           </div>
           <ul v-else class="command-list">
-            <li
-              v-for="command in store.commands[selectedDevice.deviceId]"
-              :key="command.commandId"
-            >
+            <li v-for="command in store.commands[selectedDevice.deviceId]" :key="command.commandId">
               <span>{{ commandLabel(command.commandType) }}</span>
               <small>
                 {{ commandStatusLabel(command.status) }} ·
@@ -221,10 +263,20 @@ function formatTime(value: string): string {
               </small>
             </li>
           </ul>
-          <div class="dialog-actions">
-            <button type="button" class="secondary" @click="selectedDevice = null">
-              关闭
+          <section v-if="canUnbindSelectedDevice" class="danger-zone">
+            <h3>解除绑定</h3>
+            <p>解除后设备会失去与当前家长账号的关联，需要重新绑定才能继续使用。</p>
+            <button
+              type="button"
+              class="danger"
+              :disabled="store.isSubmitting"
+              @click="unbindSelectedDevice"
+            >
+              {{ store.isSubmitting ? '正在解除…' : '解除绑定' }}
             </button>
+          </section>
+          <div class="dialog-actions">
+            <button type="button" class="secondary" @click="selectedDevice = null">关闭</button>
           </div>
         </section>
       </div>
@@ -349,6 +401,10 @@ td small {
   color: #a12b4a;
 }
 
+.lifecycle-status {
+  color: #4a2e3b;
+}
+
 .state-panel {
   display: flex;
   min-height: 132px;
@@ -432,6 +488,30 @@ td small {
   font-size: 12px;
 }
 
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.detail-grid div {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #fff8fa;
+}
+
+.detail-grid dt {
+  color: #6b4f5a;
+  font-size: 12px;
+}
+
+.detail-grid dd {
+  margin: 4px 0 0;
+  color: #4a2e3b;
+  font-weight: 700;
+}
+
 .dialog label {
   display: grid;
   gap: 7px;
@@ -489,6 +569,41 @@ td small {
   color: #6b4f5a;
 }
 
+.danger-zone {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid #f2bfcb;
+  border-radius: 18px;
+  background: #fff7f9;
+}
+
+.danger-zone h3,
+.danger-zone p {
+  margin: 0;
+}
+
+.danger-zone p {
+  color: #6b4f5a;
+  font-size: 13px;
+}
+
+.danger-zone .danger {
+  min-height: 42px;
+  border: 1px solid #c73c63;
+  border-radius: 14px;
+  background: #c73c63;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.danger-zone .danger:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
@@ -522,7 +637,7 @@ td small {
   }
 
   table {
-    min-width: 720px;
+    min-width: 840px;
   }
 }
 

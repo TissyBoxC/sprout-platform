@@ -4,10 +4,7 @@ import { ref } from 'vue'
 import { mapApiError, type ApiError } from '@/api/apiError'
 import { createHttpClient } from '@/api/httpClient'
 
-export type DeviceCommandType =
-  | 'refresh_configuration'
-  | 'reconnect_network'
-  | 'resync_time'
+export type DeviceCommandType = 'refresh_configuration' | 'reconnect_network' | 'resync_time'
 
 /// Runtime projection used by the operations console.
 export interface DeviceRuntime {
@@ -31,10 +28,12 @@ export interface DeviceRuntime {
 /// Bound device and its latest runtime snapshot.
 export interface AdminDevice {
   deviceId: string
+  parentAccountId: string
   deviceName: string
   hardwareModel: string
   firmwareVersion: string
   capabilities: string[]
+  lifecycleStatus: string
   boundAt: string
   updatedAt: string
   runtime: DeviceRuntime | null
@@ -75,12 +74,36 @@ export const useDeviceStore = defineStore('admin-devices', () => {
     }
   }
 
+  /**
+   * 按家长范围解绑设备，成功后刷新设备列表。
+   *
+   * 后端以 parentAccountId 和 deviceId 共同限定目标，避免管理员解绑到
+   * 其他家庭的设备。列表接口当前不返回 parent_account_id 时，调用方不得
+   * 猜测该值。
+   */
+  async function unbind(parentAccountId: string, deviceId: string): Promise<boolean> {
+    isSubmitting.value = true
+    error.value = null
+    lastMessage.value = ''
+    try {
+      await httpClient.delete(
+        `/api/v1/admin/families/${encodeURIComponent(parentAccountId)}/devices/${encodeURIComponent(deviceId)}`,
+      )
+      await load()
+      lastMessage.value = '设备已解除绑定。'
+      return true
+    } catch (caught: unknown) {
+      error.value = mapApiError(caught)
+      return false
+    } finally {
+      isSubmitting.value = false
+    }
+  }
+
   async function loadCommands(deviceId: string): Promise<void> {
     error.value = null
     try {
-      const response = await httpClient.get(
-        `/api/v1/admin/devices/${deviceId}/commands`,
-      )
+      const response = await httpClient.get(`/api/v1/admin/devices/${deviceId}/commands`)
       commands.value = {
         ...commands.value,
         [deviceId]: (response.data.data.commands ?? []).map(toCommand),
@@ -90,18 +113,14 @@ export const useDeviceStore = defineStore('admin-devices', () => {
     }
   }
 
-  async function sendCommand(
-    deviceId: string,
-    commandType: DeviceCommandType,
-  ): Promise<boolean> {
+  async function sendCommand(deviceId: string, commandType: DeviceCommandType): Promise<boolean> {
     isSubmitting.value = true
     error.value = null
     lastMessage.value = ''
     try {
-      await httpClient.post(
-        `/api/v1/admin/devices/${deviceId}/commands`,
-        { command_type: commandType },
-      )
+      await httpClient.post(`/api/v1/admin/devices/${deviceId}/commands`, {
+        command_type: commandType,
+      })
       lastMessage.value = '操作已发送，设备将在下一次连接时执行。'
       await loadCommands(deviceId)
       return true
@@ -123,16 +142,19 @@ export const useDeviceStore = defineStore('admin-devices', () => {
     load,
     loadCommands,
     sendCommand,
+    unbind,
   }
 })
 
 function toDevice(value: Record<string, unknown>): AdminDevice {
   return {
     deviceId: String(value.device_id ?? ''),
+    parentAccountId: String(value.parent_account_id ?? ''),
     deviceName: String(value.device_name ?? ''),
     hardwareModel: String(value.hardware_model ?? ''),
     firmwareVersion: String(value.firmware_version ?? ''),
     capabilities: stringList(value.capabilities),
+    lifecycleStatus: String(value.lifecycle_status ?? ''),
     boundAt: String(value.bound_at ?? ''),
     updatedAt: String(value.updated_at ?? ''),
     runtime: isRecord(value.runtime) ? toRuntime(value.runtime) : null,

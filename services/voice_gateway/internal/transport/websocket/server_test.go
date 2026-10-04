@@ -157,6 +157,58 @@ func TestCancelClosesSession(t *testing.T) {
 	waitFor(t, time.Second, func() bool { return manager.Count() == 0 })
 }
 
+func TestWakeDetectedStartsListening(t *testing.T) {
+	server, manager := newTestServer(t)
+	defer manager.CloseAll()
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, "valid-token")
+	defer connection.Close()
+	writeControl(t, connection, sessionStartFrame("session_wake", "device_alpha"))
+	_ = readControl(t, connection)
+
+	confidence := 875
+	wake := NewControlFrame(controlTypeWakeDetected, "session_wake", "device_alpha")
+	wake.StreamID = "stream_alpha"
+	wake.WakeWord = "nihaoxiaozhi"
+	wake.WakeConfidence = &confidence
+	writeControl(t, connection, wake)
+
+	waitFor(t, time.Second, func() bool {
+		voiceSession, ok := manager.Get("session_wake")
+		return ok && voiceSession.State() == session.StateListening
+	})
+}
+
+func TestWakeDetectedRejectsWrongStream(t *testing.T) {
+	server, manager := newTestServer(t)
+	defer manager.CloseAll()
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, "valid-token")
+	defer connection.Close()
+	writeControl(t, connection, sessionStartFrame("session_wake_mismatch", "device_alpha"))
+	_ = readControl(t, connection)
+
+	confidence := 875
+	wake := NewControlFrame(
+		controlTypeWakeDetected,
+		"session_wake_mismatch",
+		"device_alpha",
+	)
+	wake.StreamID = "stream_other"
+	wake.WakeWord = "nihaoxiaozhi"
+	wake.WakeConfidence = &confidence
+	writeControl(t, connection, wake)
+
+	errorFrame := readControl(t, connection)
+	if errorFrame.Code != errorCodeInvalidControl {
+		t.Fatalf("expected invalid_control, got %+v", errorFrame)
+	}
+}
+
 func TestDisconnectCleansUpSession(t *testing.T) {
 	server, manager := newTestServer(t)
 	defer manager.CloseAll()
@@ -376,6 +428,50 @@ func TestControlFrameRoundTrip(t *testing.T) {
 	}
 	if decoded.Type != control.Type || decoded.StreamID != control.StreamID {
 		t.Fatalf("round trip changed frame: %+v", decoded)
+	}
+}
+
+func TestWakeDetectedFrameRoundTrip(t *testing.T) {
+	confidence := 875
+	control := NewControlFrame(
+		controlTypeWakeDetected,
+		"session_wake",
+		"device_alpha",
+	)
+	control.StreamID = "stream_alpha"
+	control.WakeWord = "nihaoxiaozhi"
+	control.WakeConfidence = &confidence
+
+	encoded, err := control.Encode()
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	decoded, err := DecodeControlFrame(encoded)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if decoded.Type != controlTypeWakeDetected ||
+		decoded.StreamID != control.StreamID ||
+		decoded.WakeWord != control.WakeWord ||
+		decoded.WakeConfidence == nil ||
+		*decoded.WakeConfidence != confidence {
+		t.Fatalf("wake frame changed during round trip: %+v", decoded)
+	}
+}
+
+func TestWakeDetectedFrameRejectsInvalidConfidence(t *testing.T) {
+	confidence := 1001
+	control := NewControlFrame(
+		controlTypeWakeDetected,
+		"session_wake",
+		"device_alpha",
+	)
+	control.StreamID = "stream_alpha"
+	control.WakeWord = "nihaoxiaozhi"
+	control.WakeConfidence = &confidence
+
+	if _, err := control.Encode(); err == nil {
+		t.Fatal("expected invalid confidence to be rejected")
 	}
 }
 

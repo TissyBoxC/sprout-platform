@@ -19,6 +19,7 @@ const (
 
 	controlTypeSessionStart   = "session_start"
 	controlTypeSessionStarted = "session_started"
+	controlTypeWakeDetected   = "wake_detected"
 	controlTypeSessionEnd     = "session_end"
 	controlTypeSessionClosed  = "session_closed"
 	controlTypeCancel         = "cancel"
@@ -101,6 +102,8 @@ type ControlFrame struct {
 	DurationMS      int      `json:"duration_ms,omitempty"`
 	Encoding        string   `json:"encoding,omitempty"`
 	FirmwareVersion string   `json:"firmware_version,omitempty"`
+	WakeWord        string   `json:"wake_word,omitempty"`
+	WakeConfidence  *int     `json:"wake_confidence_milli,omitempty"`
 	Capabilities    []string `json:"capabilities,omitempty"`
 	ExpiresAt       string   `json:"expires_at,omitempty"`
 	Reason          string   `json:"reason,omitempty"`
@@ -211,6 +214,8 @@ func (control ControlFrame) Validate() error {
 		return control.validateSessionStart()
 	case controlTypeSessionStarted:
 		return control.validateSessionStarted()
+	case controlTypeWakeDetected:
+		return control.validateWakeDetected()
 	case controlTypeSessionEnd, controlTypeSessionClosed, controlTypeCancel:
 		if !validReason(control.Reason) {
 			return errors.New("control frame reason is required")
@@ -263,6 +268,22 @@ func (control ControlFrame) validateSessionStart() error {
 func (control ControlFrame) validateSessionStarted() error {
 	if _, err := time.Parse(time.RFC3339Nano, control.ExpiresAt); err != nil {
 		return fmt.Errorf("session_started expires_at is invalid: %w", err)
+	}
+	return nil
+}
+
+func (control ControlFrame) validateWakeDetected() error {
+	if !validIdentifier(control.StreamID) {
+		return fmt.Errorf("wake_detected stream_id is invalid: %q", control.StreamID)
+	}
+	if strings.TrimSpace(control.WakeWord) == "" ||
+		len(control.WakeWord) > 64 {
+		return errors.New("wake_detected wake_word is invalid")
+	}
+	if control.WakeConfidence == nil ||
+		*control.WakeConfidence < 0 ||
+		*control.WakeConfidence > 1000 {
+		return errors.New("wake_detected wake_confidence_milli is invalid")
 	}
 	return nil
 }

@@ -295,6 +295,45 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 			}
 
 			switch control.Type {
+			case controlTypeWakeDetected:
+				voiceSession := getSession()
+				if voiceSession == nil {
+					s.sendError(
+						writer,
+						nil,
+						errorCodeSessionNotFound,
+						"请先开始监听",
+						false,
+					)
+					continue
+				}
+				if control.StreamID != voiceSession.StreamID() {
+					s.stats.malformedFrames.Add(1)
+					s.sendError(
+						writer,
+						voiceSession,
+						errorCodeInvalidControl,
+						"唤醒信息与当前监听不一致",
+						false,
+					)
+					continue
+				}
+				if voiceSession.State() != session.StateListening {
+					if transitionErr := voiceSession.Transition(
+						session.EventStartListening,
+					); transitionErr != nil &&
+						!errors.Is(transitionErr, session.ErrSessionClosed) {
+						s.stats.malformedFrames.Add(1)
+						s.sendError(
+							writer,
+							voiceSession,
+							errorCodeInvalidControl,
+							"当前无法开始监听",
+							false,
+						)
+						continue
+					}
+				}
 			case controlTypeSessionStart:
 				if getSession() != nil {
 					s.sendError(writer, getSession(), errorCodeInvalidControl, "当前已有进行中的监听", false)

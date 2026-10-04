@@ -22,6 +22,7 @@
       "enum": [
         "session_start",
         "session_started",
+        "wake_detected",
         "session_end",
         "session_closed",
         "cancel",
@@ -60,6 +61,16 @@
     },
     "firmware_version": {
       "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/firmware_version"
+    },
+    "wake_word": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "wake_confidence_milli": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000
     },
     "capabilities": {
       "type": "array",
@@ -123,6 +134,24 @@
           "duration_ms",
           "encoding",
           "firmware_version"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": { "type": { "const": "wake_detected" } },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "stream_id": {},
+          "wake_word": {},
+          "wake_confidence_milli": {}
+        },
+        "required": [
+          "stream_id",
+          "wake_word",
+          "wake_confidence_milli"
         ]
       }
     },

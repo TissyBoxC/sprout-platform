@@ -40,11 +40,22 @@ export interface DeviceRecoveryEvent {
   reportedAt: string
 }
 
+export interface DeviceInteractionEvent {
+  eventId: string
+  sequence: number
+  eventType: string
+  detailCode: string
+  durationMs: number
+  firmwareVersion: string
+  reportedAt: string
+}
+
 export interface DeviceDiagnosticsSnapshot {
   deviceId: string
   bootEvents: DeviceBootEvent[]
   failures: DeviceModuleFailure[]
   recoveryEvents: DeviceRecoveryEvent[]
+  interactionEvents: DeviceInteractionEvent[]
   latestFailure: DeviceModuleFailure | null
   errorCount: number
   recoveryCount: number
@@ -53,6 +64,7 @@ export interface DeviceDiagnosticsSnapshot {
   retentionBootEvents: number
   retentionFailures: number
   retentionRecoveryEvents: number
+  retentionInteractionEvents: number
 }
 
 export interface AdminDeviceDiagnosticsClient {
@@ -132,6 +144,10 @@ function toDiagnostics(value: unknown): DeviceDiagnosticsSnapshot {
       const event = toNullableRecoveryEvent(item)
       return event === null ? [] : [event]
     }),
+    interactionEvents: arrayValue(record.interaction_events).flatMap((item) => {
+      const event = toNullableInteractionEvent(item)
+      return event === null ? [] : [event]
+    }),
     latestFailure,
     errorCount: numberValue(record.error_count ?? record.errorCount),
     recoveryCount: numberValue(record.recovery_count ?? record.recoveryCount),
@@ -141,6 +157,9 @@ function toDiagnostics(value: unknown): DeviceDiagnosticsSnapshot {
     retentionFailures: numberValue(record.retention_failures ?? record.retentionFailures),
     retentionRecoveryEvents: numberValue(
       record.retention_recovery_events ?? record.retentionRecoveryEvents,
+    ),
+    retentionInteractionEvents: numberValue(
+      record.retention_interaction_events ?? record.retentionInteractionEvents,
     ),
   }
 }
@@ -197,6 +216,26 @@ function toNullableRecoveryEvent(value: unknown): DeviceRecoveryEvent | null {
     eventId: eventId || `recovery-${sequence}`,
     sequence,
     moduleName,
+    firmwareVersion: stringValue(record.firmware_version ?? record.firmwareVersion),
+    reportedAt: stringValue(record.reported_at ?? record.reportedAt),
+  }
+}
+
+function toNullableInteractionEvent(value: unknown): DeviceInteractionEvent | null {
+  const record = recordValue(value)
+  const sequence = numberValue(record.sequence)
+  const eventId = stringValue(record.event_id ?? record.eventId).trim()
+  const eventType = stringValue(record.event_type ?? record.eventType).trim()
+  if (!eventId && !sequence && !eventType) {
+    return null
+  }
+
+  return {
+    eventId: eventId || `interaction-${sequence}`,
+    sequence,
+    eventType,
+    detailCode: stringValue(record.detail_code ?? record.detailCode),
+    durationMs: numberValue(record.duration_ms ?? record.durationMs),
     firmwareVersion: stringValue(record.firmware_version ?? record.firmwareVersion),
     reportedAt: stringValue(record.reported_at ?? record.reportedAt),
   }

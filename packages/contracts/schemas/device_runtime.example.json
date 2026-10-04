@@ -58,6 +58,24 @@
         "module_name": "network_manager",
         "firmware_version": "0.4.0"
       }
+    ],
+    "interaction_events": [
+      {
+        "event_id": "interaction_00000013",
+        "event_type": "wake_detected",
+        "sequence": 13,
+        "detail_code": "wake_word",
+        "duration_ms": 0,
+        "firmware_version": "0.4.0"
+      },
+      {
+        "event_id": "interaction_00000014",
+        "event_type": "factory_reset_requested",
+        "sequence": 14,
+        "detail_code": "guardian_request",
+        "duration_ms": 0,
+        "firmware_version": "0.4.0"
+      }
     ]
   }
 }

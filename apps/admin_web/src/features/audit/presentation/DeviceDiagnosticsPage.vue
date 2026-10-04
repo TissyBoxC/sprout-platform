@@ -6,6 +6,7 @@ import type {
   DeviceBootEvent,
   DeviceDiagnosticsSnapshot,
   DeviceHealthState,
+  DeviceInteractionEvent,
   DeviceModuleFailure,
   DeviceRecoveryEvent,
 } from '@/api/adminDeviceDiagnostics'
@@ -142,10 +143,13 @@ function retentionSummary(snapshot: DeviceDiagnosticsSnapshot): string {
     snapshot.retentionBootEvents > 0 ? `启动记录 ${snapshot.retentionBootEvents} 条` : '',
     snapshot.retentionFailures > 0 ? `故障记录 ${snapshot.retentionFailures} 条` : '',
     snapshot.retentionRecoveryEvents > 0 ? `恢复记录 ${snapshot.retentionRecoveryEvents} 条` : '',
+    snapshot.retentionInteractionEvents > 0
+      ? `交互记录 ${snapshot.retentionInteractionEvents} 条`
+      : '',
   ].filter(Boolean)
   return parts.length > 0
     ? `平台会保留最近的 ${parts.join('、')}，更早的记录会自动清理。`
-    : '平台会保留最近的启动、故障和恢复记录，更早的记录会自动清理。'
+    : '平台会保留最近的启动、故障、恢复和交互记录，更早的记录会自动清理。'
 }
 
 function eventKey(event: { eventId: string }): string {
@@ -162,6 +166,43 @@ function moduleFailures(snapshot: DeviceDiagnosticsSnapshot): DeviceModuleFailur
 
 function recoveryEvents(snapshot: DeviceDiagnosticsSnapshot): DeviceRecoveryEvent[] {
   return snapshot.recoveryEvents
+}
+
+function interactionEvents(snapshot: DeviceDiagnosticsSnapshot): DeviceInteractionEvent[] {
+  return snapshot.interactionEvents
+}
+
+function interactionLabel(eventType: string): string {
+  return (
+    {
+      wake_detected: '设备已唤醒',
+      wake_rejected: '唤醒未采纳',
+      button_gesture: '按键操作',
+      indicator_state: '指示灯状态变化',
+      factory_reset_requested: '设备请求恢复出厂',
+      factory_reset_cancelled: '设备取消恢复出厂',
+      factory_reset_completed: '设备完成恢复出厂',
+      factory_reset_failed: '设备恢复出厂失败',
+    }[eventType] ?? '设备交互'
+  )
+}
+
+function interactionDetail(event: DeviceInteractionEvent): string {
+  const detail = event.detailCode.trim()
+  if (detail === '') {
+    return '设备已记录一次交互。'
+  }
+  return `操作标识：${detail}`
+}
+
+function formatDuration(value: number): string {
+  if (value <= 0) {
+    return ''
+  }
+  if (value < 1000) {
+    return `持续 ${value} 毫秒`
+  }
+  return `持续 ${(value / 1000).toFixed(1)} 秒`
 }
 </script>
 
@@ -415,6 +456,39 @@ function recoveryEvents(snapshot: DeviceDiagnosticsSnapshot): DeviceRecoveryEven
                   </ul>
                 </article>
 
+                <article class="detail-panel recovery-panel">
+                  <header class="panel-heading">
+                    <div>
+                      <h2>交互事件</h2>
+                      <p>记录唤醒、按键、指示灯和恢复出厂相关操作。</p>
+                    </div>
+                    <span class="panel-count">{{ interactionEvents(store.snapshot).length }} 条</span>
+                  </header>
+                  <div v-if="interactionEvents(store.snapshot).length === 0" class="list-empty">
+                    最近没有交互记录。设备发生唤醒、按键或恢复出厂操作后会显示在这里。
+                  </div>
+                  <ul v-else class="event-list">
+                    <li
+                      v-for="event in interactionEvents(store.snapshot)"
+                      :key="eventKey(event)"
+                    >
+                      <span class="event-icon boot" aria-hidden="true">•</span>
+                      <div class="event-body">
+                        <div class="event-title">
+                          <strong>{{ interactionLabel(event.eventType) }}</strong>
+                          <time>{{ formatTime(event.reportedAt) }}</time>
+                        </div>
+                        <p>
+                          {{ interactionDetail(event) }}
+                          <template v-if="formatDuration(event.durationMs)">
+                            · {{ formatDuration(event.durationMs) }}
+                          </template>
+                        </p>
+                      </div>
+                    </li>
+                  </ul>
+                </article>
+
                 <article class="retention-panel">
                   <header class="panel-heading">
                     <div>
@@ -435,6 +509,10 @@ function recoveryEvents(snapshot: DeviceDiagnosticsSnapshot): DeviceRecoveryEven
                     <div>
                       <dt>恢复记录</dt>
                       <dd>最多 {{ store.snapshot.retentionRecoveryEvents || 0 }} 条</dd>
+                    </div>
+                    <div>
+                      <dt>交互记录</dt>
+                      <dd>最多 {{ store.snapshot.retentionInteractionEvents || 0 }} 条</dd>
                     </div>
                   </dl>
                 </article>

@@ -119,7 +119,23 @@ const (
 	CommandRefreshConfiguration CommandType = "refresh_configuration"
 	CommandReconnectNetwork     CommandType = "reconnect_network"
 	CommandResyncTime           CommandType = "resync_time"
+	// CommandFactoryReset is a destructive, guard-on-device action. The device
+	// must apply its own local confirmation flow before erasing configuration.
+	CommandFactoryReset CommandType = "factory_reset"
 )
+
+// CommandTypeIsValid reports whether a command is part of the stable contract.
+func CommandTypeIsValid(commandType CommandType) bool {
+	switch commandType {
+	case CommandRefreshConfiguration,
+		CommandReconnectNetwork,
+		CommandResyncTime,
+		CommandFactoryReset:
+		return true
+	default:
+		return false
+	}
+}
 
 // CommandStatus tracks delivery and acknowledgement of one maintenance action.
 type CommandStatus string

@@ -15,9 +15,10 @@ import (
 const (
 	// A device that cannot reach the platform still retains bounded history.
 	// These limits bound operator queries and storage growth per device.
-	bootEventRetention = 200
-	failureRetention   = 100
-	recoveryRetention  = 100
+	bootEventRetention   = 200
+	failureRetention     = 100
+	recoveryRetention    = 100
+	interactionRetention = 300
 
 	defaultQueryLimit = 20
 	maxQueryLimit     = 100
@@ -115,6 +116,30 @@ func (r *PostgresRepository) SaveDiagnostics(
 		}
 	}
 
+	for index := range diagnostics.InteractionEvents {
+		event := diagnostics.InteractionEvents[index]
+		if _, err := transaction.Exec(ctx, `
+			INSERT INTO device_interaction_events (
+				id, device_id, event_id, sequence, event_type, detail_code,
+				duration_ms, firmware_version, reported_at, received_at
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+			ON CONFLICT (device_id, event_id) DO NOTHING
+		`,
+			uuid.NewString(),
+			deviceID,
+			event.EventID,
+			event.Sequence,
+			event.EventType,
+			event.DetailCode,
+			event.DurationMS,
+			event.FirmwareVersion,
+			reportedAt,
+		); err != nil {
+			return fmt.Errorf("insert device interaction event: %w", err)
+		}
+	}
+
 	if diagnostics.LatestFailure != nil {
 		failure := diagnostics.LatestFailure
 		if _, err := transaction.Exec(ctx, `
@@ -155,13 +180,14 @@ func pruneDiagnostics(
 	deviceID string,
 ) error {
 	statements := []struct {
-		name   string
-		table  string
-		limit  int
+		name  string
+		table string
+		limit int
 	}{
 		{name: "boot", table: "device_boot_events", limit: bootEventRetention},
 		{name: "failure", table: "device_module_failures", limit: failureRetention},
 		{name: "recovery", table: "device_recovery_events", limit: recoveryRetention},
+		{name: "interaction", table: "device_interaction_events", limit: interactionRetention},
 	}
 	for _, statement := range statements {
 		sql := fmt.Sprintf(`
@@ -196,14 +222,16 @@ func (r *PostgresRepository) GetDiagnostics(
 	}
 
 	snapshot := &domain.Snapshot{
-		DeviceID:          deviceID,
-		BootEvents:        make([]domain.BootEvent, 0),
-		Failures:          make([]domain.ModuleFailure, 0),
-		RecoveryEvents:    make([]domain.RecoveryEvent, 0),
-		HealthState:       domain.HealthUnknown,
-		RetentionBoot:     bootEventRetention,
-		RetentionFailures: failureRetention,
-		RetentionRecovery: recoveryRetention,
+		DeviceID:             deviceID,
+		BootEvents:           make([]domain.BootEvent, 0),
+		Failures:             make([]domain.ModuleFailure, 0),
+		RecoveryEvents:       make([]domain.RecoveryEvent, 0),
+		InteractionEvents:    make([]domain.InteractionEvent, 0),
+		HealthState:          domain.HealthUnknown,
+		RetentionBoot:        bootEventRetention,
+		RetentionFailures:    failureRetention,
+		RetentionRecovery:    recoveryRetention,
+		RetentionInteraction: interactionRetention,
 	}
 
 	bootRows, err := r.pool.Query(ctx, `
@@ -301,6 +329,38 @@ func (r *PostgresRepository) GetDiagnostics(
 	}
 	if err := recoveryRows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate device recovery events: %w", err)
+	}
+
+	interactionRows, err := r.pool.Query(ctx, `
+		SELECT event_id, sequence, event_type, detail_code,
+		       duration_ms, firmware_version, reported_at
+		FROM device_interaction_events
+		WHERE device_id = $1
+		ORDER BY sequence DESC, received_at DESC, id DESC
+		LIMIT $2
+	`, deviceID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query device interaction events: %w", err)
+	}
+	defer interactionRows.Close()
+	for interactionRows.Next() {
+		event := domain.InteractionEvent{}
+		if err := interactionRows.Scan(
+			&event.EventID,
+			&event.Sequence,
+			&event.EventType,
+			&event.DetailCode,
+			&event.DurationMS,
+			&event.FirmwareVersion,
+			&event.ReportedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan device interaction event: %w", err)
+		}
+		snapshot.InteractionEvents = append(snapshot.InteractionEvents, event)
+		snapshot.UpdatedAt = laterTime(snapshot.UpdatedAt, event.ReportedAt)
+	}
+	if err := interactionRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate device interaction events: %w", err)
 	}
 
 	if err := r.populateCounters(ctx, snapshot, deviceID); err != nil {

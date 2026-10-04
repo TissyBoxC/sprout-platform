@@ -42,14 +42,15 @@ func (h *Handler) GetDiagnostics(
 	if err != nil {
 		if errors.Is(err, domain.ErrEventNotFound) {
 			httpapi.WriteSuccess(response, request, http.StatusOK, map[string]any{
-				"device_id":       deviceID,
-				"health_state":    domain.HealthUnknown,
-				"boot_events":     []domain.BootEvent{},
-				"failures":        []domain.ModuleFailure{},
-				"recovery_events": []domain.RecoveryEvent{},
-				"latest_failure":  nil,
-				"error_count":     0,
-				"recovery_count":  0,
+				"device_id":          deviceID,
+				"health_state":       domain.HealthUnknown,
+				"boot_events":        []domain.BootEvent{},
+				"failures":           []domain.ModuleFailure{},
+				"recovery_events":    []domain.RecoveryEvent{},
+				"interaction_events": []domain.InteractionEvent{},
+				"latest_failure":     nil,
+				"error_count":        0,
+				"recovery_count":     0,
 			})
 			return
 		}

@@ -298,9 +298,7 @@ func (s *Service) CreateCommand(
 	if !runtimeIdentifierPattern.MatchString(strings.TrimSpace(deviceID)) {
 		return nil, domain.ErrInvalidCommand
 	}
-	if commandType != domain.CommandRefreshConfiguration &&
-		commandType != domain.CommandReconnectNetwork &&
-		commandType != domain.CommandResyncTime {
+	if !domain.CommandTypeIsValid(commandType) {
 		return nil, domain.ErrInvalidCommand
 	}
 	requestID, err := randomIdentifier("request")

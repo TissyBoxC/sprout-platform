@@ -129,6 +129,44 @@ func TestCommandLifecycleIsAcknowledgedOnce(t *testing.T) {
 	}
 }
 
+func TestFactoryResetCommandIsAccepted(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
+	repository := newMemoryRepository()
+	service, err := New(Options{
+		Repository: repository,
+		BindingService: &memoryBindingReader{
+			deviceID: "device_test_001",
+		},
+		Clock: fixedClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+	command, err := service.CreateCommand(
+		context.Background(),
+		"device_test_001",
+		domain.CommandFactoryReset,
+		"admin_test_001",
+		map[string]any{},
+	)
+	if err != nil {
+		t.Fatalf("create factory reset command: %v", err)
+	}
+	if command.Type != domain.CommandFactoryReset {
+		t.Fatalf("expected factory_reset command, got %q", command.Type)
+	}
+	if _, err := service.CreateCommand(
+		context.Background(),
+		"device_test_001",
+		domain.CommandType("wipe_everything"),
+		"admin_test_001",
+		map[string]any{},
+	); err != domain.ErrInvalidCommand {
+		t.Fatalf("expected unknown command type to be rejected, got %v", err)
+	}
+}
+
 func TestListDeviceStatusesReturnsOnlineAndMissingRuntimeStates(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)

@@ -76,6 +76,7 @@ func (s *Service) Validate(
 	if diagnostics.SchemaVersion != "1.0.0" ||
 		len(diagnostics.BootEvents) > 8 ||
 		len(diagnostics.RecoveryEvents) > 16 ||
+		len(diagnostics.InteractionEvents) > 16 ||
 		diagnostics.DroppedBootEvents > 1_000_000 {
 		return nil, domain.ErrInvalidDiagnostics
 	}
@@ -86,6 +87,7 @@ func (s *Service) Validate(
 		DroppedBootEvents: diagnostics.DroppedBootEvents,
 		BootEvents:        make([]domain.BootEvent, 0, len(diagnostics.BootEvents)),
 		RecoveryEvents:    make([]domain.RecoveryEvent, 0, len(diagnostics.RecoveryEvents)),
+		InteractionEvents: make([]domain.InteractionEvent, 0, len(diagnostics.InteractionEvents)),
 	}
 
 	for index := range diagnostics.BootEvents {
@@ -123,6 +125,23 @@ func (s *Service) Validate(
 		normalized.RecoveryEvents = append(normalized.RecoveryEvents, event)
 	}
 
+	for index := range diagnostics.InteractionEvents {
+		event := diagnostics.InteractionEvents[index]
+		if !validEvent(
+			event.EventID,
+			event.Sequence,
+			diagnostics.NewestSequence,
+		) || !interactionEventTypeIsValid(event.EventType) ||
+			!symbolicTextPattern.MatchString(event.DetailCode) ||
+			event.DurationMS > 3_600_000 ||
+			!firmwareVersionPattern.MatchString(event.FirmwareVersion) {
+			return nil, domain.ErrInvalidDiagnostics
+		}
+		event.DetailCode = strings.TrimSpace(event.DetailCode)
+		event.FirmwareVersion = strings.TrimSpace(event.FirmwareVersion)
+		normalized.InteractionEvents = append(normalized.InteractionEvents, event)
+	}
+
 	if diagnostics.LatestFailure != nil {
 		failure := *diagnostics.LatestFailure
 		if !validEvent(
@@ -146,6 +165,7 @@ func (s *Service) Validate(
 	if normalized.NewestSequence == 0 &&
 		len(normalized.BootEvents) == 0 &&
 		len(normalized.RecoveryEvents) == 0 &&
+		len(normalized.InteractionEvents) == 0 &&
 		normalized.LatestFailure == nil {
 		return nil, nil
 	}
@@ -169,4 +189,23 @@ func validEvent(eventID string, sequence uint64, newestSequence uint64) bool {
 	return eventIDPattern.MatchString(strings.TrimSpace(eventID)) &&
 		sequence > 0 &&
 		sequence <= newestSequence
+}
+
+// interactionEventTypeIsValid keeps the accepted set identical to the values
+// the firmware interaction modules publish. Rejecting unknown types prevents
+// a firmware bug or a crafted payload from widening the stored event set.
+func interactionEventTypeIsValid(eventType string) bool {
+	switch eventType {
+	case domain.InteractionEventWakeDetected,
+		domain.InteractionEventWakeRejected,
+		domain.InteractionEventButtonGesture,
+		domain.InteractionEventIndicatorState,
+		domain.InteractionEventFactoryResetRequested,
+		domain.InteractionEventFactoryResetCancelled,
+		domain.InteractionEventFactoryResetCompleted,
+		domain.InteractionEventFactoryResetFailed:
+		return true
+	default:
+		return false
+	}
 }

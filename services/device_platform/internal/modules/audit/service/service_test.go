@@ -39,7 +39,7 @@ func TestValidateAcceptsCanonicalDiagnostics(t *testing.T) {
 	service := &Service{}
 	diagnostics := &domain.Diagnostics{
 		SchemaVersion:     "1.0.0",
-		NewestSequence:    12,
+		NewestSequence:    13,
 		DroppedBootEvents: 0,
 		BootEvents: []domain.BootEvent{
 			{
@@ -70,13 +70,23 @@ func TestValidateAcceptsCanonicalDiagnostics(t *testing.T) {
 				FirmwareVersion: "0.4.0",
 			},
 		},
+		InteractionEvents: []domain.InteractionEvent{
+			{
+				EventType:       domain.InteractionEventButtonGesture,
+				EventID:         "interaction_00000013",
+				Sequence:        13,
+				DetailCode:      "long_press",
+				DurationMS:      1800,
+				FirmwareVersion: "0.4.0",
+			},
+		},
 	}
 
 	normalized, err := service.Validate("sprout_device_001", diagnostics)
 	if err != nil {
 		t.Fatalf("expected validation to succeed, got %v", err)
 	}
-	if normalized == nil || normalized.NewestSequence != 12 {
+	if normalized == nil || normalized.NewestSequence != 13 {
 		t.Fatalf("unexpected normalized diagnostics: %+v", normalized)
 	}
 	if normalized.SchemaVersion != "1.0.0" {
@@ -143,6 +153,48 @@ func TestValidateRejectsUnknownSchemaVersion(t *testing.T) {
 	})
 	if err != domain.ErrInvalidDiagnostics {
 		t.Fatalf("expected invalid diagnostics, got %v", err)
+	}
+}
+
+func TestValidateRejectsUnknownInteractionEventType(t *testing.T) {
+	service := &Service{}
+	_, err := service.Validate("sprout_device_001", &domain.Diagnostics{
+		SchemaVersion:  "1.0.0",
+		NewestSequence: 1,
+		InteractionEvents: []domain.InteractionEvent{
+			{
+				EventType:       "unknown_interaction",
+				EventID:         "interaction_00000001",
+				Sequence:        1,
+				DetailCode:      "wake_word",
+				DurationMS:      0,
+				FirmwareVersion: "0.4.0",
+			},
+		},
+	})
+	if err != domain.ErrInvalidDiagnostics {
+		t.Fatalf("expected invalid diagnostics for an unknown interaction type, got %v", err)
+	}
+}
+
+func TestValidateRejectsOversizedInteractionDuration(t *testing.T) {
+	service := &Service{}
+	_, err := service.Validate("sprout_device_001", &domain.Diagnostics{
+		SchemaVersion:  "1.0.0",
+		NewestSequence: 1,
+		InteractionEvents: []domain.InteractionEvent{
+			{
+				EventType:       domain.InteractionEventFactoryResetCompleted,
+				EventID:         "interaction_00000001",
+				Sequence:        1,
+				DetailCode:      "guardian_request",
+				DurationMS:      3_600_001,
+				FirmwareVersion: "0.4.0",
+			},
+		},
+	})
+	if err != domain.ErrInvalidDiagnostics {
+		t.Fatalf("expected invalid diagnostics for an oversized duration, got %v", err)
 	}
 }
 

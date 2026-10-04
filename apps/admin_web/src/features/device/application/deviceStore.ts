@@ -4,7 +4,11 @@ import { ref } from 'vue'
 import { mapApiError, type ApiError } from '@/api/apiError'
 import { createHttpClient } from '@/api/httpClient'
 
-export type DeviceCommandType = 'refresh_configuration' | 'reconnect_network' | 'resync_time'
+export type DeviceCommandType =
+  | 'refresh_configuration'
+  | 'reconnect_network'
+  | 'resync_time'
+  | 'factory_reset'
 
 /// Runtime projection used by the operations console.
 export interface DeviceRuntime {

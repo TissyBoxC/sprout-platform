@@ -30,6 +30,15 @@ async function sendCommand(): Promise<void> {
   if (selectedDevice.value === null) {
     return
   }
+  if (activeCommand.value === 'factory_reset') {
+    const device = selectedDevice.value
+    const confirmed = window.confirm(
+      `确定向“${device.deviceName || device.deviceId}”发送恢复出厂操作吗？设备会在家长确认后清除本机配置，并需要重新配网和绑定。`,
+    )
+    if (!confirmed) {
+      return
+    }
+  }
   await store.sendCommand(selectedDevice.value.deviceId, activeCommand.value)
 }
 
@@ -114,6 +123,7 @@ function commandLabel(value: DeviceCommandType): string {
       refresh_configuration: '刷新配置',
       reconnect_network: '重连网络',
       resync_time: '重新校准时间',
+      factory_reset: '恢复出厂设置',
     }[value] ?? value
   )
 }
@@ -275,6 +285,7 @@ function formatTime(value: string): string {
               <option value="refresh_configuration">刷新配置</option>
               <option value="reconnect_network">重连网络</option>
               <option value="resync_time">重新校准时间</option>
+              <option value="factory_reset">恢复出厂设置（需家长确认）</option>
             </select>
           </label>
           <button type="button" :disabled="store.isSubmitting" @click="sendCommand">

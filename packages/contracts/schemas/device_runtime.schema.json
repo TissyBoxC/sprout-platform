@@ -185,7 +185,8 @@
         "dropped_boot_events",
         "boot_events",
         "latest_failure",
-        "recovery_events"
+        "recovery_events",
+        "interaction_events"
       ],
       "properties": {
         "schema_version": {
@@ -224,6 +225,13 @@
           "maxItems": 16,
           "items": {
             "$ref": "#/$defs/recovery_event"
+          }
+        },
+        "interaction_events": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/interaction_event"
           }
         }
       }
@@ -346,6 +354,54 @@
         "module_name": {
           "type": "string",
           "maxLength": 32
+        },
+        "firmware_version": {
+          "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/firmware_version"
+        }
+      }
+    },
+    "interaction_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "event_type",
+        "sequence",
+        "detail_code",
+        "duration_ms",
+        "firmware_version"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{3,63}$"
+        },
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "wake_detected",
+            "wake_rejected",
+            "button_gesture",
+            "indicator_state",
+            "factory_reset_requested",
+            "factory_reset_cancelled",
+            "factory_reset_completed",
+            "factory_reset_failed"
+          ]
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "detail_code": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.:-]{1,64}$"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600000
         },
         "firmware_version": {
           "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/firmware_version"

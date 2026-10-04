@@ -10,6 +10,7 @@ import ReleasePage from '@/features/ota/presentation/ReleasePage.vue'
 import SystemSettingsPage from '@/features/system/presentation/SystemSettingsPage.vue'
 import VersionManagementPage from '@/features/version_management/presentation/VersionManagementPage.vue'
 import DownloadFilesPage from '@/features/downloads/presentation/DownloadFilesPage.vue'
+import DeviceDiagnosticsPage from '@/features/audit/presentation/DeviceDiagnosticsPage.vue'
 import { useAuthStore } from '@/features/auth/application/authStore'
 
 /// Feature routes are registered here so removing a feature only changes its
@@ -67,6 +68,11 @@ export function createAdminRouter() {
         path: '/devices',
         name: 'devices',
         component: DevicePage,
+      },
+      {
+        path: '/device-diagnostics',
+        name: 'device-diagnostics',
+        component: DeviceDiagnosticsPage,
       },
       {
         path: '/ui-text',

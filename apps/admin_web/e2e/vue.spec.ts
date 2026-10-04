@@ -836,3 +836,228 @@ test('lists download files and manages uploads, deletion, and the release index'
     '0.12.3/stable/android/apk/sprout-parent-app-0.12.3.apk',
   )
 })
+
+test('shows complete device diagnostics with bounded history and refresh', async ({ page }) => {
+  await useAdminSession(page)
+
+  const devices = [
+    {
+      device_id: 'device-1',
+      device_name: '初芽一号',
+      hardware_model: '初芽标准版',
+      firmware_version: '0.12.3',
+      lifecycle_status: 'active',
+      runtime: {
+        is_online: true,
+        connection: { state: 'connected', transport: 'wifi' },
+      },
+    },
+    {
+      device_id: 'device-2',
+      device_name: '初芽二号',
+      hardware_model: '初芽标准版',
+      firmware_version: '0.12.2',
+      lifecycle_status: 'active',
+      runtime: {
+        is_online: false,
+        connection: { state: 'disconnected', transport: 'wifi' },
+      },
+    },
+  ]
+  const diagnosticsByDevice: Record<string, unknown> = {
+    'device-1': {
+      device_id: 'device-1',
+      boot_events: [
+        {
+          event_id: 'boot_00000003',
+          event_type: 'boot',
+          sequence: 3,
+          uptime_ms: 1200,
+          boot_count: 3,
+          reset_reason: 'power_on',
+          firmware_version: '0.12.3',
+          reported_at: '2026-10-04T03:00:00Z',
+        },
+      ],
+      failures: [
+        {
+          event_id: 'failure_00000004',
+          event_type: 'module_failure',
+          sequence: 4,
+          module_name: 'network_manager',
+          error_code: 'ESP_ERR_TIMEOUT',
+          failure_count: 2,
+          firmware_version: '0.12.3',
+          reported_at: '2026-10-04T03:01:00Z',
+        },
+      ],
+      recovery_events: [
+        {
+          event_id: 'recovery_00000005',
+          event_type: 'module_recovered',
+          sequence: 5,
+          module_name: 'network_manager',
+          firmware_version: '0.12.3',
+          reported_at: '2026-10-04T03:02:00Z',
+        },
+      ],
+      latest_failure: {
+        event_id: 'failure_00000004',
+        event_type: 'module_failure',
+        sequence: 4,
+        module_name: 'network_manager',
+        error_code: 'ESP_ERR_TIMEOUT',
+        failure_count: 2,
+        firmware_version: '0.12.3',
+        reported_at: '2026-10-04T03:01:00Z',
+      },
+      error_count: 2,
+      recovery_count: 1,
+      updated_at: '2026-10-04T03:02:00Z',
+      health_state: 'degraded',
+      retention_boot_events: 5,
+      retention_failures: 10,
+      retention_recovery_events: 10,
+    },
+    'device-2': {
+      device_id: 'device-2',
+      boot_events: [],
+      failures: [],
+      recovery_events: [],
+      latest_failure: null,
+      error_count: 0,
+      recovery_count: 0,
+      updated_at: '2026-10-04T02:00:00Z',
+      health_state: 'healthy',
+      retention_boot_events: 5,
+      retention_failures: 10,
+      retention_recovery_events: 10,
+    },
+  }
+  const requestedDeviceIds: string[] = []
+
+  await page.route('**/api/v1/admin/devices', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { devices } }),
+    })
+  })
+  await page.route('**/api/v1/admin/devices/*/diagnostics', async (route) => {
+    const deviceId = new URL(route.request().url()).pathname.split('/').at(-2) ?? ''
+    requestedDeviceIds.push(deviceId)
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: diagnosticsByDevice[deviceId] }),
+    })
+  })
+
+  await page.goto('/device-diagnostics')
+
+  await expect(page.getByRole('heading', { name: '设备诊断' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '选择设备' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /初芽一号/ })).toBeVisible()
+  expect(requestedDeviceIds).toContain('device-1')
+
+  await expect(page.getByText('需要留意', { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('heading', { name: '启动历史' })).toBeVisible()
+  await expect(page.getByText('开机启动')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '最近故障' })).toBeVisible()
+  await expect(page.getByText('网络连接出现异常')).toBeVisible()
+  await expect(page.getByText(/连接等待超时/)).toBeVisible()
+  await expect(page.getByRole('heading', { name: '恢复事件' })).toBeVisible()
+  await expect(page.getByText('网络连接已恢复')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '记录保留说明' })).toBeVisible()
+  await expect(page.getByText(/启动记录 5 条/)).toBeVisible()
+  await expect(page.getByText(/故障记录 10 条/)).toBeVisible()
+
+  await page.getByRole('button', { name: /初芽二号/ }).click()
+  await expect(page.getByText('运行正常', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('最近没有故障记录，设备运行状态良好。')).toBeVisible()
+  await expect(page.getByText('还没有恢复记录。设备恢复正常后会自动显示。')).toBeVisible()
+  expect(requestedDeviceIds.filter((deviceId) => deviceId === 'device-2')).toHaveLength(1)
+
+  await page.getByRole('button', { name: '刷新诊断' }).click()
+  await expect(page.getByRole('button', { name: '刷新诊断' })).toBeEnabled()
+  expect(requestedDeviceIds.filter((deviceId) => deviceId === 'device-2')).toHaveLength(2)
+})
+
+test('recovers the device diagnostics page from list and detail failures', async ({ page }) => {
+  await useAdminSession(page)
+
+  const device = {
+    device_id: 'device-recovery',
+    device_name: '初芽恢复测试',
+    hardware_model: '初芽标准版',
+    firmware_version: '0.12.3',
+    lifecycle_status: 'active',
+    runtime: {
+      is_online: true,
+      connection: { state: 'connected', transport: 'wifi' },
+    },
+  }
+  let deviceRequests = 0
+  let diagnosticsRequests = 0
+
+  await page.route('**/api/v1/admin/devices', async (route) => {
+    deviceRequests += 1
+    if (deviceRequests === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: { code: 'temporarily_unavailable', message: '服务暂时不可用' },
+        }),
+      })
+      return
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { devices: [device] } }),
+    })
+  })
+  await page.route('**/api/v1/admin/devices/device-recovery/diagnostics', async (route) => {
+    diagnosticsRequests += 1
+    if (diagnosticsRequests === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: { code: 'temporarily_unavailable', message: '服务暂时不可用' },
+        }),
+      })
+      return
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          device_id: 'device-recovery',
+          boot_events: [],
+          failures: [],
+          recovery_events: [],
+          latest_failure: null,
+          error_count: 0,
+          recovery_count: 0,
+          updated_at: '2026-10-04T03:10:00Z',
+          health_state: 'healthy',
+          retention_boot_events: 5,
+          retention_failures: 10,
+          retention_recovery_events: 10,
+        },
+      }),
+    })
+  })
+
+  await page.goto('/device-diagnostics')
+
+  await expect(page.getByText('服务暂时不可用，请稍后重试')).toBeVisible()
+  await page.getByRole('button', { name: '重新加载设备' }).click()
+  await expect(page.getByRole('button', { name: /初芽恢复测试/ })).toBeVisible()
+  expect(deviceRequests).toBe(2)
+
+  await expect(page.getByText('正在读取设备健康信息…')).toBeHidden()
+  await expect(page.getByRole('button', { name: '重新加载' })).toBeVisible()
+  await page.getByRole('button', { name: '重新加载' }).click()
+  await expect(page.getByText('运行正常', { exact: true }).first()).toBeVisible()
+  expect(diagnosticsRequests).toBe(2)
+})

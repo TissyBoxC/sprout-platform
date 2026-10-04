@@ -48,6 +48,9 @@ type Item struct {
 	Payload       []byte
 	EnqueuedAt    time.Time
 	Interruptible bool
+	// OnPlayed receives the gain-applied PCM immediately before Opus encoding.
+	// It is optional and must not block playback.
+	OnPlayed func([]int16)
 }
 
 // Snapshot is the observable queue state for telemetry and the device UI.
@@ -122,8 +125,9 @@ func (q *Queue) Enqueue(item Item) error {
 		// The interrupted item goes back into the pending set. Priority order
 		// then resumes it after the interrupting item but before any lower
 		// priority work that was already waiting.
-		q.insertLocked(q.nowPlaying)
+		interrupted := q.nowPlaying
 		q.nowPlaying = nil
+		q.insertLocked(interrupted)
 	}
 
 	queued := item
@@ -154,6 +158,24 @@ func (q *Queue) Next() (*Item, bool) {
 	q.pending = q.pending[1:]
 	q.nowPlaying = next
 	return next, true
+}
+
+// TakeCurrent removes one item from the active slot if it is still current.
+//
+// A preemption, clear, or mute may have requeued or dropped the item while it
+// was being encoded. Only the caller that still owns the active slot may send
+// its frame, which prevents both stale output and duplicate playback.
+func (q *Queue) TakeCurrent(itemID string) bool {
+	if q == nil || itemID == "" {
+		return false
+	}
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	if q.nowPlaying != nil && q.nowPlaying.ItemID == itemID {
+		q.nowPlaying = nil
+		return true
+	}
+	return false
 }
 
 // Pause stops returning items until Resume is called.
@@ -244,6 +266,9 @@ func (q *Queue) Clear(includeSafety bool) {
 		q.nowPlaying = nil
 		return
 	}
+	if q.nowPlaying != nil && q.nowPlaying.Priority != PrioritySafety {
+		q.nowPlaying = nil
+	}
 	// A generic clear cancels conversational audio but keeps safety
 	// announcements, which must still reach the child.
 	retained := make([]*Item, 0, len(q.pending))
@@ -253,6 +278,22 @@ func (q *Queue) Clear(includeSafety bool) {
 		}
 	}
 	q.pending = retained
+}
+
+// PlaybackVolume returns the volume to apply to one priority.
+//
+// Mute silences suppressible audio but never a safety announcement, so safety
+// playback keeps the guardian-approved volume while mute is active.
+func (q *Queue) PlaybackVolume(priority Priority) int {
+	if q == nil {
+		return 0
+	}
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	if q.isMuted && priority != PrioritySafety {
+		return 0
+	}
+	return q.volume
 }
 
 // Snapshot returns the current queue state with the effective volume.

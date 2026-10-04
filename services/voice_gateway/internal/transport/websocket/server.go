@@ -17,6 +17,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/buffer"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/frame"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/playback"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/preprocess"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/vad"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/session"
@@ -24,9 +25,14 @@ import (
 )
 
 const (
-	defaultReadLimitBytes      = 64 * 1024
-	defaultWriteQueueDepth     = 64
-	defaultSegmentQueueDepth   = 4
+	defaultReadLimitBytes    = 64 * 1024
+	defaultWriteQueueDepth   = 64
+	defaultSegmentQueueDepth = 4
+	// The device speaker owns the guardian volume cap and mute state, so the
+	// gateway passes reply PCM through unchanged. Applying an extra fixed gain
+	// here would attenuate every reply twice and quietly halve the output.
+	defaultVolumePercent       = 100
+	defaultMaxVolumePercent    = 100
 	defaultPongWait            = 60 * time.Second
 	defaultPingInterval        = 25 * time.Second
 	defaultWriteTimeout        = 10 * time.Second
@@ -72,13 +78,20 @@ type ServerConfig struct {
 	SegmentHandler func(segment session.AudioSegment, sink AudioSink)
 }
 
-// AudioSink streams one synthesized reply frame back to the connected device.
+// AudioSink accepts one synthesized PCM frame for the connected device.
 //
-// The transport owns framing, sequence numbering, and backpressure; the
-// conversation pipeline supplies only Opus payloads. SendAudio blocks until the
-// frame is queued or the connection closes.
+// The transport owns scheduling, encoding, framing, sequence numbering, and
+// backpressure; the conversation pipeline supplies only 16 kHz mono PCM. The
+// optional onPlayed callback receives the exact gain-applied frame the speaker
+// is about to play, which the echo canceller needs to subtract.
 type AudioSink interface {
-	SendAudio(payload []byte) error
+	EnqueueAudio(
+		itemID string,
+		priority playback.Priority,
+		pcm []int16,
+		interruptible bool,
+		onPlayed func([]int16),
+	) error
 }
 
 // SendQueuePolicy determines what happens when a slow connection fills the
@@ -208,6 +221,7 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 	defer writer.Close()
 
 	var currentSession *session.Session
+	var playbackGeneration atomic.Uint64
 	var sessionMutex sync.RWMutex
 	getSession := func() *session.Session {
 		sessionMutex.RLock()
@@ -232,6 +246,13 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 			return ""
 		},
 	}
+	scheduler, err := playback.NewScheduler(sink, defaultVolumePercent, defaultMaxVolumePercent)
+	if err != nil {
+		s.logger.Warn("device playback scheduler unavailable", "device_id", identity.DeviceID)
+		return
+	}
+	defer scheduler.Close()
+	sink.scheduler = scheduler
 	go s.consumeSegments(connectionContext, segmentQueue, segmentDone, sink)
 	heartbeatDone := make(chan struct{})
 	go s.sendHeartbeats(connectionContext, writer, heartbeatDone)
@@ -310,6 +331,15 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 					continue
 				}
 				setSession(voiceSession)
+				generation := playbackGeneration.Add(1)
+				go s.clearPlaybackOnSessionEnd(
+					connectionContext,
+					voiceSession,
+					scheduler,
+					generation,
+					&playbackGeneration,
+					segmentDone,
+				)
 				started := NewControlFrame(controlTypeSessionStarted, voiceSession.ID(), identity.DeviceID)
 				started.ExpiresAt = time.Now().UTC().Add(s.config.SessionTTL).Format(time.RFC3339Nano)
 				if err := writer.enqueueText(started); err != nil {
@@ -477,6 +507,27 @@ func (s *Server) consumeSegments(
 	}
 }
 
+func (s *Server) clearPlaybackOnSessionEnd(
+	ctx context.Context,
+	voiceSession *session.Session,
+	scheduler *playback.Scheduler,
+	generation uint64,
+	currentGeneration *atomic.Uint64,
+	done <-chan struct{},
+) {
+	if voiceSession == nil || scheduler == nil || currentGeneration == nil {
+		return
+	}
+	select {
+	case <-voiceSession.Done():
+		if currentGeneration.Load() == generation {
+			scheduler.Clear(false)
+		}
+	case <-ctx.Done():
+	case <-done:
+	}
+}
+
 func (s *Server) sendHeartbeats(
 	ctx context.Context,
 	writer *connectionWriter,
@@ -506,11 +557,35 @@ func (s *Server) sendHeartbeats(
 // unbounded memory.
 type connectionAudioSink struct {
 	writer    *connectionWriter
+	scheduler *playback.Scheduler
 	sessionID func() string
 	sequence  atomic.Uint32
 }
 
-// SendAudio frames and enqueues one Opus payload for the device.
+// EnqueueAudio queues one PCM frame on this connection's playback scheduler.
+func (sink *connectionAudioSink) EnqueueAudio(
+	itemID string,
+	priority playback.Priority,
+	pcm []int16,
+	interruptible bool,
+	onPlayed func([]int16),
+) error {
+	if sink == nil || sink.scheduler == nil {
+		return errors.New("audio sink is unavailable")
+	}
+	if sink.sessionID() == "" {
+		return errors.New("audio sink has no active session")
+	}
+	return sink.scheduler.Enqueue(playback.Item{
+		ItemID:        itemID,
+		Priority:      priority,
+		Payload:       pcmBytes(pcm),
+		Interruptible: interruptible,
+		OnPlayed:      onPlayed,
+	})
+}
+
+// SendAudio frames one encoded Opus payload for the device.
 func (sink *connectionAudioSink) SendAudio(payload []byte) error {
 	if sink == nil || sink.writer == nil {
 		return errors.New("audio sink is unavailable")
@@ -740,6 +815,16 @@ func mapAudioEnvelopeError(err error) string {
 		return errorCodeFrameTooLarge
 	}
 	return errorCodeInvalidAudio
+}
+
+func pcmBytes(pcm []int16) []byte {
+	data := make([]byte, len(pcm)*2)
+	for index, sample := range pcm {
+		value := uint16(sample)
+		data[index*2] = byte(value)
+		data[index*2+1] = byte(value >> 8)
+	}
+	return data
 }
 
 func writeJSON(response http.ResponseWriter, control ControlFrame) error {

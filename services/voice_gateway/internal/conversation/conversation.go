@@ -13,11 +13,12 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/asr"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/tts"
-	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/codec"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/frame"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/playback"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/llm"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/content_policy"
 )
@@ -41,9 +42,20 @@ var (
 	ErrEmptyTranscribe = errors.New("transcription returned no speech")
 )
 
-// Sink receives encoded reply audio for the connected device.
+// Sink receives PCM reply frames for one connected device.
+//
+// onPlayed, when non-nil, is invoked with the gain-applied PCM immediately
+// before the frame reaches the device speaker. The echo canceller needs the
+// signal that actually played, which is known only after scheduling and volume
+// are applied, so the callback must not be invoked at enqueue time.
 type Sink interface {
-	SendAudio(payload []byte) error
+	EnqueueAudio(
+		itemID string,
+		priority playback.Priority,
+		pcm []int16,
+		interruptible bool,
+		onPlayed func([]int16),
+	) error
 }
 
 // Config assembles the adapters and policy for one gateway instance.
@@ -72,9 +84,10 @@ type Config struct {
 // Each device conversation keeps its own bounded message history. Turn is safe
 // to call from multiple connections concurrently.
 type Runner struct {
-	config  Config
-	mutex   sync.Mutex
-	history map[string][]llm.Message
+	config        Config
+	mutex         sync.Mutex
+	history       map[string][]llm.Message
+	replySequence atomic.Uint64
 }
 
 // New creates a conversation runner. A missing required adapter is an error so
@@ -222,21 +235,24 @@ func (r *Runner) speak(ctx context.Context, deviceID string, text string, sink S
 	}
 	defer stream.Close()
 
-	audioCodec, err := codec.NewOpusCodec()
-	if err != nil {
-		return fmt.Errorf("create reply codec: %w", err)
-	}
 	pending := make([]byte, 0, ttsFrameBytes)
-	encoded := make([]byte, frame.MaxPayloadBytes)
+	// Each turn gets a unique item prefix. Reusing reply_0.. across turns would
+	// collide with frames a preemption requeued for the previous turn, and the
+	// queue rejects duplicate identifiers for the whole connection.
+	playbackSequence := r.replySequence.Add(1)
+	frameSequence := 0
 	for chunk := range stream.Audio() {
 		pending = append(pending, chunk...)
 		for len(pending) >= ttsFrameBytes {
-			payload, encodeErr := encodeFrame(audioCodec, pending[:ttsFrameBytes], encoded)
-			if encodeErr != nil {
-				return encodeErr
-			}
-			r.publishReference(deviceID, pending[:ttsFrameBytes])
-			if sendErr := sink.SendAudio(payload); sendErr != nil {
+			itemID := fmt.Sprintf("%s_reply_%d_%d", deviceID, playbackSequence, frameSequence)
+			frameSequence++
+			if sendErr := sink.EnqueueAudio(
+				itemID,
+				playback.PriorityConversation,
+				bytesToInt16(pending[:ttsFrameBytes]),
+				true,
+				r.referenceCallback(deviceID),
+			); sendErr != nil {
 				return fmt.Errorf("send reply audio: %w", sendErr)
 			}
 			pending = pending[ttsFrameBytes:]
@@ -250,35 +266,32 @@ func (r *Runner) speak(ctx context.Context, deviceID string, text string, sink S
 		// whole 20 ms frames; the padding is silence, not lost speech.
 		padded := make([]byte, ttsFrameBytes)
 		copy(padded, pending)
-		payload, encodeErr := encodeFrame(audioCodec, padded, encoded)
-		if encodeErr != nil {
-			return encodeErr
-		}
-		r.publishReference(deviceID, padded)
-		if sendErr := sink.SendAudio(payload); sendErr != nil {
+		itemID := fmt.Sprintf("%s_reply_%d_%d", deviceID, playbackSequence, frameSequence)
+		if sendErr := sink.EnqueueAudio(
+			itemID,
+			playback.PriorityConversation,
+			bytesToInt16(padded),
+			true,
+			r.referenceCallback(deviceID),
+		); sendErr != nil {
 			return fmt.Errorf("send reply audio: %w", sendErr)
 		}
 	}
 	return nil
 }
 
-// publishReference forwards the PCM the speaker is about to play. Both the
-// encoded frame and the reference carry the same 20 ms window so the echo
-// canceller aligns the far-end signal with the microphone capture it affects.
-func (r *Runner) publishReference(deviceID string, pcmBytes []byte) {
+// referenceCallback returns a playback hook that publishes the played frame.
+//
+// Returning nil when echo cancellation is unconfigured keeps the scheduler's
+// hot path free of a callback for the common case.
+func (r *Runner) referenceCallback(deviceID string) func([]int16) {
 	if r == nil || r.config.ReferencePublisher == nil || deviceID == "" {
-		return
+		return nil
 	}
-	r.config.ReferencePublisher(deviceID, bytesToInt16(pcmBytes))
-}
-
-func encodeFrame(audioCodec codec.Codec, pcmBytes []byte, destination []byte) ([]byte, error) {
-	pcm := bytesToInt16(pcmBytes)
-	written, err := audioCodec.EncodePCM(pcm, destination)
-	if err != nil {
-		return nil, fmt.Errorf("encode reply audio: %w", err)
+	publisher := r.config.ReferencePublisher
+	return func(pcm []int16) {
+		publisher(deviceID, pcm)
 	}
-	return destination[:written], nil
 }
 
 func (r *Runner) appendUserMessage(sessionID string, text string) []llm.Message {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/codec"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/frame"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/playback"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/vad"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/session"
 	"github.com/gorilla/websocket"
@@ -535,6 +536,70 @@ func TestForwardSegmentsCallback(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("segment callback was not invoked")
+	}
+}
+
+func TestSegmentHandlerPlaybackSinkEmitsServerAudio(t *testing.T) {
+	manager := session.NewManager(session.ManagerConfig{MaxSessions: 8, MaxSessionsPerDevice: 2})
+	defer manager.CloseAll()
+	enqueued := make(chan error, 1)
+	server, err := NewServer(ServerConfig{
+		Manager:  manager,
+		Verifier: testTokenVerifier{},
+		DetectorFactory: func() vad.Detector {
+			return &scriptedWebSocketDetector{values: []bool{true, false}}
+		},
+		SegmentHandler: func(segment session.AudioSegment, sink AudioSink) {
+			pcm := make([]int16, frame.SamplesPerFrame)
+			enqueueErr := sink.EnqueueAudio(
+				"reply_"+segment.ID,
+				playback.PriorityConversation,
+				pcm,
+				true,
+				nil,
+			)
+			select {
+			case enqueued <- enqueueErr:
+			default:
+			}
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("create websocket server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, "valid-token")
+	defer connection.Close()
+	writeControl(t, connection, sessionStartFrame("session_playback", "device_alpha"))
+	_ = readControl(t, connection)
+	for sequence := uint32(1); sequence <= 4; sequence++ {
+		if err := connection.WriteMessage(
+			websocket.BinaryMessage,
+			makeAudioEnvelope(t, "session_playback", sequence),
+		); err != nil {
+			t.Fatalf("write audio frame: %v", err)
+		}
+	}
+
+	_ = connection.SetReadDeadline(time.Now().Add(2 * time.Second))
+	messageType, payload, err := connection.ReadMessage()
+	if err != nil {
+		t.Fatalf("read server audio frame: %v", err)
+	}
+	if messageType != websocket.BinaryMessage {
+		t.Fatalf("expected binary server audio, got message type %d", messageType)
+	}
+	if len(payload) <= 24 || string(payload[:4]) != "SRSV" {
+		t.Fatalf("expected SRSV server audio envelope, got %x", payload[:min(len(payload), 8)])
+	}
+	select {
+	case enqueueErr := <-enqueued:
+		if enqueueErr != nil {
+			t.Fatalf("enqueue reply audio: %v", enqueueErr)
+		}
+	default:
 	}
 }
 

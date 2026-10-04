@@ -8,6 +8,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/asr"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/tts"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/playback"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/llm"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/content_policy"
 )
@@ -83,15 +84,34 @@ func (s *fakeTTSStream) Audio() <-chan []byte {
 }
 
 type recordingSink struct {
-	mutex   sync.Mutex
-	payload [][]byte
+	mutex     sync.Mutex
+	itemIDs   []string
+	pcmFrames [][]int16
 }
 
-func (s *recordingSink) SendAudio(payload []byte) error {
+func (s *recordingSink) EnqueueAudio(
+	itemID string,
+	_ playback.Priority,
+	pcm []int16,
+	_ bool,
+	onPlayed func([]int16),
+) error {
+	s.mutex.Lock()
+	s.itemIDs = append(s.itemIDs, itemID)
+	s.pcmFrames = append(s.pcmFrames, append([]int16(nil), pcm...))
+	s.mutex.Unlock()
+	// The transport invokes onPlayed at playback time; this fake models that
+	// by firing it here so reference-publishing behaviour stays covered.
+	if onPlayed != nil {
+		onPlayed(pcm)
+	}
+	return nil
+}
+
+func (s *recordingSink) count() int {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	s.payload = append(s.payload, append([]byte(nil), payload...))
-	return nil
+	return len(s.pcmFrames)
 }
 
 type allowAllPolicy struct{}
@@ -126,7 +146,7 @@ func TestTurnRunsFullPipeline(t *testing.T) {
 	if err := runner.Turn(context.Background(), "session_1", "device_a", []int16{1, 2, 3, 4}, sink); err != nil {
 		t.Fatalf("Turn() error = %v", err)
 	}
-	if len(sink.payload) == 0 {
+	if sink.count() == 0 {
 		t.Fatal("Turn() sent no audio to the sink")
 	}
 }
@@ -143,7 +163,7 @@ func TestTurnBlocksDisallowedInput(t *testing.T) {
 	if !errors.Is(err, ErrContentBlocked) {
 		t.Fatalf("Turn() error = %v, want ErrContentBlocked", err)
 	}
-	if len(sink.payload) != 0 {
+	if sink.count() != 0 {
 		t.Fatal("Turn() sent audio for a blocked utterance")
 	}
 }

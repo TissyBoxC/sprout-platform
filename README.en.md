@@ -55,7 +55,7 @@ order and never removes a capability.
 
 | ID | Capability | Modules | Status | Current state |
 | --- | --- | --- | --- | --- |
-| P0-01 | Startup, version, error recovery | `system_core`, `module_registry`, `version_info`, `error_code`, `error_recovery` | `[Partial]` | Firmware has module registration, version readout, error codes, and single-module failure recording. Platform audit, admin diagnostics, and the full crash loop are incomplete. |
+| P0-01 | Startup, version, error recovery | `system_core`, `module_registry`, `version_info`, `error_code`, `error_recovery`, `diagnostic_reporter` | `[Implemented]` | Firmware reports boot, module-failure, and recovery events; the platform validates and idempotently stores bounded history; the admin console shows health, boot history, recent failures, and recovery events. |
 | P0-02 | Audio input | `audio_input`, `audio_pipeline`, `voice_gateway` | `[Not implemented]` | Only audio package boundaries and adapter interfaces exist. Capture, gain, noise reduction, echo cancellation, and verifiable frames are missing. |
 | P0-03 | Audio output | `audio_output`, `playback_queue`, `voice_gateway` | `[Not implemented]` | TTS playback, local playback, queueing, interruption, and resume are not implemented. |
 | P0-04 | Voice wake | `voice_wake`, `wake_feedback`, `voice_gateway` | `[Not implemented]` | Wake words, false-trigger control, feedback, and the wake event path are missing. |
@@ -78,7 +78,7 @@ order and never removes a capability.
 | P1-04 | English learning | Words, sentences, speaking practice, pronunciation feedback | `[Not implemented]` | Courses, exercises, scoring, progress, and parent-facing display are missing. |
 | P1-05 | Parent app | Remote messages, playback requests, device status, content recommendations | `[Not implemented]` | The parent app only has family and device-list skeletons. No remote business flow exists. |
 | P1-06 | Local fallback | Offline stories, local commands, cached playback | `[Not implemented]` | Offline content, commands, cache, versions, and recovery sync are missing. |
-| P1-07 | Diagnostics | System diagnostics, logs, crashes, network quality, temperature | `[Partial]` | The platform has request labels, access logs, and log redaction. Firmware diagnostics, crash reporting, metric aggregation, and admin queries are incomplete. |
+| P1-07 | Diagnostics | System diagnostics, logs, crashes, network quality, temperature | `[Partial]` | Firmware boot, module-failure, and recovery events now reach redacted platform storage and the admin console. Crash dumps, temperature metrics, and long-term aggregation remain incomplete. |
 | P1-08 | Camera | Capture, object recognition, picture-book recognition, photo Q&A | `[Not implemented]` | Camera capability, capture, local processing, authorized upload, model calls, and short-lived storage are missing. |
 
 ### P2 Differentiated Capabilities

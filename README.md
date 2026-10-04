@@ -51,7 +51,7 @@ AI 网关 fork 保持独立仓库，不在本仓库中重复版本化。
 | --- | --- | --- | --- | --- |
 | P0-01 | 系统启动、版本和错误恢复 | `system_core`、`module_registry`、`version_info`、`error_code`、`error_recovery`、`diagnostic_reporter` | `[已实现]` | 固件上报启动、模块失败和恢复事件；平台校验并幂等保存有界诊断历史；管理端可查看健康状态、启动历史、最近故障与恢复记录。 |
 | P0-02 | 音频输入 | `audio_codec`、`audio_pipeline`、`voice_gateway` | `[已实现]` | 固件实现 16 kHz 单声道 Opus 编解码、I2S 采集、后置降噪/回声消除/增益校准与 VAD 分段，并支持扬声器参考回采；语音网关实现设备短期令牌鉴权、实时 WebSocket 音频会话、Opus 解码、环形缓冲、入站降噪/回声消除/增益校准、自适应 VAD 分段、ASR/LLM/TTS 适配器与对话闭环，以及语音控制帧契约和稳定错误码。 |
-| P0-03 | 音频输出 | `playback_queue`、`volume_control`、`prompt_tone`、`voice_gateway` | `[部分实现]` | 固件已实现按优先级播放、打断恢复、监护人音量上限、静音和本地提示音；语音网关已实现播放队列。TTS 内容播放、本地内容播放和跨端打断闭环未完成。 |
+| P0-03 | 音频输出 | `audio_output`、`playback_queue`、`volume_control`、`prompt_tone`、`voice_gateway` | `[已实现]` | 固件实现按优先级的多路混音输出、监护人音量上限、静音保护安全提示音、本地提示音叠加和回采参考；语音网关把 TTS 回复接入按连接调度、支持抢占恢复、暂停、静音和清理的播放队列，并以稳定音频错误码上报混音失败。 |
 | P0-04 | 语音唤醒 | `voice_wake`、`wake_feedback`、`voice_gateway` | `[未实现]` | 未实现唤醒词、误唤醒控制、唤醒反馈和唤醒事件链路。 |
 | P0-05 | 语音会话 | `voice_session`、`asr_client`、`llm_client`、`tts_client`、`voice_gateway` | `[部分实现]` | 已实现设备 WebSocket 实时音频服务、会话生命周期与空闲/时长超时、ASR/LLM/TTS 供应商适配、多轮上下文与内容策略校验，并把合成语音回传设备；唤醒词触发、播放中的双向打断（barge-in）和连续对话尚待实现。 |
 | P0-06 | AI 对话 | `conversation_context`、`child_prompt_profile`、`voice_gateway`、`sub2api_fork` | `[未实现]` | `sub2api` 客户端仍为空实现，未实现多轮上下文、儿童提示词、超时、降级和合规策略。 |

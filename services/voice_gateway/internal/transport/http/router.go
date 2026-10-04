@@ -21,6 +21,10 @@ type RouterOptions struct {
 	Logger            *slog.Logger
 	InternalAPIConfig config.InternalAPIConfig
 	UsageRecorder     usage.Recorder
+	// RealtimeHandler, when set, is mounted at the device realtime path. The
+	// caller owns authentication and upgrade; the router only routes to it.
+	RealtimeHandler http.Handler
+	RealtimePath    string
 }
 
 // NewRouter returns the HTTP router for the voice gateway.
@@ -33,6 +37,10 @@ func NewRouter(options RouterOptions) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthHandler)
 	mux.HandleFunc("GET /readyz", readyHandler)
+
+	if options.RealtimeHandler != nil && options.RealtimePath != "" {
+		mux.Handle(options.RealtimePath, options.RealtimeHandler)
+	}
 
 	if options.InternalAPIConfig.Enabled {
 		mux.Handle(

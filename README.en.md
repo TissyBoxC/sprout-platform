@@ -58,7 +58,7 @@ order and never removes a capability.
 | P0-01 | Startup, version, error recovery | `system_core`, `module_registry`, `version_info`, `error_code`, `error_recovery`, `diagnostic_reporter` | `[Implemented]` | Firmware reports boot, module-failure, and recovery events; the platform validates and idempotently stores bounded history; the admin console shows health, boot history, recent failures, and recovery events. |
 | P0-02 | Audio input | `audio_input`, `audio_pipeline`, `voice_gateway` | `[Not implemented]` | Only audio package boundaries and adapter interfaces exist. Capture, gain, noise reduction, echo cancellation, and verifiable frames are missing. |
 | P0-03 | Audio output | `audio_output`, `playback_queue`, `voice_gateway` | `[Not implemented]` | TTS playback, local playback, queueing, interruption, and resume are not implemented. |
-| P0-04 | Voice wake | `voice_wake`, `wake_feedback`, `voice_gateway` | `[Not implemented]` | Wake words, false-trigger control, feedback, and the wake event path are missing. |
+| P0-04 | Voice wake | `voice_wake`, `wake_feedback`, `voice_gateway` | `[Implemented]` | The firmware detects the wake word, suppresses false triggers, provides local feedback, tones, and LED state, and reports redacted wake events in the heartbeat; the voice gateway validates device wake control frames. |
 | P0-05 | Voice session | `voice_session`, `asr_client`, `llm_client`, `tts_client`, `voice_gateway` | `[Not implemented]` | A session state machine, ASR/TTS interfaces, and WebSocket package skeleton exist. WebSocket serving, ASR, LLM, TTS, interruption, and timeout flows are missing. |
 | P0-06 | AI conversation | `conversation_context`, `child_prompt_profile`, `voice_gateway`, `sub2api_fork` | `[Not implemented]` | The `sub2api` client is still a stub. Multi-turn context, child prompts, timeout, degradation, and compliance policy are missing. |
 | P0-07 | Content | Content library, stories, nursery rhymes, poetry, English, encyclopedia, bedtime, age tiers | `[Not implemented]` | Only shared content-package schemas exist. Production, review, publishing, delivery, caching, and playback are missing. |
@@ -66,7 +66,7 @@ order and never removes a capability.
 | P0-09 | Parent control | `parent_link`, `parent_policy`, `usage_report` | `[Not implemented]` | Device binding, content level, usage duration, blocked periods, policy delivery, and reports are missing. |
 | P0-10 | Security and privacy | `privacy_guard`, `content_filter`, `transport_security`, platform and voice security modules | `[Partial]` | Mutual MQTT TLS, certificate validation, request labels, log redaction, secure defaults, and contract validation exist. Identity, authorization, moderation, deletion, and consent flows remain incomplete. |
 | P0-11 | OTA | `ota_manager`, `ota_download`, `ota_validate`, `ota_rollback` | `[Not implemented]` | Package management, signature validation, canary release, download, install, rollback, and version statistics are missing. |
-| P0-12 | Device interaction | Buttons, LED, prompt tones, volume, factory reset, status feedback | `[Not implemented]` | Buttons, LED, tones, volume, reset, and screenless feedback paths are missing. |
+| P0-12 | Device interaction | Buttons, LED, prompt tones, volume, factory reset, status feedback | `[Implemented]` | Button gestures, LED state, local tones, guardian volume limits, protected local and remote factory reset, interaction reporting, and idempotent command acknowledgement are implemented. |
 
 ### P1 Mainstream Capabilities
 
@@ -100,7 +100,7 @@ order and never removes a capability.
 
 | Layer | Scope | Status | Notes |
 | --- | --- | --- | --- |
-| Foundation | Provisioning, wake, recording/playback, AI conversation, content, parent control, OTA | `[Partial]` | Engineering, contracts, deployment, and firmware module registration exist. Core user flows remain incomplete. |
+| Foundation | Provisioning, wake, recording/playback, AI conversation, content, parent control, OTA | `[Partial]` | Audio capture, playback, wake, and device interaction flows exist. AI conversation, content, parent control, and OTA remain incomplete. |
 | Mainstream | Continuous conversation, content operations, companionship, English, remote messages, offline fallback, diagnostics, camera | `[Not implemented]` | Except for log redaction, no usable end-to-end flow exists yet. |
 | Differentiated | Display, touch, eye care, cellular, battery, motion, video, location, multi-device | `[Not implemented]` | Directories and plans are not implementation. Every capability still needs modular, capability-based delivery. |
 

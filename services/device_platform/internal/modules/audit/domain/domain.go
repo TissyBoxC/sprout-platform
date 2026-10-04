@@ -49,6 +49,15 @@ const (
 	HealthUnknown  = "unknown"
 )
 
+// Diagnostic retention is part of the administrator-facing contract, so empty
+// and populated responses must report the same limits.
+const (
+	RetentionBootEvents  = 200
+	RetentionFailures    = 100
+	RetentionRecovery    = 100
+	RetentionInteraction = 300
+)
+
 // BootEvent is one startup record reported by a device.
 type BootEvent struct {
 	EventType       string    `json:"event_type"`

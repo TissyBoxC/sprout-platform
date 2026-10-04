@@ -17,5 +17,9 @@ Command messages carry `request_id` and `event_id`. The device acknowledges
 each command with the same `request_id`; the platform rejects a repeated
 acknowledgement and does not execute the command again.
 
+Interaction events are not a separate MQTT topic. They are delivered inside the
+authenticated runtime heartbeat as `diagnostics.interaction_events`, together
+with boot, failure, and recovery diagnostics.
+
 Device-specific implementation notes remain in
 `services/device_platform/internal/contracts`.

@@ -13,13 +13,6 @@ import (
 )
 
 const (
-	// A device that cannot reach the platform still retains bounded history.
-	// These limits bound operator queries and storage growth per device.
-	bootEventRetention   = 200
-	failureRetention     = 100
-	recoveryRetention    = 100
-	interactionRetention = 300
-
 	defaultQueryLimit = 20
 	maxQueryLimit     = 100
 )
@@ -184,10 +177,10 @@ func pruneDiagnostics(
 		table string
 		limit int
 	}{
-		{name: "boot", table: "device_boot_events", limit: bootEventRetention},
-		{name: "failure", table: "device_module_failures", limit: failureRetention},
-		{name: "recovery", table: "device_recovery_events", limit: recoveryRetention},
-		{name: "interaction", table: "device_interaction_events", limit: interactionRetention},
+		{name: "boot", table: "device_boot_events", limit: domain.RetentionBootEvents},
+		{name: "failure", table: "device_module_failures", limit: domain.RetentionFailures},
+		{name: "recovery", table: "device_recovery_events", limit: domain.RetentionRecovery},
+		{name: "interaction", table: "device_interaction_events", limit: domain.RetentionInteraction},
 	}
 	for _, statement := range statements {
 		sql := fmt.Sprintf(`
@@ -228,10 +221,10 @@ func (r *PostgresRepository) GetDiagnostics(
 		RecoveryEvents:       make([]domain.RecoveryEvent, 0),
 		InteractionEvents:    make([]domain.InteractionEvent, 0),
 		HealthState:          domain.HealthUnknown,
-		RetentionBoot:        bootEventRetention,
-		RetentionFailures:    failureRetention,
-		RetentionRecovery:    recoveryRetention,
-		RetentionInteraction: interactionRetention,
+		RetentionBoot:        domain.RetentionBootEvents,
+		RetentionFailures:    domain.RetentionFailures,
+		RetentionRecovery:    domain.RetentionRecovery,
+		RetentionInteraction: domain.RetentionInteraction,
 	}
 
 	bootRows, err := r.pool.Query(ctx, `

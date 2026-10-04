@@ -8,6 +8,8 @@ import { parse as parseYaml } from 'yaml';
 const toolsRoot = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(toolsRoot, '..', '..');
 const contractsRoot = resolve(repositoryRoot, 'packages', 'contracts');
+const mqttTopicsPath = resolve(contractsRoot, 'mqtt', 'topics.example.json');
+const mqttReadmePath = resolve(contractsRoot, 'mqtt', 'README.md');
 
 const contractNamespace = 'https://sprout.example/contracts/';
 const expectedSchemaVersion = '1.0.0';
@@ -145,6 +147,7 @@ for (const fixturePath of fixtureFiles.sort()) {
 }
 
 await validateResponseContractVersions();
+await validateMQTTTransportContract();
 
 async function validateResponseContractVersions() {
   for (const filePath of responseSchemaPaths) {
@@ -176,6 +179,39 @@ async function validateResponseContractVersions() {
       throw new Error(
         `${filePath}: expected API and response envelope version ${expectedSchemaVersion}`,
       );
+    }
+  }
+}
+
+async function validateMQTTTransportContract() {
+  const topicDocument = JSON.parse(await readFile(mqttTopicsPath, 'utf8'));
+  const topics = topicDocument.topics;
+  if (!Array.isArray(topics)) {
+    throw new Error(`${mqttTopicsPath}: topics must be an array`);
+  }
+
+  const topicNames = topics.map(({ topic }) => topic);
+  const requiredTopics = [
+    'sprout/v1/devices/{device_id}/runtime',
+    'sprout/v1/devices/{device_id}/commands',
+    'sprout/v1/devices/{device_id}/commands/ack',
+  ];
+  for (const requiredTopic of requiredTopics) {
+    if (!topicNames.includes(requiredTopic)) {
+      throw new Error(`${mqttTopicsPath}: missing implemented topic ${requiredTopic}`);
+    }
+  }
+  if (topicNames.includes('sprout/v1/devices/{device_id}/interaction')) {
+    throw new Error(
+      `${mqttTopicsPath}: interaction events travel in the runtime heartbeat, `
+        + 'not on a separate MQTT topic',
+    );
+  }
+
+  const readme = await readFile(mqttReadmePath, 'utf8');
+  for (const topicName of requiredTopics) {
+    if (!readme.includes(`\`${topicName}\``)) {
+      throw new Error(`${mqttReadmePath}: missing documented topic ${topicName}`);
     }
   }
 }

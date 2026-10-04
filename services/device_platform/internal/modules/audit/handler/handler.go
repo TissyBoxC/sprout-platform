@@ -51,6 +51,12 @@ func (h *Handler) GetDiagnostics(
 				"latest_failure":     nil,
 				"error_count":        0,
 				"recovery_count":     0,
+				// The empty state is a valid contract response, so it carries
+				// the same retention metadata as a non-empty history.
+				"retention_boot_events":        domain.RetentionBootEvents,
+				"retention_failures":           domain.RetentionFailures,
+				"retention_recovery_events":    domain.RetentionRecovery,
+				"retention_interaction_events": domain.RetentionInteraction,
 			})
 			return
 		}

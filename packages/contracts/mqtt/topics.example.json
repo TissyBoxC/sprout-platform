@@ -21,13 +21,6 @@
       "qos": 1,
       "retain": false,
       "payload_schema": "https://sprout.example/contracts/events/device_event.schema.json"
-    },
-    {
-      "topic": "sprout/v1/devices/{device_id}/interaction",
-      "direction": "device_to_platform",
-      "qos": 1,
-      "retain": false,
-      "payload_schema": "https://sprout.example/contracts/events/device_event.schema.json"
     }
   ]
 }

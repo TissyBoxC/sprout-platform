@@ -198,6 +198,7 @@ paths:
                     - refresh_configuration
                     - reconnect_network
                     - resync_time
+                    - factory_reset
       responses:
         '201':
           description: Command queued
@@ -214,13 +215,14 @@ paths:
   /api/v1/admin/devices/{device_id}/diagnostics:
     get:
       operationId: getAdminDeviceDiagnostics
-      summary: Read bounded boot, failure, and recovery diagnostics
+      summary: Read bounded boot, failure, recovery, and interaction diagnostics
       description: |
         Returns the newest bounded diagnostic history for one device. The
         endpoint is administrator-only and never returns credentials, media,
-        child content, or provider payloads. Devices running older firmware
-        report an empty history with an unknown health state instead of an
-        error.
+        child content, or provider payloads. Interaction events include wake,
+        button, indicator, and factory-reset outcomes but never raw audio or
+        free text. Devices running older firmware report an empty history with
+        an unknown health state instead of an error.
       security:
         - adminSession: []
       parameters:
@@ -394,6 +396,7 @@ components:
         - boot_events
         - failures
         - recovery_events
+        - interaction_events
         - latest_failure
         - error_count
         - recovery_count
@@ -413,6 +416,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RecoveryEvent'
+        interaction_events:
+          type: array
+          items:
+            $ref: '#/components/schemas/InteractionEvent'
         latest_failure:
           oneOf:
             - $ref: '#/components/schemas/ModuleFailure'
@@ -442,6 +449,49 @@ components:
         retention_recovery_events:
           type: integer
           minimum: 1
+        retention_interaction_events:
+          type: integer
+          minimum: 1
+    InteractionEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - event_id
+        - event_type
+        - sequence
+        - detail_code
+        - duration_ms
+        - firmware_version
+        - reported_at
+      properties:
+        event_id:
+          type: string
+        event_type:
+          type: string
+          enum:
+            - wake_detected
+            - wake_rejected
+            - button_gesture
+            - indicator_state
+            - factory_reset_requested
+            - factory_reset_cancelled
+            - factory_reset_completed
+            - factory_reset_failed
+        sequence:
+          type: integer
+          minimum: 1
+        detail_code:
+          type: string
+          pattern: '^[A-Za-z0-9_.:-]{1,64}$'
+        duration_ms:
+          type: integer
+          minimum: 0
+          maximum: 3600000
+        firmware_version:
+          type: string
+        reported_at:
+          type: string
+          format: date-time
     BootEvent:
       type: object
       additionalProperties: false
@@ -647,6 +697,7 @@ components:
             - refresh_configuration
             - reconnect_network
             - resync_time
+            - factory_reset
         status:
           type: string
           enum:

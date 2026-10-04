@@ -47,9 +47,11 @@ func TestGetDiagnosticsReturnsEmptyStateForDeviceWithoutHistory(t *testing.T) {
 	}
 	var envelope struct {
 		Data struct {
-			DeviceID    string `json:"device_id"`
-			HealthState string `json:"health_state"`
-			ErrorCount  int    `json:"error_count"`
+			DeviceID                  string `json:"device_id"`
+			HealthState               string `json:"health_state"`
+			ErrorCount                int    `json:"error_count"`
+			InteractionEvents         []any  `json:"interaction_events"`
+			RetentionInteractionEvent int    `json:"retention_interaction_events"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
@@ -57,7 +59,9 @@ func TestGetDiagnosticsReturnsEmptyStateForDeviceWithoutHistory(t *testing.T) {
 	}
 	if envelope.Data.DeviceID != "sprout_device_001" ||
 		envelope.Data.HealthState != domain.HealthUnknown ||
-		envelope.Data.ErrorCount != 0 {
+		envelope.Data.ErrorCount != 0 ||
+		envelope.Data.InteractionEvents == nil ||
+		envelope.Data.RetentionInteractionEvent != domain.RetentionInteraction {
 		t.Fatalf("unexpected empty diagnostic response: %s", recorder.Body.String())
 	}
 }

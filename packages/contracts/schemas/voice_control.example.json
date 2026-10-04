@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "type": "session_start",
+  "session_id": "session_001",
+  "device_id": "device_001",
+  "sent_at": "2026-10-04T03:21:00.000Z",
+  "stream_id": "stream_001",
+  "sample_rate_hz": 16000,
+  "channel_count": 1,
+  "duration_ms": 20,
+  "encoding": "opus",
+  "firmware_version": "0.4.0",
+  "capabilities": [
+    "audio_input",
+    "audio_output",
+    "wifi"
+  ]
+}

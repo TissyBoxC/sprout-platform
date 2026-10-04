@@ -65,6 +65,15 @@ const (
 	// CodeQueueInterruptDenied means a request tried to preempt an item that is
 	// not interruptible, such as a safety announcement.
 	CodeQueueInterruptDenied Code = "audio_queue_interrupt_denied"
+
+	// CodeOutputTimeout means the speaker mixer did not drain a submitted frame
+	// before the bounded wait elapsed, which the producer may retry once the
+	// playback lane has room.
+	CodeOutputTimeout Code = "audio_output_timeout"
+
+	// CodeOutputDiscarded means the mixer dropped a submitted frame after a
+	// preemption or clear, so the producer must not report it as played.
+	CodeOutputDiscarded Code = "audio_output_discarded"
 )
 
 // Voice-gateway-originated codes.
@@ -114,6 +123,8 @@ var catalog = []Detail{
 	{CodeQueueFull, SourceFirmware, true, "queue_capacity_reached"},
 	{CodeQueuePayloadEmpty, SourceFirmware, false, "queue_payload_missing"},
 	{CodeQueueInterruptDenied, SourceFirmware, false, "active_item_protected"},
+	{CodeOutputDiscarded, SourceFirmware, false, "mixer_frame_discarded"},
+	{CodeOutputTimeout, SourceFirmware, true, "mixer_submit_timeout"},
 	{CodePacketSizeInvalid, SourceVoiceGateway, false, "gateway_packet_outside_profile"},
 	{CodePCMWindowInvalid, SourceVoiceGateway, false, "gateway_pcm_window_invalid"},
 	{CodeCodecUnavailable, SourceVoiceGateway, true, "gateway_codec_missing"},

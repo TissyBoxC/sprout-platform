@@ -81,6 +81,18 @@
       "diagnostic": "active_item_protected"
     },
     {
+      "code": "audio_output_discarded",
+      "source": "firmware",
+      "retryable": false,
+      "diagnostic": "mixer_frame_discarded"
+    },
+    {
+      "code": "audio_output_timeout",
+      "source": "firmware",
+      "retryable": true,
+      "diagnostic": "mixer_submit_timeout"
+    },
+    {
       "code": "audio_packet_size_invalid",
       "source": "voice_gateway",
       "retryable": false,

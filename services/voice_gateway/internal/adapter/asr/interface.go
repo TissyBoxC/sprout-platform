@@ -17,8 +17,19 @@ type Result struct {
 
 // Stream accepts audio and emits recognition results.
 type Stream interface {
+	// WriteAudio appends PCM bytes in the fixed 16 kHz mono int16 profile.
+	// Implementations may buffer or forward the bytes and must reject writes
+	// after Close.
 	WriteAudio(data []byte) error
+
+	// Results is closed after the final result or the first terminal error.
+	// The channel is never closed before Close has been called.
 	Results() <-chan Result
+
+	// Err reports the terminal stream error, or nil when recognition completed.
+	Err() error
+
+	// Close finalizes the recognition request and is safe to call repeatedly.
 	Close() error
 }
 

@@ -17,7 +17,13 @@ type Request struct {
 
 // Stream emits model response chunks.
 type Stream interface {
+	// Chunks emits response text deltas in order.
 	Chunks() <-chan string
+
+	// Err reports the terminal stream error, or nil after clean completion.
+	Err() error
+
+	// Close cancels the stream and is safe to call repeatedly.
 	Close() error
 }
 

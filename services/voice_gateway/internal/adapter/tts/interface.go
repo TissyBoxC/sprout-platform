@@ -12,7 +12,14 @@ type Request struct {
 
 // Stream produces synthesized audio.
 type Stream interface {
+	// Audio emits provider audio bytes in order. The channel closes after the
+	// final chunk or after a terminal error.
 	Audio() <-chan []byte
+
+	// Err reports the terminal synthesis error, or nil after clean completion.
+	Err() error
+
+	// Close cancels synthesis and is safe to call repeatedly.
 	Close() error
 }
 

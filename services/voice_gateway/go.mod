@@ -5,6 +5,7 @@ go 1.27.1
 require (
 	github.com/TissyBoxC/sprout-platform/packages/go/httpapi v0.0.0
 	github.com/TissyBoxC/sprout-platform/packages/go/observability v0.0.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/thesyncim/gopus v0.1.2

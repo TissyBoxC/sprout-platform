@@ -2,6 +2,7 @@
 package http
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
@@ -13,6 +14,8 @@ import (
 	"github.com/TissyBoxC/sprout-platform/packages/go/observability"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/config"
 	gatewayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/service"
+	auditdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/domain"
+	audithandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/handler"
 	authservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
 	childservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
@@ -34,8 +37,26 @@ type RouterOptions struct {
 	OperationsService     *operationsservice.Service
 	BindingService        *bindingservice.Service
 	RuntimeService        *runtimeservice.Service
+	DiagnosticService     auditService
 	ServiceVersionService *serviceversionservice.Service
 	ReleaseStoreService   *releasestoreservice.Service
+}
+
+// auditService is the diagnostic read surface exposed to administrators.
+// Keeping the transport dependency narrow allows handlers to be tested with a
+// small fake and avoids coupling HTTP to the database repository.
+type auditService interface {
+	Get(ctx context.Context, deviceID string, limit int) (*auditdomain.Snapshot, error)
+	Validate(
+		deviceID string,
+		diagnostics *auditdomain.Diagnostics,
+	) (*auditdomain.Diagnostics, error)
+	Record(
+		ctx context.Context,
+		deviceID string,
+		reportedAt time.Time,
+		diagnostics *auditdomain.Diagnostics,
+	) error
 }
 
 // NewRouter returns the HTTP router for the device platform.
@@ -144,8 +165,9 @@ func NewRouter(options RouterOptions) http.Handler {
 		}
 		if options.RuntimeService != nil {
 			runtimeHandler := deviceRuntimeHandler{
-				service:       options.RuntimeService,
-				policyService: options.ParentPolicyService,
+				service:           options.RuntimeService,
+				policyService:     options.ParentPolicyService,
+				diagnosticService: options.DiagnosticService,
 			}
 			mux.HandleFunc(
 				"GET /api/v1/devices/status",
@@ -183,6 +205,13 @@ func NewRouter(options RouterOptions) http.Handler {
 				"GET /api/v1/admin/devices/{device_id}/commands",
 				authHandler.requireAdmin(runtimeHandler.listCommands),
 			)
+			if options.DiagnosticService != nil {
+				diagnosticHandler := audithandler.New(options.DiagnosticService)
+				mux.HandleFunc(
+					"GET /api/v1/admin/devices/{device_id}/diagnostics",
+					authHandler.requireAdmin(diagnosticHandler.GetDiagnostics),
+				)
+			}
 		}
 		if options.AIService != nil {
 			adminHandler := adminHandler{

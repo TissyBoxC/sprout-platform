@@ -17,6 +17,8 @@ import (
 	aiProvider "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/provider"
 	aiRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/repository"
 	aiService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/service"
+	auditRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/repository"
+	auditService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/service"
 	authRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/repository"
 	authService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
 	childRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/repository"
@@ -153,6 +155,12 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create device runtime service: %w", err)
 	}
+	diagnosticService, err := auditService.New(auditService.Options{
+		Repository: auditRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
+	if err != nil {
+		return fmt.Errorf("create diagnostic service: %w", err)
+	}
 	operations, err := operationsService.New(operationsService.Options{
 		Repository: operationsRepository.NewPostgresRepository(
 			databaseStore.Pool(),
@@ -201,6 +209,7 @@ func Run() error {
 			OperationsService:     operations,
 			BindingService:        deviceBindingService,
 			RuntimeService:        deviceRuntimeService,
+			DiagnosticService:     diagnosticService,
 			ServiceVersionService: serviceVersions,
 			ReleaseStoreService:   releaseStore,
 		}),

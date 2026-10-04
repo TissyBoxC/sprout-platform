@@ -211,6 +211,39 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/admin/devices/{device_id}/diagnostics:
+    get:
+      operationId: getAdminDeviceDiagnostics
+      summary: Read bounded boot, failure, and recovery diagnostics
+      description: |
+        Returns the newest bounded diagnostic history for one device. The
+        endpoint is administrator-only and never returns credentials, media,
+        child content, or provider payloads. Devices running older firmware
+        report an empty history with an unknown health state instead of an
+        error.
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/DeviceID'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Bounded diagnostic history for the device
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceDiagnosticsEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/admin/families/{parent_account_id}/devices/{device_id}:
     delete:
       operationId: unbindAdminFamilyDevice
@@ -346,6 +379,162 @@ components:
                   type: array
                   items:
                     $ref: '#/components/schemas/DeviceStatus'
+    DeviceDiagnosticsEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/DeviceDiagnostics'
+    DeviceDiagnostics:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - boot_events
+        - failures
+        - recovery_events
+        - latest_failure
+        - error_count
+        - recovery_count
+        - health_state
+      properties:
+        device_id:
+          type: string
+        boot_events:
+          type: array
+          items:
+            $ref: '#/components/schemas/BootEvent'
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModuleFailure'
+        recovery_events:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecoveryEvent'
+        latest_failure:
+          oneOf:
+            - $ref: '#/components/schemas/ModuleFailure'
+            - type: 'null'
+        error_count:
+          type: integer
+          minimum: 0
+        recovery_count:
+          type: integer
+          minimum: 0
+        updated_at:
+          type: string
+          format: date-time
+        health_state:
+          type: string
+          enum:
+            - healthy
+            - degraded
+            - faulted
+            - unknown
+        retention_boot_events:
+          type: integer
+          minimum: 1
+        retention_failures:
+          type: integer
+          minimum: 1
+        retention_recovery_events:
+          type: integer
+          minimum: 1
+    BootEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - event_id
+        - event_type
+        - sequence
+        - uptime_ms
+        - boot_count
+        - reset_reason
+        - firmware_version
+        - reported_at
+      properties:
+        event_id:
+          type: string
+        event_type:
+          type: string
+          const: boot
+        sequence:
+          type: integer
+          minimum: 1
+        uptime_ms:
+          type: integer
+          minimum: 0
+        boot_count:
+          type: integer
+          minimum: 1
+        reset_reason:
+          type: string
+        firmware_version:
+          type: string
+        reported_at:
+          type: string
+          format: date-time
+    ModuleFailure:
+      type: object
+      additionalProperties: false
+      required:
+        - event_id
+        - event_type
+        - sequence
+        - module_name
+        - error_code
+        - failure_count
+        - firmware_version
+        - reported_at
+      properties:
+        event_id:
+          type: string
+        event_type:
+          type: string
+          const: module_failure
+        sequence:
+          type: integer
+          minimum: 1
+        module_name:
+          type: string
+        error_code:
+          type: string
+        failure_count:
+          type: integer
+          minimum: 1
+        firmware_version:
+          type: string
+        reported_at:
+          type: string
+          format: date-time
+    RecoveryEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - event_id
+        - event_type
+        - sequence
+        - module_name
+        - firmware_version
+        - reported_at
+      properties:
+        event_id:
+          type: string
+        event_type:
+          type: string
+          const: module_recovered
+        sequence:
+          type: integer
+          minimum: 1
+        module_name:
+          type: string
+        firmware_version:
+          type: string
+        reported_at:
+          type: string
+          format: date-time
     CommandEnvelope:
       allOf:
         - $ref: '#/components/schemas/SuccessEnvelope'

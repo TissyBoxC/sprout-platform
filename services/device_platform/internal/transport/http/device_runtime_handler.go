@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	auditdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/domain"
 	bindingdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
@@ -14,8 +15,22 @@ import (
 )
 
 type deviceRuntimeHandler struct {
-	service       *runtimeservice.Service
-	policyService deviceRuntimePolicyService
+	service           *runtimeservice.Service
+	policyService     deviceRuntimePolicyService
+	diagnosticService deviceRuntimeDiagnosticService
+}
+
+type deviceRuntimeDiagnosticService interface {
+	Validate(
+		deviceID string,
+		diagnostics *auditdomain.Diagnostics,
+	) (*auditdomain.Diagnostics, error)
+	Record(
+		ctx context.Context,
+		deviceID string,
+		reportedAt time.Time,
+		diagnostics *auditdomain.Diagnostics,
+	) error
 }
 
 type deviceRuntimePolicyService interface {
@@ -51,6 +66,7 @@ type recordHeartbeatRequest struct {
 		FallbackActive   bool   `json:"fallback_active"`
 		PendingTelemetry int    `json:"pending_telemetry"`
 	} `json:"offline"`
+	Diagnostics *auditdomain.Diagnostics `json:"diagnostics"`
 }
 
 type createRuntimeCommandRequest struct {
@@ -92,11 +108,28 @@ func (handler deviceRuntimeHandler) recordHeartbeat(
 		}
 		timeSyncedAt = &parsed
 	}
+	deviceID := strings.TrimSpace(request.PathValue("device_id"))
+	var normalizedDiagnostics *auditdomain.Diagnostics
+	if payload.Diagnostics != nil {
+		if handler.diagnosticService == nil {
+			writeError(response, request, http.StatusServiceUnavailable, "service_unavailable", "设备诊断暂时无法接收")
+			return
+		}
+		var validationErr error
+		normalizedDiagnostics, validationErr = handler.diagnosticService.Validate(
+			deviceID,
+			payload.Diagnostics,
+		)
+		if validationErr != nil {
+			writeError(response, request, http.StatusUnprocessableEntity, "invalid_device_diagnostics", "设备诊断需要重新同步")
+			return
+		}
+	}
 	status, err := handler.service.RecordHeartbeat(
 		request.Context(),
 		deviceSessionToken,
 		domain.HeartbeatInput{
-			DeviceID:          strings.TrimSpace(request.PathValue("device_id")),
+			DeviceID:          deviceID,
 			HeartbeatID:       payload.HeartbeatID,
 			ReportedAt:        reportedAt,
 			FirmwareVersion:   payload.FirmwareVersion,
@@ -119,6 +152,17 @@ func (handler deviceRuntimeHandler) recordHeartbeat(
 	if err != nil {
 		writeDeviceRuntimeError(response, request, err)
 		return
+	}
+	if normalizedDiagnostics != nil {
+		if recordErr := handler.diagnosticService.Record(
+			request.Context(),
+			status.DeviceID,
+			reportedAt,
+			normalizedDiagnostics,
+		); recordErr != nil {
+			writeError(response, request, http.StatusInternalServerError, "service_error", "设备诊断暂时无法保存，请稍后重试")
+			return
+		}
 	}
 	writeSuccess(response, request, http.StatusOK, runtimeStatusResponse(status))
 }

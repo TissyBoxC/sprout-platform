@@ -175,6 +175,182 @@
           "maximum": 10000
         }
       }
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "newest_sequence",
+        "dropped_boot_events",
+        "boot_events",
+        "latest_failure",
+        "recovery_events"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "newest_sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "dropped_boot_events": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "boot_events": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/boot_event"
+          }
+        },
+        "latest_failure": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/module_failure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recovery_events": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/recovery_event"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "boot_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "event_type",
+        "sequence",
+        "uptime_ms",
+        "boot_count",
+        "reset_reason",
+        "firmware_version"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{3,63}$"
+        },
+        "event_type": {
+          "type": "string",
+          "const": "boot"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "uptime_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "boot_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "reset_reason": {
+          "type": "string",
+          "maxLength": 24
+        },
+        "firmware_version": {
+          "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/firmware_version"
+        }
+      }
+    },
+    "module_failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "event_type",
+        "sequence",
+        "module_name",
+        "error_code",
+        "failure_count",
+        "firmware_version"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{3,63}$"
+        },
+        "event_type": {
+          "type": "string",
+          "const": "module_failure"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "module_name": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "error_code": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "failure_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "firmware_version": {
+          "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/firmware_version"
+        }
+      }
+    },
+    "recovery_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "event_type",
+        "sequence",
+        "module_name",
+        "firmware_version"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{3,63}$"
+        },
+        "event_type": {
+          "type": "string",
+          "const": "module_recovered"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "module_name": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "firmware_version": {
+          "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/firmware_version"
+        }
+      }
     }
   }
 }

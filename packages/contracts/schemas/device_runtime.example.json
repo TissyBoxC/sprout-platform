@@ -25,5 +25,39 @@
     "reason": "none",
     "fallback_active": false,
     "pending_telemetry": 0
+  },
+  "diagnostics": {
+    "schema_version": "1.0.0",
+    "newest_sequence": 12,
+    "dropped_boot_events": 0,
+    "boot_events": [
+      {
+        "event_id": "boot_00000001",
+        "event_type": "boot",
+        "sequence": 10,
+        "uptime_ms": 1200,
+        "boot_count": 3,
+        "reset_reason": "power_on",
+        "firmware_version": "0.4.0"
+      }
+    ],
+    "latest_failure": {
+      "event_id": "failure_00000011",
+      "event_type": "module_failure",
+      "sequence": 11,
+      "module_name": "network_manager",
+      "error_code": "ESP_ERR_TIMEOUT",
+      "failure_count": 1,
+      "firmware_version": "0.4.0"
+    },
+    "recovery_events": [
+      {
+        "event_id": "recovery_00000012",
+        "event_type": "module_recovered",
+        "sequence": 12,
+        "module_name": "network_manager",
+        "firmware_version": "0.4.0"
+      }
+    ]
   }
 }

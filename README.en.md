@@ -34,10 +34,10 @@ tooling. Firmware and the AI gateway fork remain independent repositories.
 
 ## Current Status
 
-The repository version is `0.1.0` and is in the engineering foundation plus
-first basic-module implementation phase. Status is based on an accepted
-end-to-end capability, not on the presence of a directory, interface, or
-placeholder file.
+The repository version is `0.13.0` and is in the foundation-layer phase where
+recording, playback, wake, and device interaction are closed loops. Status is
+based on an accepted end-to-end capability, not on the presence of a directory,
+interface, or placeholder file.
 
 | Marker | Meaning |
 | --- | --- |
@@ -56,13 +56,13 @@ order and never removes a capability.
 | ID | Capability | Modules | Status | Current state |
 | --- | --- | --- | --- | --- |
 | P0-01 | Startup, version, error recovery | `system_core`, `module_registry`, `version_info`, `error_code`, `error_recovery`, `diagnostic_reporter` | `[Implemented]` | Firmware reports boot, module-failure, and recovery events; the platform validates and idempotently stores bounded history; the admin console shows health, boot history, recent failures, and recovery events. |
-| P0-02 | Audio input | `audio_input`, `audio_pipeline`, `voice_gateway` | `[Not implemented]` | Only audio package boundaries and adapter interfaces exist. Capture, gain, noise reduction, echo cancellation, and verifiable frames are missing. |
-| P0-03 | Audio output | `audio_output`, `playback_queue`, `voice_gateway` | `[Not implemented]` | TTS playback, local playback, queueing, interruption, and resume are not implemented. |
+| P0-02 | Audio input | `audio_codec`, `audio_pipeline`, `voice_gateway` | `[Implemented]` | The firmware performs 16 kHz mono Opus encode/decode, I2S capture, post-capture noise reduction, echo cancellation, gain calibration, and VAD segmentation with speaker-reference loopback; the voice gateway implements short-lived device tokens, the realtime WebSocket audio session, Opus decode, ring buffering, inbound noise reduction/echo cancellation/gain calibration, adaptive VAD segmentation, ASR/LLM/TTS adapters with a conversation loop, and the voice control-frame contract with stable error codes. |
+| P0-03 | Audio output | `audio_output`, `playback_queue`, `volume_control`, `prompt_tone`, `voice_gateway` | `[Implemented]` | The firmware mixes multiple paths by priority, enforces the guardian volume ceiling, keeps safety prompt tones audible while muted, overlays local prompt tones, and feeds the capture reference; the voice gateway routes TTS replies through a per-connection playback queue with preemption, resume, pause, mute, and cleanup, and reports mix failures with stable audio error codes. |
 | P0-04 | Voice wake | `voice_wake`, `wake_feedback`, `voice_gateway` | `[Implemented]` | The firmware detects the wake word, suppresses false triggers, provides local feedback, tones, and LED state, and reports redacted wake events in the heartbeat; the voice gateway validates device wake control frames. |
-| P0-05 | Voice session | `voice_session`, `asr_client`, `llm_client`, `tts_client`, `voice_gateway` | `[Not implemented]` | A session state machine, ASR/TTS interfaces, and WebSocket package skeleton exist. WebSocket serving, ASR, LLM, TTS, interruption, and timeout flows are missing. |
+| P0-05 | Voice session | `voice_session`, `asr_client`, `llm_client`, `tts_client`, `voice_gateway` | `[Partial]` | The device WebSocket realtime audio service, session lifecycle with idle and duration timeouts, ASR/LLM/TTS provider adapters, multi-turn context, and content-policy validation exist, and synthesized speech returns to the device. Wake-word triggering, barge-in during playback, and continuous conversation remain. |
 | P0-06 | AI conversation | `conversation_context`, `child_prompt_profile`, `voice_gateway`, `sub2api_fork` | `[Not implemented]` | The `sub2api` client is still a stub. Multi-turn context, child prompts, timeout, degradation, and compliance policy are missing. |
 | P0-07 | Content | Content library, stories, nursery rhymes, poetry, English, encyclopedia, bedtime, age tiers | `[Not implemented]` | Only shared content-package schemas exist. Production, review, publishing, delivery, caching, and playback are missing. |
-| P0-08 | Connectivity | `network_manager`, `wifi_provisioning`, `time_sync`, `cloud_auth` | `[Not implemented]` | Provisioning, reconnect, time sync, device authentication, heartbeat, and offline recovery are missing. |
+| P0-08 | Connectivity | `network_manager`, `device_provisioning`, `time_sync`, `cloud_auth`, `device_runtime_reporter` | `[Partial]` | The firmware implements BLE provisioning, device binding, time sync, network quality, offline fallback, cloud authentication, and runtime reporting. Platform-side provisioning audit, credential revocation, and a complete offline-recovery loop remain. |
 | P0-09 | Parent control | `parent_link`, `parent_policy`, `usage_report` | `[Not implemented]` | Device binding, content level, usage duration, blocked periods, policy delivery, and reports are missing. |
 | P0-10 | Security and privacy | `privacy_guard`, `content_filter`, `transport_security`, platform and voice security modules | `[Partial]` | Mutual MQTT TLS, certificate validation, request labels, log redaction, secure defaults, and contract validation exist. Identity, authorization, moderation, deletion, and consent flows remain incomplete. |
 | P0-11 | OTA | `ota_manager`, `ota_download`, `ota_validate`, `ota_rollback` | `[Not implemented]` | Package management, signature validation, canary release, download, install, rollback, and version statistics are missing. |
@@ -109,8 +109,10 @@ order and never removes a capability.
 | Module | Purpose | Status | Current state |
 | --- | --- | --- | --- |
 | `module_registry` | Register, initialize, and stop optional modules | `[Implemented]` | Firmware supports module registration, initialization failure recording, and removable-module verification. |
-| `config_store` | Store device configuration and capability sets | `[Not implemented]` | Configuration read/write, migration, encrypted storage, and deletion are missing. |
-| `playback_queue` | Manage playback priority, interruption, and resume | `[Not implemented]` | Audio queueing and playback state control are missing. |
+| `config_store` | Store device configuration and capability sets | `[Implemented]` | Supports NVS string and binary key read/write and deletion for provisioning, binding, and volume persistence; production images still need NVS encryption enabled. |
+| `playback_queue` | Manage playback priority, interruption, and resume | `[Implemented]` | Both firmware and the voice gateway queue by priority with preemption, unplayed-tail resume, pause, and cleanup; safety prompt tones cannot be interrupted or muted. |
+| `volume_control` | Enforce guardian volume ceiling and local mute | `[Implemented]` | Supports volume 0 to 100, policy-ceiling clamping, persistence, mute, and saturating PCM gain. |
+| `prompt_tone` | Generate local wake, capture, network, and safety prompt tones | `[Implemented]` | Generates nine local prompt tones, plays them by priority when a queue is available, and keeps safety prompt tones at the highest priority. |
 | `alarm_reminder` | Scheduled reminders, alarms, and routines | `[Not implemented]` | Time synchronization, reminder scheduling, and parent configuration are missing. |
 | `bluetooth_audio` | Bluetooth speaker mode and pairing | `[Not implemented]` | Bluetooth audio, pairing, mode switching, and playback priority are missing. |
 | `learning_visualization` | Touch-screen learning content and visual feedback | `[Not implemented]` | Learning visualization, course linkage, and display interaction are missing. |
@@ -131,6 +133,7 @@ whether later modules can be added, removed, and regression-tested independently
 | Docker Compose | `[Implemented]` | Supports PostgreSQL, Redis, MQTT/TLS, optional `sub2api`, `device_platform`, and `voice_gateway`. Business capabilities remain incomplete. |
 | Request labels, logging, and redaction | `[Implemented]` | Services use request IDs, trace fields, access logs, and sensitive-field redaction. |
 | Remote UI text | `[Partial]` | The UI-text contract, platform module skeleton, and admin page exist. Publishing, cache, version, and firmware consumption are incomplete. |
+| Brand service version management | `[Implemented]` | The admin console lists every image's current and repository-latest version and can upgrade platform services and the AI gateway individually or in a batch; self-upgrade runs in a separate executor so an admin restart does not interrupt the task, and infrastructure images are only checked, never auto-upgraded. |
 | `sub2api_fork` customization | `[Not implemented]` | The fork retains upstream behavior. Tenant labels, child policy, internal API, call auditing, and configuration prefix are not customized. |
 
 ## System Composition

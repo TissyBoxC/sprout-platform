@@ -5,13 +5,16 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	bindingdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/domain"
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 )
 
 type deviceBindingHandler struct {
-	service *bindingservice.Service
+	service           *bindingservice.Service
+	voiceTokenIssuer  bindingservice.VoiceTokenIssuer
+	voiceWebSocketURL string
 }
 
 type createRegistrationTokenRequest struct {
@@ -249,6 +252,52 @@ func (handler deviceBindingHandler) bindingStatus(
 	writeSuccess(response, request, http.StatusOK, map[string]any{
 		"device_id": deviceID,
 		"is_bound":  isBound,
+	})
+}
+
+// createVoiceToken issues a short-lived signed credential for one bound device.
+// The device session must belong to the exact path device, and the binding
+// lookup prevents an unbound but valid device session from reaching the voice
+// gateway. A missing signer is a safe 503 rather than an unsigned token.
+func (handler deviceBindingHandler) createVoiceToken(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	deviceID := strings.TrimSpace(request.PathValue("device_id"))
+	sessionToken, ok := bearerToken(request)
+	if !ok {
+		writeError(response, request, http.StatusUnauthorized, "device_session_expired", "设备登录已过期，请重新连接")
+		return
+	}
+	sessionDeviceID, err := handler.service.VerifyDeviceSession(
+		request.Context(),
+		sessionToken,
+	)
+	if err != nil {
+		writeDeviceBindingError(response, request, err)
+		return
+	}
+	if sessionDeviceID != deviceID {
+		writeDeviceBindingError(response, request, bindingdomain.ErrInvalidDeviceProof)
+		return
+	}
+	if _, err := handler.service.GetByDeviceID(request.Context(), sessionDeviceID); err != nil {
+		writeDeviceBindingError(response, request, err)
+		return
+	}
+	if handler.voiceTokenIssuer == nil || handler.voiceWebSocketURL == "" {
+		writeError(response, request, http.StatusServiceUnavailable, "voice_unavailable", "实时语音暂时不可用，请稍后重试")
+		return
+	}
+	issue, err := handler.voiceTokenIssuer.Issue(sessionDeviceID)
+	if err != nil || strings.TrimSpace(issue.Token) == "" || issue.ExpiresAt.IsZero() {
+		writeError(response, request, http.StatusServiceUnavailable, "voice_unavailable", "实时语音暂时不可用，请稍后重试")
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"websocket_url": handler.voiceWebSocketURL,
+		"token":         issue.Token,
+		"expires_at":    issue.ExpiresAt.UTC().Format(time.RFC3339),
 	})
 }
 

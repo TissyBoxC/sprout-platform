@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ type Config struct {
 	DeviceRuntime  DeviceRuntimeConfig
 	ServiceVersion ServiceVersionConfig
 	ReleaseStore   ReleaseStoreConfig
+	VoiceGateway   VoiceGatewayConfig
 }
 
 // HTTPConfig contains HTTP server settings.
@@ -139,6 +141,14 @@ type ReleaseStoreConfig struct {
 	PublicBaseURL string
 }
 
+// VoiceGatewayConfig contains the public realtime voice endpoint and the
+// shared signing settings used to issue short-lived device tokens.
+type VoiceGatewayConfig struct {
+	WSTokenSecret string
+	WSTokenTTL    time.Duration
+	WebSocketURL  string
+}
+
 // Load reads configuration from environment variables with local defaults.
 func Load() (Config, error) {
 	cfg := Config{
@@ -226,6 +236,19 @@ func Load() (Config, error) {
 				"",
 			),
 		},
+		VoiceGateway: VoiceGatewayConfig{
+			WSTokenSecret: env(
+				"DEVICE_PLATFORM_VOICE_GATEWAY_WS_TOKEN_SECRET",
+				"",
+			),
+			WSTokenTTL: time.Duration(
+				envInt("DEVICE_PLATFORM_VOICE_TOKEN_TTL_SECONDS", 300),
+			) * time.Second,
+			WebSocketURL: env(
+				"DEVICE_PLATFORM_VOICE_GATEWAY_WS_URL",
+				"wss://voice.clarkhub.cn/v1/voice",
+			),
+		},
 	}
 
 	if cfg.Internal.Enabled && len(strings.TrimSpace(cfg.Internal.AuthToken)) < 32 {
@@ -276,6 +299,27 @@ func Load() (Config, error) {
 	}
 	if !strings.HasPrefix(strings.TrimSpace(cfg.ReleaseStore.RootDir), "/") {
 		return Config{}, fmt.Errorf("DEVICE_PLATFORM_DOWNLOAD_STORE_DIR must be an absolute path")
+	}
+	if secret := strings.TrimSpace(cfg.VoiceGateway.WSTokenSecret); secret != "" &&
+		len(secret) < 32 {
+		return Config{}, fmt.Errorf(
+			"DEVICE_PLATFORM_VOICE_GATEWAY_WS_TOKEN_SECRET must contain at least 32 characters when set",
+		)
+	}
+	if cfg.VoiceGateway.WSTokenTTL <= 0 {
+		return Config{}, fmt.Errorf(
+			"DEVICE_PLATFORM_VOICE_TOKEN_TTL_SECONDS must be positive",
+		)
+	}
+	voiceWebSocketURL, err := url.ParseRequestURI(
+		strings.TrimSpace(cfg.VoiceGateway.WebSocketURL),
+	)
+	if err != nil || voiceWebSocketURL.Scheme != "wss" ||
+		voiceWebSocketURL.Host == "" || voiceWebSocketURL.User != nil ||
+		voiceWebSocketURL.Fragment != "" {
+		return Config{}, fmt.Errorf(
+			"DEVICE_PLATFORM_VOICE_GATEWAY_WS_URL must be a public wss URL without credentials or fragments",
+		)
 	}
 
 	return cfg, nil

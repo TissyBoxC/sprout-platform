@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadUsesTLSMQTTDefaults(t *testing.T) {
@@ -46,6 +47,82 @@ func TestLoadReadsMQTTMutualTLSSettings(t *testing.T) {
 	}
 	if !strings.HasSuffix(cfg.MQTT.ClientKeyFile, ".key") {
 		t.Fatalf("unexpected client key file: %q", cfg.MQTT.ClientKeyFile)
+	}
+}
+
+func TestLoadReadsVoiceGatewaySettings(t *testing.T) {
+	setAuthenticationTestSecrets(t)
+	t.Setenv(
+		"DEVICE_PLATFORM_VOICE_GATEWAY_WS_TOKEN_SECRET",
+		"test-voice-token-secret-at-least-32-characters",
+	)
+	t.Setenv("DEVICE_PLATFORM_VOICE_TOKEN_TTL_SECONDS", "120")
+	t.Setenv(
+		"DEVICE_PLATFORM_VOICE_GATEWAY_WS_URL",
+		"wss://voice.example.test/v1/voice",
+	)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.VoiceGateway.WSTokenTTL != 120*time.Second {
+		t.Fatalf("unexpected voice token TTL: %s", cfg.VoiceGateway.WSTokenTTL)
+	}
+	if cfg.VoiceGateway.WebSocketURL != "wss://voice.example.test/v1/voice" {
+		t.Fatalf("unexpected voice WebSocket URL: %q", cfg.VoiceGateway.WebSocketURL)
+	}
+}
+
+func TestLoadUsesSafeVoiceGatewayDefaultsWhenSecretIsUnset(t *testing.T) {
+	setAuthenticationTestSecrets(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.VoiceGateway.WSTokenSecret != "" {
+		t.Fatal("unexpected default voice token secret")
+	}
+	if cfg.VoiceGateway.WSTokenTTL != 5*time.Minute {
+		t.Fatalf("unexpected default voice token TTL: %s", cfg.VoiceGateway.WSTokenTTL)
+	}
+	if cfg.VoiceGateway.WebSocketURL != "wss://voice.clarkhub.cn/v1/voice" {
+		t.Fatalf("unexpected default voice WebSocket URL: %q", cfg.VoiceGateway.WebSocketURL)
+	}
+}
+
+func TestLoadRejectsUnsafeVoiceGatewaySettings(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{
+			name:  "short secret",
+			key:   "DEVICE_PLATFORM_VOICE_GATEWAY_WS_TOKEN_SECRET",
+			value: "too-short",
+		},
+		{
+			name:  "non-positive ttl",
+			key:   "DEVICE_PLATFORM_VOICE_TOKEN_TTL_SECONDS",
+			value: "0",
+		},
+		{
+			name:  "insecure websocket url",
+			key:   "DEVICE_PLATFORM_VOICE_GATEWAY_WS_URL",
+			value: "ws://voice.example.test/v1/voice",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setAuthenticationTestSecrets(t)
+			t.Setenv(test.key, test.value)
+
+			if _, err := Load(); err == nil {
+				t.Fatal("expected unsafe voice gateway setting to be rejected")
+			}
+		})
 	}
 }
 

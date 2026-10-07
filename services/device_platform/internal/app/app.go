@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -138,6 +139,17 @@ func Run() error {
 		return fmt.Errorf("create child profile service: %w", err)
 	}
 	parentAuthService.SetChildProvisioner(childProfileService)
+	var voiceTokenIssuer bindingService.VoiceTokenIssuer
+	if strings.TrimSpace(cfg.VoiceGateway.WSTokenSecret) != "" {
+		signer, signerErr := bindingService.NewVoiceTokenSigner(
+			cfg.VoiceGateway.WSTokenSecret,
+			cfg.VoiceGateway.WSTokenTTL,
+		)
+		if signerErr != nil {
+			return fmt.Errorf("create voice token signer: %w", signerErr)
+		}
+		voiceTokenIssuer = signer
+	}
 	deviceBindingService, err := bindingService.New(bindingService.Options{
 		Repository:    bindingRepository.NewPostgresRepository(databaseStore.Pool()),
 		TokenTTL:      15 * time.Minute,
@@ -212,6 +224,8 @@ func Run() error {
 			DiagnosticService:     diagnosticService,
 			ServiceVersionService: serviceVersions,
 			ReleaseStoreService:   releaseStore,
+			VoiceTokenIssuer:      voiceTokenIssuer,
+			VoiceWebSocketURL:     cfg.VoiceGateway.WebSocketURL,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

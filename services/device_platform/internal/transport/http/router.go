@@ -40,6 +40,8 @@ type RouterOptions struct {
 	DiagnosticService     auditService
 	ServiceVersionService *serviceversionservice.Service
 	ReleaseStoreService   *releasestoreservice.Service
+	VoiceTokenIssuer      bindingservice.VoiceTokenIssuer
+	VoiceWebSocketURL     string
 }
 
 // auditService is the diagnostic read surface exposed to administrators.
@@ -129,7 +131,11 @@ func NewRouter(options RouterOptions) http.Handler {
 			)
 		}
 		if options.BindingService != nil {
-			bindingHandler := deviceBindingHandler{service: options.BindingService}
+			bindingHandler := deviceBindingHandler{
+				service:           options.BindingService,
+				voiceTokenIssuer:  options.VoiceTokenIssuer,
+				voiceWebSocketURL: strings.TrimSpace(options.VoiceWebSocketURL),
+			}
 			mux.HandleFunc(
 				"POST /api/v1/devices/register",
 				bindingHandler.registerDevice,
@@ -149,6 +155,10 @@ func NewRouter(options RouterOptions) http.Handler {
 			mux.HandleFunc(
 				"GET /api/v1/devices/{device_id}/binding-status",
 				bindingHandler.bindingStatus,
+			)
+			mux.HandleFunc(
+				"POST /api/v1/devices/{device_id}/voice-token",
+				bindingHandler.createVoiceToken,
 			)
 			mux.HandleFunc(
 				"POST /api/v1/devices/bind",

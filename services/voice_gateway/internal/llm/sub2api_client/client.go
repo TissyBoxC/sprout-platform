@@ -95,6 +95,16 @@ func (c *Client) Chat(ctx context.Context, request llm.Request) (llm.Stream, err
 	httpRequest.Header.Set("Authorization", "Bearer "+c.APIKey)
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Accept", "text/event-stream")
+	// Provenance labels let the AI gateway attribute usage to the originating
+	// device and apply its stable degradation contract for robot traffic. They
+	// never contain prompts, replies, credentials, or audio.
+	if deviceID := strings.TrimSpace(request.DeviceID); deviceID != "" {
+		httpRequest.Header.Set("X-Sprout-Device-ID", deviceID)
+	}
+	if sessionID := strings.TrimSpace(request.SessionID); sessionID != "" {
+		httpRequest.Header.Set("X-Sprout-Session-ID", sessionID)
+	}
+	httpRequest.Header.Set("X-Sprout-Project", "voice")
 
 	httpClient := c.HTTPClient
 	if httpClient == nil {

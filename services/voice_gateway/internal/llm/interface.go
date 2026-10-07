@@ -10,9 +10,15 @@ type Message struct {
 }
 
 // Request describes one chat request.
+//
+// DeviceID and SessionID are pseudonymous provenance labels attached for the
+// AI gateway. They carry no personal data; SessionID is the gateway session
+// identifier, never recognized speech or model output.
 type Request struct {
-	Model    string
-	Messages []Message
+	Model     string
+	Messages  []Message
+	DeviceID  string
+	SessionID string
 }
 
 // Stream emits model response chunks.

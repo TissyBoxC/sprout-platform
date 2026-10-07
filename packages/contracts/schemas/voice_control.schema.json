@@ -22,6 +22,7 @@
       "enum": [
         "session_start",
         "session_started",
+        "session_state",
         "wake_detected",
         "session_end",
         "session_closed",
@@ -39,6 +40,15 @@
     },
     "sent_at": {
       "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "idle",
+        "listening",
+        "thinking",
+        "speaking"
+      ]
     },
     "stream_id": {
       "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
@@ -165,6 +175,18 @@
           "expires_at": {}
         },
         "required": ["expires_at"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "type": { "const": "session_state" } },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "state": {}
+        },
+        "required": ["state"]
       }
     },
     {

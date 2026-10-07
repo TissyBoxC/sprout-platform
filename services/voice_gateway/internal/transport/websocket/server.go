@@ -76,6 +76,9 @@ type ServerConfig struct {
 	// to the device over this connection. Invocations for one connection are
 	// serialised, so the handler may keep per-session state.
 	SegmentHandler func(segment session.AudioSegment, sink AudioSink)
+	// onPlaybackScheduler observes the per-connection scheduler once it is
+	// created. Test-only seam; production leaves it nil.
+	onPlaybackScheduler func(*playback.Scheduler)
 }
 
 // AudioSink accepts one synthesized PCM frame for the connected device.
@@ -92,6 +95,16 @@ type AudioSink interface {
 		interruptible bool,
 		onPlayed func([]int16),
 	) error
+}
+
+// turnObserver is the optional transport-internal half of a conversation turn.
+//
+// The segment consumer brackets each SegmentHandler invocation with these
+// callbacks so the session state machine advances thinking -> speaking ->
+// listening without changing the public AudioSink signature.
+type turnObserver interface {
+	beginTurn(segment session.AudioSegment)
+	completeTurn(segment session.AudioSegment)
 }
 
 // SendQueuePolicy determines what happens when a slow connection fills the
@@ -239,13 +252,10 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 	segmentDone := make(chan struct{})
 	sink := &connectionAudioSink{
 		writer: writer,
-		sessionID: func() string {
-			if voiceSession := getSession(); voiceSession != nil {
-				return voiceSession.ID()
-			}
-			return ""
-		},
 	}
+	// Start reply turns at epoch 1 so zero unambiguously means "untagged"
+	// (safety announcements) and every conversation frame is checked.
+	sink.turnEpoch.Store(1)
 	scheduler, err := playback.NewScheduler(sink, defaultVolumePercent, defaultMaxVolumePercent)
 	if err != nil {
 		s.logger.Warn("device playback scheduler unavailable", "device_id", identity.DeviceID)
@@ -253,6 +263,123 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 	}
 	defer scheduler.Close()
 	sink.scheduler = scheduler
+	if s.config.onPlaybackScheduler != nil {
+		s.config.onPlaybackScheduler(scheduler)
+	}
+	sink.session = func() *session.Session {
+		voiceSession := getSession()
+		if voiceSession == nil {
+			return nil
+		}
+		return voiceSession
+	}
+	sink.sessionID = func() string {
+		voiceSession := sink.currentSession()
+		if voiceSession == nil {
+			return ""
+		}
+		return voiceSession.ID()
+	}
+	sink.notifyState = func(voiceSession *session.Session, state string) {
+		if voiceSession == nil {
+			return
+		}
+		if getSession() != voiceSession {
+			return
+		}
+		notification := NewControlFrame(controlTypeSessionState, voiceSession.ID(), identity.DeviceID)
+		notification.State = state
+		_ = writer.enqueueText(notification)
+	}
+	createSession := func(control ControlFrame) (*session.Session, error) {
+		return s.config.Manager.Create(session.SessionConfig{
+			ID:                control.SessionID,
+			DeviceID:          identity.DeviceID,
+			SchemaVersion:     frame.SchemaVersion,
+			StreamID:          control.StreamID,
+			MinimumSpeechMS:   frame.DurationMS,
+			DetectorFactory:   s.config.DetectorFactory,
+			PreprocessFactory: s.config.PreprocessFactory,
+			ReferenceAudio: func() []int16 {
+				if s.config.ReferenceAudio == nil {
+					return nil
+				}
+				return s.config.ReferenceAudio(identity.DeviceID)
+			},
+			SegmentHandler: func(segment session.AudioSegment) {
+				select {
+				case segmentQueue <- segment:
+				case <-connectionContext.Done():
+				default:
+					s.stats.backpressureDrops.Add(1)
+					if s.config.OnBackpressure != nil {
+						s.config.OnBackpressure(identity.DeviceID, s.stats.backpressureDrops.Load())
+					}
+				}
+			},
+		})
+	}
+	attachSession := func(voiceSession *session.Session) {
+		setSession(voiceSession)
+		generation := playbackGeneration.Add(1)
+		go s.clearPlaybackOnSessionEnd(
+			connectionContext,
+			voiceSession,
+			scheduler,
+			generation,
+			&playbackGeneration,
+			segmentDone,
+		)
+	}
+	sink.onTurnStart = func(segment session.AudioSegment) {
+		voiceSession := getSession()
+		if voiceSession == nil || voiceSession.ID() != segment.SessionID {
+			return
+		}
+		if transitionErr := voiceSession.Transition(session.EventStartThinking); transitionErr != nil {
+			return
+		}
+		sink.notifyState(voiceSession, string(session.StateThinking))
+	}
+	sink.onTurnEnd = func(segment session.AudioSegment) {
+		voiceSession := getSession()
+		if voiceSession == nil || voiceSession.ID() != segment.SessionID {
+			return
+		}
+		// A turn with no reply stays thinking and finishes directly; a turn that
+		// spoke returns to listening via the speaking edge. Both release the
+		// session so the device can re-arm for the next utterance.
+		var transitionErr error
+		switch voiceSession.State() {
+		case session.StateSpeaking:
+			transitionErr = voiceSession.Transition(session.EventStartListening)
+		case session.StateThinking:
+			transitionErr = voiceSession.Transition(session.EventFinishTurn)
+		default:
+			return
+		}
+		if transitionErr != nil {
+			return
+		}
+		sink.notifyState(voiceSession, string(session.StateListening))
+	}
+	scheduleBargeIn := func(voiceSession *session.Session) {
+		if voiceSession == nil || voiceSession.State() != session.StateSpeaking {
+			return
+		}
+		// Serialize the clear against reply enqueues: any frame ordered before
+		// this point is dropped by Clear, and any frame ordered after it sees
+		// the session already back in listening and is refused.
+		sink.turnMu.Lock()
+		// Advance the epoch before clearing so a frame the scheduler already
+		// dequeued for the canceled turn fails the SendAudio check below.
+		sink.turnEpoch.Add(1)
+		scheduler.Clear(false)
+		if transitionErr := voiceSession.Transition(session.EventStartListening); transitionErr == nil {
+			sink.notifyState(voiceSession, string(session.StateListening))
+		}
+		sink.turnMu.Unlock()
+	}
 	go s.consumeSegments(connectionContext, segmentQueue, segmentDone, sink)
 	heartbeatDone := make(chan struct{})
 	go s.sendHeartbeats(connectionContext, writer, heartbeatDone)
@@ -298,13 +425,28 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 			case controlTypeWakeDetected:
 				voiceSession := getSession()
 				if voiceSession == nil {
-					s.sendError(
-						writer,
-						nil,
-						errorCodeSessionNotFound,
-						"请先开始监听",
-						false,
-					)
+					if control.SessionID == "" || control.StreamID == "" {
+						s.sendError(writer, nil, errorCodeInvalidControl, "控制信息格式不正确", false)
+						continue
+					}
+					created, createErr := createSession(control)
+					if createErr != nil {
+						s.sendError(writer, nil, mapSessionError(createErr), "当前无法开始监听，请稍后重试", true)
+						continue
+					}
+					if transitionErr := created.Transition(session.EventStartListening); transitionErr != nil {
+						s.config.Manager.Remove(created.ID())
+						s.sendError(writer, created, errorCodeInternal, "当前无法开始监听，请稍后重试", true)
+						continue
+					}
+					attachSession(created)
+					started := NewControlFrame(controlTypeSessionStarted, created.ID(), identity.DeviceID)
+					started.ExpiresAt = time.Now().UTC().Add(s.config.SessionTTL).Format(time.RFC3339Nano)
+					if err := writer.enqueueText(started); err != nil {
+						disconnectReason = "send_failed"
+						goto closed
+					}
+					sink.notifyState(created, string(session.StateListening))
 					continue
 				}
 				if control.StreamID != voiceSession.StreamID() {
@@ -333,58 +475,31 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 						)
 						continue
 					}
+					sink.notifyState(voiceSession, string(session.StateListening))
 				}
 			case controlTypeSessionStart:
 				if getSession() != nil {
 					s.sendError(writer, getSession(), errorCodeInvalidControl, "当前已有进行中的监听", false)
 					continue
 				}
-				voiceSession, createErr := s.config.Manager.Create(session.SessionConfig{
-					ID:                control.SessionID,
-					DeviceID:          identity.DeviceID,
-					SchemaVersion:     frame.SchemaVersion,
-					StreamID:          control.StreamID,
-					MinimumSpeechMS:   frame.DurationMS,
-					DetectorFactory:   s.config.DetectorFactory,
-					PreprocessFactory: s.config.PreprocessFactory,
-					ReferenceAudio: func() []int16 {
-						if s.config.ReferenceAudio == nil {
-							return nil
-						}
-						return s.config.ReferenceAudio(identity.DeviceID)
-					},
-					SegmentHandler: func(segment session.AudioSegment) {
-						select {
-						case segmentQueue <- segment:
-						case <-connectionContext.Done():
-						default:
-							s.stats.backpressureDrops.Add(1)
-							if s.config.OnBackpressure != nil {
-								s.config.OnBackpressure(identity.DeviceID, s.stats.backpressureDrops.Load())
-							}
-						}
-					},
-				})
+				voiceSession, createErr := createSession(control)
 				if createErr != nil {
 					s.sendError(writer, nil, mapSessionError(createErr), "当前无法开始监听，请稍后重试", true)
 					continue
 				}
-				setSession(voiceSession)
-				generation := playbackGeneration.Add(1)
-				go s.clearPlaybackOnSessionEnd(
-					connectionContext,
-					voiceSession,
-					scheduler,
-					generation,
-					&playbackGeneration,
-					segmentDone,
-				)
+				if transitionErr := voiceSession.Transition(session.EventStartListening); transitionErr != nil {
+					s.config.Manager.Remove(voiceSession.ID())
+					s.sendError(writer, voiceSession, errorCodeInternal, "当前无法开始监听，请稍后重试", true)
+					continue
+				}
+				attachSession(voiceSession)
 				started := NewControlFrame(controlTypeSessionStarted, voiceSession.ID(), identity.DeviceID)
 				started.ExpiresAt = time.Now().UTC().Add(s.config.SessionTTL).Format(time.RFC3339Nano)
 				if err := writer.enqueueText(started); err != nil {
 					disconnectReason = "send_failed"
 					goto closed
 				}
+				sink.notifyState(voiceSession, string(session.StateListening))
 			case controlTypeSessionEnd, controlTypeCancel:
 				voiceSession := getSession()
 				if voiceSession == nil {
@@ -400,6 +515,7 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 					continue
 				}
 				s.config.Manager.Remove(voiceSession.ID())
+				sink.notifyState(voiceSession, string(session.StateIdle))
 				setSession(nil)
 				closedFrame := NewControlFrame(controlTypeSessionClosed, voiceSession.ID(), identity.DeviceID)
 				closedFrame.Reason = reason
@@ -418,7 +534,7 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 				}
 			case controlTypePong:
 				continue
-			case controlTypeSessionStarted, controlTypeSessionClosed, controlTypeError:
+			case controlTypeSessionStarted, controlTypeSessionState, controlTypeSessionClosed, controlTypeError:
 				s.stats.malformedFrames.Add(1)
 				s.sendError(writer, getSession(), errorCodeInvalidControl, "控制信息方向不正确", false)
 			default:
@@ -448,6 +564,9 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 				s.sendError(writer, voiceSession, errorCodeSessionNotFound, "会话已结束，请重新开始", false)
 				continue
 			}
+			if voiceSession.State() == session.StateSpeaking {
+				scheduleBargeIn(voiceSession)
+			}
 			if err := voiceSession.AcceptFrame(connectionContext, frame.New(
 				fmt.Sprintf("%s_%d", voiceSession.ID(), envelope.Sequence),
 				identity.DeviceID,
@@ -468,6 +587,9 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 				if errors.Is(err, session.ErrSessionClosed) ||
 					errors.Is(err, session.ErrSessionIdleTimeout) ||
 					errors.Is(err, session.ErrSessionDurationLimit) {
+					// The device is still connected, so tell it the session fell
+					// idle before the reader tears the connection down.
+					sink.notifyState(voiceSession, string(session.StateIdle))
 					disconnectReason = "session_ended"
 					goto closed
 				}
@@ -514,6 +636,10 @@ func (s *Server) consumeSegments(
 			return
 		case segment := <-segments:
 			if s.config.SegmentHandler != nil {
+				observer, _ := sink.(turnObserver)
+				if observer != nil {
+					observer.beginTurn(segment)
+				}
 				handlerDone := make(chan struct{})
 				go func(segment session.AudioSegment) {
 					defer close(handlerDone)
@@ -525,6 +651,11 @@ func (s *Server) consumeSegments(
 					return
 				case <-done:
 					return
+				}
+				if observer != nil {
+					// The handler enqueues the full reply before returning, so the
+					// turn is re-armed for the next utterance at this point.
+					observer.completeTurn(segment)
 				}
 				continue
 			}
@@ -595,10 +726,25 @@ func (s *Server) sendHeartbeats(
 // device applies backpressure to the conversation handler instead of growing
 // unbounded memory.
 type connectionAudioSink struct {
-	writer    *connectionWriter
-	scheduler *playback.Scheduler
-	sessionID func() string
-	sequence  atomic.Uint32
+	writer      *connectionWriter
+	scheduler   *playback.Scheduler
+	sessionID   func() string
+	session     func() *session.Session
+	notifyState func(*session.Session, string)
+	onTurnStart func(session.AudioSegment)
+	onTurnEnd   func(session.AudioSegment)
+	sequence    atomic.Uint32
+	// turnMu orders reply enqueues against a barge-in clear so a canceled turn
+	// cannot slip a frame in just after playback was dropped.
+	turnMu sync.Mutex
+	// turnEpoch increments on every barge-in. The scheduler dequeues a frame and
+	// sends it after releasing its own lock, so a barge-in can land in that gap;
+	// SendAudio re-checks this epoch under turnMu to drop frames produced by a
+	// turn that a barge-in has already canceled.
+	//
+	// Epoch zero is reserved for untagged audio (for example safety
+	// announcements), so a tagged reply turn starts at one.
+	turnEpoch atomic.Uint64
 }
 
 // EnqueueAudio queues one PCM frame on this connection's playback scheduler.
@@ -615,19 +761,60 @@ func (sink *connectionAudioSink) EnqueueAudio(
 	if sink.sessionID() == "" {
 		return errors.New("audio sink has no active session")
 	}
-	return sink.scheduler.Enqueue(playback.Item{
+	voiceSession := sink.currentSession()
+	if voiceSession == nil {
+		return errors.New("audio sink has no active session")
+	}
+	sink.turnMu.Lock()
+	defer sink.turnMu.Unlock()
+	// A barge-in drops the session back to listening while a canceled turn may
+	// still be producing frames. Refusing non-listening conversation audio keeps
+	// that stale reply from resuming behind the child's new speech.
+	if priority == playback.PriorityConversation {
+		switch voiceSession.State() {
+		case session.StateThinking, session.StateSpeaking:
+		default:
+			return errors.New("audio sink session is not producing a reply")
+		}
+	}
+
+	item := playback.Item{
 		ItemID:        itemID,
 		Priority:      priority,
 		Payload:       pcmBytes(pcm),
 		Interruptible: interruptible,
 		OnPlayed:      onPlayed,
-	})
+	}
+	if priority == playback.PriorityConversation {
+		// Emit speaking before the first reply frame is schedulable so the wire
+		// order is always session_state=speaking followed by reply audio.
+		sink.markSpeaking(voiceSession)
+	}
+	// Pin the reply frame to the current turn. A barge-in bumps the epoch while
+	// holding turnMu, so SendAudio can drop any frame whose turn was canceled in
+	// the window between scheduler dequeue and socket write.
+	item.TurnEpoch = sink.turnEpoch.Load()
+	if err := sink.scheduler.Enqueue(item); err != nil {
+		return err
+	}
+	return nil
 }
 
 // SendAudio frames one encoded Opus payload for the device.
-func (sink *connectionAudioSink) SendAudio(payload []byte) error {
+//
+// turnEpoch is the reply turn that produced the frame. The barge-in path
+// advances sink.turnEpoch while holding turnMu, so a frame that was dequeued
+// just before the barge-in is dropped here instead of being written after the
+// child has already started a new utterance.
+func (sink *connectionAudioSink) SendAudio(payload []byte, turnEpoch uint64) error {
 	if sink == nil || sink.writer == nil {
 		return errors.New("audio sink is unavailable")
+	}
+	sink.turnMu.Lock()
+	stale := turnEpoch != 0 && turnEpoch != sink.turnEpoch.Load()
+	sink.turnMu.Unlock()
+	if stale {
+		return nil
 	}
 	sessionID := sink.sessionID()
 	if sessionID == "" {
@@ -641,6 +828,44 @@ func (sink *connectionAudioSink) SendAudio(payload []byte) error {
 		messageType: websocket.BinaryMessage,
 		payload:     encoded,
 	})
+}
+
+func (sink *connectionAudioSink) currentSession() *session.Session {
+	if sink == nil || sink.session == nil {
+		return nil
+	}
+	return sink.session()
+}
+
+func (sink *connectionAudioSink) markSpeaking(voiceSession *session.Session) {
+	if sink == nil || voiceSession == nil {
+		return
+	}
+	if voiceSession.State() != session.StateThinking {
+		return
+	}
+	if transitionErr := voiceSession.Transition(session.EventStartSpeaking); transitionErr != nil {
+		return
+	}
+	sink.notifyState(voiceSession, string(session.StateSpeaking))
+}
+
+// beginTurn marks the session thinking before the conversation handler runs.
+func (sink *connectionAudioSink) beginTurn(segment session.AudioSegment) {
+	if sink == nil || sink.onTurnStart == nil {
+		return
+	}
+	sink.onTurnStart(segment)
+}
+
+// completeTurn re-arms the session for the next utterance once the handler has
+// enqueued the whole reply. A barge-in or session end already moved the state,
+// so the callback is a no-op in those cases.
+func (sink *connectionAudioSink) completeTurn(segment session.AudioSegment) {
+	if sink == nil || sink.onTurnEnd == nil {
+		return
+	}
+	sink.onTurnEnd(segment)
 }
 
 func (s *Server) sendError(

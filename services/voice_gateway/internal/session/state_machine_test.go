@@ -32,3 +32,21 @@ func TestInvalidTransitionIsRejected(t *testing.T) {
 		t.Fatal("expected idle -> thinking to be rejected")
 	}
 }
+
+func TestFinishTurnReturnsThinkingToListening(t *testing.T) {
+	next, err := StateThinking.Transition(EventFinishTurn)
+	if err != nil {
+		t.Fatalf("thinking -> finish_turn failed: %v", err)
+	}
+	if next != StateListening {
+		t.Fatalf("expected thinking -> listening, got %s", next)
+	}
+}
+
+func TestFinishTurnIsRejectedWhileSpeaking(t *testing.T) {
+	// A turn that produced audio returns to listening via the speaking edge, so
+	// finish_turn must not silently skip it.
+	if _, err := StateSpeaking.Transition(EventFinishTurn); err == nil {
+		t.Fatal("expected speaking -> finish_turn to be rejected")
+	}
+}

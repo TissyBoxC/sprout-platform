@@ -40,9 +40,13 @@ func (s *fakeASRStream) Results() <-chan asr.Result {
 type fakeLLM struct {
 	reply string
 	err   error
+	// lastRequest captures the fully populated request the runner built so a
+	// test can prove device and session provenance reaches the AI gateway.
+	lastRequest llm.Request
 }
 
-func (f *fakeLLM) Chat(context.Context, llm.Request) (llm.Stream, error) {
+func (f *fakeLLM) Chat(_ context.Context, request llm.Request) (llm.Stream, error) {
+	f.lastRequest = request
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -148,6 +152,34 @@ func TestTurnRunsFullPipeline(t *testing.T) {
 	}
 	if sink.count() == 0 {
 		t.Fatal("Turn() sent no audio to the sink")
+	}
+}
+
+// The AI gateway attributes usage and applies its robot-specific degradation
+// contract from the request provenance. If the runner drops these labels the
+// voice path silently loses device attribution and the stable error shape.
+func TestTurnForwardsDeviceAndSessionProvenance(t *testing.T) {
+	config := testConfig()
+	llmClient := &fakeLLM{reply: "你好呀"}
+	config.LLM = llmClient
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := runner.Turn(
+		context.Background(),
+		"session_1",
+		"72453d1e-dce3-401a-96db-e96db54c9fd5",
+		[]int16{1, 2, 3, 4},
+		&recordingSink{},
+	); err != nil {
+		t.Fatalf("Turn() error = %v", err)
+	}
+	if llmClient.lastRequest.DeviceID != "72453d1e-dce3-401a-96db-e96db54c9fd5" {
+		t.Fatalf("DeviceID = %q, want the platform device id", llmClient.lastRequest.DeviceID)
+	}
+	if llmClient.lastRequest.SessionID != "session_1" {
+		t.Fatalf("SessionID = %q, want session_1", llmClient.lastRequest.SessionID)
 	}
 }
 

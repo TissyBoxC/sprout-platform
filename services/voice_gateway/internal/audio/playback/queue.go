@@ -48,6 +48,11 @@ type Item struct {
 	Payload       []byte
 	EnqueuedAt    time.Time
 	Interruptible bool
+	// TurnEpoch tags conversation audio with the reply turn that produced it.
+	// The frame sink uses it to drop frames whose turn a barge-in canceled in
+	// the window between dequeue and socket write. Zero means "untagged" for
+	// non-conversation audio such as safety announcements.
+	TurnEpoch uint64
 	// OnPlayed receives the gain-applied PCM immediately before Opus encoding.
 	// It is optional and must not block playback.
 	OnPlayed func([]int16)

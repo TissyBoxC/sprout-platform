@@ -16,7 +16,10 @@ var ErrInvalidPCMFrame = errors.New("playback item is not one PCM frame")
 
 // FrameSink receives one encoded Opus frame for the connected device.
 type FrameSink interface {
-	SendAudio(payload []byte) error
+	// SendAudio writes one encoded Opus frame. turnEpoch is the reply turn the
+	// frame belongs to; the sink MUST drop the frame when a barge-in has since
+	// advanced past that turn, so a canceled reply never reaches the speaker.
+	SendAudio(payload []byte, turnEpoch uint64) error
 }
 
 type frameEncoder interface {
@@ -271,7 +274,7 @@ func (s *Scheduler) play(item *Item) error {
 		item.OnPlayed(append([]int16(nil), pcm...))
 	}
 	s.mutex.Unlock()
-	return s.sink.SendAudio(encoded[:written])
+	return s.sink.SendAudio(encoded[:written], item.TurnEpoch)
 }
 
 func (s *Scheduler) fail(err error) {

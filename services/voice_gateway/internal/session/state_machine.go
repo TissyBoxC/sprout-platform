@@ -19,7 +19,10 @@ const (
 	EventStartListening Event = "start_listening"
 	EventStartThinking  Event = "start_thinking"
 	EventStartSpeaking  Event = "start_speaking"
-	EventReset          Event = "reset"
+	// EventFinishTurn returns a session to listening after a turn produced no
+	// reply audio; a turn that did speak finishes via EventStartListening.
+	EventFinishTurn Event = "finish_turn"
+	EventReset      Event = "reset"
 )
 
 // Transition applies one event and returns the next session state.
@@ -39,6 +42,10 @@ func (s State) Transition(event Event) (State, error) {
 	case EventStartSpeaking:
 		if s == StateThinking {
 			return StateSpeaking, nil
+		}
+	case EventFinishTurn:
+		if s == StateThinking {
+			return StateListening, nil
 		}
 	case EventReset:
 		return StateIdle, nil

@@ -139,7 +139,7 @@ func (r *Runner) Turn(ctx context.Context, sessionID string, deviceID string, pc
 		}
 	}
 
-	reply, err := r.reply(ctx, sessionID, text)
+	reply, err := r.reply(ctx, sessionID, deviceID, text)
 	if err != nil {
 		return err
 	}
@@ -192,11 +192,13 @@ func (r *Runner) transcribe(ctx context.Context, pcm []int16) (string, error) {
 	return builder.String(), nil
 }
 
-func (r *Runner) reply(ctx context.Context, sessionID string, text string) (string, error) {
+func (r *Runner) reply(ctx context.Context, sessionID string, deviceID string, text string) (string, error) {
 	messages := r.appendUserMessage(sessionID, text)
 	stream, err := r.config.LLM.Chat(ctx, llm.Request{
-		Model:    r.config.Model,
-		Messages: messages,
+		Model:     r.config.Model,
+		Messages:  messages,
+		DeviceID:  deviceID,
+		SessionID: sessionID,
 	})
 	if err != nil {
 		return "", fmt.Errorf("start chat: %w", err)

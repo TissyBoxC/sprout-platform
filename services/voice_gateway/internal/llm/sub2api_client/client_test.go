@@ -61,6 +61,67 @@ func TestChatStreamsOpenAIContent(t *testing.T) {
 	}
 }
 
+// The AI gateway only recognizes robot traffic and applies its stable
+// degradation contract when the X-Sprout-* provenance headers are present.
+func TestChatSendsSproutProvenanceHeaders(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if got := request.Header.Get("X-Sprout-Device-ID"); got != "72453d1e-dce3-401a-96db-e96db54c9fd5" {
+			t.Errorf("X-Sprout-Device-ID = %q", got)
+		}
+		if got := request.Header.Get("X-Sprout-Session-ID"); got != "session_1" {
+			t.Errorf("X-Sprout-Session-ID = %q", got)
+		}
+		if got := request.Header.Get("X-Sprout-Project"); got != "voice" {
+			t.Errorf("X-Sprout-Project = %q", got)
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte("data: [DONE]\n"))
+	}))
+	defer server.Close()
+
+	client := New(server.URL, "secret")
+	stream, err := client.Chat(context.Background(), llm.Request{
+		Model:     "sprout-chat",
+		Messages:  []llm.Message{{Role: "user", Content: "你好"}},
+		DeviceID:  "72453d1e-dce3-401a-96db-e96db54c9fd5",
+		SessionID: "session_1",
+	})
+	if err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
+
+// A request without provenance must not invent labels: an untagged call keeps
+// the gateway's legacy behavior and cannot attribute usage to a fake device.
+func TestChatOmitsProvenanceWhenUnset(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if got := request.Header.Get("X-Sprout-Device-ID"); got != "" {
+			t.Errorf("X-Sprout-Device-ID = %q, want empty", got)
+		}
+		if got := request.Header.Get("X-Sprout-Session-ID"); got != "" {
+			t.Errorf("X-Sprout-Session-ID = %q, want empty", got)
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte("data: [DONE]\n"))
+	}))
+	defer server.Close()
+
+	client := New(server.URL, "secret")
+	stream, err := client.Chat(context.Background(), llm.Request{
+		Model:    "sprout-chat",
+		Messages: []llm.Message{{Role: "user", Content: "你好"}},
+	})
+	if err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
+
 func TestChatReturnsProviderStatusSynchronously(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		http.Error(writer, "upstream unavailable", http.StatusBadGateway)

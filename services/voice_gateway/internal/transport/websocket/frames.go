@@ -19,6 +19,7 @@ const (
 
 	controlTypeSessionStart   = "session_start"
 	controlTypeSessionStarted = "session_started"
+	controlTypeSessionState   = "session_state"
 	controlTypeWakeDetected   = "wake_detected"
 	controlTypeSessionEnd     = "session_end"
 	controlTypeSessionClosed  = "session_closed"
@@ -85,6 +86,13 @@ var allowedErrorCodes = map[string]struct{}{
 	errorCodeInternal:        {},
 }
 
+var allowedSessionStates = map[string]struct{}{
+	"idle":      {},
+	"listening": {},
+	"thinking":  {},
+	"speaking":  {},
+}
+
 // ControlFrame is one JSON control message in the realtime voice contract.
 //
 // Fields mirror packages/contracts/schemas/voice_control.schema.json exactly.
@@ -93,6 +101,7 @@ var allowedErrorCodes = map[string]struct{}{
 type ControlFrame struct {
 	SchemaVersion   string   `json:"schema_version"`
 	Type            string   `json:"type"`
+	State           string   `json:"state,omitempty"`
 	SessionID       string   `json:"session_id"`
 	DeviceID        string   `json:"device_id"`
 	SentAt          string   `json:"sent_at"`
@@ -214,6 +223,8 @@ func (control ControlFrame) Validate() error {
 		return control.validateSessionStart()
 	case controlTypeSessionStarted:
 		return control.validateSessionStarted()
+	case controlTypeSessionState:
+		return control.validateSessionState()
 	case controlTypeWakeDetected:
 		return control.validateWakeDetected()
 	case controlTypeSessionEnd, controlTypeSessionClosed, controlTypeCancel:
@@ -268,6 +279,13 @@ func (control ControlFrame) validateSessionStart() error {
 func (control ControlFrame) validateSessionStarted() error {
 	if _, err := time.Parse(time.RFC3339Nano, control.ExpiresAt); err != nil {
 		return fmt.Errorf("session_started expires_at is invalid: %w", err)
+	}
+	return nil
+}
+
+func (control ControlFrame) validateSessionState() error {
+	if _, ok := allowedSessionStates[control.State]; !ok {
+		return fmt.Errorf("session_state state is invalid: %q", control.State)
 	}
 	return nil
 }

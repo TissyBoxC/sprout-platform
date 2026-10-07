@@ -20,7 +20,7 @@ func newRecordingFrameSink() *recordingFrameSink {
 	return &recordingFrameSink{signal: make(chan struct{}, 64)}
 }
 
-func (s *recordingFrameSink) SendAudio(payload []byte) error {
+func (s *recordingFrameSink) SendAudio(payload []byte, _ uint64) error {
 	s.mutex.Lock()
 	s.payload = append(s.payload, append([]byte(nil), payload...))
 	s.mutex.Unlock()
@@ -115,7 +115,7 @@ func (encoder *countingEncoder) EncodePCM(_ []int16, destination []byte) (int, e
 
 type failingSink struct{}
 
-func (failingSink) SendAudio([]byte) error {
+func (failingSink) SendAudio([]byte, uint64) error {
 	return errors.New("sink failed")
 }
 

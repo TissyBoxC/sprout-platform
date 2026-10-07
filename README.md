@@ -53,8 +53,8 @@ AI 网关 fork 保持独立仓库，不在本仓库中重复版本化。
 | P0-02 | 音频输入 | `audio_codec`、`audio_pipeline`、`voice_gateway` | `[已实现]` | 固件实现 16 kHz 单声道 Opus 编解码、I2S 采集、后置降噪/回声消除/增益校准与 VAD 分段，并支持扬声器参考回采；语音网关实现设备短期令牌鉴权、实时 WebSocket 音频会话、Opus 解码、环形缓冲、入站降噪/回声消除/增益校准、自适应 VAD 分段、ASR/LLM/TTS 适配器与对话闭环，以及语音控制帧契约和稳定错误码。 |
 | P0-03 | 音频输出 | `audio_output`、`playback_queue`、`volume_control`、`prompt_tone`、`voice_gateway` | `[已实现]` | 固件实现按优先级的多路混音输出、监护人音量上限、静音保护安全提示音、本地提示音叠加和回采参考；语音网关把 TTS 回复接入按连接调度、支持抢占恢复、暂停、静音和清理的播放队列，并以稳定音频错误码上报混音失败。 |
 | P0-04 | 语音唤醒 | `voice_wake`、`wake_feedback`、`voice_gateway` | `[已实现]` | 固件实现唤醒词检测、误唤醒抑制、唤醒反馈、本地提示音和 LED 状态；唤醒事件经脱敏心跳上报，语音网关接收并校验设备唤醒控制帧。 |
-| P0-05 | 语音会话 | `voice_session`、`asr_client`、`llm_client`、`tts_client`、`voice_gateway` | `[部分实现]` | 已实现设备 WebSocket 实时音频服务、会话生命周期与空闲/时长超时、ASR/LLM/TTS 供应商适配、多轮上下文与内容策略校验，并把合成语音回传设备；唤醒词触发、播放中的双向打断（barge-in）和连续对话尚待实现。 |
-| P0-06 | AI 对话 | `conversation_context`、`child_prompt_profile`、`voice_gateway`、`sub2api_fork` | `[未实现]` | `sub2api` 客户端仍为空实现，未实现多轮上下文、儿童提示词、超时、降级和合规策略。 |
+| P0-05 | 语音会话 | `voice_session`、`voice_gateway` | `[已实现]` | 设备用平台签发的短期令牌连接语音网关实时音频端点；唤醒词可直接建立监听会话，网关驱动 listening → thinking → speaking → listening 的连续多轮状态机并在每步下发 `session_state` 控制帧，播放中检测到儿童发言会立即清空当前回复回到监听（barge-in，安全提示音保留），空闲与时长超时结束会话；固件 `voice_session` 负责 WSS 传输、SRAW/SRSV 编解码、与 `audio_input`/`playback_queue` 的采集和播放联动。 |
+| P0-06 | AI 对话 | `conversation_context`、`child_prompt_profile`、`voice_gateway`、`sub2api_fork` | `[已实现]` | 语音网关 `sub2api_client` 提供流式 OpenAI 兼容对话、重试与稳定错误映射，并按会话保留有界多轮上下文；`conversation_context` 在设备侧保存有界回合摘要与状态镜像，`child_prompt_profile` 持久化年龄层/内容等级并在会话建立时下发；`sub2api_fork` 在完成与模型接口上校验设备来源标签、模型白名单、配额与降级，并把脱敏调用统计写入审计。 |
 | P0-07 | 内容 | 内容库、故事、儿歌、古诗、英语、百科、睡前、分龄模块 | `[未实现]` | 仅有共享内容包 Schema，没有内容生产、审核、发布、下发、缓存和播放闭环。 |
 | P0-08 | 联网 | `network_manager`、`device_provisioning`、`time_sync`、`cloud_auth`、`device_runtime_reporter` | `[部分实现]` | 固件已实现 BLE 配网、设备绑定、时间同步、网络质量、离线兜底、云端鉴权和运行态上报；平台侧的配网审计、鉴权吊销和完整断网恢复闭环未完成。 |
 | P0-09 | 家长控制 | `parent_link`、`parent_policy`、`usage_report` | `[未实现]` | 未实现设备绑定、内容等级、使用时长、禁用时段、策略下发和使用报告。 |

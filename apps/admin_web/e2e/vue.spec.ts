@@ -1061,3 +1061,193 @@ test('recovers the device diagnostics page from list and detail failures', async
   await expect(page.getByText('运行正常', { exact: true }).first()).toBeVisible()
   expect(diagnosticsRequests).toBe(2)
 })
+
+test('manages the content library lifecycle from draft to published', async ({ page }) => {
+  await useAdminSession(page)
+
+  // The list endpoint returns one row per package version, mirroring the Go
+  // domain so the client can fold versions into a package.
+  const storyVersion = () => ({
+    package_id: 'content_story_001',
+    package_version: 1,
+    title: '小兔子的一天',
+    category: 'story',
+    age_tiers: ['age_3_4'],
+    asset_key: '1.0.0/stable/all/resource/story-001.zip',
+    sha256: 'a'.repeat(64),
+    size_bytes: 2048,
+    status: 'draft',
+    created_at: '2026-10-05T02:00:00Z',
+    updated_at: '2026-10-05T02:00:00Z',
+  })
+  let rows = [storyVersion()]
+  const history: Record<string, unknown>[] = []
+  let createPayload = ''
+  const rejectPayloads: string[] = []
+  const downloads = [
+    {
+      file_name: 'story-001.zip',
+      relative_path: '1.0.0/stable/all/resource/story-001.zip',
+      directory: '1.0.0/stable/all/resource',
+      size_bytes: 2048,
+      sha256: 'a'.repeat(64),
+      download_url:
+        'https://download.example.test/1.0.0/stable/all/resource/story-001.zip',
+      is_indexed: true,
+    },
+  ]
+
+  await page.route('**/api/v1/admin/content/packages**', async (route) => {
+    const request = route.request()
+    const requestUrl = new URL(request.url())
+    const path = requestUrl.pathname
+
+    if (path === '/api/v1/admin/content/packages' && request.method() === 'GET') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: { packages: rows, page: 1, page_size: 20, total: rows.length },
+        }),
+      })
+      return
+    }
+    if (path === '/api/v1/admin/content/packages' && request.method() === 'POST') {
+      createPayload = request.postData() ?? ''
+      const created = {
+        package_id: 'content_story_002',
+        package_version: 1,
+        title: '小熊的清晨',
+        category: 'story',
+        age_tiers: ['age_5_6'],
+        asset_key: '1.0.0/stable/all/resource/story-001.zip',
+        sha256: 'a'.repeat(64),
+        size_bytes: 2048,
+        status: 'draft',
+        created_at: '2026-10-05T03:00:00Z',
+        updated_at: '2026-10-05T03:00:00Z',
+      }
+      rows = [...rows, created]
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { package: created } }),
+      })
+      return
+    }
+
+    // Detail is the only read for a single package; actions return one version.
+    const segments = path.split('/')
+    const versionIndex = segments.indexOf('versions')
+    if (versionIndex === -1) {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            package_id: 'content_story_001',
+            versions: rows.filter((row) => row.package_id === 'content_story_001'),
+            history,
+          },
+        }),
+      })
+      return
+    }
+    const action = segments[segments.length - 1]
+    const current = rows[0]
+    if (action === 'reject') {
+      rejectPayloads.push(request.postData() ?? '')
+      current.status = 'draft'
+      history.push({
+        package_version: 1,
+        action: 'reject',
+        reason: '音频有杂音，请重新录制。',
+        actor_account_id: 'test-admin',
+        created_at: '2026-10-05T03:30:00Z',
+      })
+    } else if (action === 'submit') {
+      current.status = 'in_review'
+      history.push({
+        package_version: 1,
+        action: 'submit',
+        reason: '',
+        actor_account_id: 'test-admin',
+        created_at: '2026-10-05T03:40:00Z',
+      })
+    } else if (action === 'publish') {
+      current.status = 'published'
+      history.push({
+        package_version: 1,
+        action: 'publish',
+        reason: '',
+        actor_account_id: 'test-admin',
+        created_at: '2026-10-05T03:50:00Z',
+      })
+    }
+    rows = [current, ...rows.slice(1)]
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { package: current } }),
+    })
+  })
+
+  await page.route('**/api/v1/admin/storage/files**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { files: downloads } }),
+    })
+  })
+
+  await page.goto('/content')
+
+  await expect(page.getByRole('heading', { name: '内容库' })).toBeVisible()
+  await expect(page.locator('table tbody tr')).toHaveCount(1)
+  await expect(page.getByText('小兔子的一天', { exact: true })).toBeVisible()
+  await expect(page.getByText('草稿', { exact: true }).first()).toBeVisible()
+
+  await page.getByRole('button', { name: '新建内容' }).click()
+  const createDialog = page.getByRole('dialog', { name: '新建内容草稿' })
+  await expect(createDialog).toBeVisible()
+  await createDialog.getByLabel('内容编号').fill('content_story_002')
+  await createDialog.getByLabel('标题').fill('小熊的清晨')
+  await createDialog.getByText('5-6 岁').click()
+  await createDialog.getByRole('button', { name: '选择下载文件' }).click()
+  await createDialog.getByLabel('选择已经上传的文件').selectOption(
+    '1.0.0/stable/all/resource/story-001.zip',
+  )
+  await expect(createDialog.getByLabel('校验值')).toHaveValue('a'.repeat(64))
+  await expect(createDialog.getByLabel('文件大小（字节）')).toHaveValue('2048')
+  await createDialog.getByRole('button', { name: '创建草稿' }).click()
+
+  await expect(page.getByText('内容草稿已创建。')).toBeVisible()
+  expect(createPayload).toContain('"package_id":"content_story_002"')
+  expect(createPayload).toContain('"category":"story"')
+  expect(createPayload).toContain('"age_tiers":["age_5_6"]')
+  expect(createPayload).toContain(`"sha256":"${'a'.repeat(64)}"`)
+
+  await expect(page.locator('table tbody tr')).toHaveCount(2)
+  await page.getByRole('button', { name: '管理' }).first().click()
+  const drawer = page.getByRole('dialog', { name: '小兔子的一天' })
+  await expect(drawer).toBeVisible()
+  await expect(page.getByRole('heading', { name: '第 1 版' })).toBeVisible()
+  await expect(page.getByText('还没有审核记录。')).toBeVisible()
+
+  await page.getByRole('button', { name: '审核驳回' }).click()
+  const rejectDialog = page.getByRole('dialog', { name: '驳回第 1 版？' })
+  await expect(rejectDialog).toBeVisible()
+  await rejectDialog.getByRole('button', { name: '确认驳回' }).click()
+  await expect(
+    rejectDialog.getByText('请填写驳回理由，便于作者修改后再提交。'),
+  ).toBeVisible()
+  expect(rejectPayloads).toHaveLength(0)
+  await rejectDialog.getByLabel('驳回理由').fill('音频有杂音，请重新录制。')
+  await rejectDialog.getByRole('button', { name: '确认驳回' }).click()
+  await expect(page.getByText('已驳回该版本。')).toBeVisible()
+  expect(rejectPayloads[0]).toContain('音频有杂音，请重新录制。')
+
+  await page.getByRole('button', { name: '提交审核' }).click()
+  await expect(page.getByText('已提交审核。')).toBeVisible()
+  await expect(page.getByText('待审核', { exact: true }).first()).toBeVisible()
+
+  await page.getByRole('button', { name: '发布' }).click()
+  await expect(page.getByText('内容已发布。')).toBeVisible()
+  await expect(page.getByText('已发布', { exact: true }).first()).toBeVisible()
+})

@@ -34,8 +34,8 @@ tooling. Firmware and the AI gateway fork remain independent repositories.
 
 ## Current Status
 
-The repository version is `0.13.0` and is in the foundation-layer phase where
-recording, playback, wake, and device interaction are closed loops. Status is
+The repository version is `0.14.0` and is in the foundation-layer phase where
+recording, playback, wake, device interaction, and the content library are closed loops. Status is
 based on an accepted end-to-end capability, not on the presence of a directory,
 interface, or placeholder file.
 
@@ -61,7 +61,7 @@ order and never removes a capability.
 | P0-04 | Voice wake | `voice_wake`, `wake_feedback`, `voice_gateway` | `[Implemented]` | The firmware detects the wake word, suppresses false triggers, provides local feedback, tones, and LED state, and reports redacted wake events in the heartbeat; the voice gateway validates device wake control frames. |
 | P0-05 | Voice session | `voice_session`, `voice_gateway` | `[Implemented]` | The device connects with a short-lived platform-issued token; a wake word can establish the listening session directly, the gateway drives a continuous listening to thinking to speaking to listening state machine and emits a `session_state` frame at each step, child speech during playback clears the current reply and returns to listening (barge-in, safety announcements preserved), and idle or duration limits end the session; firmware `voice_session` owns the WSS transport, SRAW/SRSV envelope handling, and audio capture/playback integration. |
 | P0-06 | AI conversation | `conversation_context`, `child_prompt_profile`, `voice_gateway`, `sub2api_fork` | `[Implemented]` | The gateway `sub2api_client` streams OpenAI-compatible replies with retries and stable error mapping and keeps bounded per-session multi-turn context; firmware `conversation_context` stores bounded turn summaries and state mirroring, `child_prompt_profile` persists the age tier/content level and sends it at session start, and `sub2api_fork` validates the device origin tag, model allowlist, quota, and degradation on the completion and models routes and records redacted usage into the audit log. |
-| P0-07 | Content | Content library, stories, nursery rhymes, poetry, English, encyclopedia, bedtime, age tiers | `[Not implemented]` | Only shared content-package schemas exist. Production, review, publishing, delivery, caching, and playback are missing. |
+| P0-07 | Content | Content library, stories, nursery rhymes, poetry, English, encyclopedia, bedtime, age tiers | `[Implemented]` | The platform supports content drafts, review submission, approval or rejection, publishing, withdrawal, archival, and review history, verifies the asset SHA-256 on publish, and advances an atomic catalog revision; the parent app syncs incrementally by age tier and category, verifies downloads, caches packages, and removes withdrawn items; the admin console exposes the full content workflow; the firmware pulls the incremental device manifest with its session token, resumes downloads, verifies SHA-256, commits packages atomically to SPIFFS, and plays them at ambient priority. |
 | P0-08 | Connectivity | `network_manager`, `device_provisioning`, `time_sync`, `cloud_auth`, `device_runtime_reporter` | `[Partial]` | The firmware implements BLE provisioning, device binding, time sync, network quality, offline fallback, cloud authentication, and runtime reporting. Platform-side provisioning audit, credential revocation, and a complete offline-recovery loop remain. |
 | P0-09 | Parent control | `parent_link`, `parent_policy`, `usage_report` | `[Not implemented]` | Device binding, content level, usage duration, blocked periods, policy delivery, and reports are missing. |
 | P0-10 | Security and privacy | `privacy_guard`, `content_filter`, `transport_security`, platform and voice security modules | `[Partial]` | Mutual MQTT TLS, certificate validation, request labels, log redaction, secure defaults, and contract validation exist. Identity, authorization, moderation, deletion, and consent flows remain incomplete. |
@@ -100,7 +100,7 @@ order and never removes a capability.
 
 | Layer | Scope | Status | Notes |
 | --- | --- | --- | --- |
-| Foundation | Provisioning, wake, recording/playback, AI conversation, content, parent control, OTA | `[Partial]` | Audio capture, playback, wake, and device interaction flows exist. AI conversation, content, parent control, and OTA remain incomplete. |
+| Foundation | Provisioning, wake, recording/playback, AI conversation, content, parent control, OTA | `[Partial]` | Audio capture, playback, wake, device interaction, AI conversation, and the content library exist. Parent control and OTA remain incomplete. |
 | Mainstream | Continuous conversation, content operations, companionship, English, remote messages, offline fallback, diagnostics, camera | `[Not implemented]` | Except for log redaction, no usable end-to-end flow exists yet. |
 | Differentiated | Display, touch, eye care, cellular, battery, motion, video, location, multi-device | `[Not implemented]` | Directories and plans are not implementation. Every capability still needs modular, capability-based delivery. |
 

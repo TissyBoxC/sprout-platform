@@ -7,6 +7,7 @@ import '../../features/auth/presentation/bind_email_page.dart';
 import '../../features/auth/presentation/login_page.dart';
 import '../../features/auth/presentation/register_page.dart';
 import '../../features/child_profile/presentation/child_profile_page.dart';
+import '../../features/content_management/presentation/content_library_page.dart';
 import '../../features/device/presentation/device_list_page.dart';
 import '../../features/device/domain/device_payload.dart';
 import '../../features/device/presentation/device_provisioning_page.dart';
@@ -57,6 +58,10 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/update',
         builder: (context, state) => const AppUpdatePage(),
+      ),
+      GoRoute(
+        path: '/me/content',
+        builder: (context, state) => const ContentLibraryPage(),
       ),
       GoRoute(
         path: '/me/children',

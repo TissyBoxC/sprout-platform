@@ -24,6 +24,8 @@ import (
 	authService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
 	childRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/repository"
 	childService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
+	contentRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/repository"
+	contentService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/service"
 	bindingRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/repository"
 	bindingService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 	runtimeRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/repository"
@@ -208,6 +210,13 @@ func Run() error {
 	}
 	defer releaseStore.Close()
 	operations.SetArtifactStore(releaseArtifactStoreAdapter{store: releaseStore})
+	contentLibraryService, err := contentService.New(contentService.Options{
+		Repository:  contentRepository.NewPostgresRepository(databaseStore.Pool()),
+		AssetReader: contentAssetReader{store: releaseStore},
+	})
+	if err != nil {
+		return fmt.Errorf("create content library service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
@@ -224,6 +233,7 @@ func Run() error {
 			DiagnosticService:     diagnosticService,
 			ServiceVersionService: serviceVersions,
 			ReleaseStoreService:   releaseStore,
+			ContentService:        contentLibraryService,
 			VoiceTokenIssuer:      voiceTokenIssuer,
 			VoiceWebSocketURL:     cfg.VoiceGateway.WebSocketURL,
 		}),

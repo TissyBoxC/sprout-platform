@@ -13,8 +13,7 @@
     "age_tiers",
     "asset_key",
     "sha256",
-    "size_bytes",
-    "published_at"
+    "size_bytes"
   ],
   "properties": {
     "schema_version": {
@@ -55,7 +54,37 @@
       "minimum": 1,
       "maximum": 4294967296
     },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "in_review",
+        "published",
+        "withdrawn",
+        "archived"
+      ]
+    },
+    "submitted_at": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    },
+    "approved_at": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    },
+    "approved_by": {
+      "type": "string",
+      "maxLength": 128
+    },
     "published_at": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    },
+    "catalog_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "created_at": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
       "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
     }
   }

@@ -73,6 +73,7 @@ class ProfilePage extends ConsumerWidget {
                   child: _SettingsCard(
                     account: account,
                     onChildren: () => context.push('/me/children'),
+                    onContent: () => context.push('/me/content'),
                     onEmail: () => context.push('/account/email'),
                     onUpdate: () => context.push('/me/update'),
                     onLogout: () => _confirmLogout(context, ref),
@@ -401,6 +402,7 @@ class _SettingsCard extends StatelessWidget {
   const _SettingsCard({
     required this.account,
     required this.onChildren,
+    required this.onContent,
     required this.onEmail,
     required this.onUpdate,
     required this.onLogout,
@@ -408,6 +410,7 @@ class _SettingsCard extends StatelessWidget {
 
   final ParentAccount account;
   final VoidCallback onChildren;
+  final VoidCallback onContent;
   final VoidCallback onEmail;
   final VoidCallback onUpdate;
   final VoidCallback onLogout;
@@ -425,6 +428,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('管理宝贝资料、兴趣和使用边界'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onChildren,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.auto_stories_outlined),
+            title: const Text('内容管理'),
+            subtitle: const Text('挑选和下载故事、儿歌与学习内容'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onContent,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

@@ -18,6 +18,7 @@ import (
 	audithandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/handler"
 	authservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
 	childservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
+	contentservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/service"
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
 	operationsservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
@@ -40,6 +41,7 @@ type RouterOptions struct {
 	DiagnosticService     auditService
 	ServiceVersionService *serviceversionservice.Service
 	ReleaseStoreService   *releasestoreservice.Service
+	ContentService        *contentservice.Service
 	VoiceTokenIssuer      bindingservice.VoiceTokenIssuer
 	VoiceWebSocketURL     string
 }
@@ -394,6 +396,86 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 			}
 		}
+		if options.ContentService != nil {
+			contentHandler := contentHandler{service: options.ContentService}
+			mux.HandleFunc(
+				"GET /api/v1/admin/content/packages",
+				authHandler.requireAdmin(contentHandler.listPackages),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/content/packages",
+				authHandler.requireAdmin(contentHandler.createPackage),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/admin/content/packages/{package_id}",
+				authHandler.requireAdmin(contentHandler.getPackage),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/content/packages/{package_id}/versions",
+				authHandler.requireAdmin(contentHandler.createPackageVersion),
+			)
+			mux.HandleFunc(
+				"PUT /api/v1/admin/content/packages/{package_id}/versions/{package_version}",
+				authHandler.requireAdmin(contentHandler.updatePackage),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/submit",
+				authHandler.requireAdmin(contentHandler.submitPackage),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/approve",
+				authHandler.requireAdmin(contentHandler.approvePackage),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/reject",
+				authHandler.requireAdmin(contentHandler.rejectPackage),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/publish",
+				authHandler.requireAdmin(contentHandler.publishPackage),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/withdraw",
+				authHandler.requireAdmin(contentHandler.withdrawPackage),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/archive",
+				authHandler.requireAdmin(contentHandler.archivePackage),
+			)
+		}
+	}
+
+	if options.ContentService != nil {
+		contentHandler := contentHandler{service: options.ContentService}
+		// The parent app reads the catalog with a guardian session.
+		if options.AuthService != nil {
+			authHandler := authHandler{service: options.AuthService}
+			mux.HandleFunc(
+				"GET /api/v1/content/catalog",
+				authHandler.requireAuthentication(contentHandler.catalog),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/content/packages/{package_id}/download",
+				authHandler.requireAuthentication(contentHandler.download),
+			)
+		}
+		// Firmware devices never receive a guardian credential, so the same
+		// manifest and download lookup are also exposed behind a device
+		// session token verified with the path device id.
+		if options.BindingService != nil {
+			deviceHandler := deviceContentHandler{
+				contentHandler: contentHandler,
+				bindingService: options.BindingService,
+			}
+			mux.HandleFunc(
+				"GET /api/v1/devices/{device_id}/content/catalog",
+				deviceHandler.catalog,
+			)
+			mux.HandleFunc(
+				"GET /api/v1/devices/{device_id}/content/packages/{package_id}/download",
+				deviceHandler.download,
+			)
+		}
 	}
 
 	if options.InternalAPIConfig.Enabled {
@@ -436,6 +518,23 @@ func NewRouter(options RouterOptions) http.Handler {
 				requireServiceToken(
 					options.InternalAPIConfig.AuthToken,
 					http.HandlerFunc(internalHandler.effectivePolicies),
+				),
+			)
+		}
+		if options.ContentService != nil {
+			contentHandler := contentHandler{service: options.ContentService}
+			mux.Handle(
+				"GET /internal/v1/content/catalog",
+				requireServiceToken(
+					options.InternalAPIConfig.AuthToken,
+					http.HandlerFunc(contentHandler.catalog),
+				),
+			)
+			mux.Handle(
+				"GET /internal/v1/content/packages/{package_id}/download",
+				requireServiceToken(
+					options.InternalAPIConfig.AuthToken,
+					http.HandlerFunc(contentHandler.download),
 				),
 			)
 		}

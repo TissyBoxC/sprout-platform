@@ -10,6 +10,7 @@ import ReleasePage from '@/features/ota/presentation/ReleasePage.vue'
 import SystemSettingsPage from '@/features/system/presentation/SystemSettingsPage.vue'
 import VersionManagementPage from '@/features/version_management/presentation/VersionManagementPage.vue'
 import DownloadFilesPage from '@/features/downloads/presentation/DownloadFilesPage.vue'
+import ContentLibraryPage from '@/features/content/presentation/ContentLibraryPage.vue'
 import DeviceDiagnosticsPage from '@/features/audit/presentation/DeviceDiagnosticsPage.vue'
 import { useAuthStore } from '@/features/auth/application/authStore'
 
@@ -53,6 +54,11 @@ export function createAdminRouter() {
         path: '/downloads',
         name: 'downloads',
         component: DownloadFilesPage,
+      },
+      {
+        path: '/content',
+        name: 'content',
+        component: ContentLibraryPage,
       },
       {
         path: '/services',

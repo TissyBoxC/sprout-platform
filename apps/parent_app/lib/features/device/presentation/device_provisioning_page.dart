@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:esp_provisioning_wifi/esp_provisioning_wifi.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/error/app_exception.dart';
+import '../../../core/theme/app_motion.dart';
+import '../../../shared/widgets/app_reveal.dart';
 import '../../../shared/widgets/app_state_switcher.dart';
 import '../application/device_binding_controller.dart';
 import '../data/device_binding_api.dart';
@@ -22,6 +26,13 @@ class DeviceProvisioningPage extends ConsumerStatefulWidget {
 
 enum _ProvisioningStep { finding, wifi, password, binding, done }
 
+enum _ProvisioningStage {
+  bluetoothConnection,
+  sendingWifi,
+  waitingForNetwork,
+  confirmingBinding,
+}
+
 class _DeviceProvisioningPageState
     extends ConsumerState<DeviceProvisioningPage> {
   _ProvisioningStep _step = _ProvisioningStep.finding;
@@ -31,19 +42,41 @@ class _DeviceProvisioningPageState
   String? _selectedSSID;
   String? _errorMessage;
   BoundDevice? _completedBinding;
+  _ProvisioningStage? _activeStage;
+  _ProvisioningStage? _failedStage;
+  bool _isLeaving = false;
+  late final DeviceBindingController _controller;
   final _passwordController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    _controller = ref.read(deviceBindingControllerProvider.notifier);
     _findDevice();
   }
 
   @override
   void dispose() {
     _passwordController.dispose();
-    ref.read(deviceBindingControllerProvider.notifier).cancelProvisioning();
+    unawaited(_controller.cancelProvisioning());
     super.dispose();
+  }
+
+  Future<void> _leave() async {
+    if (_isLeaving) {
+      return;
+    }
+    _isLeaving = true;
+    await _controller.cancelProvisioning();
+    if (!mounted) {
+      return;
+    }
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop();
+      return;
+    }
+    context.go('/devices');
   }
 
   Future<void> _findDevice() async {
@@ -52,9 +85,7 @@ class _DeviceProvisioningPageState
       _errorMessage = null;
     });
     try {
-      final devices = await ref
-          .read(deviceBindingControllerProvider.notifier)
-          .scanProvisioningDevices();
+      final devices = await _controller.scanProvisioningDevices();
       if (!mounted) {
         return;
       }
@@ -80,9 +111,7 @@ class _DeviceProvisioningPageState
       _networks = const [];
     });
     try {
-      final networks = await ref
-          .read(deviceBindingControllerProvider.notifier)
-          .scanWifiNetworks(widget.setup);
+      final networks = await _controller.scanWifiNetworks(widget.setup);
       if (!mounted) {
         return;
       }
@@ -117,77 +146,136 @@ class _DeviceProvisioningPageState
     setState(() {
       _step = _ProvisioningStep.binding;
       _errorMessage = null;
+      _activeStage = _ProvisioningStage.sendingWifi;
+      _failedStage = null;
     });
     try {
-      await ref
-          .read(deviceBindingControllerProvider.notifier)
-          .provisionWifi(
-            setup: widget.setup,
-            ssid: ssid,
-            password: _passwordController.text,
+      await _controller.provisionWifi(
+        setup: widget.setup,
+        ssid: ssid,
+        password: _passwordController.text,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _activeStage = _ProvisioningStage.waitingForNetwork;
+        _failedStage = null;
+      });
+      await _confirmBinding();
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _failedStage = _activeStage ?? _ProvisioningStage.sendingWifi;
+          _errorMessage = _messageForStage(
+            error,
+            _failedStage ?? _ProvisioningStage.sendingWifi,
           );
-      final bindingPayload = await ref
-          .read(deviceBindingControllerProvider.notifier)
-          .readBindingPayload(widget.setup);
-      final binding = await ref
-          .read(deviceBindingControllerProvider.notifier)
-          .bindToken(
-            token: bindingPayload.bindingToken,
-            deviceName: bindingPayload.deviceName,
-          );
+        });
+      }
+    }
+  }
+
+  Future<void> _confirmBinding() async {
+    try {
+      final binding = await _controller.bindProvisionedDevice(
+        setup: widget.setup,
+      );
       if (mounted) {
         setState(() {
           _completedBinding = binding;
+          _activeStage = null;
           _step = _ProvisioningStep.done;
         });
       }
     } on Object catch (error) {
       if (mounted) {
         setState(() {
-          _step = _ProvisioningStep.password;
-          _errorMessage = _messageFor(error);
+          _failedStage = _activeStage ?? _ProvisioningStage.waitingForNetwork;
+          _errorMessage = _messageForStage(
+            error,
+            _failedStage ?? _ProvisioningStage.waitingForNetwork,
+          );
         });
       }
     }
   }
 
+  Future<void> _retryFailedStage() async {
+    final stage = _failedStage;
+    setState(() {
+      _errorMessage = null;
+      _failedStage = null;
+    });
+    switch (stage) {
+      case _ProvisioningStage.bluetoothConnection:
+        await _findDevice();
+      case _ProvisioningStage.sendingWifi:
+        await _connect();
+      case _ProvisioningStage.waitingForNetwork:
+      case _ProvisioningStage.confirmingBinding:
+        await _confirmBinding();
+      case null:
+        await _connect();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('连接新设备')),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: AppStateSwitcher(
-            stateKey: _step,
-            child: switch (_step) {
-              _ProvisioningStep.finding => KeyedSubtree(
-                key: const ValueKey<_ProvisioningStep>(
-                  _ProvisioningStep.finding,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          _leave();
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('连接新设备'),
+          leading: IconButton(
+            tooltip: '返回',
+            onPressed: _leave,
+            icon: const Icon(Icons.arrow_back_rounded),
+          ),
+        ),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: AppStateSwitcher(
+              stateKey: _step,
+              child: switch (_step) {
+                _ProvisioningStep.finding => KeyedSubtree(
+                  key: const ValueKey<_ProvisioningStep>(
+                    _ProvisioningStep.finding,
+                  ),
+                  child: _buildFinding(),
                 ),
-                child: _buildFinding(),
-              ),
-              _ProvisioningStep.wifi => KeyedSubtree(
-                key: const ValueKey<_ProvisioningStep>(_ProvisioningStep.wifi),
-                child: _buildWifiList(),
-              ),
-              _ProvisioningStep.password => KeyedSubtree(
-                key: const ValueKey<_ProvisioningStep>(
-                  _ProvisioningStep.password,
+                _ProvisioningStep.wifi => KeyedSubtree(
+                  key: const ValueKey<_ProvisioningStep>(
+                    _ProvisioningStep.wifi,
+                  ),
+                  child: _buildWifiList(),
                 ),
-                child: _buildPassword(),
-              ),
-              _ProvisioningStep.binding => KeyedSubtree(
-                key: const ValueKey<_ProvisioningStep>(
-                  _ProvisioningStep.binding,
+                _ProvisioningStep.password => KeyedSubtree(
+                  key: const ValueKey<_ProvisioningStep>(
+                    _ProvisioningStep.password,
+                  ),
+                  child: _buildPassword(),
                 ),
-                child: _buildProgress('正在完成连接…'),
-              ),
-              _ProvisioningStep.done => KeyedSubtree(
-                key: const ValueKey<_ProvisioningStep>(_ProvisioningStep.done),
-                child: _buildDone(),
-              ),
-            },
+                _ProvisioningStep.binding => KeyedSubtree(
+                  key: const ValueKey<_ProvisioningStep>(
+                    _ProvisioningStep.binding,
+                  ),
+                  child: _buildProgress(),
+                ),
+                _ProvisioningStep.done => KeyedSubtree(
+                  key: const ValueKey<_ProvisioningStep>(
+                    _ProvisioningStep.done,
+                  ),
+                  child: _buildDone(),
+                ),
+              },
+            ),
           ),
         ),
       ),
@@ -326,16 +414,70 @@ class _DeviceProvisioningPageState
     );
   }
 
-  Widget _buildProgress(String message) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const CircularProgressIndicator(),
+  Widget _buildProgress() {
+    final current =
+        _failedStage ?? _activeStage ?? _ProvisioningStage.sendingWifi;
+    final hasFailed = _failedStage != null;
+    return ListView(
+      children: [
+        AppReveal(
+          child: Text(
+            hasFailed ? '连接没有完成' : '正在连接初芽',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+        ),
+        const SizedBox(height: 8),
+        AppReveal(
+          delay: const Duration(milliseconds: 40),
+          child: Text(
+            hasFailed ? '已停留在没有完成的步骤，你可以直接重试。' : '请保持初芽开机，并把手机放在设备附近。',
+          ),
+        ),
+        const SizedBox(height: 20),
+        AppReveal(
+          delay: const Duration(milliseconds: 80),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                children: [
+                  for (
+                    var index = 0;
+                    index < _ProvisioningStage.values.length;
+                    index++
+                  )
+                    _ProvisioningStageTile(
+                      stage: _ProvisioningStage.values[index],
+                      isComplete: index < current.index,
+                      isCurrent: !hasFailed && index == current.index,
+                      hasFailed: hasFailed && index == current.index,
+                      isLast: index == _ProvisioningStage.values.length - 1,
+                    ),
+                  if (!hasFailed) ...[
+                    const SizedBox(height: 16),
+                    const LinearProgressIndicator(),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (hasFailed && _errorMessage != null) ...[
           const SizedBox(height: 16),
-          Text(message),
+          _ProvisioningFailureNotice(
+            message: _errorMessage!,
+            onRetry: _retryFailedStage,
+            onEditPassword: current == _ProvisioningStage.sendingWifi
+                ? () => setState(() {
+                    _step = _ProvisioningStep.password;
+                    _activeStage = null;
+                    _failedStage = null;
+                    _errorMessage = null;
+                  })
+                : null,
+          ),
         ],
-      ),
+      ],
     );
   }
 
@@ -387,4 +529,177 @@ class _DeviceProvisioningPageState
     }
     return '连接没有完成，请确认初芽已开机并靠近手机';
   }
+
+  String _messageForStage(Object error, _ProvisioningStage stage) {
+    final message = _messageFor(error);
+    if (message != '连接没有完成，请确认初芽已开机并靠近手机') {
+      return message;
+    }
+    return switch (stage) {
+      _ProvisioningStage.bluetoothConnection => '没有通过蓝牙找到初芽，请确认设备已开机并靠近手机后重试',
+      _ProvisioningStage.sendingWifi => '没有把无线网络信息发送到设备，请确认密码后重试',
+      _ProvisioningStage.waitingForNetwork => '设备还没有连上无线网络，请确认网络可用并保持设备开机后重试',
+      _ProvisioningStage.confirmingBinding => '设备已经联网，但平台还没有确认绑定，请检查网络后重试',
+    };
+  }
+}
+
+class _ProvisioningStageTile extends StatelessWidget {
+  const _ProvisioningStageTile({
+    required this.stage,
+    required this.isComplete,
+    required this.isCurrent,
+    required this.hasFailed,
+    required this.isLast,
+  });
+
+  final _ProvisioningStage stage;
+  final bool isComplete;
+  final bool isCurrent;
+  final bool hasFailed;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final color = hasFailed
+        ? colorScheme.error
+        : isComplete
+        ? const Color(0xFF2E7D5B)
+        : isCurrent
+        ? colorScheme.primary
+        : colorScheme.outline;
+    final icon = hasFailed
+        ? Icons.close_rounded
+        : isComplete
+        ? Icons.check_rounded
+        : isCurrent
+        ? Icons.more_horiz_rounded
+        : Icons.circle_outlined;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Column(
+          children: [
+            AnimatedContainer(
+              duration: AppMotion.fast,
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+                border: Border.all(color: color, width: 1.5),
+              ),
+              child: Icon(icon, size: 20, color: color),
+            ),
+            if (!isLast)
+              Container(
+                width: 2,
+                height: 38,
+                color: isComplete
+                    ? const Color(0xFF2E7D5B).withValues(alpha: 0.42)
+                    : colorScheme.outlineVariant,
+              ),
+          ],
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _stageTitle(stage),
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(hasFailed ? '这一步没有完成' : _stageDescription(stage)),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ProvisioningFailureNotice extends StatelessWidget {
+  const _ProvisioningFailureNotice({
+    required this.message,
+    required this.onRetry,
+    this.onEditPassword,
+  });
+
+  final String message;
+  final VoidCallback onRetry;
+  final VoidCallback? onEditPassword;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.info_outline_rounded,
+                color: Theme.of(context).colorScheme.onErrorContainer,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  message,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onErrorContainer,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('重试'),
+          ),
+          if (onEditPassword != null) ...[
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: onEditPassword,
+              child: const Text('返回修改无线网络密码'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+String _stageTitle(_ProvisioningStage stage) {
+  return switch (stage) {
+    _ProvisioningStage.bluetoothConnection => '连接设备蓝牙',
+    _ProvisioningStage.sendingWifi => '发送无线网络',
+    _ProvisioningStage.waitingForNetwork => '等待设备联网',
+    _ProvisioningStage.confirmingBinding => '确认设备绑定',
+  };
+}
+
+String _stageDescription(_ProvisioningStage stage) {
+  return switch (stage) {
+    _ProvisioningStage.bluetoothConnection => '让手机找到附近的初芽',
+    _ProvisioningStage.sendingWifi => '把选好的网络和密码安全发送到设备',
+    _ProvisioningStage.waitingForNetwork => '设备正在连接家里的无线网络',
+    _ProvisioningStage.confirmingBinding => '让设备加入当前家长账号',
+  };
 }

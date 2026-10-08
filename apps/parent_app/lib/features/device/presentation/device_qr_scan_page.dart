@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../../../core/error/app_exception.dart';
 import '../../../core/theme/app_motion.dart';
 import '../../../shared/widgets/app_reveal.dart';
 import '../application/device_binding_controller.dart';
@@ -29,12 +30,31 @@ class _DeviceQrScanPageState extends ConsumerState<DeviceQrScanPage> {
   );
   bool _isHandlingResult = false;
   bool _isLeaving = false;
+  bool _isScannerReleased = false;
   String? _errorMessage;
+  DeviceBindingPayload? _failedBindingPayload;
 
   @override
   void dispose() {
-    _controller.stop().then((_) => _controller.dispose());
+    _releaseScanner();
     super.dispose();
+  }
+
+  Future<void> _releaseScanner() async {
+    if (_isScannerReleased) {
+      return;
+    }
+    _isScannerReleased = true;
+    try {
+      await _controller.stop();
+    } on Object {
+      // The scanner may already be stopped or detached during route teardown.
+    }
+    try {
+      await _controller.dispose();
+    } on Object {
+      // Disposal must not block returning to the device list.
+    }
   }
 
   Future<void> _handleBarcode(BarcodeCapture capture) async {
@@ -53,7 +73,10 @@ class _DeviceQrScanPageState extends ConsumerState<DeviceQrScanPage> {
 
     final payload = DevicePayload.tryParse(rawValue);
     if (payload == null) {
-      setState(() => _errorMessage = '这不是初芽设备上的绑定码，请重新扫描');
+      setState(() {
+        _errorMessage = '这不是初芽设备上的绑定码，请重新扫描';
+        _failedBindingPayload = null;
+      });
       _isHandlingResult = false;
       if (mounted && !_isLeaving) {
         await _controller.start();
@@ -72,6 +95,10 @@ class _DeviceQrScanPageState extends ConsumerState<DeviceQrScanPage> {
         return;
       }
       final bindingPayload = payload as DeviceBindingPayload;
+      setState(() {
+        _errorMessage = null;
+        _failedBindingPayload = null;
+      });
       await ref
           .read(deviceBindingControllerProvider.notifier)
           .bindToken(
@@ -81,9 +108,17 @@ class _DeviceQrScanPageState extends ConsumerState<DeviceQrScanPage> {
       if (mounted) {
         context.go('/devices');
       }
-    } on Object {
+    } on Object catch (error) {
       if (mounted && !_isLeaving) {
-        setState(() => _errorMessage = '绑定没有完成，请确认绑定码仍然有效');
+        setState(() {
+          _errorMessage = _scanErrorMessage(
+            error,
+            isBindingPayload: payload is DeviceBindingPayload,
+          );
+          _failedBindingPayload = payload is DeviceBindingPayload
+              ? payload
+              : null;
+        });
       }
       _isHandlingResult = false;
       if (mounted && !_isLeaving) {
@@ -97,9 +132,47 @@ class _DeviceQrScanPageState extends ConsumerState<DeviceQrScanPage> {
       return;
     }
     _isLeaving = true;
-    await _controller.stop();
+    await _releaseScanner();
     if (mounted) {
-      Navigator.of(context).pop();
+      final navigator = Navigator.of(context);
+      if (navigator.canPop()) {
+        navigator.pop();
+        return;
+      }
+      context.go('/devices');
+    }
+  }
+
+  Future<void> _retryBinding() async {
+    final payload = _failedBindingPayload;
+    setState(() => _errorMessage = null);
+    if (payload == null) {
+      _isHandlingResult = false;
+      if (!_isLeaving) {
+        setState(() => _isScannerReleased = false);
+        await _controller.start();
+      }
+      return;
+    }
+    setState(() => _isHandlingResult = true);
+    try {
+      await ref
+          .read(deviceBindingControllerProvider.notifier)
+          .bindToken(
+            token: payload.bindingToken,
+            deviceName: payload.deviceName,
+          );
+      if (mounted) {
+        context.go('/devices');
+      }
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isHandlingResult = false;
+        _errorMessage = _scanErrorMessage(error, isBindingPayload: true);
+      });
     }
   }
 
@@ -144,7 +217,32 @@ class _DeviceQrScanPageState extends ConsumerState<DeviceQrScanPage> {
                       color: Theme.of(context).colorScheme.errorContainer,
                       borderRadius: BorderRadius.circular(18),
                     ),
-                    child: Text(_errorMessage ?? ''),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          _errorMessage ?? '',
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onErrorContainer,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        FilledButton.icon(
+                          onPressed: _isHandlingResult ? null : _retryBinding,
+                          icon: Icon(
+                            _failedBindingPayload == null
+                                ? Icons.qr_code_scanner_rounded
+                                : Icons.refresh_rounded,
+                          ),
+                          label: Text(
+                            _failedBindingPayload == null ? '重新扫描' : '重试',
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -171,6 +269,15 @@ class _DeviceQrScanPageState extends ConsumerState<DeviceQrScanPage> {
       ),
     );
   }
+}
+
+String _scanErrorMessage(Object error, {required bool isBindingPayload}) {
+  if (error is AppException && error.message.trim().isNotEmpty) {
+    return error.message;
+  }
+  return isBindingPayload
+      ? '绑定没有完成，请确认设备已开机并靠近手机后重试'
+      : '没有读取到绑定信息，请重新扫描设备上的绑定码';
 }
 
 class _ScannerFrame extends StatelessWidget {

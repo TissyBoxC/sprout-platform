@@ -148,6 +148,17 @@ class DeviceBindingController extends AsyncNotifier<DeviceBindingState> {
     return _api.requestProvisioningTicket(deviceId, deviceSessionToken);
   }
 
+  /// Confirms a freshly provisioned device through the platform binding API.
+  Future<BoundDevice> bindProvisionedDevice({
+    required DeviceSetupPayload setup,
+  }) async {
+    final bindingPayload = await readBindingPayload(setup);
+    return bindToken(
+      token: bindingPayload.bindingToken,
+      deviceName: bindingPayload.deviceName,
+    );
+  }
+
   /// Scans for first-run devices advertising the configured local prefix.
   Future<List<String>> scanProvisioningDevices() async {
     try {

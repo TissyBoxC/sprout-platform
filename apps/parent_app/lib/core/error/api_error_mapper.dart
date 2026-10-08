@@ -26,6 +26,14 @@ AppException mapApiError(Object error) {
         cause: error,
       );
     }
+    if (errorCode == 'device_session_expired') {
+      return AppException(
+        kind: AppErrorKind.deviceSessionExpired,
+        message: '设备登录已过期，请重新连接',
+        retryable: false,
+        cause: error,
+      );
+    }
     if (errorCode == 'phone_exists') {
       return AppException(
         kind: AppErrorKind.validation,

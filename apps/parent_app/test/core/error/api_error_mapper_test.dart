@@ -20,6 +20,33 @@ void main() {
     expect(exception.retryable, isFalse);
   });
 
+  test('keeps device session expiry distinct from guardian login expiry', () {
+    final exception = mapApiError(
+      DioException(
+        requestOptions: RequestOptions(
+          path: '/api/v1/devices/device_demo_001/provisioning-token',
+        ),
+        response: Response<Map<String, Object?>>(
+          requestOptions: RequestOptions(
+            path: '/api/v1/devices/device_demo_001/provisioning-token',
+          ),
+          statusCode: 401,
+          data: const {
+            'error': {
+              'code': 'device_session_expired',
+              'message': '设备登录已过期，请重新连接',
+              'retryable': false,
+            },
+          },
+        ),
+      ),
+    );
+
+    expect(exception.kind, AppErrorKind.deviceSessionExpired);
+    expect(exception.message, '设备登录已过期，请重新连接');
+    expect(exception.retryable, isFalse);
+  });
+
   test('maps connection failures to retryable network state', () {
     final exception = mapApiError(
       DioException(

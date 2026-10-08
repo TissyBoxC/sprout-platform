@@ -1,4 +1,5 @@
 import '../../../core/network/api_client.dart';
+import '../domain/device_provisioning_status.dart';
 
 /// Device information returned by the platform binding API.
 class BoundDevice {
@@ -62,6 +63,7 @@ class DeviceRuntimeStatus {
     required this.pendingTelemetry,
     required this.reportedAt,
     required this.receivedAt,
+    required this.provisioning,
   });
 
   final bool isOnline;
@@ -79,12 +81,14 @@ class DeviceRuntimeStatus {
   final int pendingTelemetry;
   final DateTime? reportedAt;
   final DateTime? receivedAt;
+  final DeviceProvisioningStatus? provisioning;
 
   factory DeviceRuntimeStatus.fromJson(Map<String, Object?> json) {
     final connection = _map(json['connection']);
     final quality = _map(json['network_quality']);
     final timeSync = _map(json['time_sync']);
     final offline = _map(json['offline']);
+    final provisioning = json['provisioning'];
     return DeviceRuntimeStatus(
       isOnline: json['is_online'] == true,
       connectionState: _asString(connection['state']),
@@ -101,6 +105,11 @@ class DeviceRuntimeStatus {
       pendingTelemetry: _asInt(offline['pending_telemetry']),
       reportedAt: _asDateTime(json['reported_at']),
       receivedAt: _asDateTime(json['received_at']),
+      provisioning: provisioning is Map
+          ? DeviceProvisioningStatus.fromJson(
+              Map<String, Object?>.from(provisioning),
+            )
+          : null,
     );
   }
 }

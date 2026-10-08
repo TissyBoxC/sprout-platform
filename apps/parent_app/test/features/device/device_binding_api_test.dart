@@ -19,9 +19,62 @@ void main() {
       DateTime.parse('2026-10-03T10:00:02Z'),
     );
   });
+
+  test('device status parses provisioning state and session state', () async {
+    final client = _RecordingApiClient(
+      provisioning: {
+        'state': 'provisioned',
+        'wifi_configured': true,
+        'session_state': 'reauth_required',
+        'last_provisioned_at': '2026-10-03T09:58:00Z',
+      },
+    );
+    final api = DeviceBindingApi(client);
+
+    final devices = await api.list();
+
+    final provisioning = devices.single.runtime?.provisioning;
+    expect(provisioning, isNotNull);
+    expect(provisioning?.state, 'provisioned');
+    expect(provisioning?.wifiConfigured, isTrue);
+    expect(provisioning?.sessionState, 'reauth_required');
+    expect(
+      provisioning?.lastProvisionedAt,
+      DateTime.parse('2026-10-03T09:58:00Z'),
+    );
+  });
+
+  test('device status keeps old runtimes without provisioning', () async {
+    final client = _RecordingApiClient();
+    final api = DeviceBindingApi(client);
+
+    final devices = await api.list();
+
+    expect(devices.single.runtime, isNotNull);
+    expect(devices.single.runtime?.provisioning, isNull);
+  });
+
+  test('device status tolerates invalid provisioning dates', () async {
+    final client = _RecordingApiClient(
+      provisioning: {
+        'state': 'provisioning',
+        'wifi_configured': false,
+        'session_state': 'revoked',
+        'last_provisioned_at': 'not-a-date',
+      },
+    );
+    final api = DeviceBindingApi(client);
+
+    final devices = await api.list();
+
+    expect(devices.single.runtime?.provisioning?.lastProvisionedAt, isNull);
+  });
 }
 
 class _RecordingApiClient implements ApiClient {
+  _RecordingApiClient({this.provisioning});
+
+  final Map<String, Object?>? provisioning;
   String? path;
 
   @override
@@ -64,6 +117,7 @@ class _RecordingApiClient implements ApiClient {
               },
               'reported_at': '2026-10-03T10:00:00Z',
               'received_at': '2026-10-03T10:00:02Z',
+              if (provisioning != null) 'provisioning': provisioning,
             },
           },
         ],

@@ -1,6 +1,7 @@
 /// Category used by UI layers to choose a safe next action.
 enum AppErrorKind {
   unauthenticated,
+  deviceSessionExpired,
   insufficientPermission,
   notFound,
   validation,
@@ -38,4 +39,10 @@ bool isSessionRejected(Object error) {
   }
   return error.kind == AppErrorKind.unauthenticated ||
       error.kind == AppErrorKind.insufficientPermission;
+}
+
+/// Returns whether a device rejected its own authentication session.
+bool isDeviceSessionExpired(Object error) {
+  return error is AppException &&
+      error.kind == AppErrorKind.deviceSessionExpired;
 }

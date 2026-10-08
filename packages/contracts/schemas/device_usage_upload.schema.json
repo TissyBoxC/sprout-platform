@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprout.example/contracts/schemas/device_usage_upload.schema.json",
+  "title": "Device usage upload",
+  "description": "One device-local usage day uploaded by the firmware. Uploads are idempotent by device_id and report_date, so a retry or offline backfill replaces the same day without double counting. The payload carries no conversation text, audio, images, tokens, or personal data.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "report_date",
+    "timezone_offset_minutes",
+    "active_seconds",
+    "conversation_count",
+    "conversation_seconds",
+    "content_play_count",
+    "content_seconds",
+    "categories",
+    "blocked"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "report_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "timezone_offset_minutes": {
+      "type": "integer",
+      "minimum": -840,
+      "maximum": 840
+    },
+    "active_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 86400
+    },
+    "conversation_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "conversation_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 86400
+    },
+    "content_play_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "content_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 86400
+    },
+    "categories": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/category_usage"
+      }
+    },
+    "blocked": {
+      "$ref": "#/$defs/blocked_counts"
+    }
+  },
+  "$defs": {
+    "category_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "play_count",
+        "seconds"
+      ],
+      "properties": {
+        "category": {
+          "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/content_category"
+        },
+        "play_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400
+        }
+      }
+    },
+    "blocked_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "disabled_period",
+        "daily_limit",
+        "category_denied",
+        "time_untrusted"
+      ],
+      "properties": {
+        "disabled_period": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "daily_limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "category_denied": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "time_untrusted": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

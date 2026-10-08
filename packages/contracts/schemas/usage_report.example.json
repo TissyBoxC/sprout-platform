@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0.0",
+  "report_date": "2026-10-07",
+  "timezone_offset_minutes": 480,
+  "active_minutes": 42,
+  "conversation_count": 18,
+  "conversation_minutes": 24,
+  "content_play_count": 6,
+  "content_minutes": 18,
+  "daily_limit_minutes": 60,
+  "remaining_minutes": 18,
+  "limit_reached": false,
+  "categories": [
+    {
+      "category": "story",
+      "play_count": 3,
+      "minutes": 9
+    },
+    {
+      "category": "nursery_rhyme",
+      "play_count": 2,
+      "minutes": 6
+    },
+    {
+      "category": "bedtime",
+      "play_count": 1,
+      "minutes": 3
+    }
+  ],
+  "blocked": {
+    "disabled_period": 1,
+    "daily_limit": 0,
+    "category_denied": 2,
+    "time_untrusted": 0
+  },
+  "devices": [
+    {
+      "device_id": "sprout_device_demo_001",
+      "device_name": "初芽",
+      "active_minutes": 42,
+      "conversation_count": 18,
+      "content_play_count": 6
+    }
+  ],
+  "updated_at": "2026-10-07T12:00:00Z"
+}

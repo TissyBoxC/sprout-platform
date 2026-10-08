@@ -17,6 +17,13 @@ most-restrictive policy a family-bound device executes after the platform
 aggregates every child policy. Device clients must consume the effective
 contract and must not choose a child identifier.
 
+`schemas/device_usage_upload.schema.json` describes the counters and durations
+a device uploads for one device-local usage day; uploads are idempotent per
+device and date. `schemas/usage_report.schema.json` describes one aggregated
+usage day returned to a guardian or support operator. Both contracts carry only
+counters, durations, categories, and device metadata. They must never contain
+conversation text, audio, images, tokens, or child identifiers.
+
 ## Rules
 
 - Use `schema_version` on every breaking contract change.

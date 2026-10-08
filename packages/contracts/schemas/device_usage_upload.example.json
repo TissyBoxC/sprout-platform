@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "report_date": "2026-10-07",
+  "timezone_offset_minutes": 480,
+  "active_seconds": 2520,
+  "conversation_count": 18,
+  "conversation_seconds": 1440,
+  "content_play_count": 6,
+  "content_seconds": 1080,
+  "categories": [
+    {
+      "category": "story",
+      "play_count": 3,
+      "seconds": 540
+    },
+    {
+      "category": "bedtime",
+      "play_count": 1,
+      "seconds": 180
+    }
+  ],
+  "blocked": {
+    "disabled_period": 1,
+    "daily_limit": 0,
+    "category_denied": 2,
+    "time_untrusted": 0
+  }
+}

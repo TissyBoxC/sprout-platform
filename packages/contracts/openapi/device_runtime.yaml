@@ -123,6 +123,99 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+  /api/v1/devices/{device_id}/runtime/usage:
+    post:
+      operationId: recordDeviceUsage
+      summary: Upload one device-local usage day
+      description: |
+        The device session token identifies the owner; the path device id must
+        match that owner. Uploads are idempotent per device and report date, so
+        an offline backfill or retry replaces the same day instead of double
+        counting. The payload contains only counters and durations and never
+        carries conversation text, audio, images, tokens, or child data.
+      security:
+        - deviceSession: []
+      parameters:
+        - $ref: '#/components/parameters/DeviceID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/device_usage_upload.schema.json'
+      responses:
+        '200':
+          description: The usage day was stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageUploadEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/usage-reports:
+    get:
+      operationId: listGuardianUsageReports
+      summary: List usage report days for the signed-in guardian
+      description: |
+        Usage is attributed to the family-bound device rather than an
+        individual child, because a device is paired to the guardian account
+        and runs the most-restrictive policy shared across every child. Each
+        day therefore includes the per-device breakdown.
+      security:
+        - parentSession: []
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 30
+      responses:
+        '200':
+          description: Usage report days newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageReportListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/admin/families/{parent_account_id}/usage-reports:
+    get:
+      operationId: listAdminFamilyUsageReports
+      summary: List usage report days for one family for support staff
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/ParentAccountID'
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 30
+      responses:
+        '200':
+          description: Usage report days newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageReportListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/devices/status:
     get:
       operationId: listParentDeviceStatuses
@@ -353,6 +446,38 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/RuntimeStatus'
+    UsageUploadEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - report_date
+                - updated_at
+              properties:
+                report_date:
+                  type: string
+                  format: date
+                updated_at:
+                  type: string
+                  format: date-time
+    UsageReportListEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              required:
+                - reports
+              properties:
+                reports:
+                  type: array
+                  items:
+                    $ref: '../schemas/usage_report.schema.json'
     EffectiveParentPolicyEnvelope:
       allOf:
         - $ref: '#/components/schemas/SuccessEnvelope'

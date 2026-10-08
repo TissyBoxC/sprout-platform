@@ -13,17 +13,9 @@ import {
 import { createHttpClient } from '@/api/httpClient'
 
 const activeOperationStatuses = new Set(['queued', 'running', 'recovering'])
-export const UPGRADEABLE_SERVICE_IDS = [
-  'sub2api',
-  'device_platform',
-  'voice_gateway',
-  'admin_web',
-] as const
 
-const upgradeableServiceIds = new Set<string>(UPGRADEABLE_SERVICE_IDS)
-
-export function isUpgradeableService(serviceId: string): boolean {
-  return upgradeableServiceIds.has(serviceId)
+export function isUpgradeableService(service: AdminServiceVersion): boolean {
+  return service.upgradeSupported
 }
 
 export interface ServiceReleaseState {
@@ -53,7 +45,12 @@ export const useVersionManagementStore = defineStore('admin-version-management',
 
   const services = computed(() => snapshot.value?.services ?? [])
   const outdatedServices = computed(() =>
-    services.value.filter((service) => service.status === 'outdated' && service.canUpgrade),
+    services.value.filter(
+      (service) =>
+        service.status === 'outdated' &&
+        service.canUpgrade &&
+        isUpgradeableService(service),
+    ),
   )
   const hasActiveOperations = computed(() =>
     operations.value.some((operation) => activeOperationStatuses.has(operation.status)),
@@ -109,6 +106,9 @@ export const useVersionManagementStore = defineStore('admin-version-management',
     service: AdminServiceVersion,
     targetVersion?: string,
   ): Promise<boolean> {
+    if (!isUpgradeableService(service)) {
+      return false
+    }
     const releaseState = releaseStates.value[service.id]
     const requestedVersion = (targetVersion ?? releaseState?.selectedVersion ?? '').trim()
     if (
@@ -237,7 +237,7 @@ export const useVersionManagementStore = defineStore('admin-version-management',
   }
 
   async function loadServiceReleases(service: AdminServiceVersion): Promise<void> {
-    if (!isUpgradeableService(service.id)) {
+    if (!isUpgradeableService(service)) {
       return
     }
     releaseStates.value = {
@@ -278,7 +278,7 @@ export const useVersionManagementStore = defineStore('admin-version-management',
 
   async function loadReleaseStates(targetServices: AdminServiceVersion[]): Promise<void> {
     const upgradeableServices = targetServices.filter((service) =>
-      isUpgradeableService(service.id),
+      isUpgradeableService(service),
     )
     await Promise.all(upgradeableServices.map((service) => loadServiceReleases(service)))
   }

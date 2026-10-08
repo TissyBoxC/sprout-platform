@@ -74,7 +74,7 @@ validate_service() {
       return 0
       ;;
     *)
-      echo "不支持的服务: $service" >&2
+      echo "该服务由部署配置统一维护，不能单独升级: $service" >&2
       return 1
       ;;
   esac

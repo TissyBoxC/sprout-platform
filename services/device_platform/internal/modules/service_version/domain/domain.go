@@ -50,18 +50,19 @@ const (
 // cannot confirm a value it leaves the field empty and sets Status to unknown
 // instead of inventing a version.
 type Service struct {
-	ID             string     `json:"id"`
-	DisplayName    string     `json:"display_name"`
-	Role           string     `json:"role"`
-	Image          string     `json:"image"`
-	CurrentVersion string     `json:"current_version"`
-	LatestVersion  string     `json:"latest_version"`
-	Status         string     `json:"status"`
-	ReleaseURL     string     `json:"release_url"`
-	IsSelf         bool       `json:"is_self"`
-	CanUpgrade     bool       `json:"can_upgrade"`
-	LastCheckedAt  *time.Time `json:"last_checked_at"`
-	UpdatedAt      *time.Time `json:"updated_at"`
+	ID               string     `json:"id"`
+	DisplayName      string     `json:"display_name"`
+	Role             string     `json:"role"`
+	Image            string     `json:"image"`
+	CurrentVersion   string     `json:"current_version"`
+	LatestVersion    string     `json:"latest_version"`
+	Status           string     `json:"status"`
+	ReleaseURL       string     `json:"release_url"`
+	IsSelf           bool       `json:"is_self"`
+	UpgradeSupported bool       `json:"upgrade_supported"`
+	CanUpgrade       bool       `json:"can_upgrade"`
+	LastCheckedAt    *time.Time `json:"last_checked_at"`
+	UpdatedAt        *time.Time `json:"updated_at"`
 }
 
 // Release is one selectable published version of a managed service.

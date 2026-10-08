@@ -97,7 +97,7 @@ function targetVersion(service: AdminServiceVersion): string {
 }
 
 function canSelectVersion(service: AdminServiceVersion): boolean {
-  return isUpgradeableService(service.id)
+  return isUpgradeableService(service)
 }
 
 function canStartUpgrade(service: AdminServiceVersion): boolean {

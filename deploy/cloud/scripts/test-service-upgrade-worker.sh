@@ -29,6 +29,23 @@ if ! grep -Eq '^platform_repository=' "$worker_script" ||
   exit 1
 fi
 
+validate_service_block="$(
+  sed -n '/^validate_service()/,/^}/p' "$worker_script"
+)"
+for unsupported_service in \
+  postgres \
+  redis \
+  mqtt \
+  download_init \
+  download_ftp \
+  download_http; do
+  if printf '%s\n' "$validate_service_block" |
+    grep -Eq "(^|[|])${unsupported_service}([|]|$)"; then
+    echo "validate_service 不应接受基础设施服务: $unsupported_service" >&2
+    exit 1
+  fi
+done
+
 if ! grep -Eq 'test -s .*status\.json' "$compose_file"; then
   echo "upgrade_worker 缺少 status.json 健康检查。" >&2
   exit 1

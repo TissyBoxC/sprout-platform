@@ -196,6 +196,17 @@ validate_service() {
   esac
 }
 
+is_known_service() {
+  case " $service_ids " in
+    *" $1 "*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 iso_timestamp() {
   date -u +%Y-%m-%dT%H:%M:%SZ
 }
@@ -708,8 +719,18 @@ process_operation() {
 
   service="$(jq -r '.target_service' "$processing_file")"
   target_version="$(jq -r '.target_version' "$processing_file")"
-  if ! validate_service "$service" || ! validate_version "$target_version"; then
-    write_result_snapshot "$operation_id" "$service" "unknown" "$target_version" "failed" "升级请求包含不支持的服务或版本。" "$(iso_timestamp)" "$(json_string_or_null "$(iso_timestamp)")" /dev/null
+  if ! is_known_service "$service"; then
+    write_result_snapshot "$operation_id" "$service" "unknown" "$target_version" "failed" "没有找到这个服务。" "$(iso_timestamp)" "$(json_string_or_null "$(iso_timestamp)")" /dev/null
+    rm -f "$processing_file"
+    return 0
+  fi
+  if ! validate_version "$target_version"; then
+    write_result_snapshot "$operation_id" "$service" "unknown" "$target_version" "failed" "目标版本格式不正确。" "$(iso_timestamp)" "$(json_string_or_null "$(iso_timestamp)")" /dev/null
+    rm -f "$processing_file"
+    return 0
+  fi
+  if ! validate_service "$service"; then
+    write_result_snapshot "$operation_id" "$service" "unknown" "$target_version" "failed" "该服务由部署配置统一维护，不能通过版本管理升级。" "$(iso_timestamp)" "$(json_string_or_null "$(iso_timestamp)")" /dev/null
     rm -f "$processing_file"
     return 0
   fi

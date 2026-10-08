@@ -113,6 +113,7 @@ func (s *Service) SnapshotResult(ctx context.Context) (SnapshotResult, error) {
 		service.Role = entry.Role
 		service.Image = entry.Image
 		service.IsSelf = entry.IsSelf
+		service.UpgradeSupported = entry.AutoUpgrade
 		if service.Status == "" {
 			service.Status = domain.ServiceStatusUnknown
 		}

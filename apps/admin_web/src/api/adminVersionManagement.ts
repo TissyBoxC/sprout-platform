@@ -17,6 +17,7 @@ export interface AdminServiceVersion {
   status: ServiceVersionStatus
   releaseUrl: string
   isSelf: boolean
+  upgradeSupported: boolean
   canUpgrade: boolean
   lastCheckedAt: string
   updatedAt: string
@@ -216,6 +217,7 @@ function toNullableServiceVersion(value: unknown): AdminServiceVersion | null {
     status: serviceVersionStatus(record.status),
     releaseUrl: stringValue(record.release_url),
     isSelf: record.is_self === true,
+    upgradeSupported: record.upgrade_supported === true,
     canUpgrade: record.can_upgrade === true,
     lastCheckedAt: stringValue(record.last_checked_at),
     updatedAt: stringValue(record.updated_at),

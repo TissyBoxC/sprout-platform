@@ -172,6 +172,9 @@ func TestSnapshotMergesCatalogAndMarksUpgradable(t *testing.T) {
 	if !platform.CanUpgrade {
 		t.Fatal("expected an outdated platform to be upgradable")
 	}
+	if !platform.UpgradeSupported {
+		t.Fatal("expected the platform to support version selection")
+	}
 	if platform.DisplayName == "" {
 		t.Fatal("expected the catalogue to supply a display name")
 	}
@@ -181,7 +184,8 @@ func TestInfrastructureNeverUpgradable(t *testing.T) {
 	service, _ := newTestService(t, `{
 		"generated_at": "2026-10-03T00:00:00Z",
 		"services": [
-			{"id":"postgres","current_version":"15","latest_version":"16","status":"outdated"}
+			{"id":"postgres","current_version":"15","latest_version":"16","status":"outdated"},
+			{"id":"download_http","current_version":"1.27","latest_version":"1.28","status":"outdated"}
 		]
 	}`)
 
@@ -190,8 +194,13 @@ func TestInfrastructureNeverUpgradable(t *testing.T) {
 		t.Fatalf("Snapshot() returned unexpected error: %v", err)
 	}
 	for _, item := range services {
-		if item.ID == "postgres" && item.CanUpgrade {
-			t.Fatal("infrastructure images must not be auto-upgraded")
+		if item.ID == "postgres" || item.ID == "download_http" {
+			if item.UpgradeSupported {
+				t.Fatalf("infrastructure image %s must not support upgrades", item.ID)
+			}
+			if item.CanUpgrade {
+				t.Fatalf("infrastructure image %s must not be auto-upgraded", item.ID)
+			}
 		}
 	}
 }
@@ -468,6 +477,27 @@ func TestListReleasesRejectsInfrastructureService(t *testing.T) {
 	_, err := service.ListReleases(context.Background(), "postgres", 1, 20)
 	if !errors.Is(err, domain.ErrServiceNotFound) {
 		t.Fatalf("expected ErrServiceNotFound, got %v", err)
+	}
+
+	_, err = service.ListReleases(context.Background(), "download_http", 1, 20)
+	if !errors.Is(err, domain.ErrServiceNotFound) {
+		t.Fatalf("expected download_http to be rejected, got %v", err)
+	}
+}
+
+func TestPlanUpgradeRejectsInfrastructureService(t *testing.T) {
+	service, _ := newTestService(t, `{
+		"generated_at":"2026-10-03T00:00:00Z",
+		"services":[{"id":"download_http","current_version":"1.27","latest_version":"1.28","status":"outdated"}]
+	}`)
+
+	_, err := service.PlanUpgradeTo(
+		context.Background(),
+		"download_http",
+		"1.28",
+	)
+	if !errors.Is(err, domain.ErrServiceNotUpgradable) {
+		t.Fatalf("expected ErrServiceNotUpgradable, got %v", err)
 	}
 }
 

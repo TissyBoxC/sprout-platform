@@ -227,6 +227,25 @@ func (c *Client) DeleteAPIKey(
 	return err
 }
 
+// DeleteAccount deletes the controlled provider account and every credential
+// it owns. A missing account is already deleted, so this method is idempotent.
+func (c *Client) DeleteAccount(
+	ctx context.Context,
+	providerAccountID string,
+) error {
+	status, err := c.doJSON(
+		ctx,
+		http.MethodDelete,
+		"/internal/sprout/v1/ai-accounts/"+url.PathEscape(providerAccountID),
+		nil,
+		nil,
+	)
+	if status == http.StatusNotFound {
+		return nil
+	}
+	return err
+}
+
 func (c *Client) writeAPIKey(
 	ctx context.Context,
 	path string,

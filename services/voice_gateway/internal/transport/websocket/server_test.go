@@ -44,6 +44,43 @@ func TestHandlerRejectsMissingTokenBeforeUpgrade(t *testing.T) {
 	}
 }
 
+func TestHandlerRejectsDeviceWhenGuardianConsentIsWithdrawn(t *testing.T) {
+	manager := session.NewManager(session.ManagerConfig{
+		MaxSessions:          8,
+		MaxSessionsPerDevice: 2,
+	})
+	defer manager.CloseAll()
+	server, err := NewServer(ServerConfig{
+		Manager:    manager,
+		Verifier:   testTokenVerifier{},
+		Authorizer: rejectingAuthorizer{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("create websocket server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	header := http.Header{}
+	header.Set("Authorization", "Bearer valid-token")
+	connection, response, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(httpServer.URL, "http")+"/voice",
+		header,
+	)
+	if connection != nil {
+		_ = connection.Close()
+	}
+	if err == nil {
+		t.Fatal("expected withdrawn consent to be rejected")
+	}
+	if response == nil || response.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403, got %#v", response)
+	}
+	if server.Stats().RejectedConnections == 0 {
+		t.Fatal("rejected connection counter was not incremented")
+	}
+}
+
 func TestSessionStartAudioFrameAndClose(t *testing.T) {
 	server, manager := newTestServer(t)
 	defer manager.CloseAll()
@@ -412,6 +449,45 @@ func TestDisconnectCleansUpSession(t *testing.T) {
 	waitFor(t, 2*time.Second, func() bool { return manager.Count() == 0 })
 }
 
+func TestDisconnectRevokesAuthenticatedToken(t *testing.T) {
+	manager := session.NewManager(session.ManagerConfig{MaxSessions: 8, MaxSessionsPerDevice: 2})
+	defer manager.CloseAll()
+
+	verifier, err := NewHMACDeviceTokenVerifier(testTokenSecret, nil)
+	if err != nil {
+		t.Fatalf("create verifier: %v", err)
+	}
+	token, err := verifier.IssueDeviceToken("device_alpha", "token_revoke_on_close", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("issue token: %v", err)
+	}
+
+	server, err := NewServer(ServerConfig{
+		Manager:      manager,
+		Verifier:     verifier,
+		TokenRevoker: verifier.RevokeIdentity,
+		DetectorFactory: func() vad.Detector {
+			return &scriptedWebSocketDetector{values: []bool{true, true, false}}
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("create websocket server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, token)
+	if _, err := verifier.VerifyDeviceToken(token); err != nil {
+		t.Fatalf("token should be valid while connected: %v", err)
+	}
+	_ = connection.Close()
+
+	waitFor(t, 2*time.Second, func() bool {
+		_, verifyErr := verifier.VerifyDeviceToken(token)
+		return verifyErr != nil
+	})
+}
+
 func TestHeartbeatPingPong(t *testing.T) {
 	server, manager := newTestServer(t)
 	server.config.PingInterval = 20 * time.Millisecond
@@ -715,6 +791,15 @@ func (testTokenVerifier) VerifyDeviceToken(token string) (DeviceIdentity, error)
 	default:
 		return DeviceIdentity{}, errors.New("invalid token")
 	}
+}
+
+type rejectingAuthorizer struct{}
+
+func (rejectingAuthorizer) AuthorizeDevice(
+	context.Context,
+	string,
+) error {
+	return ErrDeviceNotAuthorized
 }
 
 type scriptedWebSocketDetector struct {

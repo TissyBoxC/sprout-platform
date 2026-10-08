@@ -31,6 +31,7 @@ type adminHandler struct {
 	deviceBindingService  adminDeviceManagementService
 	childService          adminChildService
 	policyService         adminPolicyService
+	auditService          auditRecorder
 }
 
 type parentAccountService interface {
@@ -252,6 +253,12 @@ func (handler adminHandler) createParent(
 		writeAuthServiceError(response, request, err)
 		return
 	}
+	handler.recordAdminAudit(
+		request,
+		account.ID,
+		"admin.family.created",
+		map[string]any{"scope": "family"},
+	)
 	writeSuccess(response, request, http.StatusCreated, accountResponse(account, summary))
 }
 
@@ -298,6 +305,16 @@ func (handler adminHandler) retryParentAIAccount(
 		writeError(response, request, http.StatusInternalServerError, "service_error", "家长 AI 账号没有开通，请稍后重试")
 		return
 	}
+	handler.recordAdminAudit(
+		request,
+		account.ID,
+		"admin.family.ai_account.created",
+		map[string]any{
+			"status":            summary.Status,
+			"balance_usd":       summary.BalanceUSD,
+			"concurrency_limit": summary.ConcurrencyLimit,
+		},
+	)
 	writeSuccess(response, request, http.StatusOK, map[string]any{
 		"ai_account": map[string]any{
 			"status":            summary.Status,
@@ -344,6 +361,12 @@ func (handler adminHandler) updateParentProfile(
 		writeAuthServiceError(response, request, err)
 		return
 	}
+	handler.recordAdminAudit(
+		request,
+		account.ID,
+		"admin.family.profile.updated",
+		map[string]any{"scope": "profile"},
+	)
 	writeSuccess(response, request, http.StatusOK, map[string]any{
 		"account": map[string]any{
 			"parent_account_id":    account.ID,
@@ -382,6 +405,12 @@ func (handler adminHandler) resetParentPassword(
 		writeAuthServiceError(response, request, err)
 		return
 	}
+	handler.recordAdminAudit(
+		request,
+		parentAccountID,
+		"admin.family.password.reset",
+		map[string]any{"scope": "credential"},
+	)
 	writeSuccess(response, request, http.StatusOK, map[string]any{
 		"password_reset": true,
 	})
@@ -448,6 +477,12 @@ func (handler adminHandler) unbindParentDevice(
 		writeDeviceBindingError(response, request, err)
 		return
 	}
+	handler.recordAdminAudit(
+		request,
+		parentAccountID,
+		"admin.family.device_binding.revoked",
+		map[string]any{"device_id": deviceID},
+	)
 	writeSuccess(response, request, http.StatusOK, map[string]any{
 		"unbound": true,
 	})
@@ -626,7 +661,36 @@ func (handler adminHandler) updateAIAccount(
 		writeError(response, request, http.StatusBadGateway, "provider_error", "暂时无法更新 AI 服务，请稍后重试")
 		return
 	}
+	handler.recordAdminAudit(
+		request,
+		account.ParentAccountID,
+		"admin.family.ai_account.updated",
+		map[string]any{
+			"new_status":        account.Status,
+			"balance_usd":       account.BalanceUSD,
+			"concurrency_limit": account.ConcurrencyLimit,
+		},
+	)
 	writeSuccess(response, request, http.StatusOK, aiAccountAdminResponse(account))
+}
+
+func (handler adminHandler) recordAdminAudit(
+	request *http.Request,
+	targetAccountID string,
+	action string,
+	detail map[string]any,
+) {
+	if handler.auditService == nil || request == nil {
+		return
+	}
+	actorAccountID, _ := authenticatedAccountID(request)
+	_ = handler.auditService.RecordAudit(
+		request.Context(),
+		actorAccountID,
+		targetAccountID,
+		action,
+		detail,
+	)
 }
 
 // updateParentAIModels lets a guardian choose from provider-approved models.

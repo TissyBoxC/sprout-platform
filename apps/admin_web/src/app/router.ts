@@ -13,6 +13,7 @@ import FeatureCenterPage from '@/features/feature_center/presentation/FeatureCen
 import DownloadFilesPage from '@/features/downloads/presentation/DownloadFilesPage.vue'
 import ContentLibraryPage from '@/features/content/presentation/ContentLibraryPage.vue'
 import DeviceDiagnosticsPage from '@/features/audit/presentation/DeviceDiagnosticsPage.vue'
+import OperationAuditPage from '@/features/audit/presentation/OperationAuditPage.vue'
 import UsageReportPage from '@/features/usage_report/presentation/UsageReportPage.vue'
 import { useAuthStore } from '@/features/auth/application/authStore'
 
@@ -91,6 +92,11 @@ export function createAdminRouter() {
         path: '/device-diagnostics',
         name: 'device-diagnostics',
         component: DeviceDiagnosticsPage,
+      },
+      {
+        path: '/audit',
+        name: 'audit',
+        component: OperationAuditPage,
       },
       {
         path: '/ui-text',

@@ -24,6 +24,8 @@ import (
 	featurecenterservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	operationsservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
 	policeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
+	privacyhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/handler"
+	privacyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/service"
 	releasestoreservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
 	serviceversionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
 	usagereportservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
@@ -48,6 +50,21 @@ type RouterOptions struct {
 	UsageReportService    *usagereportservice.Service
 	VoiceTokenIssuer      bindingservice.VoiceTokenIssuer
 	VoiceWebSocketURL     string
+	PrivacyService        *privacyservice.Service
+	AuditRecorder         auditRecorder
+}
+
+// auditRecorder is the narrow operation-audit write surface used by existing
+// administrator handlers. The privacy service implements it; transport does
+// not depend on the privacy repository or domain internals.
+type auditRecorder interface {
+	RecordAudit(
+		ctx context.Context,
+		actorAccountID string,
+		targetAccountID string,
+		action string,
+		detail map[string]any,
+	) error
 }
 
 // auditService is the diagnostic read surface exposed to administrators.
@@ -274,6 +291,7 @@ func NewRouter(options RouterOptions) http.Handler {
 				deviceBindingService:  options.BindingService,
 				childService:          options.ChildService,
 				policyService:         options.ParentPolicyService,
+				auditService:          options.AuditRecorder,
 			}
 			mux.HandleFunc(
 				"PUT /api/v1/auth/ai-models",
@@ -445,6 +463,67 @@ func NewRouter(options RouterOptions) http.Handler {
 				featureCenterHandler.RegisterAdminRoutes(
 					mux,
 					authHandler.requireAdmin,
+				)
+			}
+			if options.PrivacyService != nil {
+				privacyHandler := privacyhandler.New(options.PrivacyService)
+				parentScoped := func(
+					action func(
+						http.ResponseWriter,
+						*http.Request,
+						string,
+					),
+				) http.HandlerFunc {
+					return func(response http.ResponseWriter, request *http.Request) {
+						accountID, ok := authenticatedAccountID(request)
+						if !ok {
+							writeError(
+								response,
+								request,
+								http.StatusUnauthorized,
+								"unauthenticated",
+								"请重新登录",
+							)
+							return
+						}
+						action(response, request, accountID)
+					}
+				}
+				mux.HandleFunc(
+					"GET /api/v1/privacy",
+					authHandler.requireAuthentication(parentScoped(privacyHandler.Status)),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/privacy/export",
+					authHandler.requireAuthentication(parentScoped(privacyHandler.Export)),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/privacy/deletion",
+					authHandler.requireAuthentication(
+						parentScoped(privacyHandler.RequestDeletion),
+					),
+				)
+				mux.HandleFunc(
+					"DELETE /api/v1/privacy/deletion",
+					authHandler.requireAuthentication(
+						parentScoped(privacyHandler.CancelDeletion),
+					),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/privacy/consent/withdraw",
+					authHandler.requireAuthentication(
+						parentScoped(privacyHandler.WithdrawConsent),
+					),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/privacy/consent/grant",
+					authHandler.requireAuthentication(
+						parentScoped(privacyHandler.GrantConsent),
+					),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/audit",
+					authHandler.requireAdmin(privacyHandler.AdminAudit),
 				)
 			}
 		}

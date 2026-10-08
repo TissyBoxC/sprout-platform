@@ -76,6 +76,7 @@ class ProfilePage extends ConsumerWidget {
                     onUsageReports: () => context.push('/me/usage-reports'),
                     onContent: () => context.push('/me/content'),
                     onEmail: () => context.push('/account/email'),
+                    onPrivacy: () => context.push('/me/privacy'),
                     onUpdate: () => context.push('/me/update'),
                     onLogout: () => _confirmLogout(context, ref),
                   ),
@@ -406,6 +407,7 @@ class _SettingsCard extends StatelessWidget {
     required this.onUsageReports,
     required this.onContent,
     required this.onEmail,
+    required this.onPrivacy,
     required this.onUpdate,
     required this.onLogout,
   });
@@ -415,6 +417,7 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onUsageReports;
   final VoidCallback onContent;
   final VoidCallback onEmail;
+  final VoidCallback onPrivacy;
   final VoidCallback onUpdate;
   final VoidCallback onLogout;
 
@@ -455,6 +458,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: Text(hasEmail ? '可以使用手机号或邮箱登录' : '绑定后可以用邮箱登录，也方便找回账号'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onEmail,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.shield_outlined),
+            title: const Text('隐私与数据'),
+            subtitle: const Text('查看授权、获取数据副本和管理账号注销'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onPrivacy,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

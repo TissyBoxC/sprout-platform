@@ -712,6 +712,16 @@ func (r *memoryRepository) List(context.Context) ([]domain.Account, error) {
 	return []domain.Account{*r.account}, nil
 }
 
+func (r *memoryRepository) DeleteByParentAccountID(
+	_ context.Context,
+	parentAccountID string,
+) error {
+	if r.account != nil && r.account.ParentAccountID == parentAccountID {
+		r.account = nil
+	}
+	return nil
+}
+
 func (r *memoryRepository) UpsertProvisioning(
 	_ context.Context,
 	account *domain.Account,
@@ -764,6 +774,7 @@ type stubProvider struct {
 	createdKeyCalls           int
 	rotateKeyCalls            int
 	deletedKeyIDs             []int64
+	deletedAccountIDs         []string
 }
 
 func (p *stubProvider) GetRuntimeConfig(
@@ -869,6 +880,15 @@ func (p *stubProvider) DeleteAPIKey(
 	apiKeyID int64,
 ) error {
 	p.deletedKeyIDs = append(p.deletedKeyIDs, apiKeyID)
+	return nil
+}
+
+func (p *stubProvider) DeleteAccount(
+	_ context.Context,
+	providerAccountID string,
+) error {
+	p.deletedAccountIDs = append(p.deletedAccountIDs, providerAccountID)
+	p.account = nil
 	return nil
 }
 

@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/TissyBoxC/sprout-platform/packages/go/observability"
+	sharedobservability "github.com/TissyBoxC/sprout-platform/packages/go/observability"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/frame"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/preprocess"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/reference"
@@ -21,6 +21,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/conversation"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/pipeline"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/platform/cache"
+	securityauth "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/authorization"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/content_policy"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/session"
 	gatewayhttp "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/transport/http"
@@ -36,7 +37,7 @@ func Run() error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	logger := slog.New(observability.NewRedactingHandler(slog.NewJSONHandler(
+	logger := slog.New(sharedobservability.NewRedactingHandler(slog.NewJSONHandler(
 		os.Stdout,
 		&slog.HandlerOptions{
 			Level: cfg.Log.SlogLevel(),
@@ -55,6 +56,7 @@ func Run() error {
 
 	var usageRecorder usage.Recorder
 	var policyResolver content_policy.Resolver
+	var deviceAuthorizer websocket.DeviceAuthorizer
 	if cfg.Database.DSN != "" {
 		databaseStore, err := pgxpool.New(startupCtx, cfg.Database.DSN)
 		if err != nil {
@@ -63,9 +65,15 @@ func Run() error {
 		defer databaseStore.Close()
 		usageRecorder = usage.NewPostgresRecorder(databaseStore)
 		policyResolver = content_policy.NewPostgresResolver(databaseStore)
+		deviceAuthorizer = securityauth.NewPostgresDeviceAuthorizer(databaseStore)
 	}
 
-	realtimeHandler, realtimeShutdown, err := buildRealtimeTransport(cfg, logger, policyResolver)
+	realtimeHandler, realtimeShutdown, err := buildRealtimeTransport(
+		cfg,
+		logger,
+		policyResolver,
+		deviceAuthorizer,
+	)
 	if err != nil {
 		return err
 	}
@@ -120,6 +128,7 @@ func buildRealtimeTransport(
 	cfg config.Config,
 	logger *slog.Logger,
 	policyResolver content_policy.Resolver,
+	deviceAuthorizer websocket.DeviceAuthorizer,
 ) (http.Handler, func(), error) {
 	if !cfg.WebSocket.Enabled {
 		logger.Info("device realtime endpoint is disabled")
@@ -147,13 +156,16 @@ func buildRealtimeTransport(
 	}
 
 	runner, err := conversation.New(conversation.Config{
-		ASR:          adapters.ASR,
-		LLM:          adapters.LLM,
-		TTS:          adapters.TTS,
-		Model:        cfg.Audio.LLMModel,
-		Voice:        cfg.Audio.TTSConfig.Voice,
-		Language:     "zh",
-		DevicePolicy: devicePolicy,
+		ASR:                 adapters.ASR,
+		LLM:                 adapters.LLM,
+		TTS:                 adapters.TTS,
+		Model:               cfg.Audio.LLMModel,
+		Voice:               cfg.Audio.TTSConfig.Voice,
+		Language:            "zh",
+		DevicePolicy:        devicePolicy,
+		MaxInputRunes:       cfg.Security.MaxInputRunes,
+		InputFilterEnabled:  cfg.Security.InputFilterEnabled,
+		OutputFilterEnabled: cfg.Security.OutputFilterEnabled,
 		ReferencePublisher: func(deviceID string, pcm []int16) {
 			references.Publish(deviceID, pcm)
 		},
@@ -191,6 +203,8 @@ func buildRealtimeTransport(
 		SessionTTL:         seconds(cfg.WebSocket.SessionTokenTTLSeconds),
 		Manager:            manager,
 		Verifier:           verifier,
+		Authorizer:         deviceAuthorizer,
+		TokenRevoker:       verifier.RevokeIdentity,
 		DetectorFactory: func() vad.Detector {
 			return vad.NewEnergyDetector(detectorConfig)
 		},
@@ -217,7 +231,7 @@ func buildRealtimeTransport(
 				logger.Warn("voice conversation turn failed",
 					"session_id", segment.SessionID,
 					"device_id", segment.DeviceID,
-					"error", turnErr.Error(),
+					"error", sharedobservability.RedactValue(turnErr.Error()),
 				)
 			}
 		},

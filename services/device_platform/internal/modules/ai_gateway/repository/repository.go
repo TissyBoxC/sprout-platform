@@ -78,6 +78,7 @@ type Repository interface {
 		providerAccountID string,
 	) (*domain.Account, error)
 	List(ctx context.Context) ([]domain.Account, error)
+	DeleteByParentAccountID(ctx context.Context, parentAccountID string) error
 	// UpsertProvisioning atomically creates or repairs one account projection.
 	// It returns the stored account so callers can detect a concurrent winner
 	// without issuing a second credential.
@@ -199,6 +200,21 @@ func (r *PostgresRepository) List(ctx context.Context) ([]domain.Account, error)
 		return nil, fmt.Errorf("iterate AI accounts: %w", err)
 	}
 	return accounts, nil
+}
+
+// DeleteByParentAccountID removes the local provider projection after the
+// provider has accepted account deletion.
+func (r *PostgresRepository) DeleteByParentAccountID(
+	ctx context.Context,
+	parentAccountID string,
+) error {
+	if _, err := r.pool.Exec(ctx, `
+		DELETE FROM ai_accounts
+		WHERE parent_account_id = $1
+	`, parentAccountID); err != nil {
+		return fmt.Errorf("delete AI account projection: %w", err)
+	}
+	return nil
 }
 
 // UpsertProvisioning stores the encrypted credential and provider projection

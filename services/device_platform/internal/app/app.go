@@ -37,6 +37,8 @@ import (
 	operationsService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
 	policyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/repository"
 	policyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
+	privacyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/repository"
+	privacyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/service"
 	releaseStoreService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
 	serviceVersionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/repository"
 	serviceVersionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
@@ -85,6 +87,11 @@ func Run() error {
 	}
 	defer mqttClient.Close()
 
+	authPersistence := authRepository.NewPostgresRepository(databaseStore.Pool())
+	childPersistence := childRepository.NewPostgresRepository(databaseStore.Pool())
+	bindingPersistence := bindingRepository.NewPostgresRepository(databaseStore.Pool())
+	usagePersistence := usageReportRepository.NewPostgresRepository(databaseStore.Pool())
+
 	tokenIssuer, err := security.NewHMACTokenIssuer(cfg.Auth.AccessTokenSecret)
 	if err != nil {
 		return fmt.Errorf("create token issuer: %w", err)
@@ -115,12 +122,12 @@ func Run() error {
 	var phoneVerifier authService.PhoneVerifier
 	if cfg.Auth.PhoneVerificationMode == "local" {
 		phoneVerifier = authService.NewLocalPhoneVerifier(
-			authRepository.NewPostgresRepository(databaseStore.Pool()),
+			authPersistence,
 			nil,
 		)
 	}
 	parentAuthService, err := authService.New(authService.Options{
-		Repository:      authRepository.NewPostgresRepository(databaseStore.Pool()),
+		Repository:      authPersistence,
 		TokenIssuer:     tokenIssuer,
 		AIProvisioner:   aiAccountService,
 		MFACipher:       mfaCipher,
@@ -139,7 +146,7 @@ func Run() error {
 		return fmt.Errorf("create parent policy service: %w", err)
 	}
 	childProfileService, err := childService.New(childService.Options{
-		Repository:        childRepository.NewPostgresRepository(databaseStore.Pool()),
+		Repository:        childPersistence,
 		PolicyProvisioner: parentPolicyService,
 	})
 	if err != nil {
@@ -158,7 +165,7 @@ func Run() error {
 		voiceTokenIssuer = signer
 	}
 	deviceBindingService, err := bindingService.New(bindingService.Options{
-		Repository:    bindingRepository.NewPostgresRepository(databaseStore.Pool()),
+		Repository:    bindingPersistence,
 		TokenTTL:      15 * time.Minute,
 		ProofVerifier: security.ECDSAProofVerifier{},
 	})
@@ -380,13 +387,24 @@ func Run() error {
 		return fmt.Errorf("create content library service: %w", err)
 	}
 	usageReports, err := usageReportService.New(usageReportService.Options{
-		Repository: usageReportRepository.NewPostgresRepository(
-			databaseStore.Pool(),
-		),
+		Repository:    usagePersistence,
 		PolicyService: parentPolicyService,
 	})
 	if err != nil {
 		return fmt.Errorf("create usage report service: %w", err)
+	}
+	privacy, err := privacyService.New(privacyService.Options{
+		Repository:     privacyRepository.NewPostgresRepository(databaseStore.Pool()),
+		ParentAccounts: authPersistence,
+		Children:       childPersistence,
+		Devices:        bindingPersistence,
+		Runtime:        deviceRuntimeService,
+		Usage:          usagePersistence,
+		AIAccounts:     aiAccountService,
+		Retention:      operations,
+	})
+	if err != nil {
+		return fmt.Errorf("create privacy service: %w", err)
 	}
 
 	server := &http.Server{
@@ -409,6 +427,8 @@ func Run() error {
 			UsageReportService:    usageReports,
 			VoiceTokenIssuer:      voiceTokenIssuer,
 			VoiceWebSocketURL:     cfg.VoiceGateway.WebSocketURL,
+			PrivacyService:        privacy,
+			AuditRecorder:         privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
@@ -420,6 +440,10 @@ func Run() error {
 			errCh <- serveErr
 		}
 	}()
+
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	defer workerCancel()
+	go runDeletionWorker(workerCtx, logger, privacy)
 
 	stopCh := make(chan os.Signal, 1)
 	signal.Notify(stopCh, os.Interrupt, syscall.SIGTERM)
@@ -434,4 +458,27 @@ func Run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return server.Shutdown(shutdownCtx)
+}
+
+func runDeletionWorker(
+	ctx context.Context,
+	logger *slog.Logger,
+	privacy *privacyService.Service,
+) {
+	if privacy == nil {
+		return
+	}
+	const interval = time.Hour
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if err := privacy.ExecuteDueDeletions(ctx, 20); err != nil {
+			logger.Error("privacy deletion worker failed", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }

@@ -59,7 +59,12 @@ type ServerConfig struct {
 	SessionTTL         time.Duration
 	Manager            *session.Manager
 	Verifier           TokenVerifier
-	DetectorFactory    func() vad.Detector
+	// Authorizer re-checks the guardian's platform state before the upgrade so
+	// a withdrawn consent or disabled account blocks new voice sessions. It is
+	// optional for tests and legacy deployments; production enables it whenever
+	// the platform database is configured.
+	Authorizer      DeviceAuthorizer
+	DetectorFactory func() vad.Detector
 	// PreprocessFactory builds the per-session echo cancellation, noise
 	// suppression, and gain calibration chain. Optional; nil keeps the plain
 	// codec and VAD path.
@@ -71,6 +76,10 @@ type ServerConfig struct {
 	OnSessionClosed func(sessionID string, cause error)
 	OnSegmentReady  func(segment session.AudioSegment)
 	OnBackpressure  func(deviceID string, dropped uint64)
+	// TokenRevoker invalidates the authenticated session token when this
+	// connection closes. Production uses the HMAC verifier's revocation list;
+	// test and legacy verifiers may leave it nil.
+	TokenRevoker func(identity DeviceIdentity)
 	// SegmentHandler, when set, owns the conversation pipeline. It receives each
 	// completed utterance plus a sink that streams synthesized reply audio back
 	// to the device over this connection. Invocations for one connection are
@@ -183,6 +192,17 @@ func (s *Server) Handler() http.Handler {
 			_ = writeJSON(response, NewErrorFrame("", "", errorCodeUnauthenticated, "设备认证失败，请重新登录", false))
 			return
 		}
+		if err := authorizeDevice(
+			request.Context(),
+			s.config.Authorizer,
+			identity.DeviceID,
+		); err != nil {
+			s.stats.rejectedConnections.Add(1)
+			response.Header().Set("Content-Type", "application/json; charset=utf-8")
+			response.WriteHeader(http.StatusForbidden)
+			_ = writeJSON(response, NewErrorFrame("", "", errorCodeUnauthenticated, "语音服务当前不可用，请让家长重新确认授权", false))
+			return
+		}
 		upgradeHeaders := http.Header{}
 		_, selectedProtocol := deviceToken(request)
 		if selectedProtocol != "" {
@@ -224,6 +244,11 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 	connectionContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	defer connection.Close()
+	defer func() {
+		if s.config.TokenRevoker != nil {
+			s.config.TokenRevoker(identity)
+		}
+	}()
 	connection.SetReadLimit(s.config.ReadLimitBytes)
 	_ = connection.SetReadDeadline(time.Now().Add(s.config.PongWait))
 	connection.SetPongHandler(func(string) error {

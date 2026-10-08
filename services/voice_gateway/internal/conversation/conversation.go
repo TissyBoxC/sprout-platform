@@ -20,7 +20,10 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/frame"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/playback"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/llm"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/platform/observability"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/content_policy"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/moderation"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/prompt_guard"
 )
 
 const (
@@ -30,6 +33,9 @@ const (
 	// defaultMaxReplyRunes caps synthesized text so a runaway model response
 	// cannot monopolize the speaker.
 	defaultMaxReplyRunes = 600
+	// defaultMaxInputRunes bounds recognized speech before it enters policy
+	// evaluation, prompt construction, or provider calls.
+	defaultMaxInputRunes = 1200
 	// ttsFrameBytes is the largest Opus frame the contract allows; TTS output is
 	// chunked to this size before encoding.
 	ttsFrameBytes = frame.SamplesPerFrame * 2
@@ -67,6 +73,18 @@ type Config struct {
 	LLM    llm.Client
 	TTS    tts.Synthesizer
 	Policy content_policy.Policy
+	// Moderator applies deterministic child-safety checks to recognized input
+	// and model output. A nil value uses the production engine.
+	Moderator *moderation.Engine
+	// PromptGuard adds a non-negotiable instruction boundary around the
+	// composed system prompt. A nil value uses the production guard.
+	PromptGuard *prompt_guard.Engine
+	// InputFilterEnabled and OutputFilterEnabled are explicit operator
+	// switches. The production configuration loader defaults both to true;
+	// direct package callers must set them explicitly because Go's bool zero
+	// value is false. Crisis intervention never depends on either switch.
+	InputFilterEnabled  bool
+	OutputFilterEnabled bool
 	// DevicePolicy resolves the authenticated device's effective family policy.
 	// It constrains the system prompt by age tier and refuses a turn whose
 	// declared content category is not explicitly allowed. A nil value keeps
@@ -79,6 +97,9 @@ type Config struct {
 	SystemPrompt  string
 	MaxTurns      int
 	MaxReplyRunes int
+	// MaxInputRunes rejects unexpectedly large recognized utterances before
+	// they can consume provider or memory resources.
+	MaxInputRunes int
 	// ReferencePublisher receives the PCM the device speaker is about to play,
 	// so gateway echo cancellation can subtract it from the next microphone
 	// frame. Optional; nil leaves the reference signal silent.
@@ -107,6 +128,15 @@ func New(config Config) (*Runner, error) {
 	}
 	if config.MaxReplyRunes <= 0 {
 		config.MaxReplyRunes = defaultMaxReplyRunes
+	}
+	if config.MaxInputRunes <= 0 {
+		config.MaxInputRunes = defaultMaxInputRunes
+	}
+	if config.Moderator == nil {
+		config.Moderator = moderation.DefaultEngine()
+	}
+	if config.PromptGuard == nil {
+		config.PromptGuard = prompt_guard.New()
 	}
 	if strings.TrimSpace(config.SystemPrompt) == "" {
 		config.SystemPrompt = defaultSystemPrompt
@@ -158,11 +188,32 @@ func (r *Runner) TurnWithCategory(
 	if text == "" {
 		return ErrEmptyTranscribe
 	}
+	if !moderation.ValidateUTF8Text(text, r.config.MaxInputRunes) {
+		return fmt.Errorf("%w: %s", ErrContentBlocked, moderation.ReasonEmpty)
+	}
 	safetyExempt := content_policy.IsSafetyIntent(text)
+	// Crisis detection is independent from the operator-facing moderation
+	// switch so a disabled ordinary filter cannot turn off child protection.
+	crisisInput := r.config.Moderator.CheckCrisis(text).Crisis
+	if r.config.InputFilterEnabled {
+		inputDecision := r.config.Moderator.CheckInput(text)
+		crisisInput = inputDecision.Crisis
+		safetyExempt = crisisInput || safetyExempt
+		if !inputDecision.Allowed && !inputDecision.Crisis {
+			return fmt.Errorf("%w: %s", ErrContentBlocked, inputDecision.Reason)
+		}
+	}
 	if !safetyExempt && r.config.Policy != nil {
 		if decision := r.config.Policy.CheckText(text); !decision.Allowed {
 			return fmt.Errorf("%w: %s", ErrContentBlocked, decision.Reason)
 		}
+	}
+
+	// A recognized crisis utterance must not depend on a model reply. The model
+	// may fail, be unavailable, or produce unsafe text; the child still receives
+	// the fixed protective response and no provider call is made.
+	if crisisInput {
+		return r.speak(ctx, deviceID, moderation.CrisisReply, sink)
 	}
 
 	systemPrompt := r.config.SystemPrompt
@@ -189,8 +240,15 @@ func (r *Runner) TurnWithCategory(
 		}
 		systemPrompt = composed
 	}
+	if !safetyExempt {
+		guardResult := r.config.PromptGuard.ApplyDetailed(systemPrompt, text)
+		if !guardResult.Allowed {
+			return fmt.Errorf("%w: %s", ErrContentBlocked, guardResult.Reason)
+		}
+		systemPrompt = guardResult.SystemPrompt
+	}
 
-	reply, err := r.reply(ctx, sessionID, deviceID, systemPrompt, text)
+	reply, outputDecision, err := r.reply(ctx, sessionID, deviceID, systemPrompt, text)
 	if err != nil {
 		return err
 	}
@@ -199,7 +257,7 @@ func (r *Runner) TurnWithCategory(
 	}
 	if !safetyExempt && r.config.Policy != nil {
 		if decision := r.config.Policy.CheckText(reply); !decision.Allowed {
-			return fmt.Errorf("%w: %s", ErrContentBlocked, decision.Reason)
+			reply = r.safeReply(outputDecision)
 		}
 	}
 	return r.speak(ctx, deviceID, reply, sink)
@@ -218,15 +276,15 @@ func (r *Runner) ClearSession(sessionID string) {
 func (r *Runner) transcribe(ctx context.Context, pcm []int16) (string, error) {
 	stream, err := r.config.ASR.Open(ctx, asr.Config{Language: r.config.Language})
 	if err != nil {
-		return "", fmt.Errorf("open recognition: %w", err)
+		return "", observability.NewSafeError("语音识别服务暂不可用", err)
 	}
 	defer stream.Close()
 
 	if err := stream.WriteAudio(int16Bytes(pcm)); err != nil {
-		return "", fmt.Errorf("write recognition audio: %w", err)
+		return "", observability.NewSafeError("语音识别未能接收音频", err)
 	}
 	if err := stream.Close(); err != nil {
-		return "", fmt.Errorf("finalize recognition: %w", err)
+		return "", observability.NewSafeError("语音识别未能完成", err)
 	}
 
 	var builder strings.Builder
@@ -238,7 +296,7 @@ func (r *Runner) transcribe(ctx context.Context, pcm []int16) (string, error) {
 		builder.WriteString(result.Text)
 	}
 	if err := stream.Err(); err != nil {
-		return "", fmt.Errorf("recognize speech: %w", err)
+		return "", observability.NewSafeError("语音识别服务暂不可用", err)
 	}
 	return builder.String(), nil
 }
@@ -249,7 +307,7 @@ func (r *Runner) reply(
 	deviceID string,
 	systemPrompt string,
 	text string,
-) (string, error) {
+) (string, moderation.Decision, error) {
 	messages := r.appendUserMessage(sessionID, systemPrompt, text)
 	stream, err := r.config.LLM.Chat(ctx, llm.Request{
 		Model:     r.config.Model,
@@ -258,7 +316,7 @@ func (r *Runner) reply(
 		SessionID: sessionID,
 	})
 	if err != nil {
-		return "", fmt.Errorf("start chat: %w", err)
+		return "", moderation.Decision{}, observability.NewSafeError("对话服务暂不可用", err)
 	}
 	defer stream.Close()
 
@@ -273,11 +331,27 @@ func (r *Runner) reply(
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return "", fmt.Errorf("read chat reply: %w", err)
+		return "", moderation.Decision{}, observability.NewSafeError("对话服务未能完成回复", err)
 	}
 	reply := truncateRunes(strings.TrimSpace(builder.String()), maxRunes)
+	decision := moderation.Decision{Allowed: true, Action: moderation.ActionAllow}
+	if r.config.OutputFilterEnabled {
+		decision = r.config.Moderator.CheckOutput(reply)
+		if !decision.Allowed {
+			safeReply := r.safeReply(decision)
+			r.appendAssistantMessage(sessionID, safeReply)
+			return safeReply, decision, nil
+		}
+	}
+	// Even when the ordinary output filter is disabled, a model reply that
+	// itself contains a crisis phrase must never be spoken verbatim.
+	if crisisDecision := r.config.Moderator.CheckCrisis(reply); crisisDecision.Crisis {
+		safeReply := moderation.CrisisReply
+		r.appendAssistantMessage(sessionID, safeReply)
+		return safeReply, crisisDecision, nil
+	}
 	r.appendAssistantMessage(sessionID, reply)
-	return reply, nil
+	return reply, decision, nil
 }
 
 func (r *Runner) speak(ctx context.Context, deviceID string, text string, sink Sink) error {
@@ -290,7 +364,7 @@ func (r *Runner) speak(ctx context.Context, deviceID string, text string, sink S
 		Language: r.config.Language,
 	})
 	if err != nil {
-		return fmt.Errorf("start synthesis: %w", err)
+		return observability.NewSafeError("语音播报服务暂不可用", err)
 	}
 	defer stream.Close()
 
@@ -312,13 +386,13 @@ func (r *Runner) speak(ctx context.Context, deviceID string, text string, sink S
 				true,
 				r.referenceCallback(deviceID),
 			); sendErr != nil {
-				return fmt.Errorf("send reply audio: %w", sendErr)
+				return observability.NewSafeError("回复音频未能发送", sendErr)
 			}
 			pending = pending[ttsFrameBytes:]
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return fmt.Errorf("read synthesized audio: %w", err)
+		return observability.NewSafeError("语音播报服务未能完成", err)
 	}
 	if len(pending) > 0 {
 		// Zero-pad the trailing partial frame so the device always receives
@@ -333,10 +407,17 @@ func (r *Runner) speak(ctx context.Context, deviceID string, text string, sink S
 			true,
 			r.referenceCallback(deviceID),
 		); sendErr != nil {
-			return fmt.Errorf("send reply audio: %w", sendErr)
+			return observability.NewSafeError("回复音频未能发送", sendErr)
 		}
 	}
 	return nil
+}
+
+func (r *Runner) safeReply(decision moderation.Decision) string {
+	if strings.TrimSpace(decision.Replacement) != "" {
+		return decision.Replacement
+	}
+	return moderation.SafeFallbackReply
 }
 
 // referenceCallback returns a playback hook that publishes the played frame.

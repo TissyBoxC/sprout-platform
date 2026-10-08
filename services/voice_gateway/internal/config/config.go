@@ -194,6 +194,13 @@ type Sub2APIConfig struct {
 // SecurityConfig contains content safety settings.
 type SecurityConfig struct {
 	ContentPolicyEnabled bool
+	// InputFilterEnabled and OutputFilterEnabled are explicit operator
+	// switches. Production defaults keep both enabled; disabling one leaves a
+	// visible, auditable configuration rather than silently weakening policy.
+	InputFilterEnabled  bool
+	OutputFilterEnabled bool
+	// MaxInputRunes bounds recognized speech before prompt construction.
+	MaxInputRunes int
 }
 
 // Load reads configuration from environment variables with local defaults.
@@ -223,6 +230,9 @@ func Load() (Config, error) {
 		},
 		Security: SecurityConfig{
 			ContentPolicyEnabled: envBool("VOICE_GATEWAY_CONTENT_POLICY_ENABLED", true),
+			InputFilterEnabled:   envBool("VOICE_GATEWAY_INPUT_FILTER_ENABLED", true),
+			OutputFilterEnabled:  envBool("VOICE_GATEWAY_OUTPUT_FILTER_ENABLED", true),
+			MaxInputRunes:        envInt("VOICE_GATEWAY_MAX_INPUT_RUNES", 1200),
 		},
 		WebSocket: WebSocketConfig{
 			Enabled:                   envBool("VOICE_GATEWAY_WS_ENABLED", false),
@@ -314,6 +324,8 @@ func Load() (Config, error) {
 		if cfg.WebSocket.SegmentQueueDepth < 1 ||
 			cfg.WebSocket.MaxBytesPerSecond < 1 ||
 			cfg.WebSocket.WriteQueueDepth < 1 ||
+			cfg.WebSocket.SessionTokenTTLSeconds < 30 ||
+			cfg.WebSocket.SessionTokenTTLSeconds > 900 ||
 			cfg.WebSocket.PongWaitSeconds < 1 ||
 			cfg.WebSocket.PingIntervalSeconds < 1 ||
 			cfg.WebSocket.PongWaitSeconds <= cfg.WebSocket.PingIntervalSeconds ||
@@ -322,6 +334,9 @@ func Load() (Config, error) {
 			cfg.WebSocket.SessionMaxDurationSeconds < cfg.WebSocket.IdleTimeoutSeconds {
 			return Config{}, fmt.Errorf("VOICE_GATEWAY_WS timing and queue limits are invalid")
 		}
+	}
+	if cfg.Security.MaxInputRunes < 64 || cfg.Security.MaxInputRunes > 8000 {
+		return Config{}, fmt.Errorf("VOICE_GATEWAY_MAX_INPUT_RUNES must be between 64 and 8000")
 	}
 
 	return cfg, nil

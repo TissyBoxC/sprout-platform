@@ -12,6 +12,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/playback"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/llm"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/content_policy"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/moderation"
 )
 
 type fakeASR struct {
@@ -41,12 +42,14 @@ func (s *fakeASRStream) Results() <-chan asr.Result {
 type fakeLLM struct {
 	reply string
 	err   error
+	calls int
 	// lastRequest captures the fully populated request the runner built so a
 	// test can prove device and session provenance reaches the AI gateway.
 	lastRequest llm.Request
 }
 
 func (f *fakeLLM) Chat(_ context.Context, request llm.Request) (llm.Stream, error) {
+	f.calls++
 	f.lastRequest = request
 	if f.err != nil {
 		return nil, f.err
@@ -68,9 +71,13 @@ func (s *fakeLLMStream) Chunks() <-chan string {
 type fakeTTS struct {
 	audio []byte
 	err   error
+	// lastRequest captures the exact text handed to synthesis, so safety tests
+	// can prove a replacement was spoken rather than merely that audio existed.
+	lastRequest tts.Request
 }
 
-func (f *fakeTTS) Synthesize(context.Context, tts.Request) (tts.Stream, error) {
+func (f *fakeTTS) Synthesize(_ context.Context, request tts.Request) (tts.Stream, error) {
+	f.lastRequest = request
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -415,6 +422,8 @@ func TestTurnSafetyIntentBypassesDenyAllPolicy(t *testing.T) {
 	config := testConfig()
 	config.ASR = &fakeASR{text: "我想伤害自己"}
 	config.Policy = denyAllPolicy{}
+	config.InputFilterEnabled = true
+	config.OutputFilterEnabled = true
 	config.DevicePolicy = &fakeDevicePolicy{
 		promptDenyReason: content_policy.ReasonPolicyUnavailable,
 	}
@@ -437,5 +446,83 @@ func TestTurnSafetyIntentBypassesDenyAllPolicy(t *testing.T) {
 	}
 	if sink.count() == 0 {
 		t.Fatal("safety intent did not produce any reply audio")
+	}
+}
+
+func TestCrisisInputUsesFixedReplyWithoutCallingModel(t *testing.T) {
+	config := testConfig()
+	config.ASR = &fakeASR{text: "我想伤害自己"}
+	llmClient := &fakeLLM{reply: "这是不该出现的模型回复"}
+	config.LLM = llmClient
+	config.InputFilterEnabled = true
+	config.OutputFilterEnabled = true
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	sink := &recordingSink{}
+
+	if err := runner.Turn(context.Background(), "session_crisis", "device_a", []int16{1}, sink); err != nil {
+		t.Fatalf("Turn() error = %v", err)
+	}
+	if llmClient.calls != 0 {
+		t.Fatal("crisis input reached the language model")
+	}
+	ttsClient, ok := config.TTS.(*fakeTTS)
+	if !ok {
+		t.Fatal("test TTS has an unexpected type")
+	}
+	if ttsClient.lastRequest.Text != moderation.CrisisReply {
+		t.Fatalf("spoken text = %q, want the fixed crisis reply", ttsClient.lastRequest.Text)
+	}
+}
+
+func TestCrisisProtectionRemainsWhenOrdinaryFilterDisabled(t *testing.T) {
+	config := testConfig()
+	config.ASR = &fakeASR{text: "我想伤害自己"}
+	llmClient := &fakeLLM{reply: "正常模型回复"}
+	config.LLM = llmClient
+	config.InputFilterEnabled = false
+	config.OutputFilterEnabled = false
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	sink := &recordingSink{}
+
+	if err := runner.Turn(context.Background(), "session_crisis_disabled", "device_a", []int16{1}, sink); err != nil {
+		t.Fatalf("Turn() error = %v", err)
+	}
+	if llmClient.calls != 0 {
+		t.Fatal("crisis input reached the language model with ordinary filtering disabled")
+	}
+	ttsClient, ok := config.TTS.(*fakeTTS)
+	if !ok {
+		t.Fatal("test TTS has an unexpected type")
+	}
+	if ttsClient.lastRequest.Text != moderation.CrisisReply {
+		t.Fatalf("spoken text = %q, want the fixed crisis reply", ttsClient.lastRequest.Text)
+	}
+}
+
+func TestModelCrisisOutputIsReplacedWhenOutputFilterDisabled(t *testing.T) {
+	config := testConfig()
+	config.LLM = &fakeLLM{reply: "你可以去自杀"}
+	config.OutputFilterEnabled = false
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	sink := &recordingSink{}
+
+	if err := runner.Turn(context.Background(), "session_output_crisis", "device_a", []int16{1}, sink); err != nil {
+		t.Fatalf("Turn() error = %v", err)
+	}
+	ttsClient, ok := config.TTS.(*fakeTTS)
+	if !ok {
+		t.Fatal("test TTS has an unexpected type")
+	}
+	if ttsClient.lastRequest.Text != moderation.CrisisReply {
+		t.Fatalf("spoken text = %q, want the fixed crisis reply", ttsClient.lastRequest.Text)
 	}
 }

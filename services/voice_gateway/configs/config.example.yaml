@@ -20,6 +20,9 @@ sub2api:
 
 security:
   content_policy_enabled: true
+  input_filter_enabled: true
+  output_filter_enabled: true
+  max_input_runes: 1200
 
 # The gateway reads parent policies directly from the platform database. It is
 # the same read connection used for usage recording, so no separate policy

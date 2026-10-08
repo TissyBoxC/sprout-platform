@@ -35,8 +35,18 @@ frame may carry an optional `content_category`; the value is validated as a
 lower-case category identifier and never logged.
 
 Crisis and self-harm utterances are exempt from ordinary category refusal and
-use a fixed protective prompt. Safety responses must never be blocked by a
-family category or by a policy lookup failure.
+receive a fixed protective reply without calling the language model. Safety
+responses must never be blocked by a family category, a model outage, or a
+policy lookup failure. The input and output moderation stages are independent
+operator switches, both defaulting to `true`; disabling either cannot disable
+the crisis path.
+
+Recognized input and model output are checked for sexual, violent, self-harm,
+illegal, horror, privacy, offline-meeting, commercial-inducement,
+prompt-injection, secret-exfiltration, and personal-data patterns. Unsafe
+model output is replaced with an age-appropriate fallback instead of being
+spoken. Errors and logs expose only a stable message and redact credentials,
+phone numbers, email addresses, and national identifiers.
 
 Configure this with `VOICE_GATEWAY_DATABASE_DSN`. When content policy is
 enabled but no database is configured, the realtime endpoint refuses to start
@@ -76,3 +86,16 @@ Configuration is read from environment variables. See
 path requires `VOICE_GATEWAY_DATABASE_DSN`; the realtime WebSocket path
 requires `VOICE_GATEWAY_WS_ENABLED=true` and a strong
 `VOICE_GATEWAY_WS_TOKEN_SECRET`.
+
+## Device Token Revocation
+
+The gateway rejects device tokens with a missing or blank `token_id`. When a
+WebSocket connection closes, the verifier revokes that token identifier in
+process memory until its signed expiry, closing the replay window for a closed
+conversation.
+
+This revocation set is **process-local**. The current deployment topology is a
+single gateway replica, so the guarantee holds there. Before running multiple
+gateway replicas, move the revocation set to shared state such as Redis or the
+platform database; otherwise a token revoked by one replica can still be
+accepted by another.

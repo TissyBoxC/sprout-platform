@@ -29,6 +29,12 @@ func TestLoadUsesConservativeSecurityDefaults(t *testing.T) {
 	if !cfg.Security.ContentPolicyEnabled {
 		t.Fatal("content policy must be enabled by default")
 	}
+	if !cfg.Security.InputFilterEnabled || !cfg.Security.OutputFilterEnabled {
+		t.Fatal("input and output moderation must be enabled by default")
+	}
+	if cfg.Security.MaxInputRunes != 1200 {
+		t.Fatalf("max input runes = %d, want 1200", cfg.Security.MaxInputRunes)
+	}
 	if cfg.Internal.Enabled {
 		t.Fatal("internal API must be disabled by default")
 	}
@@ -81,6 +87,24 @@ func TestLoadRejectsEnabledWebsiteSocketWithoutStrongSecret(t *testing.T) {
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected weak websocket secret to be rejected")
+	}
+}
+
+func TestLoadRejectsUnsafeSessionTokenTTL(t *testing.T) {
+	t.Setenv("VOICE_GATEWAY_WS_ENABLED", "true")
+	t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
+	t.Setenv("VOICE_GATEWAY_WS_SESSION_TOKEN_TTL_SECONDS", "3600")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected excessive session token ttl to be rejected")
+	}
+}
+
+func TestLoadRejectsInvalidMaxInputRunes(t *testing.T) {
+	t.Setenv("VOICE_GATEWAY_MAX_INPUT_RUNES", "8")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected tiny max input runes to be rejected")
 	}
 }
 

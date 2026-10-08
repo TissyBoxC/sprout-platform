@@ -59,6 +59,7 @@ type Provider interface {
 		providerAccountID string,
 		apiKeyID int64,
 	) error
+	DeleteAccount(ctx context.Context, providerAccountID string) error
 }
 
 // RuntimeConfigForAdmin returns the authoritative gateway defaults and model
@@ -731,6 +732,32 @@ func (s *Service) CredentialForDevice(
 		ProviderAccountID: account.ProviderAccountID,
 		APIKey:            string(plaintext),
 	}, nil
+}
+
+// DeleteForParent removes the provider-side account for one guardian. It is
+// idempotent because deletion may be retried after a transient provider or
+// database failure. The platform projection is removed only after the
+// provider has accepted the deletion.
+func (s *Service) DeleteForParent(
+	ctx context.Context,
+	parentAccountID string,
+) error {
+	parentAccountID = strings.TrimSpace(parentAccountID)
+	if parentAccountID == "" {
+		return domain.ErrAccountNotFound
+	}
+	account, err := s.repository.GetByParentAccountID(ctx, parentAccountID)
+	if errors.Is(err, domain.ErrAccountNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := s.provider.DeleteAccount(ctx, account.ProviderAccountID); err != nil &&
+		!errors.Is(err, domain.ErrAccountNotFound) {
+		return err
+	}
+	return s.repository.DeleteByParentAccountID(ctx, parentAccountID)
 }
 
 func normalizeModelSelection(models []string) ([]string, error) {

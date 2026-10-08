@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/llm"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/platform/observability"
 )
 
 const (
@@ -122,20 +123,25 @@ func (c *Client) Chat(ctx context.Context, request llm.Request) (llm.Stream, err
 		defer response.Body.Close()
 		body, readErr := io.ReadAll(io.LimitReader(response.Body, maxErrorBodyBytes+1))
 		if readErr != nil {
-			return nil, fmt.Errorf("read sub2api error response: %w", readErr)
+			return nil, observability.NewSafeError(
+				fmt.Sprintf("sub2api chat request failed status=%d", response.StatusCode),
+				readErr,
+			)
 		}
 		if len(body) > maxErrorBodyBytes {
 			body = body[:maxErrorBodyBytes]
 		}
-		message := strings.TrimSpace(string(body))
-		if len(message) > 256 {
-			message = message[:256]
-		}
-		return nil, fmt.Errorf("sub2api chat request failed status=%d: %s", response.StatusCode, message)
+		return nil, observability.NewSafeError(
+			fmt.Sprintf("sub2api chat request failed status=%d", response.StatusCode),
+			errors.New(observability.RedactString(string(body))),
+		)
 	}
 	if !strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
 		defer response.Body.Close()
-		return nil, fmt.Errorf("sub2api chat response is not event-stream: %s", response.Header.Get("Content-Type"))
+		return nil, observability.NewSafeError(
+			"AI service returned an unsupported response",
+			nil,
+		)
 	}
 
 	stream := &chatStream{

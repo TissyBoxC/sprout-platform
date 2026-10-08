@@ -32,6 +32,7 @@ export interface DeviceProvisioning {
   state: ProvisioningState
   wifiConfigured: boolean
   sessionState: ProvisioningSessionState
+  droppedEvents: number
   lastProvisionedAt: string | null
 }
 
@@ -142,6 +143,8 @@ export const useDeviceStore = defineStore('admin-devices', () => {
       await httpClient.delete(
         `/api/v1/admin/families/${encodeURIComponent(parentAccountId)}/devices/${encodeURIComponent(deviceId)}`,
       )
+      updateRevokedSession(deviceId)
+      await loadProvisioning(deviceId)
       await load()
       lastMessage.value = '设备已解除绑定。'
       return true
@@ -270,6 +273,26 @@ export const useDeviceStore = defineStore('admin-devices', () => {
         },
       }
     }
+    const devicesWithRevokedSession = devices.value.map((device) =>
+      device.deviceId === deviceId && device.runtime
+        ? {
+            ...device,
+            runtime: {
+              ...device.runtime,
+              provisioning: device.runtime.provisioning
+                ? { ...device.runtime.provisioning, sessionState: 'revoked' as const }
+                : {
+                    state: 'unprovisioned' as const,
+                    wifiConfigured: false,
+                    sessionState: 'revoked' as const,
+                    droppedEvents: 0,
+                    lastProvisionedAt: null,
+                  },
+            },
+          }
+        : device,
+    )
+    devices.value = devicesWithRevokedSession
   }
 
   return {
@@ -348,6 +371,7 @@ function toProvisioning(value: unknown): DeviceProvisioning | undefined {
     state,
     wifiConfigured: value.wifi_configured === true,
     sessionState,
+    droppedEvents: number(value.dropped_events),
     lastProvisionedAt: nullableString(value.last_provisioned_at),
   }
 }
@@ -371,9 +395,9 @@ function toProvisioningSnapshot(
     state,
     wifiConfigured: value.wifi_configured === true,
     sessionState,
+    droppedEvents: number(value.dropped_events),
     lastProvisionedAt: nullableString(value.last_provisioned_at),
     newestSequence: number(value.newest_sequence),
-    droppedEvents: number(value.dropped_events),
     updatedAt: String(value.updated_at ?? ''),
     events: Array.isArray(value.events)
       ? value.events.flatMap((event) => {

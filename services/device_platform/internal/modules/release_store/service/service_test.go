@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -90,6 +92,168 @@ func TestInventoryListsNestedFilesAndAnnotatesReleaseArtifacts(t *testing.T) {
 	if releaseFile.DownloadURL !=
 		"https://download.example.test/0.12.3/stable/android/apk/sprout-parent-app-v0.12.3.apk" {
 		t.Fatalf("unexpected download URL: %q", releaseFile.DownloadURL)
+	}
+}
+
+func TestInventorySkipsTemporaryUploadFiles(t *testing.T) {
+	service, root := newTestService(t)
+	if err := os.WriteFile(
+		filepath.Join(root, ".upload-123-456.tmp"),
+		[]byte("partial upload"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write temporary upload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "release-notes.txt"), []byte("notes"), 0o644); err != nil {
+		t.Fatalf("write visible file: %v", err)
+	}
+
+	inventory, err := service.Inventory(context.Background())
+	if err != nil {
+		t.Fatalf("Inventory() returned unexpected error: %v", err)
+	}
+	if len(inventory.Files) != 1 || inventory.Files[0].RelativePath != "release-notes.txt" {
+		t.Fatalf("expected only the published file, got %+v", inventory.Files)
+	}
+}
+
+func TestInventorySkipsFileRemovedAfterDirectoryListing(t *testing.T) {
+	service, root := newTestService(t)
+	service.inventoryRetryDelay = 0
+	racePath := "0.13.0/stable/any/resource/race.bin"
+	stablePath := "0.13.0/stable/any/resource/stable.bin"
+	for pathValue, payload := range map[string]string{
+		racePath:   "race",
+		stablePath: "stable",
+	} {
+		fullPath := filepath.Join(root, filepath.FromSlash(pathValue))
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatalf("create artifact directory: %v", err)
+		}
+		if err := os.WriteFile(fullPath, []byte(payload), 0o644); err != nil {
+			t.Fatalf("write artifact: %v", err)
+		}
+	}
+	open := service.inventoryOpen
+	service.inventoryOpen = func(name string) (*os.File, error) {
+		if name == racePath {
+			return nil, os.ErrNotExist
+		}
+		return open(name)
+	}
+
+	inventory, err := service.Inventory(context.Background())
+	if err != nil {
+		t.Fatalf("Inventory() returned unexpected error: %v", err)
+	}
+	if len(inventory.Files) != 1 || inventory.Files[0].RelativePath != stablePath {
+		t.Fatalf("expected only the stable artifact, got %+v", inventory.Files)
+	}
+}
+
+func TestInventoryRetriesTransientEntryFailures(t *testing.T) {
+	service, root := newTestService(t)
+	service.inventoryRetryDelay = 0
+	relativePath := "0.13.0/stable/any/resource/retry.bin"
+	fullPath := filepath.Join(root, filepath.FromSlash(relativePath))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("create retry directory: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte("retry"), 0o644); err != nil {
+		t.Fatalf("write retry artifact: %v", err)
+	}
+	open := service.inventoryOpen
+	var mu sync.Mutex
+	openCalls := 0
+	service.inventoryOpen = func(name string) (*os.File, error) {
+		if name != relativePath {
+			return open(name)
+		}
+		mu.Lock()
+		openCalls++
+		attempt := openCalls
+		mu.Unlock()
+		if attempt < inventoryReadAttempts {
+			return nil, os.ErrNotExist
+		}
+		return open(name)
+	}
+
+	inventory, err := service.Inventory(context.Background())
+	if err != nil {
+		t.Fatalf("Inventory() returned unexpected error: %v", err)
+	}
+	if len(inventory.Files) != 1 || inventory.Files[0].RelativePath != relativePath {
+		t.Fatalf("expected transient entry failure to recover, got %+v", inventory.Files)
+	}
+}
+
+func TestInventorySupportsConcurrentRequests(t *testing.T) {
+	service, root := newTestService(t)
+	relativePath := "0.13.0/stable/any/resource/concurrent.bin"
+	fullPath := filepath.Join(root, filepath.FromSlash(relativePath))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("create concurrent directory: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte("concurrent"), 0o644); err != nil {
+		t.Fatalf("write concurrent artifact: %v", err)
+	}
+
+	const requestCount = 8
+	errs := make(chan error, requestCount)
+	var group sync.WaitGroup
+	for index := 0; index < requestCount; index++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			inventory, err := service.Inventory(context.Background())
+			if err != nil {
+				errs <- err
+				return
+			}
+			if len(inventory.Files) != 1 ||
+				inventory.Files[0].RelativePath != relativePath ||
+				len(inventory.Files[0].SHA256) != 64 {
+				errs <- errors.New("concurrent inventory returned an unexpected snapshot")
+			}
+		}()
+	}
+	group.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent Inventory() failed: %v", err)
+	}
+}
+
+func TestInventoryDigestCacheIsBounded(t *testing.T) {
+	service, root := newTestService(t)
+	for index := 0; index < inventoryDigestLimit+32; index++ {
+		relativePath := filepath.Join("cache", fmt.Sprintf("file-%03d.bin", index))
+		fullPath := filepath.Join(root, relativePath)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatalf("create cache directory: %v", err)
+		}
+		if err := os.WriteFile(fullPath, []byte("cache"), 0o644); err != nil {
+			t.Fatalf("write cache file: %v", err)
+		}
+	}
+
+	if _, err := service.Inventory(context.Background()); err != nil {
+		t.Fatalf("Inventory() returned unexpected error: %v", err)
+	}
+	if len(service.inventoryDigests) > inventoryDigestLimit {
+		t.Fatalf(
+			"expected at most %d cached digests, got %d",
+			inventoryDigestLimit,
+			len(service.inventoryDigests),
+		)
+	}
+	if len(service.inventoryDigestKeys) > inventoryDigestLimit {
+		t.Fatalf(
+			"expected at most %d cache keys, got %d",
+			inventoryDigestLimit,
+			len(service.inventoryDigestKeys),
+		)
 	}
 }
 

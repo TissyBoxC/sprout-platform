@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/domain"
@@ -34,12 +35,28 @@ var (
 	kindPattern     = regexp.MustCompile(`^[a-z][a-z0-9._-]*$`)
 )
 
+const (
+	inventoryReadAttempts = 3
+	inventoryDigestLimit  = 256
+)
+
+type cachedInventoryDigest struct {
+	info   os.FileInfo
+	digest string
+}
+
 // Service owns the shared download volume.
 type Service struct {
-	root          *os.Root
-	rootDir       string
-	publicBaseURL string
-	clock         clock.Clock
+	root                *os.Root
+	rootDir             string
+	publicBaseURL       string
+	clock               clock.Clock
+	inventoryRetryDelay time.Duration
+	inventoryOpen       func(string) (*os.File, error)
+	inventoryStat       func(string) (os.FileInfo, error)
+	inventoryDigestMu   sync.Mutex
+	inventoryDigests    map[string]cachedInventoryDigest
+	inventoryDigestKeys []string
 }
 
 type releaseDirectoryTarget struct {
@@ -92,10 +109,14 @@ func New(options Options) (*Service, error) {
 		timeSource = clock.SystemClock{}
 	}
 	return &Service{
-		root:          root,
-		rootDir:       absoluteRoot,
-		publicBaseURL: strings.TrimRight(strings.TrimSpace(options.PublicBaseURL), "/"),
-		clock:         timeSource,
+		root:                root,
+		rootDir:             absoluteRoot,
+		publicBaseURL:       strings.TrimRight(strings.TrimSpace(options.PublicBaseURL), "/"),
+		clock:               timeSource,
+		inventoryRetryDelay: 15 * time.Millisecond,
+		inventoryOpen:       root.Open,
+		inventoryStat:       root.Stat,
+		inventoryDigests:    make(map[string]cachedInventoryDigest),
 	}, nil
 }
 
@@ -115,30 +136,24 @@ func (s *Service) Inventory(ctx context.Context) (domain.Inventory, error) {
 	}
 	indexedArtifacts := s.indexedArtifactSet()
 	files := make([]domain.File, 0)
-	err := walkRoot(s.root, ".", func(relativePath string, info os.FileInfo) error {
+	err := s.walkInventory(ctx, ".", func(relativePath string, info os.FileInfo) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if !info.Mode().IsRegular() {
+		if !info.Mode().IsRegular() || isTemporaryUploadFile(relativePath) {
 			return nil
 		}
-		digest, err := s.fileSHA256(relativePath)
+		file, ok, err := s.readInventoryFile(ctx, relativePath, info)
 		if err != nil {
 			return err
 		}
-		release, _ := ParseArtifactPath(relativePath)
-		files = append(files, domain.File{
-			RelativePath: relativePath,
-			FileName:     path.Base(relativePath),
-			Name:         path.Base(relativePath),
-			Directory:    directoryName(relativePath),
-			SizeBytes:    info.Size(),
-			ModifiedAt:   info.ModTime().UTC(),
-			SHA256:       digest,
-			Release:      release,
-			DownloadURL:  s.publicURL(relativePath),
-			IsIndexed:    isArtifactIndexed(relativePath, indexedArtifacts),
-		})
+		if !ok {
+			return nil
+		}
+		file.DownloadURL = s.publicURL(relativePath)
+		file.Release, _ = ParseArtifactPath(relativePath)
+		file.IsIndexed = isArtifactIndexed(relativePath, indexedArtifacts)
+		files = append(files, file)
 		return nil
 	})
 	if err != nil {
@@ -153,6 +168,258 @@ func (s *Service) Inventory(ctx context.Context) (domain.Inventory, error) {
 		Files:         files,
 		GeneratedAt:   s.clock.Now().UTC(),
 	}, nil
+}
+
+// readInventoryFile performs a bounded retry for every directory entry. A
+// file that disappears during a concurrent upload or deletion is omitted from
+// the snapshot. A file that remains present but cannot be read is still
+// listed with an empty digest, so one corrupt or permission-blocked entry
+// cannot fail the entire download panel.
+func (s *Service) readInventoryFile(
+	ctx context.Context,
+	relativePath string,
+	fallbackInfo os.FileInfo,
+) (domain.File, bool, error) {
+	lastInfo := fallbackInfo
+	var lastErr error
+	for attempt := 0; attempt < inventoryReadAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return domain.File{}, false, err
+		}
+		file, err := s.inventoryOpen(relativePath)
+		if err != nil {
+			lastErr = err
+			if !s.waitInventoryRetry(ctx) {
+				return domain.File{}, false, ctx.Err()
+			}
+			continue
+		}
+		info, statErr := file.Stat()
+		if statErr != nil {
+			_ = file.Close()
+			lastErr = statErr
+			if !s.waitInventoryRetry(ctx) {
+				return domain.File{}, false, ctx.Err()
+			}
+			continue
+		}
+		lastInfo = info
+		if !info.Mode().IsRegular() {
+			_ = file.Close()
+			return domain.File{}, false, nil
+		}
+		digest, cached := s.cachedInventoryDigest(relativePath, info)
+		if !cached {
+			hasher := sha256.New()
+			_, readErr := io.Copy(hasher, file)
+			closeErr := file.Close()
+			if readErr == nil && closeErr == nil {
+				digest = hex.EncodeToString(hasher.Sum(nil))
+				s.storeInventoryDigest(relativePath, info, digest)
+				return inventoryFile(relativePath, info, digest), true, nil
+			}
+			lastErr = readErr
+			if lastErr == nil {
+				lastErr = closeErr
+			}
+			if !s.waitInventoryRetry(ctx) {
+				return domain.File{}, false, ctx.Err()
+			}
+			continue
+		}
+		if err := file.Close(); err != nil {
+			lastErr = err
+			if !s.waitInventoryRetry(ctx) {
+				return domain.File{}, false, ctx.Err()
+			}
+			continue
+		}
+		return inventoryFile(relativePath, info, digest), true, nil
+	}
+	if errors.Is(lastErr, os.ErrNotExist) {
+		return domain.File{}, false, nil
+	}
+	// Preserve the metadata for an unreadable but still present file. The
+	// digest remains empty, so the UI shows the entry without pretending it
+	// is safe to publish.
+	return inventoryFile(relativePath, lastInfo, ""), true, nil
+}
+
+func inventoryFile(relativePath string, info os.FileInfo, digest string) domain.File {
+	fileName := path.Base(relativePath)
+	return domain.File{
+		RelativePath: relativePath,
+		FileName:     fileName,
+		Name:         fileName,
+		Directory:    directoryName(relativePath),
+		SizeBytes:    info.Size(),
+		ModifiedAt:   info.ModTime().UTC(),
+		SHA256:       digest,
+	}
+}
+
+func (s *Service) cachedInventoryDigest(
+	relativePath string,
+	info os.FileInfo,
+) (string, bool) {
+	s.inventoryDigestMu.Lock()
+	defer s.inventoryDigestMu.Unlock()
+	cached, ok := s.inventoryDigests[relativePath]
+	if !ok || cached.digest == "" || cached.info == nil {
+		return "", false
+	}
+	if !os.SameFile(cached.info, info) ||
+		cached.info.Size() != info.Size() ||
+		!cached.info.ModTime().Equal(info.ModTime()) {
+		return "", false
+	}
+	return cached.digest, true
+}
+
+func (s *Service) storeInventoryDigest(
+	relativePath string,
+	info os.FileInfo,
+	digest string,
+) {
+	s.inventoryDigestMu.Lock()
+	defer s.inventoryDigestMu.Unlock()
+	_, tracked := s.inventoryDigests[relativePath]
+	s.inventoryDigests[relativePath] = cachedInventoryDigest{
+		info:   info,
+		digest: digest,
+	}
+	if !tracked {
+		s.inventoryDigestKeys = append(s.inventoryDigestKeys, relativePath)
+	}
+	if len(s.inventoryDigestKeys) <= inventoryDigestLimit {
+		return
+	}
+	oldestPath := s.inventoryDigestKeys[0]
+	s.inventoryDigestKeys = s.inventoryDigestKeys[1:]
+	delete(s.inventoryDigests, oldestPath)
+}
+
+func (s *Service) waitInventoryRetry(ctx context.Context) bool {
+	if err := ctx.Err(); err != nil {
+		return false
+	}
+	if s.inventoryRetryDelay <= 0 {
+		return true
+	}
+	timer := time.NewTimer(s.inventoryRetryDelay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func (s *Service) walkInventory(
+	ctx context.Context,
+	directory string,
+	visit func(relativePath string, info os.FileInfo) error,
+) error {
+	entries, err := s.readInventoryDirectory(ctx, directory)
+	if err != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if directory == "." {
+			return err
+		}
+		return nil
+	}
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		entryPath := path.Join(directory, entry.Name())
+		if isTemporaryUploadFile(entryPath) {
+			continue
+		}
+		info, err := s.statInventoryEntry(ctx, entryPath)
+		if err != nil {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			continue
+		}
+		if info.IsDir() {
+			if err := s.walkInventory(ctx, entryPath, visit); err != nil {
+				return err
+			}
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		if err := visit(entryPath, info); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) readInventoryDirectory(
+	ctx context.Context,
+	directory string,
+) ([]os.FileInfo, error) {
+	var lastErr error
+	for attempt := 0; attempt < inventoryReadAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		handle, err := s.inventoryOpen(directory)
+		if err == nil {
+			entries, readErr := handle.Readdir(-1)
+			closeErr := handle.Close()
+			if readErr == nil && closeErr == nil {
+				return entries, nil
+			}
+			if readErr == nil {
+				readErr = closeErr
+			}
+			if len(entries) > 0 {
+				return entries, nil
+			}
+			lastErr = readErr
+		} else {
+			lastErr = err
+		}
+		if !s.waitInventoryRetry(ctx) {
+			return nil, ctx.Err()
+		}
+	}
+	return nil, fmt.Errorf("read download directory %q: %w", directory, lastErr)
+}
+
+func (s *Service) statInventoryEntry(
+	ctx context.Context,
+	relativePath string,
+) (os.FileInfo, error) {
+	var lastErr error
+	for attempt := 0; attempt < inventoryReadAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		info, err := s.inventoryStat(relativePath)
+		if err == nil {
+			return info, nil
+		}
+		lastErr = err
+		if !s.waitInventoryRetry(ctx) {
+			return nil, ctx.Err()
+		}
+	}
+	return nil, fmt.Errorf("stat download entry %q: %w", relativePath, lastErr)
+}
+
+func isTemporaryUploadFile(relativePath string) bool {
+	name := path.Base(relativePath)
+	return strings.HasPrefix(name, ".upload-") &&
+		strings.HasSuffix(name, ".tmp")
 }
 
 // IndexStatus reports how much of the current release inventory is represented
@@ -182,20 +449,18 @@ func (s *Service) IndexStatus(ctx context.Context) (domain.IndexStatus, error) {
 			ErrorMessage:     "download index unavailable",
 		}, nil
 	}
-	indexedArtifacts := s.indexedArtifactSet()
-	pending := 0
+	indexedFileCount := 0
+	pending := countCanonicalArtifacts(inventory.Files)
 	for _, file := range inventory.Files {
-		if file.Release == nil {
-			continue
-		}
-		if _, exists := indexedArtifacts[file.RelativePath]; !exists {
-			pending++
+		if file.Release != nil && file.IsIndexed {
+			indexedFileCount++
+			pending--
 		}
 	}
 	return domain.IndexStatus{
 		IsAvailable:      true,
 		RefreshedAt:      index.GeneratedAt,
-		IndexedFileCount: len(indexedArtifacts),
+		IndexedFileCount: indexedFileCount,
 		PendingFileCount: pending,
 	}, nil
 }

@@ -17,6 +17,7 @@ var (
 	ErrServiceNotUpgradable      = errors.New("service cannot be upgraded")
 	ErrReleaseNotFound           = errors.New("service release not found")
 	ErrReleaseRepositoryNotFound = errors.New("service release repository not found")
+	ErrReleaseCatalogNotReady    = errors.New("service release catalog not ready")
 	ErrReleaseSourceFailed       = errors.New("service release source unavailable")
 	ErrUpgradeInProgress         = errors.New("an upgrade is already in progress")
 	ErrOperationNotFound         = errors.New("upgrade operation not found")

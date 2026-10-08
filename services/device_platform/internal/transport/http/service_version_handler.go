@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TissyBoxC/sprout-platform/packages/go/httpapi"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/domain"
 	serviceversionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
 )
@@ -216,6 +217,14 @@ func writeServiceVersionError(
 		writeError(response, request, http.StatusNotFound, "release_not_found", "没有找到这个发布版本")
 	case errors.Is(err, domain.ErrReleaseRepositoryNotFound):
 		writeError(response, request, http.StatusNotFound, "release_repository_not_found", "没有找到这个服务的发布仓库")
+	case errors.Is(err, domain.ErrReleaseCatalogNotReady):
+		writeRetryableError(
+			response,
+			request,
+			http.StatusServiceUnavailable,
+			"release_catalog_not_ready",
+			"版本目录正在准备，稍后刷新即可",
+		)
 	case errors.Is(err, domain.ErrReleaseSourceFailed):
 		writeError(response, request, http.StatusBadGateway, "release_source_unavailable", "暂时无法读取可选版本，请稍后重试")
 	case errors.Is(err, domain.ErrNoUpgradeAvailable):
@@ -225,6 +234,16 @@ func writeServiceVersionError(
 	default:
 		writeError(response, request, http.StatusInternalServerError, "service_error", "升级任务没有开始，请稍后重试")
 	}
+}
+
+func writeRetryableError(
+	response http.ResponseWriter,
+	request *http.Request,
+	status int,
+	code string,
+	message string,
+) {
+	httpapi.WriteError(response, request, status, code, message, true)
 }
 
 func parsePositiveQueryInt(value string, fallback int) int {

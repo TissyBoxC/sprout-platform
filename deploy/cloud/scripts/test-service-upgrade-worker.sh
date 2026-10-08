@@ -13,6 +13,22 @@ if ! grep -Eq '^require_command\(\)' "$worker_script"; then
   exit 1
 fi
 
+if ! grep -Eq '^release_catalog_is_valid\(\)' "$worker_script"; then
+  echo "service-upgrade-worker.sh 缺少版本目录有效性校验。" >&2
+  exit 1
+fi
+
+if ! grep -Eq '^refresh_release_catalog\(\)' "$worker_script"; then
+  echo "service-upgrade-worker.sh 缺少版本目录刷新与退避逻辑。" >&2
+  exit 1
+fi
+
+if ! grep -Eq '^platform_repository=' "$worker_script" ||
+  ! grep -Eq '^sub2api_repository=' "$worker_script"; then
+  echo "service-upgrade-worker.sh 缺少发布仓库配置。" >&2
+  exit 1
+fi
+
 if ! grep -Eq 'test -s .*status\.json' "$compose_file"; then
   echo "upgrade_worker 缺少 status.json 健康检查。" >&2
   exit 1

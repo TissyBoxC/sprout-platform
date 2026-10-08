@@ -4,6 +4,7 @@ import { defineStore } from 'pinia'
 import { mapApiError, type ApiError } from '@/api/apiError'
 import {
   createAdminVersionManagementClient,
+  ReleaseCatalogNotReadyError,
   type AdminServiceVersion,
   type AdminServiceVersionOperation,
   type ServiceVersionRelease,
@@ -260,12 +261,16 @@ export const useVersionManagementStore = defineStore('admin-version-management',
         },
       }
     } catch (caught: unknown) {
+      const errorMessage =
+        caught instanceof ReleaseCatalogNotReadyError
+          ? caught.message
+          : mapApiError(caught).message
       releaseStates.value = {
         ...releaseStates.value,
         [service.id]: {
           ...releaseStateForService(service.id),
           isLoading: false,
-          error: mapApiError(caught).message,
+          error: errorMessage,
         },
       }
     }

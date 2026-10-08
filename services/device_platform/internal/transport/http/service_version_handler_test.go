@@ -13,6 +13,7 @@ import (
 type fakeServiceVersionAdminService struct {
 	serviceVersionAdminService
 	listReleasesCalls []listReleasesCall
+	listReleasesErr   error
 }
 
 type listReleasesCall struct {
@@ -32,12 +33,77 @@ func (service *fakeServiceVersionAdminService) ListReleases(
 		page:      page,
 		pageSize:  pageSize,
 	})
+	if service.listReleasesErr != nil {
+		return serviceversiondomain.ReleasePage{}, service.listReleasesErr
+	}
 	return serviceversiondomain.ReleasePage{
 		Service:  serviceID,
 		Releases: []serviceversiondomain.Release{},
 		Page:     page,
 		PageSize: pageSize,
 	}, nil
+}
+
+func TestListServiceReleasesReportsCatalogNotReadyAsRetryableServiceUnavailable(
+	t *testing.T,
+) {
+	service := &fakeServiceVersionAdminService{
+		listReleasesErr: serviceversiondomain.ErrReleaseCatalogNotReady,
+	}
+	handler := adminHandler{serviceVersionService: service}
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/admin/service-versions/device_platform/releases",
+		nil,
+	)
+	request.SetPathValue("service", "device_platform")
+	response := httptest.NewRecorder()
+
+	handler.listServiceReleases(response, request)
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusServiceUnavailable,
+			response.Code,
+		)
+	}
+	envelope := decodeEnvelope(t, response)
+	if envelope.Error == nil ||
+		envelope.Error.Code != "release_catalog_not_ready" {
+		t.Fatalf("unexpected error envelope: %+v", envelope)
+	}
+	if !envelope.Error.Retryable {
+		t.Fatal("catalog-not-ready responses must be retryable")
+	}
+}
+
+func TestListServiceReleasesKeepsSourceFailureAsBadGateway(t *testing.T) {
+	service := &fakeServiceVersionAdminService{
+		listReleasesErr: serviceversiondomain.ErrReleaseSourceFailed,
+	}
+	handler := adminHandler{serviceVersionService: service}
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/admin/service-versions/device_platform/releases",
+		nil,
+	)
+	request.SetPathValue("service", "device_platform")
+	response := httptest.NewRecorder()
+
+	handler.listServiceReleases(response, request)
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("expected status %d, got %d", http.StatusBadGateway, response.Code)
+	}
+	envelope := decodeEnvelope(t, response)
+	if envelope.Error == nil ||
+		envelope.Error.Code != "release_source_unavailable" {
+		t.Fatalf("unexpected error envelope: %+v", envelope)
+	}
+	if envelope.Error.Retryable {
+		t.Fatal("source failure compatibility path must remain non-retryable")
+	}
 }
 
 func TestListServiceReleasesDefaultsToCatalogueLimit(t *testing.T) {

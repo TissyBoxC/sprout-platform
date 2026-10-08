@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -65,6 +66,45 @@ func TestRepositoryReleaseSourceFindsReleaseBeyondFirstPage(t *testing.T) {
 	}
 	if release.Version != "1.0.1" {
 		t.Fatalf("expected release 1.0.1, got %q", release.Version)
+	}
+}
+
+func TestRepositoryReleaseSourceReportsMissingCatalogAsNotReady(t *testing.T) {
+	source := NewRepositoryReleaseSource(repository.NewFileRepository(t.TempDir()))
+
+	_, _, err := source.ListReleases(
+		context.Background(),
+		"device_platform",
+		1,
+		ReleaseCatalogLimit,
+	)
+	if !errors.Is(err, domain.ErrReleaseCatalogNotReady) {
+		t.Fatalf("expected ErrReleaseCatalogNotReady, got %v", err)
+	}
+	if errors.Is(err, domain.ErrReleaseSourceFailed) {
+		t.Fatal("a missing catalog must not be reported as a source failure")
+	}
+}
+
+func TestRepositoryReleaseSourceReportsCorruptCatalogAsSourceFailure(t *testing.T) {
+	stateDir := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(stateDir, "releases.json"),
+		[]byte("{not-json"),
+		0o600,
+	); err != nil {
+		t.Fatalf("write corrupt release catalog: %v", err)
+	}
+	source := NewRepositoryReleaseSource(repository.NewFileRepository(stateDir))
+
+	_, _, err := source.ListReleases(
+		context.Background(),
+		"device_platform",
+		1,
+		ReleaseCatalogLimit,
+	)
+	if !errors.Is(err, domain.ErrReleaseSourceFailed) {
+		t.Fatalf("expected ErrReleaseSourceFailed, got %v", err)
 	}
 }
 

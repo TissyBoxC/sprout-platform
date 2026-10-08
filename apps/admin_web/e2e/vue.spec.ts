@@ -620,6 +620,91 @@ test('checks and upgrades brand services from the service version page', async (
   await expect(page.getByRole('button', { name: '查看进度' })).toBeVisible()
 })
 
+test('distinguishes a release catalog that is still preparing from a real failure', async ({
+  page,
+}) => {
+  await useAdminSession(page)
+
+  let releaseRequests = 0
+  await page.route('**/api/v1/admin/service-versions', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          services: [
+            {
+              id: 'device_platform',
+              display_name: '设备平台',
+              role: '平台服务',
+              image: 'ghcr.io/tissyboxc/sprout-device-platform:0.17.0',
+              current_version: '0.17.0',
+              latest_version: '0.17.1',
+              status: 'outdated',
+              release_url: '',
+              is_self: false,
+              can_upgrade: true,
+              last_checked_at: '2026-10-08T10:00:00Z',
+              updated_at: '2026-10-08T10:00:00Z',
+            },
+          ],
+          checked_at: '2026-10-08T10:00:00Z',
+          all_up_to_date: false,
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/service-version-operations', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { operations: [] } }),
+    })
+  })
+  await page.route('**/api/v1/admin/service-versions/*/releases**', async (route) => {
+    releaseRequests += 1
+    if (releaseRequests === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: null,
+          error: {
+            code: 'release_catalog_not_ready',
+            message: '版本目录正在准备，稍后刷新即可',
+            retryable: true,
+          },
+        }),
+      })
+      return
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          service: 'device_platform',
+          releases: [
+            {
+              version: '0.17.1',
+              release_url: 'https://github.com/TissyBoxC/sprout-platform/releases/tag/v0.17.1',
+              published_at: '2026-10-08T10:00:00Z',
+              is_current: false,
+              is_latest: true,
+            },
+          ],
+        },
+      }),
+    })
+  })
+
+  await page.goto('/services')
+
+  await expect(page.getByText('版本目录正在准备，稍后刷新即可')).toBeVisible()
+  await expect(page.getByText('服务暂时不可用，请稍后重试')).toHaveCount(0)
+  await page.getByRole('button', { name: '重新读取版本' }).click()
+  await expect(page.getByLabel('设备平台版本')).toHaveValue('0.17.1')
+  await expect(page.getByText('版本目录正在准备，稍后刷新即可')).toHaveCount(0)
+  expect(releaseRequests).toBe(2)
+})
+
 test('lists download files and manages uploads, deletion, and the release index', async ({ page }) => {
   await useAdminSession(page)
 

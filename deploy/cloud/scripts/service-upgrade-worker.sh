@@ -23,6 +23,11 @@ state_gid="${SPROUT_SERVICE_VERSION_STATE_GID:-65532}"
 release_cache_dir="$root_dir/.release-cache"
 release_cache_ttl="${SPROUT_SERVICE_VERSION_RELEASE_CACHE_SECONDS:-300}"
 release_catalog_limit="${SPROUT_SERVICE_VERSION_RELEASE_CATALOG_LIMIT:-100}"
+release_catalog_retry_interval="${SPROUT_SERVICE_VERSION_RELEASE_CATALOG_RETRY_SECONDS:-30}"
+release_catalog_state_file="$root_dir/.releases-state"
+release_catalog_next_refresh_at=0
+platform_repository="${SPROUT_UPGRADE_PLATFORM_REPOSITORY:-TissyBoxC/sprout-platform}"
+sub2api_repository="${SPROUT_UPGRADE_SUB2API_REPOSITORY:-TissyBoxC/sprout-sub2api-fork}"
 
 service_ids="device_platform voice_gateway admin_web sub2api postgres redis mqtt download_init download_ftp download_http"
 upgrade_order="sub2api device_platform voice_gateway admin_web"
@@ -462,6 +467,7 @@ write_release_catalog() {
   platform_releases="$(list_releases_for_repository "$platform_repository" "$release_catalog_limit")" || return 1
   sub2api_releases="$(list_releases_for_repository "$sub2api_repository" "$release_catalog_limit")" || return 1
 
+  catalog_temp="$(mktemp "$root_dir/.releases.json.XXXXXX")"
   jq -n \
     --arg generated_at "$generated_at" \
     --argjson platform_releases "$platform_releases" \
@@ -474,10 +480,65 @@ write_release_catalog() {
         admin_web: $platform_releases,
         sub2api: $sub2api_releases
       }
-    }' > "$root_dir/.releases.json"
-  chmod 640 "$root_dir/.releases.json"
-  chown "$state_uid:$state_gid" "$root_dir/.releases.json" 2>/dev/null || true
-  mv "$root_dir/.releases.json" "$root_dir/releases.json"
+    }' > "$catalog_temp"
+  chmod 640 "$catalog_temp"
+  chown "$state_uid:$state_gid" "$catalog_temp" 2>/dev/null || true
+  mv "$catalog_temp" "$root_dir/releases.json"
+  release_catalog_next_refresh_at=$(( $(date +%s) + release_cache_ttl ))
+  printf '%s\n' "$release_catalog_next_refresh_at" > "$release_catalog_state_file"
+  chmod 640 "$release_catalog_state_file"
+  chown "$state_uid:$state_gid" "$release_catalog_state_file" 2>/dev/null || true
+}
+
+release_catalog_is_valid() {
+  [ -s "$root_dir/releases.json" ] &&
+    jq -e '
+      type == "object"
+      and (.generated_at | type == "string" and length > 0)
+      and (.services | type == "object")
+      and (.services.device_platform | type == "array")
+      and (.services.voice_gateway | type == "array")
+      and (.services.admin_web | type == "array")
+      and (.services.sub2api | type == "array")
+    ' "$root_dir/releases.json" >/dev/null 2>&1
+}
+
+refresh_release_catalog() {
+  force_refresh="${1:-0}"
+  now="$(date +%s)"
+  catalog_exists=0
+  if [ -f "$root_dir/releases.json" ]; then
+    catalog_exists=1
+  fi
+  if [ -f "$release_catalog_state_file" ]; then
+    persisted_next_refresh_at="$(cat "$release_catalog_state_file" 2>/dev/null || true)"
+    if printf '%s' "$persisted_next_refresh_at" | grep -Eq '^[0-9]+$'; then
+      release_catalog_next_refresh_at="$persisted_next_refresh_at"
+    fi
+  fi
+
+  if [ "$force_refresh" != "1" ] &&
+    [ "$catalog_exists" -eq 1 ] &&
+    [ "$now" -lt "$release_catalog_next_refresh_at" ] &&
+    release_catalog_is_valid; then
+    return 0
+  fi
+
+  if [ "$force_refresh" = "1" ] ||
+    [ "$catalog_exists" -eq 0 ] ||
+    ! release_catalog_is_valid ||
+    [ "$now" -ge "$release_catalog_next_refresh_at" ]; then
+    if write_release_catalog; then
+      return 0
+    fi
+    release_catalog_next_refresh_at=$((now + release_catalog_retry_interval))
+    printf '%s\n' "$release_catalog_next_refresh_at" > "$release_catalog_state_file"
+    chmod 640 "$release_catalog_state_file"
+    chown "$state_uid:$state_gid" "$release_catalog_state_file" 2>/dev/null || true
+    return 1
+  fi
+
+  return 0
 }
 
 write_status_snapshot() {
@@ -572,7 +633,7 @@ consume_check_request() {
 
   # Refresh first. A malformed request is removed afterwards so it can never
   # block future checks, but the admin still receives a fresh snapshot.
-  if ! write_release_catalog; then
+  if ! refresh_release_catalog 1; then
     rm -f "$request_file"
     return 1
   fi
@@ -704,6 +765,7 @@ main() {
   validate_positive_integer "SPROUT_SERVICE_VERSION_MAX_REQUEST_BYTES" "$max_request_bytes" 1024 1048576
   validate_positive_integer "SPROUT_SERVICE_VERSION_RELEASE_CACHE_SECONDS" "$release_cache_ttl" 0 86400
   validate_positive_integer "SPROUT_SERVICE_VERSION_RELEASE_CATALOG_LIMIT" "$release_catalog_limit" 1 500
+  validate_positive_integer "SPROUT_SERVICE_VERSION_RELEASE_CATALOG_RETRY_SECONDS" "$release_catalog_retry_interval" 5 3600
   validate_positive_integer "SPROUT_SERVICE_VERSION_STATE_UID" "$state_uid" 0 4294967295
   validate_positive_integer "SPROUT_SERVICE_VERSION_STATE_GID" "$state_gid" 0 4294967295
 
@@ -719,8 +781,12 @@ main() {
   require_command jq
   require_command curl
 
-  if ! write_release_catalog; then
-    echo "发布版本列表初始化失败，worker 将在下一轮重试。" >&2
+  if ! refresh_release_catalog 1; then
+    if [ -f "$root_dir/releases.json" ]; then
+      echo "发布版本列表刷新失败，继续使用上一次成功生成的版本目录。" >&2
+    else
+      echo "发布版本列表初始化失败，worker 将在缓存过期后重试。" >&2
+    fi
   fi
 
   next_status_at=0
@@ -729,6 +795,7 @@ main() {
     if consume_check_request; then
       :
     elif [ "$now" -ge "$next_status_at" ]; then
+      refresh_release_catalog || true
       write_status_snapshot
       next_status_at=$((now + status_interval))
     fi

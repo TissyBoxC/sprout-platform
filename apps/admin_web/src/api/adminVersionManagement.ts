@@ -1,4 +1,4 @@
-import type { AxiosInstance } from 'axios'
+import axios, { type AxiosInstance } from 'axios'
 
 import { createHttpClient } from '@/api/httpClient'
 
@@ -61,6 +61,15 @@ export interface AdminVersionManagementClient {
   loadServiceVersionOperation(operationId: string): Promise<AdminServiceVersionOperation | null>
 }
 
+export class ReleaseCatalogNotReadyError extends Error {
+  readonly retryable = true
+
+  constructor() {
+    super('版本目录正在准备，稍后刷新即可')
+    this.name = 'ReleaseCatalogNotReadyError'
+  }
+}
+
 /// Creates the client for the brand service inventory and its upgrade operations.
 export function createAdminVersionManagementClient(
   httpClient: AxiosInstance = createHttpClient(),
@@ -77,10 +86,18 @@ export function createAdminVersionManagementClient(
     },
 
     async loadServiceReleases(serviceId: string): Promise<ServiceVersionRelease[]> {
-      const response = await httpClient.get(
-        `/api/v1/admin/service-versions/${encodeURIComponent(serviceId)}/releases`,
-        { params: { page_size: 100 } },
-      )
+      let response
+      try {
+        response = await httpClient.get(
+          `/api/v1/admin/service-versions/${encodeURIComponent(serviceId)}/releases`,
+          { params: { page_size: 100 } },
+        )
+      } catch (caught: unknown) {
+        if (releaseCatalogNotReady(caught)) {
+          throw new ReleaseCatalogNotReadyError()
+        }
+        throw caught
+      }
       return toReleases(response.data?.data)
     },
 
@@ -121,6 +138,16 @@ export function createAdminVersionManagementClient(
       return toNullableOperation(response.data?.data?.operation)
     },
   }
+}
+
+function releaseCatalogNotReady(error: unknown): boolean {
+  if (!axios.isAxiosError(error)) {
+    return false
+  }
+  const data = error.response?.data as
+    | { error?: { code?: unknown } }
+    | undefined
+  return data?.error?.code === 'release_catalog_not_ready'
 }
 
 function toReleases(value: unknown): ServiceVersionRelease[] {

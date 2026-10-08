@@ -115,9 +115,13 @@ func (source *RepositoryReleaseSource) FindRelease(
 
 func mapReleaseCatalogError(err error) error {
 	if errors.Is(err, domain.ErrStateUnavailable) {
-		return domain.ErrReleaseSourceFailed
+		return domain.ErrReleaseCatalogNotReady
 	}
-	return err
+	if errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return domain.ErrReleaseSourceFailed
 }
 
 func publishedReleases(releases []domain.Release) []domain.Release {

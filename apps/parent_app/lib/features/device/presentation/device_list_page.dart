@@ -592,6 +592,8 @@ class _ProvisioningStatusPanel extends StatelessWidget {
           const SizedBox(height: 8),
           Text('配网状态：${_provisioningStateLabel(status)}'),
           Text('会话状态：${_sessionStateLabel(status)}'),
+          if ((status?.droppedEvents ?? 0) > 0)
+            Text('待补传事件：${status!.droppedEvents}'),
           if (status?.lastProvisionedAt != null) ...[
             const SizedBox(height: 4),
             Text('最近配网：${_relativeTime(status!.lastProvisionedAt!)}'),

@@ -26,6 +26,7 @@ void main() {
         'state': 'provisioned',
         'wifi_configured': true,
         'session_state': 'reauth_required',
+        'dropped_events': 4,
         'last_provisioned_at': '2026-10-03T09:58:00Z',
       },
     );
@@ -38,6 +39,7 @@ void main() {
     expect(provisioning?.state, 'provisioned');
     expect(provisioning?.wifiConfigured, isTrue);
     expect(provisioning?.sessionState, 'reauth_required');
+    expect(provisioning?.droppedEvents, 4);
     expect(
       provisioning?.lastProvisionedAt,
       DateTime.parse('2026-10-03T09:58:00Z'),
@@ -68,6 +70,21 @@ void main() {
     final devices = await api.list();
 
     expect(devices.single.runtime?.provisioning?.lastProvisionedAt, isNull);
+  });
+
+  test('device status defaults missing dropped events for older firmware', () async {
+    final client = _RecordingApiClient(
+      provisioning: {
+        'state': 'provisioned',
+        'wifi_configured': true,
+        'session_state': 'ready',
+      },
+    );
+    final api = DeviceBindingApi(client);
+
+    final devices = await api.list();
+
+    expect(devices.single.runtime?.provisioning?.droppedEvents, 0);
   });
 }
 

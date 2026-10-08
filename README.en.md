@@ -34,7 +34,7 @@ tooling. Firmware and the AI gateway fork remain independent repositories.
 
 ## Current Status
 
-The repository version is `0.15.0` and is in the foundation-layer phase where
+The repository version is `0.16.0` and is in the foundation-layer phase where
 recording, playback, wake, device interaction, and the content library are closed loops. Status is
 based on an accepted end-to-end capability, not on the presence of a directory,
 interface, or placeholder file.

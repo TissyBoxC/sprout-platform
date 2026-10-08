@@ -76,6 +76,10 @@ async function logout(): Promise<void> {
           <span class="nav-dot" aria-hidden="true"></span>
           服务版本
         </RouterLink>
+        <RouterLink to="/feature-center">
+          <span class="nav-dot" aria-hidden="true"></span>
+          功能中心
+        </RouterLink>
         <RouterLink to="/settings">
           <span class="nav-dot" aria-hidden="true"></span>
           系统设置

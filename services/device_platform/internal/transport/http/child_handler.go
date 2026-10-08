@@ -52,6 +52,13 @@ type policyService interface {
 		childID string,
 		input policydomain.PolicyInput,
 	) (*policydomain.Policy, error)
+	UpdateWithVersion(
+		ctx context.Context,
+		familyID string,
+		childID string,
+		input policydomain.PolicyInput,
+		expectedVersion int,
+	) (*policydomain.Policy, error)
 }
 
 type childHandler struct {
@@ -73,6 +80,7 @@ type disabledPeriodRequest struct {
 }
 
 type parentPolicyRequest struct {
+	PolicyVersion     int                     `json:"policy_version"`
 	DailyLimitMinutes int                     `json:"daily_limit_minutes"`
 	AllowedCategories []string                `json:"allowed_categories"`
 	DisabledPeriods   []disabledPeriodRequest `json:"disabled_periods"`
@@ -238,7 +246,7 @@ func (handler childHandler) updatePolicy(
 			EndTime:   period.EndTime,
 		})
 	}
-	policy, err := handler.policyService.Update(
+	policy, err := handler.policyService.UpdateWithVersion(
 		request.Context(),
 		familyID,
 		strings.TrimSpace(request.PathValue("child_id")),
@@ -248,6 +256,7 @@ func (handler childHandler) updatePolicy(
 			DisabledPeriods:   periods,
 			MaxVolumePercent:  payload.MaxVolumePercent,
 		},
+		payload.PolicyVersion,
 	)
 	if err != nil {
 		writeChildError(response, request, err)
@@ -326,6 +335,8 @@ func writeChildError(
 		writeError(response, request, http.StatusUnprocessableEntity, "invalid_disabled_periods", "请检查免打扰时段")
 	case errors.Is(err, policydomain.ErrInvalidVolume):
 		writeError(response, request, http.StatusUnprocessableEntity, "invalid_volume", "最大音量需要在 0 到 100 之间")
+	case errors.Is(err, policydomain.ErrPolicyVersionConflict):
+		writeError(response, request, http.StatusConflict, "version_conflict", "家长策略已更新，请重新加载后再保存")
 	default:
 		writeError(response, request, http.StatusInternalServerError, "service_error", "操作没有完成，请稍后重试")
 	}

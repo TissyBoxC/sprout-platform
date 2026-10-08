@@ -125,6 +125,20 @@ func TestInternalAPIContractDocumentsDeviceCredentialEndpoint(t *testing.T) {
 	}
 }
 
+func TestInternalAPIContractDocumentsEffectiveParentPolicyEndpoint(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	expected := "/internal/v1/parent-policies"
+	if !bytes.Contains(contract, []byte(expected)) {
+		t.Fatalf("expected %s in internal API contract", expected)
+	}
+	if !bytes.Contains(contract, []byte("EffectiveParentPolicyEnvelope")) {
+		t.Fatal("expected effective parent policy schema in internal API contract")
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

@@ -15,6 +15,7 @@ import (
 	contentdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/domain"
 	contentservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/service"
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
+	policydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/security"
 )
 
@@ -166,9 +167,41 @@ func (repository *contentTestRepository) ApplyTransition(
 
 func (repository *contentTestRepository) Catalog(
 	_ context.Context,
-	_ contentdomain.CatalogQuery,
+	query contentdomain.CatalogQuery,
 ) (*contentdomain.Catalog, error) {
-	return &contentdomain.Catalog{Revision: 1}, nil
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	packages := make([]contentdomain.PackageVersion, 0)
+	for _, version := range repository.versions {
+		if version.Status != contentdomain.StatusPublished {
+			continue
+		}
+		if query.Category != "" && string(version.Category) != query.Category {
+			continue
+		}
+		if len(query.AllowedCategories) > 0 {
+			allowed := false
+			for _, category := range query.AllowedCategories {
+				if string(version.Category) == category {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				continue
+			}
+		}
+		packages = append(packages, *cloneContentTestVersion(version))
+	}
+	return &contentdomain.Catalog{Revision: 1, Packages: packages}, nil
+}
+
+func (repository *contentTestRepository) CatalogRevision(
+	_ context.Context,
+) (int64, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	return 1, nil
 }
 
 func (repository *contentTestRepository) PublishedDownload(
@@ -202,6 +235,36 @@ type contentTestBindingService struct {
 	err             error
 }
 
+type contentTestRuntimeService struct {
+	familyID string
+	err      error
+}
+
+func (service contentTestRuntimeService) ResolveDeviceFamily(
+	_ context.Context,
+	_ string,
+	_ string,
+) (string, error) {
+	if service.err != nil {
+		return "", service.err
+	}
+	return service.familyID, nil
+}
+
+type contentTestPolicyReader struct {
+	categories []string
+}
+
+func (reader contentTestPolicyReader) GetEffective(
+	_ context.Context,
+	_ string,
+) (*policydomain.EffectivePolicy, error) {
+	return &policydomain.EffectivePolicy{
+		DailyLimitMinutes: 60,
+		AllowedCategories: append([]string(nil), reader.categories...),
+	}, nil
+}
+
 func (service contentTestBindingService) VerifyDeviceSession(
 	_ context.Context,
 	_ string,
@@ -217,6 +280,9 @@ func newContentHandlerForTest(t *testing.T) contentHandler {
 	service, err := contentservice.New(contentservice.Options{
 		Repository:  newContentTestRepository(),
 		AssetReader: contentTestAssetReader{},
+		PolicyReader: contentTestPolicyReader{
+			categories: []string{"story"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("create content service: %v", err)
@@ -347,6 +413,7 @@ func TestDeviceContentCatalogRequiresMatchingDeviceSession(t *testing.T) {
 		bindingService: contentTestBindingService{
 			sessionDeviceID: "sprout_device_001",
 		},
+		runtimeService: contentTestRuntimeService{familyID: "family_001"},
 	}
 	for _, test := range []struct {
 		name       string
@@ -397,12 +464,78 @@ func TestDeviceContentCatalogRequiresMatchingDeviceSession(t *testing.T) {
 	}
 }
 
+// TestDeviceContentCatalogFiltersByFamilyPolicy proves the device-facing
+// catalog excludes packages whose category the family policy does not allow,
+// even though the admin catalog still lists them.
+func TestDeviceContentCatalogFiltersByFamilyPolicy(t *testing.T) {
+	repository := newContentTestRepository()
+	repository.versions[contentTestKey("content_story_001", 1)] = &contentdomain.PackageVersion{
+		PackageID:      "content_story_001",
+		PackageVersion: 1,
+		Title:          "月亮晚安故事",
+		Category:       contentdomain.CategoryStory,
+		Status:         contentdomain.StatusPublished,
+	}
+	repository.versions[contentTestKey("content_english_001", 1)] = &contentdomain.PackageVersion{
+		PackageID:      "content_english_001",
+		PackageVersion: 1,
+		Title:          "早安英语",
+		Category:       contentdomain.CategoryEnglish,
+		Status:         contentdomain.StatusPublished,
+	}
+	service, err := contentservice.New(contentservice.Options{
+		Repository:  repository,
+		AssetReader: contentTestAssetReader{},
+		PolicyReader: contentTestPolicyReader{
+			categories: []string{"story"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create content service: %v", err)
+	}
+	handler := deviceContentHandler{
+		contentHandler: contentHandler{service: service},
+		bindingService: contentTestBindingService{
+			sessionDeviceID: "sprout_device_001",
+		},
+		runtimeService: contentTestRuntimeService{familyID: "family_001"},
+	}
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/devices/sprout_device_001/content/catalog",
+		nil,
+	)
+	request.SetPathValue("device_id", "sprout_device_001")
+	request.Header.Set("Authorization", "Bearer device-session-token")
+	recorder := httptest.NewRecorder()
+	handler.catalog(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Packages []struct {
+				PackageID string `json:"package_id"`
+				Category  string `json:"category"`
+			} `json:"packages"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data.Packages) != 1 ||
+		payload.Data.Packages[0].PackageID != "content_story_001" {
+		t.Fatalf("device catalog was not filtered: %s", recorder.Body.String())
+	}
+}
+
 func TestDeviceContentCatalogRejectsInvalidSession(t *testing.T) {
 	handler := deviceContentHandler{
 		contentHandler: newContentHandlerForTest(t),
 		bindingService: contentTestBindingService{
 			err: errors.New("session expired"),
 		},
+		runtimeService: contentTestRuntimeService{familyID: "family_001"},
 	}
 	request := httptest.NewRequest(
 		http.MethodGet,

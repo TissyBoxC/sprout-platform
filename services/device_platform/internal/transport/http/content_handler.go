@@ -22,10 +22,19 @@ type contentHandler struct {
 type deviceContentHandler struct {
 	contentHandler contentHandler
 	bindingService deviceContentBindingService
+	runtimeService deviceContentRuntimeService
 }
 
 type deviceContentBindingService interface {
 	VerifyDeviceSession(ctx context.Context, deviceSessionToken string) (string, error)
+}
+
+type deviceContentRuntimeService interface {
+	ResolveDeviceFamily(
+		ctx context.Context,
+		deviceSessionToken string,
+		pathDeviceID string,
+	) (string, error)
 }
 
 type createContentPackageRequest struct {
@@ -276,34 +285,65 @@ func (handler deviceContentHandler) catalog(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	if !handler.verifyDeviceSession(response, request) {
+	familyID, ok := handler.verifyDeviceFamily(response, request)
+	if !ok {
 		return
 	}
-	handler.contentHandler.catalog(response, request)
+	sinceRevision, err := contentRevisionParam(request)
+	if err != nil {
+		writeError(response, request, http.StatusUnprocessableEntity, "invalid_revision", "请检查内容版本号")
+		return
+	}
+	catalog, err := handler.contentHandler.service.Catalog(
+		request.Context(),
+		contentdomain.CatalogQuery{
+			SinceRevision: sinceRevision,
+			AgeTier:       strings.TrimSpace(request.URL.Query().Get("age_tier")),
+			Category:      strings.TrimSpace(request.URL.Query().Get("category")),
+			FamilyID:      familyID,
+		},
+	)
+	if err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, catalog)
 }
 
 func (handler deviceContentHandler) download(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	if !handler.verifyDeviceSession(response, request) {
+	familyID, ok := handler.verifyDeviceFamily(response, request)
+	if !ok {
 		return
 	}
-	handler.contentHandler.download(response, request)
+	info, err := handler.contentHandler.service.DownloadForFamily(
+		request.Context(),
+		familyID,
+		request.PathValue("package_id"),
+	)
+	if err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"download": info,
+	})
 }
 
-func (handler deviceContentHandler) verifyDeviceSession(
+func (handler deviceContentHandler) verifyDeviceFamily(
 	response http.ResponseWriter,
 	request *http.Request,
-) bool {
-	if handler.bindingService == nil {
+) (string, bool) {
+	if handler.bindingService == nil || handler.runtimeService == nil {
 		writeError(response, request, http.StatusUnauthorized, "device_session_expired", "设备登录已过期，请重新连接")
-		return false
+		return "", false
 	}
 	deviceSessionToken, ok := bearerToken(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "device_session_expired", "设备登录已过期，请重新连接")
-		return false
+		return "", false
 	}
 	pathDeviceID := strings.TrimSpace(request.PathValue("device_id"))
 	sessionDeviceID, err := handler.bindingService.VerifyDeviceSession(
@@ -312,9 +352,18 @@ func (handler deviceContentHandler) verifyDeviceSession(
 	)
 	if err != nil || sessionDeviceID != pathDeviceID {
 		writeError(response, request, http.StatusUnauthorized, "device_session_expired", "设备登录已过期，请重新连接")
-		return false
+		return "", false
 	}
-	return true
+	familyID, err := handler.runtimeService.ResolveDeviceFamily(
+		request.Context(),
+		deviceSessionToken,
+		pathDeviceID,
+	)
+	if err != nil {
+		writeContentError(response, request, err)
+		return "", false
+	}
+	return familyID, true
 }
 
 func (handler contentHandler) applyAction(

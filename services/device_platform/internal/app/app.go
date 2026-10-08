@@ -37,6 +37,8 @@ import (
 	releaseStoreService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
 	serviceVersionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/repository"
 	serviceVersionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
+	usageReportRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/repository"
+	usageReportService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/cache"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/database"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/security"
@@ -217,6 +219,15 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create content library service: %w", err)
 	}
+	usageReports, err := usageReportService.New(usageReportService.Options{
+		Repository: usageReportRepository.NewPostgresRepository(
+			databaseStore.Pool(),
+		),
+		PolicyService: parentPolicyService,
+	})
+	if err != nil {
+		return fmt.Errorf("create usage report service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
@@ -234,6 +245,7 @@ func Run() error {
 			ServiceVersionService: serviceVersions,
 			ReleaseStoreService:   releaseStore,
 			ContentService:        contentLibraryService,
+			UsageReportService:    usageReports,
 			VoiceTokenIssuer:      voiceTokenIssuer,
 			VoiceWebSocketURL:     cfg.VoiceGateway.WebSocketURL,
 		}),

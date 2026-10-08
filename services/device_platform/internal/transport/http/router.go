@@ -25,6 +25,7 @@ import (
 	policeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
 	releasestoreservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
 	serviceversionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
+	usagereportservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
 )
 
 // RouterOptions contains dependencies for the device platform HTTP transport.
@@ -42,6 +43,7 @@ type RouterOptions struct {
 	ServiceVersionService *serviceversionservice.Service
 	ReleaseStoreService   *releasestoreservice.Service
 	ContentService        *contentservice.Service
+	UsageReportService    *usagereportservice.Service
 	VoiceTokenIssuer      bindingservice.VoiceTokenIssuer
 	VoiceWebSocketURL     string
 }
@@ -217,6 +219,16 @@ func NewRouter(options RouterOptions) http.Handler {
 				"GET /api/v1/devices/{device_id}/runtime/parent-policy",
 				runtimeHandler.getParentPolicy,
 			)
+			if options.UsageReportService != nil {
+				usageHandler := usageReportHandler{
+					service:        options.UsageReportService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/runtime/usage",
+					usageHandler.recordDeviceUsage,
+				)
+			}
 			mux.HandleFunc(
 				"POST /api/v1/devices/{device_id}/runtime/commands/{command_id}/ack",
 				runtimeHandler.acknowledgeCommand,
@@ -297,6 +309,13 @@ func NewRouter(options RouterOptions) http.Handler {
 				"GET /api/v1/admin/families/{parent_account_id}/children",
 				authHandler.requireAdmin(adminHandler.listFamilyChildren),
 			)
+			if options.UsageReportService != nil {
+				usageHandler := usageReportHandler{service: options.UsageReportService}
+				mux.HandleFunc(
+					"GET /api/v1/admin/families/{parent_account_id}/usage-reports",
+					authHandler.requireAdmin(usageHandler.listAdminFamilyUsageReports),
+				)
+			}
 			mux.HandleFunc(
 				"GET /api/v1/admin/ai-accounts",
 				authHandler.requireAdmin(adminHandler.listAIAccounts),
@@ -469,6 +488,15 @@ func NewRouter(options RouterOptions) http.Handler {
 		}
 	}
 
+	if options.UsageReportService != nil && options.AuthService != nil {
+		usageHandler := usageReportHandler{service: options.UsageReportService}
+		authHandler := authHandler{service: options.AuthService}
+		mux.HandleFunc(
+			"GET /api/v1/usage-reports",
+			authHandler.requireAuthentication(usageHandler.listGuardianUsageReports),
+		)
+	}
+
 	if options.ContentService != nil {
 		contentHandler := contentHandler{service: options.ContentService}
 		// The parent app reads the catalog with a guardian session.
@@ -490,6 +518,7 @@ func NewRouter(options RouterOptions) http.Handler {
 			deviceHandler := deviceContentHandler{
 				contentHandler: contentHandler,
 				bindingService: options.BindingService,
+				runtimeService: options.RuntimeService,
 			}
 			mux.HandleFunc(
 				"GET /api/v1/devices/{device_id}/content/catalog",

@@ -8,6 +8,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/repository"
+	policydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
 )
 
@@ -21,16 +22,27 @@ type AssetReader interface {
 
 // Options contains content-service dependencies.
 type Options struct {
-	Repository  repository.Repository
-	AssetReader AssetReader
-	Clock       clock.Clock
+	Repository   repository.Repository
+	AssetReader  AssetReader
+	PolicyReader ContentPolicyReader
+	Clock        clock.Clock
+}
+
+// ContentPolicyReader resolves the effective family policy that constrains a
+// device-facing catalog. Admin browsing does not use this reader.
+type ContentPolicyReader interface {
+	GetEffective(
+		ctx context.Context,
+		familyID string,
+	) (*policydomain.EffectivePolicy, error)
 }
 
 // Service owns the content-package lifecycle.
 type Service struct {
-	repository  repository.Repository
-	assetReader AssetReader
-	clock       clock.Clock
+	repository   repository.Repository
+	assetReader  AssetReader
+	policyReader ContentPolicyReader
+	clock        clock.Clock
 }
 
 // New creates the content service.
@@ -43,9 +55,10 @@ func New(options Options) (*Service, error) {
 		timeSource = clock.SystemClock{}
 	}
 	return &Service{
-		repository:  options.Repository,
-		assetReader: options.AssetReader,
-		clock:       timeSource,
+		repository:   options.Repository,
+		assetReader:  options.AssetReader,
+		policyReader: options.PolicyReader,
+		clock:        timeSource,
 	}, nil
 }
 
@@ -330,6 +343,34 @@ func (s *Service) Catalog(
 	if query.Category != "" && !domain.IsCategory(domain.Category(query.Category)) {
 		return nil, domain.ErrInvalidMetadata
 	}
+	if query.FamilyID != "" {
+		if s.policyReader == nil {
+			return nil, domain.ErrInvalidMetadata
+		}
+		effective, err := s.policyReader.GetEffective(ctx, query.FamilyID)
+		if err != nil {
+			return nil, err
+		}
+		query.AllowedCategories = intersectCategories(
+			query.AllowedCategories,
+			effective.AllowedCategories,
+		)
+		if len(query.AllowedCategories) == 0 {
+			// No category survives the policy intersection. Return an empty
+			// manifest, but keep the real delivery cursor so the device can
+			// still advance and receive packages once the policy widens.
+			revision, err := s.repository.CatalogRevision(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return &domain.Catalog{
+				Revision:            revision,
+				Packages:            []domain.PackageVersion{},
+				WithdrawnPackageIDs: []string{},
+				GeneratedAt:         s.clock.Now().UTC(),
+			}, nil
+		}
+	}
 	catalog, err := s.repository.Catalog(ctx, query)
 	if err != nil {
 		return nil, err
@@ -357,6 +398,44 @@ func (s *Service) Download(
 	if err != nil {
 		return nil, err
 	}
+	return s.downloadVersion(ctx, version)
+}
+
+// DownloadForFamily resolves a published package only when its category is
+// allowed by the family's effective parent policy. The device path uses this
+// method so a client cannot bypass catalog filtering by requesting a URL.
+func (s *Service) DownloadForFamily(
+	ctx context.Context,
+	familyID string,
+	packageID string,
+) (*domain.DownloadInfo, error) {
+	if strings.TrimSpace(familyID) == "" {
+		return nil, domain.ErrInvalidMetadata
+	}
+	if s.policyReader == nil {
+		return nil, domain.ErrInvalidMetadata
+	}
+	effective, err := s.policyReader.GetEffective(ctx, familyID)
+	if err != nil {
+		return nil, err
+	}
+	version, err := s.repository.PublishedDownload(
+		ctx,
+		strings.TrimSpace(packageID),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if !categoryAllowed(version.Category, effective.AllowedCategories) {
+		return nil, domain.ErrPackageNotFound
+	}
+	return s.downloadVersion(ctx, version)
+}
+
+func (s *Service) downloadVersion(
+	ctx context.Context,
+	version *domain.PackageVersion,
+) (*domain.DownloadInfo, error) {
 	if version.PublishedAt == nil {
 		return nil, domain.ErrPackageNotFound
 	}
@@ -383,6 +462,34 @@ func (s *Service) Download(
 		DownloadURL:    asset.DownloadURL,
 		PublishedAt:    version.PublishedAt.UTC(),
 	}, nil
+}
+
+func categoryAllowed(category domain.Category, allowed []string) bool {
+	for _, allowedCategory := range allowed {
+		if string(category) == allowedCategory {
+			return true
+		}
+	}
+	return false
+}
+
+func intersectCategories(requested []string, allowed []string) []string {
+	if len(allowed) == 0 {
+		return []string{}
+	}
+	if len(requested) == 0 {
+		return append([]string(nil), allowed...)
+	}
+	result := make([]string, 0, len(requested))
+	for _, category := range requested {
+		for _, allowedCategory := range allowed {
+			if category == allowedCategory {
+				result = append(result, category)
+				break
+			}
+		}
+	}
+	return result
 }
 
 func (s *Service) transition(

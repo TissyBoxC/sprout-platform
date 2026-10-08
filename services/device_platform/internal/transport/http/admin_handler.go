@@ -478,15 +478,27 @@ func (handler adminHandler) listFamilyChildren(
 	for index := range children {
 		child := &children[index]
 		record := childProfileResponse(child)
-		if handler.policyService != nil {
-			policy, policyErr := handler.policyService.Get(
-				request.Context(),
-				parentAccountID,
-				child.ID,
-			)
-			if policyErr == nil {
-				record["policy"] = parentPolicyResponse(policy)
-			}
+		// Operators must be able to tell a genuinely missing policy from a
+		// failed read, so the read outcome is reported explicitly instead of
+		// being dropped into an absent field.
+		if handler.policyService == nil {
+			record["policy"] = nil
+			record["policy_state"] = "unavailable"
+			record["policy_error"] = "策略服务暂时不可用"
+		} else if policy, policyErr := handler.policyService.Get(
+			request.Context(),
+			parentAccountID,
+			child.ID,
+		); policyErr == nil {
+			record["policy"] = parentPolicyResponse(policy)
+			record["policy_state"] = "available"
+		} else if errors.Is(policyErr, policydomain.ErrPolicyNotFound) {
+			record["policy"] = nil
+			record["policy_state"] = "not_set"
+		} else {
+			record["policy"] = nil
+			record["policy_state"] = "unavailable"
+			record["policy_error"] = "策略暂时无法读取"
 		}
 		result = append(result, record)
 	}

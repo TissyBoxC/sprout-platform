@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,10 +38,14 @@ var (
 
 // SessionConfig describes one device conversation and its resource bounds.
 type SessionConfig struct {
-	ID                   string
-	DeviceID             string
-	SchemaVersion        string
-	StreamID             string
+	ID            string
+	DeviceID      string
+	SchemaVersion string
+	StreamID      string
+	// ContentCategory is the category the device declared for this session.
+	// It is empty for older clients and is passed to the conversation policy
+	// without being logged or persisted here.
+	ContentCategory      string
 	BufferCapacityFrames int
 	SegmentQueueDepth    int
 	PreRollFrames        int
@@ -66,14 +71,15 @@ type SessionConfig struct {
 // The segment owns a copy of its samples; callers may retain it after the
 // session advances. Empty segments are never emitted.
 type AudioSegment struct {
-	ID            string
-	SessionID     string
-	DeviceID      string
-	StreamID      string
-	SequenceStart uint32
-	SequenceEnd   uint32
-	CapturedAt    time.Time
-	PCM           []int16
+	ID              string
+	SessionID       string
+	DeviceID        string
+	StreamID        string
+	ContentCategory string
+	SequenceStart   uint32
+	SequenceEnd     uint32
+	CapturedAt      time.Time
+	PCM             []int16
 }
 
 // SessionStats is a point-in-time diagnostic view of one conversation.
@@ -99,6 +105,7 @@ type Session struct {
 	deviceID            string
 	schemaVersion       string
 	streamID            string
+	contentCategory     string
 	createdAt           time.Time
 	buffer              *buffer.RingBuffer
 	segmentQueueDepth   int
@@ -183,6 +190,7 @@ func NewSession(config SessionConfig) (*Session, error) {
 		deviceID:            config.DeviceID,
 		schemaVersion:       config.SchemaVersion,
 		streamID:            config.StreamID,
+		contentCategory:     strings.TrimSpace(config.ContentCategory),
 		createdAt:           now,
 		buffer:              buffer.NewRingBuffer(config.BufferCapacityFrames),
 		segmentQueueDepth:   config.SegmentQueueDepth,
@@ -235,6 +243,15 @@ func (s *Session) StreamID() string {
 		return ""
 	}
 	return s.streamID
+}
+
+// ContentCategory returns the category the device declared for this session,
+// or an empty string for older clients.
+func (s *Session) ContentCategory() string {
+	if s == nil {
+		return ""
+	}
+	return s.contentCategory
 }
 
 // Done closes when the session ends because of close, cancellation, idle
@@ -563,14 +580,15 @@ func (s *Session) rememberPreRollLocked(audioFrame frame.Frame, pcm []int16) {
 func (s *Session) finishSegmentLocked(force bool) (AudioSegment, error) {
 	samples := append([]int16(nil), s.segmentSamples...)
 	segment := AudioSegment{
-		ID:            fmt.Sprintf("%s:%d", s.id, s.segmentsEmitted+1),
-		SessionID:     s.id,
-		DeviceID:      s.deviceID,
-		StreamID:      s.streamID,
-		SequenceStart: s.segmentSequenceStart,
-		SequenceEnd:   s.segmentSequenceEnd,
-		CapturedAt:    s.segmentCapturedAt,
-		PCM:           samples,
+		ID:              fmt.Sprintf("%s:%d", s.id, s.segmentsEmitted+1),
+		SessionID:       s.id,
+		DeviceID:        s.deviceID,
+		StreamID:        s.streamID,
+		ContentCategory: s.contentCategory,
+		SequenceStart:   s.segmentSequenceStart,
+		SequenceEnd:     s.segmentSequenceEnd,
+		CapturedAt:      s.segmentCapturedAt,
+		PCM:             samples,
 	}
 	s.segmentActive = false
 	s.segmentSamples = s.segmentSamples[:0]

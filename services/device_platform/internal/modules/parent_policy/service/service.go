@@ -122,7 +122,10 @@ func (s *Service) GetEffective(
 	if err != nil {
 		return nil, err
 	}
-	effective := aggregateMostRestrictive(policies)
+	effective, err := aggregateMostRestrictive(policies)
+	if err != nil {
+		return nil, err
+	}
 	if len(effective.AllowedCategories) == 0 {
 		return nil, domain.ErrInvalidCategories
 	}
@@ -138,9 +141,35 @@ func (s *Service) Update(
 	childID string,
 	input domain.PolicyInput,
 ) (*domain.Policy, error) {
+	return s.updateWithVersion(ctx, familyID, childID, input, 0)
+}
+
+// UpdateWithVersion applies a guardian edit only when the caller still holds
+// the current policy version. A zero expected version preserves the legacy
+// internal update path used by provisioning callers.
+func (s *Service) UpdateWithVersion(
+	ctx context.Context,
+	familyID string,
+	childID string,
+	input domain.PolicyInput,
+	expectedVersion int,
+) (*domain.Policy, error) {
+	return s.updateWithVersion(ctx, familyID, childID, input, expectedVersion)
+}
+
+func (s *Service) updateWithVersion(
+	ctx context.Context,
+	familyID string,
+	childID string,
+	input domain.PolicyInput,
+	expectedVersion int,
+) (*domain.Policy, error) {
 	policy, err := s.repository.GetByFamilyID(ctx, familyID, childID)
 	if err != nil {
 		return nil, err
+	}
+	if expectedVersion > 0 && policy.PolicyVersion != expectedVersion {
+		return nil, domain.ErrPolicyVersionConflict
 	}
 	categories, err := validateCategories(input.AllowedCategories)
 	if err != nil {
@@ -162,7 +191,7 @@ func (s *Service) Update(
 	policy.DisabledPeriods = periods
 	policy.MaxVolumePercent = input.MaxVolumePercent
 	policy.UpdatedAt = s.timeSource.Now().UTC()
-	if err := s.repository.Update(ctx, policy); err != nil {
+	if err := s.repository.UpdateWithVersion(ctx, policy, expectedVersion); err != nil {
 		return nil, err
 	}
 	return policy, nil
@@ -198,7 +227,12 @@ func normalizeCategories(values []string) []string {
 	return categories
 }
 
-func aggregateMostRestrictive(policies []domain.Policy) domain.EffectivePolicy {
+func aggregateMostRestrictive(
+	policies []domain.Policy,
+) (domain.EffectivePolicy, error) {
+	if len(policies) == 0 {
+		return domain.EffectivePolicy{}, domain.ErrNoFamilyPolicy
+	}
 	allowed := append([]string(nil), policies[0].AllowedCategories...)
 	allowedSet := make(map[string]struct{}, len(allowed))
 	for _, category := range allowed {
@@ -250,7 +284,7 @@ func aggregateMostRestrictive(policies []domain.Policy) domain.EffectivePolicy {
 		MaxVolumePercent:  maxVolume,
 		SourceChildCount:  len(policies),
 		UpdatedAt:         updatedAt,
-	}
+	}, nil
 }
 
 func containsString(values []string, expected string) bool {

@@ -44,6 +44,7 @@ const (
 var (
 	identifierPattern      = regexp.MustCompile(`^[a-z][a-z0-9]*(?:_[a-z0-9]+){1,7}$`)
 	firmwareVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$`)
+	contentCategoryPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 )
 
 // Audio envelope errors are sentinel values so the transport can map them to
@@ -119,6 +120,11 @@ type ControlFrame struct {
 	Code            string   `json:"code,omitempty"`
 	Message         string   `json:"message,omitempty"`
 	Retryable       *bool    `json:"retryable,omitempty"`
+	// ContentCategory declares the content category for a voice session. It is
+	// optional so older firmware still connects; the gateway then applies only
+	// the age-tier prompt and does not pretend a restricted category was
+	// approved.
+	ContentCategory string `json:"content_category,omitempty"`
 }
 
 // AudioEnvelope is the fixed binary envelope used for one inbound Opus frame.
@@ -220,13 +226,19 @@ func (control ControlFrame) Validate() error {
 
 	switch control.Type {
 	case controlTypeSessionStart:
-		return control.validateSessionStart()
+		if err := control.validateSessionStart(); err != nil {
+			return err
+		}
+		return control.validateContentCategory()
 	case controlTypeSessionStarted:
 		return control.validateSessionStarted()
 	case controlTypeSessionState:
 		return control.validateSessionState()
 	case controlTypeWakeDetected:
-		return control.validateWakeDetected()
+		if err := control.validateWakeDetected(); err != nil {
+			return err
+		}
+		return control.validateContentCategory()
 	case controlTypeSessionEnd, controlTypeSessionClosed, controlTypeCancel:
 		if !validReason(control.Reason) {
 			return errors.New("control frame reason is required")
@@ -248,6 +260,17 @@ func (control ControlFrame) Validate() error {
 	default:
 		return fmt.Errorf("control frame type is invalid: %q", control.Type)
 	}
+}
+
+func (control ControlFrame) validateContentCategory() error {
+	category := strings.TrimSpace(control.ContentCategory)
+	if category == "" {
+		return nil
+	}
+	if !contentCategoryPattern.MatchString(category) || len(category) > 32 {
+		return fmt.Errorf("control frame content_category is invalid: %q", category)
+	}
+	return nil
 }
 
 func (control ControlFrame) validateSessionStart() error {

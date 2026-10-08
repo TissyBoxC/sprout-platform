@@ -191,6 +191,10 @@ type CatalogQuery struct {
 	SinceRevision int64
 	AgeTier       string
 	Category      string
+	// FamilyID is set only on the device-facing path. When present, the
+	// service intersects the requested category with the family policy.
+	FamilyID          string
+	AllowedCategories []string
 }
 
 // Catalog is the incremental manifest returned to devices and parent clients.

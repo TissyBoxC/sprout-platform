@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/domain"
+	policydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/domain"
 )
 
 type fixedClock struct {
@@ -305,6 +306,9 @@ func (repository *memoryRepository) Catalog(
 			if query.Category != "" && string(version.Category) != query.Category {
 				continue
 			}
+			if !categoryAllowedByQuery(version.Category, query.AllowedCategories) {
+				continue
+			}
 			if query.AgeTier != "" && !containsAgeTier(version.AgeTiers, query.AgeTier) {
 				continue
 			}
@@ -333,6 +337,14 @@ func (repository *memoryRepository) Catalog(
 		Packages:            packages,
 		WithdrawnPackageIDs: withdrawn,
 	}, nil
+}
+
+func (repository *memoryRepository) CatalogRevision(
+	_ context.Context,
+) (int64, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	return repository.revision, nil
 }
 
 func (repository *memoryRepository) PublishedDownload(
@@ -399,6 +411,51 @@ func newContentService(
 	return service
 }
 
+// policyReaderStub returns one fixed effective policy for the device path.
+type policyReaderStub struct {
+	effective *policydomain.EffectivePolicy
+	err       error
+}
+
+func (reader policyReaderStub) GetEffective(
+	_ context.Context,
+	_ string,
+) (*policydomain.EffectivePolicy, error) {
+	if reader.err != nil {
+		return nil, reader.err
+	}
+	return reader.effective, nil
+}
+
+func newContentServiceWithPolicy(
+	t *testing.T,
+	repository *memoryRepository,
+	reader AssetReader,
+	allowedCategories []string,
+) *Service {
+	t.Helper()
+	service, err := New(Options{
+		Repository:  repository,
+		AssetReader: reader,
+		PolicyReader: policyReaderStub{
+			effective: &policydomain.EffectivePolicy{
+				DailyLimitMinutes: 60,
+				AllowedCategories: append(
+					[]string(nil),
+					allowedCategories...,
+				),
+			},
+		},
+		Clock: fixedClock{
+			now: time.Date(2026, 10, 8, 8, 0, 0, 0, time.UTC),
+		},
+	})
+	if err != nil {
+		t.Fatalf("create content service: %v", err)
+	}
+	return service
+}
+
 func validMetadata() domain.MetadataInput {
 	return domain.MetadataInput{
 		PackageID: "content_story_001",
@@ -412,6 +469,47 @@ func validMetadata() domain.MetadataInput {
 		SHA256:    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		SizeBytes: 1024,
 	}
+}
+
+// publishPackage drives one package through the full review lifecycle up to
+// published so the catalog and download paths can be exercised.
+func publishPackage(
+	t *testing.T,
+	service *Service,
+	input domain.MetadataInput,
+) *domain.PackageVersion {
+	t.Helper()
+	created, err := service.CreateDraft(context.Background(), input)
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+	if _, err := service.Submit(
+		context.Background(),
+		created.PackageID,
+		created.PackageVersion,
+		"admin-001",
+	); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if _, err := service.Approve(
+		context.Background(),
+		created.PackageID,
+		created.PackageVersion,
+		"admin-001",
+		"内容适合儿童",
+	); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	published, err := service.Publish(
+		context.Background(),
+		created.PackageID,
+		created.PackageVersion,
+		"admin-001",
+	)
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	return published
 }
 
 func TestLifecycleTransitionsAndReviewLog(t *testing.T) {
@@ -855,6 +953,134 @@ func TestConcurrentRevisionIsStrictlyMonotonic(t *testing.T) {
 	}
 }
 
+// TestDeviceCatalogFiltersDisallowedCategory proves the device path cannot
+// receive packages from a category the family policy excludes, while admin
+// browsing keeps the full catalog.
+func TestDeviceCatalogFiltersDisallowedCategory(t *testing.T) {
+	repository := newMemoryRepository()
+	service := newContentServiceWithPolicy(
+		t,
+		repository,
+		keyedAssetReader{assets: map[string]*domain.Asset{
+			"content/story/moon-night-v1.bin": {
+				Key:         "content/story/moon-night-v1.bin",
+				SHA256:      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				SizeBytes:   1024,
+				DownloadURL: "https://download.example.test/content/story/moon-night-v1.bin",
+			},
+			"content/english/hello-v1.bin": {
+				Key:         "content/english/hello-v1.bin",
+				SHA256:      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				SizeBytes:   2048,
+				DownloadURL: "https://download.example.test/content/english/hello-v1.bin",
+			},
+		}},
+		[]string{"story"},
+	)
+	storyMetadata := validMetadata()
+	publishPackage(t, service, storyMetadata)
+	englishMetadata := validMetadata()
+	englishMetadata.PackageID = "content_english_001"
+	englishMetadata.Title = "早安英语"
+	englishMetadata.Category = domain.CategoryEnglish
+	englishMetadata.AssetKey = "content/english/hello-v1.bin"
+	englishMetadata.SHA256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	publishPackage(t, service, englishMetadata)
+
+	adminCatalog, err := service.Catalog(context.Background(), domain.CatalogQuery{})
+	if err != nil {
+		t.Fatalf("admin catalog: %v", err)
+	}
+	if len(adminCatalog.Packages) != 2 {
+		t.Fatalf("admin catalog packages = %d, want 2", len(adminCatalog.Packages))
+	}
+
+	deviceCatalog, err := service.Catalog(context.Background(), domain.CatalogQuery{
+		FamilyID: "family_001",
+	})
+	if err != nil {
+		t.Fatalf("device catalog: %v", err)
+	}
+	if len(deviceCatalog.Packages) != 1 {
+		t.Fatalf("device catalog packages = %d, want 1", len(deviceCatalog.Packages))
+	}
+	if deviceCatalog.Packages[0].Category != domain.CategoryStory {
+		t.Fatalf(
+			"device catalog category = %q, want %q",
+			deviceCatalog.Packages[0].Category,
+			domain.CategoryStory,
+		)
+	}
+}
+
+// TestDeviceCatalogKeepsRevisionWhenPolicyDeniesAll proves the device still
+// learns the current delivery cursor even when no category is allowed.
+func TestDeviceCatalogKeepsRevisionWhenPolicyDeniesAll(t *testing.T) {
+	repository := newMemoryRepository()
+	service := newContentServiceWithPolicy(
+		t,
+		repository,
+		fakeAssetReader{
+			asset: &domain.Asset{
+				Key:         "content/story/moon-night-v1.bin",
+				SHA256:      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				SizeBytes:   1024,
+				DownloadURL: "https://download.example.test/content/story/moon-night-v1.bin",
+			},
+		},
+		// The family allows only a category that has no published package, so
+		// the intersection is empty while storage still has a real revision.
+		[]string{"bedtime"},
+	)
+	publishPackage(t, service, validMetadata())
+	catalog, err := service.Catalog(context.Background(), domain.CatalogQuery{
+		FamilyID: "family_001",
+	})
+	if err != nil {
+		t.Fatalf("device catalog: %v", err)
+	}
+	if len(catalog.Packages) != 0 {
+		t.Fatalf("expected empty catalog, got %+v", catalog.Packages)
+	}
+	if catalog.Revision < 1 {
+		t.Fatalf("revision = %d, want >= 1", catalog.Revision)
+	}
+}
+
+// TestDeviceDownloadDeniesDisallowedCategory proves a device cannot bypass the
+// catalog filter by requesting the package download directly.
+func TestDeviceDownloadDeniesDisallowedCategory(t *testing.T) {
+	repository := newMemoryRepository()
+	service := newContentServiceWithPolicy(
+		t,
+		repository,
+		keyedAssetReader{assets: map[string]*domain.Asset{
+			"content/english/hello-v1.bin": {
+				Key:         "content/english/hello-v1.bin",
+				SHA256:      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				SizeBytes:   2048,
+				DownloadURL: "https://download.example.test/content/english/hello-v1.bin",
+			},
+		}},
+		[]string{"story"},
+	)
+	englishMetadata := validMetadata()
+	englishMetadata.PackageID = "content_english_001"
+	englishMetadata.Title = "早安英语"
+	englishMetadata.Category = domain.CategoryEnglish
+	englishMetadata.AssetKey = "content/english/hello-v1.bin"
+	englishMetadata.SHA256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	publishPackage(t, service, englishMetadata)
+
+	if _, err := service.DownloadForFamily(
+		context.Background(),
+		"family_001",
+		"content_english_001",
+	); !errors.Is(err, domain.ErrPackageNotFound) {
+		t.Fatalf("expected package-not-found denial, got %v", err)
+	}
+}
+
 func TestNextStatusRejectsIllegalMoves(t *testing.T) {
 	for _, test := range []struct {
 		current domain.Status
@@ -912,6 +1138,18 @@ func timePointer(value time.Time) *time.Time {
 func containsAgeTier(values []domain.AgeTier, want string) bool {
 	for _, value := range values {
 		if string(value) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func categoryAllowedByQuery(category domain.Category, allowed []string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	for _, value := range allowed {
+		if string(category) == value {
 			return true
 		}
 	}

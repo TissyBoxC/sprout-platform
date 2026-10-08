@@ -7,12 +7,14 @@ import (
 )
 
 var (
-	ErrPolicyNotFound       = errors.New("parent policy not found")
-	ErrInvalidPolicy        = errors.New("invalid parent policy")
-	ErrInvalidDailyLimit    = errors.New("invalid daily limit")
-	ErrInvalidCategories    = errors.New("invalid allowed categories")
-	ErrInvalidDisabledHours = errors.New("invalid disabled periods")
-	ErrInvalidVolume        = errors.New("invalid maximum volume")
+	ErrPolicyNotFound        = errors.New("parent policy not found")
+	ErrInvalidPolicy         = errors.New("invalid parent policy")
+	ErrInvalidDailyLimit     = errors.New("invalid daily limit")
+	ErrInvalidCategories     = errors.New("invalid allowed categories")
+	ErrInvalidDisabledHours  = errors.New("invalid disabled periods")
+	ErrInvalidVolume         = errors.New("invalid maximum volume")
+	ErrNoFamilyPolicy        = errors.New("family has no parent policy")
+	ErrPolicyVersionConflict = errors.New("parent policy version conflict")
 )
 
 // EffectivePolicy is the most restrictive runtime policy for every child in

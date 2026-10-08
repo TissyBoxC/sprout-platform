@@ -322,6 +322,40 @@ func TestSessionStateFromClientIsRejected(t *testing.T) {
 	}
 }
 
+func TestSessionStartCarriesContentCategoryIntoSession(t *testing.T) {
+	server, manager := newTestServer(t)
+	defer manager.CloseAll()
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, "valid-token")
+	defer connection.Close()
+	start := sessionStartFrame("session_category", "device_alpha")
+	start.ContentCategory = "story"
+	writeControl(t, connection, start)
+	_ = readControl(t, connection)
+	_ = readControl(t, connection)
+
+	voiceSession, ok := manager.Get("session_category")
+	if !ok {
+		t.Fatal("session was not created")
+	}
+	if voiceSession.ContentCategory() != "story" {
+		t.Fatalf(
+			"session content category = %q, want story",
+			voiceSession.ContentCategory(),
+		)
+	}
+}
+
+func TestSessionStartRejectsInvalidContentCategory(t *testing.T) {
+	control := sessionStartFrame("session_bad_category", "device_alpha")
+	control.ContentCategory = "Story; DROP TABLE"
+	if err := control.Validate(); err == nil {
+		t.Fatal("invalid content category was accepted")
+	}
+}
+
 func TestMalformedSessionStateIsRejected(t *testing.T) {
 	_, err := DecodeControlFrame([]byte(
 		`{"schema_version":"1.0.0","type":"session_state","session_id":"session_state",` +

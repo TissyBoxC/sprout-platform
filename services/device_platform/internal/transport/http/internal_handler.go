@@ -27,12 +27,10 @@ type internalHandler struct {
 // internalPolicyService resolves the effective parent policy for the device
 // and relay path. It is separate from the guardian-facing edit surface.
 type internalPolicyService interface {
-	GetForFamily(
+	GetEffective(
 		ctx context.Context,
 		familyID string,
-		childID string,
-	) (*policydomain.Policy, error)
-	List(ctx context.Context, familyID string) ([]policydomain.Policy, error)
+	) (*policydomain.EffectivePolicy, error)
 }
 
 // uploadReleaseFile lets the release pipeline publish one artifact through
@@ -149,9 +147,8 @@ func (handler internalHandler) aiCredential(
 	})
 }
 
-// effectivePolicies returns every parent policy owned by one family. The
-// device runtime uses this to enforce limits locally without receiving any
-// guardian or provider identity.
+// effectivePolicies returns the single effective policy a family-bound
+// device or relay must execute. It never exposes child or guardian identities.
 func (handler internalHandler) effectivePolicies(
 	response http.ResponseWriter,
 	request *http.Request,
@@ -165,17 +162,16 @@ func (handler internalHandler) effectivePolicies(
 		writeError(response, request, http.StatusBadRequest, "invalid_request", "请指定家长账号")
 		return
 	}
-	policies, err := handler.policyService.List(request.Context(), familyID)
+	effective, err := handler.policyService.GetEffective(
+		request.Context(),
+		familyID,
+	)
 	if err != nil {
-		writeError(response, request, http.StatusInternalServerError, "service_error", "暂时无法读取家长策略")
+		writeDeviceRuntimeError(response, request, err)
 		return
 	}
-	result := make([]map[string]any, 0, len(policies))
-	for index := range policies {
-		result = append(result, parentPolicyResponse(&policies[index]))
-	}
 	writeSuccess(response, request, http.StatusOK, map[string]any{
-		"policies": result,
+		"policy": effectivePolicyResponse(effective),
 	})
 }
 

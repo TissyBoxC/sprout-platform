@@ -222,7 +222,7 @@ func Load() (Config, error) {
 			APIKey:  env("VOICE_GATEWAY_SUB2API_API_KEY", ""),
 		},
 		Security: SecurityConfig{
-			ContentPolicyEnabled: true,
+			ContentPolicyEnabled: envBool("VOICE_GATEWAY_CONTENT_POLICY_ENABLED", true),
 		},
 		WebSocket: WebSocketConfig{
 			Enabled:                   envBool("VOICE_GATEWAY_WS_ENABLED", false),

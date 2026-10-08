@@ -3,6 +3,7 @@ package conversation
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -130,6 +131,53 @@ func (denyAllPolicy) CheckText(string) content_policy.Decision {
 	return content_policy.Decision{Allowed: false, Reason: "blocked"}
 }
 
+// fakeDevicePolicy records the category and prompt the runner composed so a
+// test can prove the device's declared category reached the policy layer.
+type fakeDevicePolicy struct {
+	allowedCategory   string
+	promptDenyReason  string
+	categoryDecision  content_policy.Decision
+	lastCategory      string
+	lastDeviceID      string
+	lastPrompt        string
+	categoryCallCount int
+}
+
+func (p *fakeDevicePolicy) CheckDeviceCategory(
+	_ context.Context,
+	deviceID string,
+	category string,
+) content_policy.Decision {
+	p.lastDeviceID = deviceID
+	p.lastCategory = category
+	p.categoryCallCount++
+	if category == p.allowedCategory {
+		return content_policy.Decision{Allowed: true, Reason: content_policy.ReasonAllowed}
+	}
+	if p.categoryDecision.Reason != "" {
+		return p.categoryDecision
+	}
+	return content_policy.Decision{
+		Allowed: false,
+		Reason:  content_policy.ReasonCategoryNotAllowed,
+	}
+}
+
+func (p *fakeDevicePolicy) ComposeSystemPrompt(
+	_ context.Context,
+	_ string,
+	basePrompt string,
+) (string, content_policy.Decision) {
+	p.lastPrompt = basePrompt
+	if p.promptDenyReason != "" {
+		return basePrompt, content_policy.Decision{Reason: p.promptDenyReason}
+	}
+	return basePrompt + "\n[constrained]", content_policy.Decision{
+		Allowed: true,
+		Reason:  content_policy.ReasonAllowed,
+	}
+}
+
 func testConfig() Config {
 	// 640 bytes is one 20 ms frame of 16 kHz mono int16 PCM.
 	return Config{
@@ -248,5 +296,146 @@ func TestTranscriptHistoryIsBounded(t *testing.T) {
 	runner.mutex.Unlock()
 	if historyLength > 2 {
 		t.Fatalf("history length = %d, want <= 2 with MaxTurns=1", historyLength)
+	}
+}
+
+func TestTurnWithCategoryAllowsDeclaredCategory(t *testing.T) {
+	config := testConfig()
+	devicePolicy := &fakeDevicePolicy{allowedCategory: "story"}
+	config.DevicePolicy = devicePolicy
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	err = runner.TurnWithCategory(
+		context.Background(),
+		"session_1",
+		"device_a",
+		"story",
+		[]int16{1},
+		&recordingSink{},
+	)
+	if err != nil {
+		t.Fatalf("TurnWithCategory() error = %v", err)
+	}
+	if devicePolicy.categoryCallCount != 1 || devicePolicy.lastCategory != "story" {
+		t.Fatalf(
+			"category check = %d/%q, want one check for story",
+			devicePolicy.categoryCallCount,
+			devicePolicy.lastCategory,
+		)
+	}
+}
+
+func TestTurnWithCategoryRefusesDeniedCategory(t *testing.T) {
+	config := testConfig()
+	devicePolicy := &fakeDevicePolicy{allowedCategory: "story"}
+	config.DevicePolicy = devicePolicy
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	sink := &recordingSink{}
+
+	err = runner.TurnWithCategory(
+		context.Background(),
+		"session_1",
+		"device_a",
+		"encyclopedia",
+		[]int16{1},
+		sink,
+	)
+	if !errors.Is(err, ErrContentBlocked) {
+		t.Fatalf("TurnWithCategory() error = %v, want ErrContentBlocked", err)
+	}
+	if !strings.Contains(err.Error(), content_policy.ReasonCategoryNotAllowed) {
+		t.Fatalf("error %q does not carry the stable denial reason", err.Error())
+	}
+	if sink.count() != 0 {
+		t.Fatal("denied category produced audio")
+	}
+}
+
+func TestTurnWithCategoryFailsClosedWhenPolicyUnavailable(t *testing.T) {
+	config := testConfig()
+	config.DevicePolicy = &fakeDevicePolicy{
+		promptDenyReason: content_policy.ReasonPolicyUnavailable,
+	}
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	sink := &recordingSink{}
+
+	err = runner.TurnWithCategory(
+		context.Background(),
+		"session_1",
+		"device_a",
+		"story",
+		[]int16{1},
+		sink,
+	)
+	if !errors.Is(err, ErrContentBlocked) {
+		t.Fatalf("TurnWithCategory() error = %v, want ErrContentBlocked", err)
+	}
+	if !strings.Contains(err.Error(), content_policy.ReasonPolicyUnavailable) {
+		t.Fatalf("error %q does not carry the fail-closed reason", err.Error())
+	}
+	if sink.count() != 0 {
+		t.Fatal("unavailable policy produced audio")
+	}
+}
+
+func TestTurnWithoutCategoryKeepsOlderClientWorking(t *testing.T) {
+	config := testConfig()
+	devicePolicy := &fakeDevicePolicy{}
+	config.DevicePolicy = devicePolicy
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	err = runner.Turn(
+		context.Background(),
+		"session_1",
+		"device_a",
+		[]int16{1},
+		&recordingSink{},
+	)
+	if err != nil {
+		t.Fatalf("Turn() error = %v", err)
+	}
+	if devicePolicy.categoryCallCount != 0 {
+		t.Fatal("older client without a category must not trigger a category check")
+	}
+}
+
+func TestTurnSafetyIntentBypassesDenyAllPolicy(t *testing.T) {
+	config := testConfig()
+	config.ASR = &fakeASR{text: "我想伤害自己"}
+	config.Policy = denyAllPolicy{}
+	config.DevicePolicy = &fakeDevicePolicy{
+		promptDenyReason: content_policy.ReasonPolicyUnavailable,
+	}
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	sink := &recordingSink{}
+
+	err = runner.TurnWithCategory(
+		context.Background(),
+		"session_1",
+		"device_a",
+		"story",
+		[]int16{1},
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("safety intent error = %v, want a protective reply", err)
+	}
+	if sink.count() == 0 {
+		t.Fatal("safety intent did not produce any reply audio")
 	}
 }

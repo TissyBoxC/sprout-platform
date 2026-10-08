@@ -297,6 +297,7 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 			DeviceID:          identity.DeviceID,
 			SchemaVersion:     frame.SchemaVersion,
 			StreamID:          control.StreamID,
+			ContentCategory:   control.ContentCategory,
 			MinimumSpeechMS:   frame.DurationMS,
 			DetectorFactory:   s.config.DetectorFactory,
 			PreprocessFactory: s.config.PreprocessFactory,

@@ -63,10 +63,16 @@ type Sink interface {
 // ASR, LLM, and TTS are required together: a partially configured pipeline
 // would silently drop a child's speech, so the runner refuses to start.
 type Config struct {
-	ASR           asr.Recognizer
-	LLM           llm.Client
-	TTS           tts.Synthesizer
-	Policy        content_policy.Policy
+	ASR    asr.Recognizer
+	LLM    llm.Client
+	TTS    tts.Synthesizer
+	Policy content_policy.Policy
+	// DevicePolicy resolves the authenticated device's effective family policy.
+	// It constrains the system prompt by age tier and refuses a turn whose
+	// declared content category is not explicitly allowed. A nil value keeps
+	// text-only callers and tests working; the production composition root
+	// requires it before exposing the realtime endpoint.
+	DevicePolicy  content_policy.DevicePolicy
 	Model         string
 	Voice         string
 	Language      string
@@ -118,6 +124,25 @@ func New(config Config) (*Runner, error) {
 // without leaving partial provider work behind; each adapter stream is closed
 // before the method returns.
 func (r *Runner) Turn(ctx context.Context, sessionID string, deviceID string, pcm []int16, sink Sink) error {
+	return r.TurnWithCategory(ctx, sessionID, deviceID, "", pcm, sink)
+}
+
+// TurnWithCategory runs one utterance constrained by the content category the
+// device declared for the session.
+//
+// An empty category keeps voice conversation available for older clients
+// while still applying the family age-tier prompt. A declared category must be
+// explicitly allowed by the effective family policy. Crisis and self-harm
+// intents bypass ordinary category refusal so a child always receives a
+// protective response.
+func (r *Runner) TurnWithCategory(
+	ctx context.Context,
+	sessionID string,
+	deviceID string,
+	category string,
+	pcm []int16,
+	sink Sink,
+) error {
 	if r == nil {
 		return ErrNotConfigured
 	}
@@ -133,20 +158,46 @@ func (r *Runner) Turn(ctx context.Context, sessionID string, deviceID string, pc
 	if text == "" {
 		return ErrEmptyTranscribe
 	}
-	if r.config.Policy != nil {
+	safetyExempt := content_policy.IsSafetyIntent(text)
+	if !safetyExempt && r.config.Policy != nil {
 		if decision := r.config.Policy.CheckText(text); !decision.Allowed {
 			return fmt.Errorf("%w: %s", ErrContentBlocked, decision.Reason)
 		}
 	}
 
-	reply, err := r.reply(ctx, sessionID, deviceID, text)
+	systemPrompt := r.config.SystemPrompt
+	if safetyExempt {
+		systemPrompt = safetySystemPrompt
+	} else if r.config.DevicePolicy != nil {
+		composed, decision := r.config.DevicePolicy.ComposeSystemPrompt(
+			ctx,
+			deviceID,
+			r.config.SystemPrompt,
+		)
+		if !decision.Allowed {
+			return fmt.Errorf("%w: %s", ErrContentBlocked, decision.Reason)
+		}
+		if strings.TrimSpace(category) != "" {
+			categoryDecision := r.config.DevicePolicy.CheckDeviceCategory(
+				ctx,
+				deviceID,
+				category,
+			)
+			if !categoryDecision.Allowed {
+				return fmt.Errorf("%w: %s", ErrContentBlocked, categoryDecision.Reason)
+			}
+		}
+		systemPrompt = composed
+	}
+
+	reply, err := r.reply(ctx, sessionID, deviceID, systemPrompt, text)
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(reply) == "" {
 		return nil
 	}
-	if r.config.Policy != nil {
+	if !safetyExempt && r.config.Policy != nil {
 		if decision := r.config.Policy.CheckText(reply); !decision.Allowed {
 			return fmt.Errorf("%w: %s", ErrContentBlocked, decision.Reason)
 		}
@@ -192,8 +243,14 @@ func (r *Runner) transcribe(ctx context.Context, pcm []int16) (string, error) {
 	return builder.String(), nil
 }
 
-func (r *Runner) reply(ctx context.Context, sessionID string, deviceID string, text string) (string, error) {
-	messages := r.appendUserMessage(sessionID, text)
+func (r *Runner) reply(
+	ctx context.Context,
+	sessionID string,
+	deviceID string,
+	systemPrompt string,
+	text string,
+) (string, error) {
+	messages := r.appendUserMessage(sessionID, systemPrompt, text)
 	stream, err := r.config.LLM.Chat(ctx, llm.Request{
 		Model:     r.config.Model,
 		Messages:  messages,
@@ -296,11 +353,15 @@ func (r *Runner) referenceCallback(deviceID string) func([]int16) {
 	}
 }
 
-func (r *Runner) appendUserMessage(sessionID string, text string) []llm.Message {
+func (r *Runner) appendUserMessage(
+	sessionID string,
+	systemPrompt string,
+	text string,
+) []llm.Message {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	system := llm.Message{Role: "system", Content: r.config.SystemPrompt}
+	system := llm.Message{Role: "system", Content: systemPrompt}
 	existing := r.history[sessionID]
 	existing = append(existing, llm.Message{Role: "user", Content: text})
 	if len(existing) > r.config.MaxTurns*2 {
@@ -334,6 +395,14 @@ func (r *Runner) appendAssistantMessage(sessionID string, reply string) {
 const defaultSystemPrompt = "你是一个面向幼儿的陪伴机器人，用简短、温和、适龄的中文回答。" +
 	"清楚说明自己是人工智能机器人。拒绝暴力、色情、恐怖、自残和违法内容，" +
 	"不索取隐私，不诱导线下见面或消费。"
+
+// safetySystemPrompt is the fixed prompt for a possible crisis or self-harm
+// utterance. It is never replaced by the family content prompt because the
+// child needs a protective response regardless of the configured category.
+const safetySystemPrompt = "你是一个面向幼儿的陪伴机器人，清楚说明自己是人工智能机器人。" +
+	"当孩子提到自杀、自残、被伤害、极度恐惧或危险时，先表达关心，" +
+	"告诉孩子立即找可信任的大人或拨打当地紧急求助电话，" +
+	"绝不提供方法、细节或评判，也不询问隐私。"
 
 func truncateRunes(value string, limit int) string {
 	if limit <= 0 {

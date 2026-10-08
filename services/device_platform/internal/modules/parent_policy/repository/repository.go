@@ -27,6 +27,11 @@ type Repository interface {
 		familyID string,
 	) ([]domain.Policy, int64, error)
 	Update(ctx context.Context, policy *domain.Policy) error
+	UpdateWithVersion(
+		ctx context.Context,
+		policy *domain.Policy,
+		expectedVersion int,
+	) error
 	DeleteByChildID(ctx context.Context, childID string) error
 }
 
@@ -152,11 +157,29 @@ func (r *PostgresRepository) Update(
 	ctx context.Context,
 	policy *domain.Policy,
 ) error {
+	return r.update(ctx, policy, 0)
+}
+
+// UpdateWithVersion updates one policy only when the stored version still
+// matches the guardian's snapshot. The SQL predicate is the final race guard.
+func (r *PostgresRepository) UpdateWithVersion(
+	ctx context.Context,
+	policy *domain.Policy,
+	expectedVersion int,
+) error {
+	return r.update(ctx, policy, expectedVersion)
+}
+
+func (r *PostgresRepository) update(
+	ctx context.Context,
+	policy *domain.Policy,
+	expectedVersion int,
+) error {
 	disabledPeriods, err := json.Marshal(policy.DisabledPeriods)
 	if err != nil {
 		return fmt.Errorf("encode disabled periods: %w", err)
 	}
-	tag, err := r.pool.Exec(ctx, `
+	query := `
 		UPDATE parent_policies
 		SET policy_version = $3,
 		    daily_limit_minutes = $4,
@@ -166,7 +189,8 @@ func (r *PostgresRepository) Update(
 		    updated_at = $8
 		WHERE family_id = $1
 		  AND child_id = $2
-	`,
+	`
+	args := []any{
 		policy.FamilyID,
 		policy.ChildID,
 		policy.PolicyVersion,
@@ -175,11 +199,27 @@ func (r *PostgresRepository) Update(
 		disabledPeriods,
 		policy.MaxVolumePercent,
 		policy.UpdatedAt,
-	)
+	}
+	if expectedVersion > 0 {
+		query += " AND policy_version = $9"
+		args = append(args, expectedVersion)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update parent policy: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
+		if expectedVersion > 0 {
+			if _, lookupErr := r.GetByFamilyID(
+				ctx,
+				policy.FamilyID,
+				policy.ChildID,
+			); lookupErr == nil {
+				return domain.ErrPolicyVersionConflict
+			} else if !errors.Is(lookupErr, domain.ErrPolicyNotFound) {
+				return lookupErr
+			}
+		}
 		return domain.ErrPolicyNotFound
 	}
 	return nil

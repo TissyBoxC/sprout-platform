@@ -156,6 +156,40 @@ func TestSessionEmitsCompletedSpeechSegment(t *testing.T) {
 	}
 }
 
+func TestSessionPropagatesContentCategoryToSegment(t *testing.T) {
+	config := testSessionConfig("session-category", "device-1", "stream-1")
+	config.ContentCategory = "story"
+	config.DetectorFactory = func() vad.Detector {
+		return &scriptedDetector{values: []bool{true, true, false}}
+	}
+	voiceSession, err := NewSession(config)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer voiceSession.Close()
+
+	if voiceSession.ContentCategory() != "story" {
+		t.Fatalf("session category = %q, want story", voiceSession.ContentCategory())
+	}
+	for sequence := uint32(0); sequence < 3; sequence++ {
+		if err := voiceSession.AcceptFrame(
+			context.Background(),
+			testAudioFrame(sequence),
+		); err != nil {
+			t.Fatalf("accept frame %d: %v", sequence, err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	segment, err := voiceSession.NextSegment(ctx)
+	if err != nil {
+		t.Fatalf("next segment: %v", err)
+	}
+	if segment.ContentCategory != "story" {
+		t.Fatalf("segment category = %q, want story", segment.ContentCategory)
+	}
+}
+
 func TestSessionIdleTimeoutCancels(t *testing.T) {
 	config := testSessionConfig("session-1", "device-1", "stream-1")
 	config.IdleTimeout = 40 * time.Millisecond

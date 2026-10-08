@@ -69,6 +69,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResponseEnvelope"
+  /internal/v1/parent-policies:
+    get:
+      summary: Resolve the effective parent policy for one family
+      description: >
+        Returns the same most-restrictive policy snapshot the device runtime
+        serves. The endpoint is restricted to service tokens and never exposes
+        child identities or per-child policy rows.
+      parameters:
+        - name: family_id
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        "200":
+          description: Effective parent policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EffectiveParentPolicyEnvelope"
+        "400":
+          description: Missing family identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          description: Service authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "404":
+          description: Family policy not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
 components:
   securitySchemes:
     serviceToken:
@@ -99,6 +139,73 @@ components:
           oneOf:
             - type: "null"
             - $ref: "#/components/schemas/Error"
+    EffectiveParentPolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              required:
+                - policy
+              properties:
+                policy:
+                  $ref: "#/components/schemas/EffectiveParentPolicy"
+    EffectiveParentPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - policy_version
+        - daily_limit_minutes
+        - allowed_categories
+        - disabled_periods
+        - max_volume_percent
+        - source_child_count
+        - aggregation_mode
+        - updated_at
+      properties:
+        schema_version:
+          type: string
+          const: 1.0.0
+        policy_version:
+          type: integer
+          minimum: 1
+        daily_limit_minutes:
+          type: integer
+          minimum: 0
+          maximum: 720
+        allowed_categories:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        disabled_periods:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - start_time
+              - end_time
+            properties:
+              start_time:
+                type: string
+              end_time:
+                type: string
+        max_volume_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        source_child_count:
+          type: integer
+          minimum: 1
+        aggregation_mode:
+          type: string
+          const: most_restrictive
+        updated_at:
+          type: string
+          format: date-time
     Error:
       type: object
       additionalProperties: false

@@ -46,6 +46,10 @@ type Repository interface {
 		transition domain.Transition,
 	) (*domain.PackageVersion, error)
 	Catalog(ctx context.Context, query domain.CatalogQuery) (*domain.Catalog, error)
+	// CatalogRevision returns the current delivery cursor without listing
+	// packages. The device path uses it when a family policy exposes no
+	// categories, so the client still learns the server revision.
+	CatalogRevision(ctx context.Context) (int64, error)
 	PublishedDownload(
 		ctx context.Context,
 		packageID string,

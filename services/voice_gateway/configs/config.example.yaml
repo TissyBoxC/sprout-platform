@@ -20,3 +20,9 @@ sub2api:
 
 security:
   content_policy_enabled: true
+
+# The gateway reads parent policies directly from the platform database. It is
+# the same read connection used for usage recording, so no separate policy
+# service is required. Set this to the platform PostgreSQL DSN in production.
+database:
+  dsn: "postgres://sprout:change-me@127.0.0.1:5432/sprout_device_platform?sslmode=disable"

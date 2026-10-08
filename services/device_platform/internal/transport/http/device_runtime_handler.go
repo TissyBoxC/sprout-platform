@@ -425,7 +425,7 @@ func (handler deviceRuntimeHandler) getParentPolicy(
 		writeError(response, request, http.StatusUnauthorized, "device_session_expired", "设备登录已过期，请重新连接")
 		return
 	}
-	deviceID, err := handler.service.ResolveDeviceFamily(
+	parentAccountID, err := handler.service.ResolveDeviceFamily(
 		request.Context(),
 		deviceSessionToken,
 		strings.TrimSpace(request.PathValue("device_id")),
@@ -436,7 +436,7 @@ func (handler deviceRuntimeHandler) getParentPolicy(
 	}
 	effective, err := handler.policyService.GetEffective(
 		request.Context(),
-		deviceID,
+		parentAccountID,
 	)
 	if err != nil {
 		writeDeviceRuntimeError(response, request, err)

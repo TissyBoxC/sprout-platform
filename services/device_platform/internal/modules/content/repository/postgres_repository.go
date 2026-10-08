@@ -427,6 +427,14 @@ func (r *PostgresRepository) ApplyTransition(
 	return item, nil
 }
 
+// CatalogRevision returns the current delivery cursor. It lets the device
+// path preserve a valid revision when policy filtering yields no categories.
+func (r *PostgresRepository) CatalogRevision(
+	ctx context.Context,
+) (int64, error) {
+	return currentCatalogRevision(ctx, r.pool)
+}
+
 // Catalog returns published packages changed after the supplied revision.
 func (r *PostgresRepository) Catalog(
 	ctx context.Context,
@@ -451,6 +459,13 @@ func (r *PostgresRepository) Catalog(
 	if query.Category != "" {
 		args = append(args, query.Category)
 		conditions = append(conditions, fmt.Sprintf("category = $%d", len(args)))
+	}
+	if len(query.AllowedCategories) > 0 {
+		args = append(args, query.AllowedCategories)
+		conditions = append(
+			conditions,
+			fmt.Sprintf("category = ANY($%d)", len(args)),
+		)
 	}
 	rows, err := r.pool.Query(
 		ctx,

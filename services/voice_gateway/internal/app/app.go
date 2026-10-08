@@ -21,6 +21,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/conversation"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/pipeline"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/platform/cache"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/content_policy"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/session"
 	gatewayhttp "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/transport/http"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/transport/websocket"
@@ -53,6 +54,7 @@ func Run() error {
 	defer redisCache.Close()
 
 	var usageRecorder usage.Recorder
+	var policyResolver content_policy.Resolver
 	if cfg.Database.DSN != "" {
 		databaseStore, err := pgxpool.New(startupCtx, cfg.Database.DSN)
 		if err != nil {
@@ -60,9 +62,10 @@ func Run() error {
 		}
 		defer databaseStore.Close()
 		usageRecorder = usage.NewPostgresRecorder(databaseStore)
+		policyResolver = content_policy.NewPostgresResolver(databaseStore)
 	}
 
-	realtimeHandler, realtimeShutdown, err := buildRealtimeTransport(cfg, logger)
+	realtimeHandler, realtimeShutdown, err := buildRealtimeTransport(cfg, logger, policyResolver)
 	if err != nil {
 		return err
 	}
@@ -116,6 +119,7 @@ func Run() error {
 func buildRealtimeTransport(
 	cfg config.Config,
 	logger *slog.Logger,
+	policyResolver content_policy.Resolver,
 ) (http.Handler, func(), error) {
 	if !cfg.WebSocket.Enabled {
 		logger.Info("device realtime endpoint is disabled")
@@ -134,13 +138,22 @@ func buildRealtimeTransport(
 
 	references := reference.NewBus()
 
+	var devicePolicy content_policy.DevicePolicy
+	if cfg.Security.ContentPolicyEnabled {
+		if policyResolver == nil {
+			return nil, nil, errors.New("content policy is enabled but no policy resolver is configured")
+		}
+		devicePolicy = content_policy.NewDeviceEvaluator(policyResolver, 0)
+	}
+
 	runner, err := conversation.New(conversation.Config{
-		ASR:      adapters.ASR,
-		LLM:      adapters.LLM,
-		TTS:      adapters.TTS,
-		Model:    cfg.Audio.LLMModel,
-		Voice:    cfg.Audio.TTSConfig.Voice,
-		Language: "zh",
+		ASR:          adapters.ASR,
+		LLM:          adapters.LLM,
+		TTS:          adapters.TTS,
+		Model:        cfg.Audio.LLMModel,
+		Voice:        cfg.Audio.TTSConfig.Voice,
+		Language:     "zh",
+		DevicePolicy: devicePolicy,
 		ReferencePublisher: func(deviceID string, pcm []int16) {
 			references.Publish(deviceID, pcm)
 		},
@@ -193,7 +206,14 @@ func buildRealtimeTransport(
 		SegmentHandler: func(segment session.AudioSegment, sink websocket.AudioSink) {
 			// The conversation handler runs per completed utterance; a provider
 			// failure ends that turn only and is logged without child content.
-			if turnErr := runner.Turn(context.Background(), segment.SessionID, segment.DeviceID, segment.PCM, sink); turnErr != nil {
+			if turnErr := runner.TurnWithCategory(
+				context.Background(),
+				segment.SessionID,
+				segment.DeviceID,
+				segment.ContentCategory,
+				segment.PCM,
+				sink,
+			); turnErr != nil {
 				logger.Warn("voice conversation turn failed",
 					"session_id", segment.SessionID,
 					"device_id", segment.DeviceID,

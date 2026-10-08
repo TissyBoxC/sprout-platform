@@ -70,9 +70,27 @@ func (r *memoryPolicyRepository) Update(
 	_ context.Context,
 	policy *domain.Policy,
 ) error {
+	return r.update(policy, 0)
+}
+
+func (r *memoryPolicyRepository) UpdateWithVersion(
+	_ context.Context,
+	policy *domain.Policy,
+	expectedVersion int,
+) error {
+	return r.update(policy, expectedVersion)
+}
+
+func (r *memoryPolicyRepository) update(
+	policy *domain.Policy,
+	expectedVersion int,
+) error {
 	existing, ok := r.policies[policy.ChildID]
 	if !ok || existing.FamilyID != policy.FamilyID {
 		return domain.ErrPolicyNotFound
+	}
+	if expectedVersion > 0 && existing.PolicyVersion != expectedVersion {
+		return domain.ErrPolicyVersionConflict
 	}
 	copyPolicy := *policy
 	r.policies[policy.ChildID] = &copyPolicy
@@ -299,5 +317,55 @@ func TestGetEffectiveRejectsDisjointCategoryPolicy(t *testing.T) {
 		"family_1",
 	); !errors.Is(err, domain.ErrInvalidCategories) {
 		t.Fatalf("expected invalid category intersection, got %v", err)
+	}
+}
+
+func TestAggregateMostRestrictiveRejectsEmptyFamily(t *testing.T) {
+	_, err := aggregateMostRestrictive(nil)
+	if !errors.Is(err, domain.ErrNoFamilyPolicy) {
+		t.Fatalf("expected no-family-policy error, got %v", err)
+	}
+}
+
+func TestUpdateWithVersionRejectsStaleGuardianWrite(t *testing.T) {
+	repository := newMemoryPolicyRepository()
+	service, err := New(Options{Repository: repository, Clock: fixedClock{}})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	if err := service.CreateDefaultForChild(
+		context.Background(),
+		"family_1",
+		"child_1",
+		nil,
+	); err != nil {
+		t.Fatalf("create default policy: %v", err)
+	}
+	if _, err := service.UpdateWithVersion(
+		context.Background(),
+		"family_1",
+		"child_1",
+		domain.PolicyInput{
+			DailyLimitMinutes: 45,
+			AllowedCategories: []string{"story"},
+			MaxVolumePercent:  50,
+		},
+		1,
+	); err != nil {
+		t.Fatalf("update with current version: %v", err)
+	}
+	_, err = service.UpdateWithVersion(
+		context.Background(),
+		"family_1",
+		"child_1",
+		domain.PolicyInput{
+			DailyLimitMinutes: 30,
+			AllowedCategories: []string{"story"},
+			MaxVolumePercent:  50,
+		},
+		1,
+	)
+	if !errors.Is(err, domain.ErrPolicyVersionConflict) {
+		t.Fatalf("expected version conflict, got %v", err)
 	}
 }

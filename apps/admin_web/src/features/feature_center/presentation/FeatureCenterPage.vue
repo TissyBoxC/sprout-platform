@@ -132,6 +132,29 @@ function plannedReason(feature: FeatureCenterFeature): string {
       </div>
     </header>
 
+    <section v-if="hasFeatures" class="summary-strip" aria-label="功能中心概览">
+      <article>
+        <span>全部功能</span>
+        <strong>{{ store.summary.total }}</strong>
+      </article>
+      <article class="summary-healthy">
+        <span>运行正常</span>
+        <strong>{{ store.summary.healthy }}</strong>
+      </article>
+      <article class="summary-attention">
+        <span>需要处理</span>
+        <strong>{{ store.summary.attention }}</strong>
+      </article>
+      <article>
+        <span>只读能力</span>
+        <strong>{{ store.summary.readonly }}</strong>
+      </article>
+      <article>
+        <span>规划中</span>
+        <strong>{{ store.summary.planned }}</strong>
+      </article>
+    </section>
+
     <Transition name="toast">
       <p v-if="store.lastMessage" class="notice success" role="status">
         {{ store.lastMessage }}
@@ -448,6 +471,41 @@ function plannedReason(feature: FeatureCenterFeature): string {
   gap: 24px;
   padding: 24px;
   border-radius: var(--sprout-radius-card);
+}
+
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.summary-strip article {
+  display: grid;
+  gap: 5px;
+  padding: 16px 18px;
+  border: 1px solid var(--sprout-outline);
+  border-radius: var(--sprout-radius-card);
+  background: #ffffff;
+  box-shadow: 0 8px 22px rgb(194 91 128 / 5%);
+}
+
+.summary-strip span {
+  color: var(--sprout-text-muted);
+  font-size: 12px;
+}
+
+.summary-strip strong {
+  color: var(--sprout-text);
+  font-size: 26px;
+  line-height: 1;
+}
+
+.summary-strip .summary-healthy strong {
+  color: #2f8f67;
+}
+
+.summary-strip .summary-attention strong {
+  color: #c24f72;
 }
 
 .eyebrow {
@@ -1124,6 +1182,10 @@ button.compact {
 }
 
 @media (max-width: 860px) {
+  .summary-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .feature-workspace {
     grid-template-columns: 1fr;
   }
@@ -1145,6 +1207,10 @@ button.compact {
 }
 
 @media (max-width: 620px) {
+  .summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .page-header,
   .detail-header,
   .health-panel {

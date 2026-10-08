@@ -30,6 +30,14 @@ export interface FeatureSaveResult {
   error: ApiError | null
 }
 
+export interface FeatureCenterSummary {
+  total: number
+  healthy: number
+  attention: number
+  readonly: number
+  planned: number
+}
+
 export const ALL_FEATURE_CATEGORIES = 'all'
 
 /// Owns the feature catalog, editor draft, and all feature-center mutations.
@@ -73,6 +81,34 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
     return [...byId.entries()]
       .map(([id, label]) => ({ id, label }))
       .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'))
+  })
+
+  const summary = computed<FeatureCenterSummary>(() => {
+    const result: FeatureCenterSummary = {
+      total: features.value.length,
+      healthy: 0,
+      attention: 0,
+      readonly: 0,
+      planned: 0,
+    }
+    for (const feature of features.value) {
+      if (feature.status === 'planned') {
+        result.planned += 1
+        continue
+      }
+      if (feature.health.status === 'healthy') {
+        result.healthy += 1
+      } else if (
+        feature.health.status === 'degraded' ||
+        feature.health.status === 'unhealthy'
+      ) {
+        result.attention += 1
+      }
+      if (feature.readOnlyReason !== '' || feature.configSchema.length === 0) {
+        result.readonly += 1
+      }
+    }
+    return result
   })
 
   const filteredFeatures = computed(() => {
@@ -392,6 +428,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
     setConfigValue,
     setFilters,
     setSecretDraft,
+    summary,
   }
 })
 

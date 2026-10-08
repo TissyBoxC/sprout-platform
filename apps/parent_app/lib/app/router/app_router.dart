@@ -16,6 +16,7 @@ import '../../features/family/presentation/family_home_page.dart';
 import '../../features/ota/presentation/app_update_page.dart';
 import '../../features/parent_policy/presentation/parent_policy_page.dart';
 import '../../features/profile/presentation/profile_page.dart';
+import '../../features/usage_report/presentation/usage_report_page.dart';
 import '../../shared/widgets/parent_shell.dart';
 
 /// Creates the application router with authentication-aware redirects.
@@ -66,6 +67,10 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/children',
         builder: (context, state) => const ChildProfilePage(),
+      ),
+      GoRoute(
+        path: '/me/usage-reports',
+        builder: (context, state) => const UsageReportPage(),
       ),
       GoRoute(
         path: '/me/children/:childId/policy',

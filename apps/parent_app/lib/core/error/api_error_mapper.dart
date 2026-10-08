@@ -98,6 +98,14 @@ AppException mapApiError(Object error) {
         cause: error,
       );
     }
+    if (status == 409 || errorCode == 'parent_policy_conflict') {
+      return AppException(
+        kind: AppErrorKind.conflict,
+        message: '设置已在其他页面更新，请重新加载后再修改',
+        retryable: true,
+        cause: error,
+      );
+    }
     if (status == 422 || errorCode == 'invalid_request') {
       final message = _readErrorMessage(error.response?.data);
       return AppException(

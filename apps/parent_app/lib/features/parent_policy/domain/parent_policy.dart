@@ -74,12 +74,14 @@ class ParentPolicy {
 /// Validated values collected by the time and content policy form.
 class ParentPolicyDraft {
   const ParentPolicyDraft({
+    required this.policyVersion,
     required this.dailyLimitMinutes,
     required this.allowedCategories,
     required this.disabledPeriods,
     required this.maxVolumePercent,
   });
 
+  final int policyVersion;
   final int dailyLimitMinutes;
   final List<ChildContentCategory> allowedCategories;
   final List<DisabledPeriod> disabledPeriods;
@@ -87,6 +89,7 @@ class ParentPolicyDraft {
 
   Map<String, Object?> toJson() {
     return {
+      'policy_version': policyVersion,
       'daily_limit_minutes': dailyLimitMinutes,
       'allowed_categories': allowedCategories
           .map((category) => category.wireValue)

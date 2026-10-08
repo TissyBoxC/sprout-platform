@@ -123,6 +123,7 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
                     delay: const Duration(milliseconds: 90),
                     child: _FamilyToolsCard(
                       onChildProfiles: () => context.push('/me/children'),
+                      onUsageReports: () => context.push('/me/usage-reports'),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -174,19 +175,36 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
 }
 
 class _FamilyToolsCard extends StatelessWidget {
-  const _FamilyToolsCard({required this.onChildProfiles});
+  const _FamilyToolsCard({
+    required this.onChildProfiles,
+    required this.onUsageReports,
+  });
 
   final VoidCallback onChildProfiles;
+  final VoidCallback onUsageReports;
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: ListTile(
-        leading: const Icon(Icons.child_care_rounded),
-        title: const Text('儿童档案'),
-        subtitle: const Text('管理宝贝年龄、兴趣、内容和使用边界'),
-        trailing: const Icon(Icons.chevron_right_rounded),
-        onTap: onChildProfiles,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.child_care_rounded),
+            title: const Text('儿童档案'),
+            subtitle: const Text('管理宝贝年龄、兴趣、内容和使用边界'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onChildProfiles,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.auto_graph_rounded),
+            title: const Text('使用记录'),
+            subtitle: const Text('查看每日时长、对话、内容和限制记录'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onUsageReports,
+          ),
+        ],
       ),
     );
   }

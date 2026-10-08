@@ -4,6 +4,7 @@ enum AppErrorKind {
   deviceSessionExpired,
   insufficientPermission,
   notFound,
+  conflict,
   validation,
   rateLimited,
   network,

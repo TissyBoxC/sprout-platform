@@ -1,4 +1,13 @@
-# Parent Policy Feature
+# 时间与内容
 
-Owns usage time, blocked hours, content permissions, volume limits, and
-per-session limits.
+家长端的时间与内容模块，负责为每个宝贝设置设备实际执行的边界。
+
+- 每日使用时长，`0` 表示不限制。
+- 允许播放的内容分类。
+- 支持跨午夜的免打扰时段。
+- 设备最大音量。
+- 保存时携带 `policy_version`，避免多个入口同时修改时静默覆盖。
+- 有未保存修改时返回会先确认；版本冲突时提示重新加载后再修改。
+
+公开入口是 `GET/PUT /api/v1/children/{child_id}/policy`。保存成功只表示
+平台已接收设置，设备会在下一次同步后应用。

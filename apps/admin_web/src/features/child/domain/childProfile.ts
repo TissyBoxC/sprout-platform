@@ -33,8 +33,13 @@ export interface ChildProfile {
   guardianConsent: boolean
   createdAt: string
   updatedAt: string
-  policy: ParentPolicy | null
+  policyState: ChildPolicyState
 }
+
+export type ChildPolicyState =
+  | { status: 'available'; policy: ParentPolicy }
+  | { status: 'not_set' }
+  | { status: 'unavailable'; message: string }
 
 export function parseParentAccountOptions(payload: unknown): ParentAccountOption[] {
   const record = recordValue(payload)
@@ -110,7 +115,54 @@ function parseChildProfile(value: unknown): ChildProfile | null {
     guardianConsent: value.guardian_consent === true,
     createdAt: stringValue(value.created_at),
     updatedAt: stringValue(value.updated_at),
-    policy: parseParentPolicy(value.policy),
+    policyState: resolveChildPolicyState(value),
+  }
+}
+
+/// Resolves one child's policy into a state the page can render without
+/// mistaking a failed read for a missing policy.
+function resolveChildPolicyState(
+  value: Record<string, unknown>,
+): ChildPolicyState {
+  const explicitState = stringValue(value.policy_state ?? value.policy_status)
+  if (explicitState === 'read_failed' || explicitState === 'unavailable') {
+    return {
+      status: 'unavailable',
+      message: stringValue(
+        value.policy_error,
+        '策略暂时无法读取，请稍后重试',
+      ),
+    }
+  }
+  if (explicitState === 'not_set') {
+    return { status: 'not_set' }
+  }
+  if (isRecord(value.policy_error)) {
+    const message = stringValue(value.policy_error.message)
+    return {
+      status: 'unavailable',
+      message: message || '策略暂时无法读取，请稍后重试',
+    }
+  }
+  if (typeof value.policy_error === 'string' && value.policy_error.length > 0) {
+    return {
+      status: 'unavailable',
+      message: value.policy_error,
+    }
+  }
+  // A present null is an explicit backend statement that no policy exists.
+  if (value.policy === null) {
+    return { status: 'not_set' }
+  }
+  const policy = parseParentPolicy(value.policy)
+  if (policy !== null) {
+    return { status: 'available', policy }
+  }
+  // A missing field or a policy object that cannot be parsed means the
+  // response is incomplete. Support staff must not see this as "not set".
+  return {
+    status: 'unavailable',
+    message: '策略暂时无法读取，请稍后重试',
   }
 }
 

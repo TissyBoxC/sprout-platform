@@ -11,7 +11,9 @@ import {
 } from '@/features/child/domain/childProfile'
 
 // This is a read-only support view, so the store intentionally keeps the
-// administrator from editing or deleting a family's child data.
+// administrator from editing or deleting a family's child data. Each child
+// carries an explicit policy state so a read failure is never rendered as an
+// empty policy.
 export const useChildProfileStore = defineStore('admin-child-profiles', () => {
   const httpClient = createHttpClient()
   const families = ref<ParentAccountOption[]>([])

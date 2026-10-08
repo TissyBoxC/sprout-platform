@@ -43,6 +43,10 @@ async function logout(): Promise<void> {
           <span class="nav-dot" aria-hidden="true"></span>
           儿童档案
         </RouterLink>
+        <RouterLink to="/usage-reports">
+          <span class="nav-dot" aria-hidden="true"></span>
+          使用报告
+        </RouterLink>
         <RouterLink to="/devices">
           <span class="nav-dot" aria-hidden="true"></span>
           设备管理

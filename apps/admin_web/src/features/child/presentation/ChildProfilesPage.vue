@@ -59,6 +59,13 @@ async function reloadChildren(): Promise<void> {
   await store.loadChildren(selectedParentAccountId.value)
 }
 
+async function reloadChildPolicy(): Promise<void> {
+  if (!selectedParentAccountId.value) {
+    return
+  }
+  await store.loadChildren(selectedParentAccountId.value)
+}
+
 function isExpanded(childId: string): boolean {
   return expandedChildId.value === childId
 }
@@ -322,12 +329,31 @@ function formatDate(value: string): string {
                     <h3>家长策略</h3>
                     <p>家长在应用中设置的时长、内容和免打扰规则。</p>
                   </div>
-                  <span v-if="child.policy" class="policy-version">
-                    第 {{ child.policy.policyVersion }} 版
+                  <span
+                    v-if="child.policyState.status === 'available'"
+                    class="policy-version"
+                  >
+                    第 {{ child.policyState.policy.policyVersion }} 版
                   </span>
                 </div>
 
-                <div v-if="!child.policy" class="inline-state">
+                <div
+                  v-if="child.policyState.status === 'unavailable'"
+                  class="inline-state error"
+                >
+                  <span>
+                    <strong>策略读取失败</strong>
+                    <br />
+                    {{ child.policyState.message }}
+                  </span>
+                  <button type="button" class="text-button" @click="reloadChildPolicy">
+                    重新读取
+                  </button>
+                </div>
+                <div
+                  v-else-if="child.policyState.status === 'not_set'"
+                  class="inline-state"
+                >
                   监护人尚未设置时间与内容策略。监护人保存后，这里会显示最新规则。
                 </div>
                 <template v-else>
@@ -335,28 +361,43 @@ function formatDate(value: string): string {
                     <div>
                       <span>每日使用时长</span>
                       <strong>
-                        {{ dailyLimitLabel(child.policy.dailyLimitMinutes) }}
+                        {{
+                          dailyLimitLabel(
+                            child.policyState.policy.dailyLimitMinutes,
+                          )
+                        }}
                       </strong>
                     </div>
                     <div>
                       <span>最大音量</span>
-                      <strong>{{ child.policy.maxVolumePercent }}%</strong>
+                      <strong>{{ child.policyState.policy.maxVolumePercent }}%</strong>
                     </div>
                     <div class="wide-field">
                       <span>允许内容</span>
                       <strong>
-                        {{ contentCategoryLabels(child.policy.allowedCategories).join('、') }}
+                        {{
+                          contentCategoryLabels(
+                            child.policyState.policy.allowedCategories,
+                          ).join('、')
+                        }}
                       </strong>
                     </div>
                     <div class="wide-field">
                       <span>免打扰时段</span>
-                      <strong v-if="child.policy.disabledPeriods.length">
-                        {{ child.policy.disabledPeriods.map(disabledPeriodLabel).join('；') }}
+                      <strong v-if="child.policyState.policy.disabledPeriods.length">
+                        {{
+                          child.policyState.policy.disabledPeriods
+                            .map(disabledPeriodLabel)
+                            .join('；')
+                        }}
                       </strong>
                       <strong v-else>未设置免打扰时段</strong>
                     </div>
                   </div>
-                  <p class="policy-updated">策略更新于 {{ formatDate(child.policy.updatedAt) }}</p>
+                  <p class="policy-updated">
+                    策略更新于
+                    {{ formatDate(child.policyState.policy.updatedAt) }}
+                  </p>
                 </template>
               </section>
             </div>

@@ -1251,3 +1251,210 @@ test('manages the content library lifecycle from draft to published', async ({ p
   await expect(page.getByText('内容已发布。')).toBeVisible()
   await expect(page.getByText('已发布', { exact: true }).first()).toBeVisible()
 })
+
+test('shows family usage reports and recovers from a report read failure', async ({ page }) => {
+  await useAdminSession(page)
+
+  let reportRequests = 0
+  const requestedDays: string[] = []
+  await page.route('**/api/v1/admin/families', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          accounts: [
+            {
+              parent_account_id: 'parent-usage-1',
+              display_name: '小芽家长',
+              phone: '13800001111',
+            },
+          ],
+        },
+      }),
+    })
+  })
+  await page.route(
+    '**/api/v1/admin/families/parent-usage-1/usage-reports**',
+    async (route) => {
+      reportRequests += 1
+      const requestUrl = new URL(route.request().url())
+      requestedDays.push(requestUrl.searchParams.get('days') ?? '')
+      if (reportRequests === 1) {
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: { code: 'temporarily_unavailable', message: '服务暂时不可用' },
+          }),
+        })
+        return
+      }
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            reports: [
+              {
+                schema_version: '1.0.0',
+                report_date: '2026-10-07',
+                timezone_offset_minutes: 480,
+                active_minutes: 42,
+                conversation_count: 18,
+                conversation_minutes: 24,
+                content_play_count: 6,
+                content_minutes: 18,
+                daily_limit_minutes: 60,
+                remaining_minutes: 18,
+                limit_reached: false,
+                categories: [
+                  { category: 'story', play_count: 3, minutes: 9 },
+                  { category: 'nursery_rhyme', play_count: 2, minutes: 6 },
+                ],
+                blocked: {
+                  disabled_period: 1,
+                  daily_limit: 0,
+                  category_denied: 2,
+                  time_untrusted: 0,
+                },
+                devices: [
+                  {
+                    device_id: 'device-usage-1',
+                    device_name: '初芽一号',
+                    active_minutes: 42,
+                    conversation_count: 18,
+                    content_play_count: 6,
+                  },
+                ],
+                updated_at: '2026-10-07T12:00:00Z',
+              },
+              {
+                schema_version: '1.0.0',
+                report_date: '2026-10-06',
+                timezone_offset_minutes: 480,
+                active_minutes: 12,
+                conversation_count: 4,
+                conversation_minutes: 5,
+                content_play_count: 2,
+                content_minutes: 7,
+                daily_limit_minutes: 60,
+                remaining_minutes: 48,
+                limit_reached: false,
+                categories: [{ category: 'bedtime', play_count: 1, minutes: 3 }],
+                blocked: {
+                  disabled_period: 0,
+                  daily_limit: 1,
+                  category_denied: 0,
+                  time_untrusted: 0,
+                },
+                devices: [
+                  {
+                    device_id: 'device-usage-1',
+                    device_name: '初芽一号',
+                    active_minutes: 12,
+                    conversation_count: 4,
+                    content_play_count: 2,
+                  },
+                ],
+                updated_at: '2026-10-06T12:00:00Z',
+              },
+            ],
+          },
+        }),
+      })
+    },
+  )
+
+  await page.goto('/usage-reports')
+
+  await expect(page.getByRole('heading', { name: '使用报告' })).toBeVisible()
+  await expect(page.getByText('服务暂时不可用，请稍后重试')).toBeVisible()
+  await page.getByRole('button', { name: '重新加载' }).click()
+
+  await expect(page.getByRole('heading', { name: '小芽家长' })).toBeVisible()
+  await expect(page.getByText('54', { exact: true })).toBeVisible()
+  await expect(page.getByText('22', { exact: true })).toBeVisible()
+  await expect(page.getByText('8', { exact: true })).toBeVisible()
+  await expect(page.getByText('4', { exact: true }).last()).toBeVisible()
+  await expect(page.getByText('2026-10-07')).toBeVisible()
+  await expect(page.getByText('故事')).toBeVisible()
+  await expect(page.getByText('免打扰时段')).toBeVisible()
+  await expect(page.getByText('初芽一号', { exact: true }).first()).toBeVisible()
+
+  await page.getByRole('button', { name: '最近 30 天' }).click()
+  await expect(page.getByRole('button', { name: '最近 30 天' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+  expect(requestedDays).toEqual(['7', '7', '30'])
+})
+
+test('distinguishes a missing guardian policy from a policy read failure', async ({ page }) => {
+  await useAdminSession(page)
+
+  await page.route('**/api/v1/admin/families', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          accounts: [
+            {
+              parent_account_id: 'parent-policy-1',
+              display_name: '政策测试家长',
+              phone: '13900002222',
+            },
+          ],
+        },
+      }),
+    })
+  })
+  await page.route(
+    '**/api/v1/admin/families/parent-policy-1/children',
+    async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            children: [
+              {
+                child_id: 'child-policy-1',
+                family_id: 'parent-policy-1',
+                nickname: '小满',
+                age_tier: 'age_5_6',
+                interests: [],
+                content_categories: ['story'],
+                guardian_consent: true,
+                created_at: '2026-10-01T00:00:00Z',
+                updated_at: '2026-10-07T00:00:00Z',
+                policy: null,
+              },
+              {
+                child_id: 'child-policy-2',
+                family_id: 'parent-policy-1',
+                nickname: '小禾',
+                age_tier: 'age_3_4',
+                interests: [],
+                content_categories: ['story'],
+                guardian_consent: true,
+                created_at: '2026-10-01T00:00:00Z',
+                updated_at: '2026-10-07T00:00:00Z',
+                policy_state: 'read_failed',
+                policy_error: '策略暂时无法读取，请稍后重试',
+              },
+            ],
+          },
+        }),
+      })
+    },
+  )
+
+  await page.goto('/children')
+
+  await expect(page.getByRole('heading', { name: '儿童档案' })).toBeVisible()
+  await page.getByRole('button', { name: /小满/ }).click()
+  await expect(page.getByText('监护人尚未设置时间与内容策略。监护人保存后，这里会显示最新规则。')).toBeVisible()
+
+  await page.getByRole('button', { name: /小禾/ }).click()
+  await expect(page.getByText('策略读取失败')).toBeVisible()
+  await expect(page.getByText('策略暂时无法读取，请稍后重试')).toBeVisible()
+  await expect(page.getByRole('button', { name: '重新读取' })).toBeVisible()
+})

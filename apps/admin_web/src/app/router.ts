@@ -12,6 +12,7 @@ import VersionManagementPage from '@/features/version_management/presentation/Ve
 import DownloadFilesPage from '@/features/downloads/presentation/DownloadFilesPage.vue'
 import ContentLibraryPage from '@/features/content/presentation/ContentLibraryPage.vue'
 import DeviceDiagnosticsPage from '@/features/audit/presentation/DeviceDiagnosticsPage.vue'
+import UsageReportPage from '@/features/usage_report/presentation/UsageReportPage.vue'
 import { useAuthStore } from '@/features/auth/application/authStore'
 
 /// Feature routes are registered here so removing a feature only changes its
@@ -40,6 +41,11 @@ export function createAdminRouter() {
         path: '/children',
         name: 'children',
         component: ChildProfilesPage,
+      },
+      {
+        path: '/usage-reports',
+        name: 'usage-reports',
+        component: UsageReportPage,
       },
       {
         path: '/ai-accounts',

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -290,6 +291,77 @@ func TestDefaultRegistryCoversRequiredFeatures(t *testing.T) {
 		if _, ok := registered[featureID]; !ok {
 			t.Fatalf("missing required feature %q", featureID)
 		}
+	}
+}
+
+func TestDefaultRegistryActiveFeaturesHaveHealthAndReadOnlyReason(t *testing.T) {
+	required := []string{
+		"auth",
+		"parent_account",
+		"ai_account",
+		"child_profile",
+		"parent_policy",
+		"device_binding",
+		"device_runtime",
+		"device_diagnostics",
+		"content_library",
+		"ota_release",
+		"download_server",
+		"service_version",
+		"voice_gateway",
+		"ai_model_gateway",
+		"usage_report",
+		"platform_security",
+		"deployment_infrastructure",
+	}
+	registered := make(map[string]Definition)
+	for _, definition := range DefaultRegistry() {
+		registered[definition.Feature.ID] = definition
+	}
+	for _, featureID := range required {
+		definition, ok := registered[featureID]
+		if !ok {
+			t.Fatalf("missing required active feature %q", featureID)
+		}
+		if definition.Feature.Status != domain.FeatureStatusActive {
+			t.Fatalf("%s status = %q, want active", featureID, definition.Feature.Status)
+		}
+		if len(definition.Feature.ConfigSchema) == 0 &&
+			definition.Feature.ReadOnlyReason == "" {
+			t.Fatalf(
+				"%s has no editable config and must explain why it is read-only",
+				featureID,
+			)
+		}
+	}
+}
+
+func TestValidateHealthProbeCoverageRejectsActiveFeatureWithoutProbe(t *testing.T) {
+	definitions := []Definition{
+		featureDef(
+			"voice_gateway",
+			"语音网关",
+			"已上线功能",
+			"voice",
+			"语音平台",
+			false,
+			nil,
+			nil,
+		),
+		plannedFeatureDef(
+			"notification",
+			"消息通知",
+			"规划功能",
+			"platform",
+			"平台运维",
+		),
+	}
+	err := ValidateHealthProbeCoverage(definitions, map[string]HealthProbe{})
+	if err == nil || !strings.Contains(err.Error(), "voice_gateway") {
+		t.Fatalf("expected missing probe error for voice_gateway, got %v", err)
+	}
+	if strings.Contains(err.Error(), "notification") {
+		t.Fatalf("planned feature must not be treated as missing: %v", err)
 	}
 }
 

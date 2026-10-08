@@ -49,6 +49,31 @@ type Service struct {
 	modelCatalog    ModelCatalogReader
 }
 
+// ValidateHealthProbeCoverage rejects a runtime composition where an active
+// feature has no health probe. Planned features are allowed to omit probes
+// because their capability is intentionally not implemented yet.
+func ValidateHealthProbeCoverage(
+	definitions []Definition,
+	probes map[string]HealthProbe,
+) error {
+	missing := make([]string, 0)
+	for _, definition := range definitions {
+		if definition.Feature.Status != domain.FeatureStatusActive {
+			continue
+		}
+		if probes[definition.Feature.ID] == nil {
+			missing = append(missing, definition.Feature.ID)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"active features missing health probes: %s",
+		strings.Join(missing, ", "),
+	)
+}
+
 // New creates a feature-center service.
 func New(options Options) (*Service, error) {
 	if options.Repository == nil {

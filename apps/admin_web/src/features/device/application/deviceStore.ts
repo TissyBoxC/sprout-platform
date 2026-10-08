@@ -10,6 +10,49 @@ export type DeviceCommandType =
   | 'resync_time'
   | 'factory_reset'
 
+export type ProvisioningState = 'unprovisioned' | 'provisioning' | 'provisioned'
+
+export type ProvisioningSessionState = 'ready' | 'reauth_required' | 'revoked'
+
+export type ProvisioningEventType =
+  | 'provisioning_started'
+  | 'wifi_configured'
+  | 'wifi_failed'
+  | 'binding_completed'
+  | 'binding_removed'
+  | 'network_reconnected'
+  | 'network_lost'
+  | 'time_synced'
+  | 'auth_revoked'
+  | 'auth_restored'
+  | 'binding_confirmed'
+  | 'binding_pending'
+
+export interface DeviceProvisioning {
+  state: ProvisioningState
+  wifiConfigured: boolean
+  sessionState: ProvisioningSessionState
+  lastProvisionedAt: string | null
+}
+
+export interface ProvisioningEvent {
+  eventId: string
+  eventType: ProvisioningEventType
+  sequence: number
+  detailCode: string
+  durationMs: number
+  firmwareVersion: string
+  reportedAt: string
+}
+
+export interface ProvisioningSnapshot extends DeviceProvisioning {
+  deviceId: string
+  newestSequence: number
+  droppedEvents: number
+  updatedAt: string
+  events: ProvisioningEvent[]
+}
+
 /// Runtime projection used by the operations console.
 export interface DeviceRuntime {
   isOnline: boolean
@@ -27,6 +70,7 @@ export interface DeviceRuntime {
   pendingTelemetry: number
   reportedAt: string
   receivedAt: string
+  provisioning?: DeviceProvisioning
 }
 
 /// Bound device and its latest runtime snapshot.
@@ -64,6 +108,11 @@ export const useDeviceStore = defineStore('admin-devices', () => {
   const isSubmitting = ref(false)
   const error = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  const provisioningSnapshots = ref<Record<string, ProvisioningSnapshot | undefined>>({})
+  const isLoadingProvisioning = ref(false)
+  const provisioningError = ref<ApiError | null>(null)
+  const isRevokingSessions = ref(false)
+  const revokeError = ref<ApiError | null>(null)
 
   async function load(): Promise<void> {
     isLoading.value = true
@@ -136,15 +185,109 @@ export const useDeviceStore = defineStore('admin-devices', () => {
     }
   }
 
+  async function loadProvisioning(deviceId: string): Promise<ProvisioningSnapshot | null> {
+    const normalizedDeviceId = deviceId.trim()
+    if (!normalizedDeviceId) {
+      provisioningError.value = {
+        kind: 'validation',
+        message: '没有找到这台设备，请重新加载后再试。',
+        retryable: false,
+      }
+      return null
+    }
+
+    isLoadingProvisioning.value = true
+    provisioningError.value = null
+    try {
+      const response = await httpClient.get(
+        `/api/v1/admin/devices/${encodeURIComponent(normalizedDeviceId)}/provisioning`,
+      )
+      const snapshot = toProvisioningSnapshot(response.data?.data, normalizedDeviceId)
+      provisioningSnapshots.value = {
+        ...provisioningSnapshots.value,
+        [normalizedDeviceId]: snapshot ?? undefined,
+      }
+      return snapshot
+    } catch (caught: unknown) {
+      provisioningError.value = withProvisioningLoadMessage(mapApiError(caught))
+      return null
+    } finally {
+      isLoadingProvisioning.value = false
+    }
+  }
+
+  async function revokeSessions(deviceId: string, disableDevice: boolean): Promise<boolean> {
+    const normalizedDeviceId = deviceId.trim()
+    if (!normalizedDeviceId) {
+      revokeError.value = {
+        kind: 'validation',
+        message: '没有找到这台设备，请重新加载后再试。',
+        retryable: false,
+      }
+      return false
+    }
+
+    isRevokingSessions.value = true
+    revokeError.value = null
+    lastMessage.value = ''
+    try {
+      const response = await httpClient.post(
+        `/api/v1/admin/devices/${encodeURIComponent(normalizedDeviceId)}/sessions/revoke`,
+        { disable_device: disableDevice },
+      )
+      const payload = record(response.data?.data)
+      if (payload.sessions_revoked !== true) {
+        revokeError.value = {
+          kind: 'unexpected',
+          message: '会话吊销没有完成，请重新加载设备状态后再试。',
+          retryable: true,
+        }
+        return false
+      }
+
+      updateRevokedSession(normalizedDeviceId)
+      lastMessage.value = disableDevice
+        ? '设备会话已吊销，设备已停用。设备需要由维护人员重新启用后才能继续使用。'
+        : '设备会话已吊销，设备将在下次连接时重新认证。'
+      await loadProvisioning(normalizedDeviceId)
+      return true
+    } catch (caught: unknown) {
+      revokeError.value = withRevokeMessage(mapApiError(caught))
+      return false
+    } finally {
+      isRevokingSessions.value = false
+    }
+  }
+
+  function updateRevokedSession(deviceId: string): void {
+    const snapshot = provisioningSnapshots.value[deviceId]
+    if (snapshot) {
+      provisioningSnapshots.value = {
+        ...provisioningSnapshots.value,
+        [deviceId]: {
+          ...snapshot,
+          sessionState: 'revoked',
+        },
+      }
+    }
+  }
+
   return {
     commands,
     devices,
     error,
     isLoading,
+    isLoadingProvisioning,
     isSubmitting,
+    isRevokingSessions,
     lastMessage,
+    provisioningError,
+    provisioningSnapshots,
+    revokeError,
     load,
     loadCommands,
+    loadProvisioning,
+    revokeSessions,
     sendCommand,
     unbind,
   }
@@ -186,6 +329,123 @@ function toRuntime(value: Record<string, unknown>): DeviceRuntime {
     pendingTelemetry: number(offline.pending_telemetry),
     reportedAt: String(value.reported_at ?? ''),
     receivedAt: String(value.received_at ?? ''),
+    provisioning: toProvisioning(value.provisioning),
+  }
+}
+
+function toProvisioning(value: unknown): DeviceProvisioning | undefined {
+  if (!isRecord(value)) {
+    return undefined
+  }
+
+  const state = provisioningState(value.state)
+  const sessionState = provisioningSessionState(value.session_state)
+  if (state === null || sessionState === null) {
+    return undefined
+  }
+
+  return {
+    state,
+    wifiConfigured: value.wifi_configured === true,
+    sessionState,
+    lastProvisionedAt: nullableString(value.last_provisioned_at),
+  }
+}
+
+function toProvisioningSnapshot(
+  value: unknown,
+  fallbackDeviceId: string,
+): ProvisioningSnapshot | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const state = provisioningState(value.state)
+  const sessionState = provisioningSessionState(value.session_state)
+  if (state === null || sessionState === null) {
+    return null
+  }
+
+  return {
+    deviceId: String(value.device_id ?? '').trim() || fallbackDeviceId,
+    state,
+    wifiConfigured: value.wifi_configured === true,
+    sessionState,
+    lastProvisionedAt: nullableString(value.last_provisioned_at),
+    newestSequence: number(value.newest_sequence),
+    droppedEvents: number(value.dropped_events),
+    updatedAt: String(value.updated_at ?? ''),
+    events: Array.isArray(value.events)
+      ? value.events.flatMap((event) => {
+          const parsed = toProvisioningEvent(event)
+          return parsed === null ? [] : [parsed]
+        })
+      : [],
+  }
+}
+
+function toProvisioningEvent(value: unknown): ProvisioningEvent | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const eventType = provisioningEventType(value.event_type)
+  if (eventType === null) {
+    return null
+  }
+
+  const sequence = number(value.sequence)
+  const eventId = String(value.event_id ?? '').trim()
+  return {
+    eventId: eventId || `provisioning-${sequence}`,
+    eventType,
+    sequence,
+    detailCode: String(value.detail_code ?? ''),
+    durationMs: number(value.duration_ms),
+    firmwareVersion: String(value.firmware_version ?? ''),
+    reportedAt: String(value.reported_at ?? ''),
+  }
+}
+
+function provisioningState(value: unknown): ProvisioningState | null {
+  switch (value) {
+    case 'unprovisioned':
+    case 'provisioning':
+    case 'provisioned':
+      return value
+    default:
+      return null
+  }
+}
+
+function provisioningSessionState(value: unknown): ProvisioningSessionState | null {
+  switch (value) {
+    case 'ready':
+    case 'reauth_required':
+    case 'revoked':
+      return value
+    default:
+      return null
+  }
+}
+
+function provisioningEventType(value: unknown): ProvisioningEventType | null {
+  switch (value) {
+    case 'provisioning_started':
+    case 'wifi_configured':
+    case 'wifi_failed':
+    case 'binding_completed':
+    case 'binding_removed':
+    case 'network_reconnected':
+    case 'network_lost':
+    case 'time_synced':
+    case 'auth_revoked':
+    case 'auth_restored':
+    case 'binding_confirmed':
+    case 'binding_pending':
+      return value
+    default:
+      return null
   }
 }
 
@@ -217,4 +477,52 @@ function stringList(value: unknown): string[] {
 
 function number(value: unknown): number {
   return typeof value === 'number' ? value : Number(value ?? 0)
+}
+
+function nullableString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function withProvisioningLoadMessage(error: ApiError): ApiError {
+  switch (error.kind) {
+    case 'not_found':
+      return {
+        ...error,
+        message: '暂时找不到这台设备的配网记录，请重新加载设备列表后再试。',
+      }
+    case 'network':
+      return {
+        ...error,
+        message: '网络连接不稳定，配网记录暂时无法读取，请检查网络后重试。',
+      }
+    case 'service_unavailable':
+      return {
+        ...error,
+        message: '配网记录暂时无法读取，请稍后重试。',
+      }
+    default:
+      return error
+  }
+}
+
+function withRevokeMessage(error: ApiError): ApiError {
+  switch (error.kind) {
+    case 'not_found':
+      return {
+        ...error,
+        message: '没有找到这台设备，请重新加载设备列表后再试。',
+      }
+    case 'network':
+      return {
+        ...error,
+        message: '网络连接不稳定，设备会话没有变更，请检查网络后重试。',
+      }
+    case 'service_unavailable':
+      return {
+        ...error,
+        message: '服务暂时不可用，设备会话没有变更，请稍后重试。',
+      }
+    default:
+      return error
+  }
 }

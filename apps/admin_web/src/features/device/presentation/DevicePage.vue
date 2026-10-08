@@ -5,11 +5,14 @@ import {
   useDeviceStore,
   type AdminDevice,
   type DeviceCommandType,
+  type DeviceProvisioning,
+  type ProvisioningEvent,
 } from '@/features/device/application/deviceStore'
 
 const store = useDeviceStore()
 const selectedDevice = ref<AdminDevice | null>(null)
 const activeCommand = ref<DeviceCommandType>('refresh_configuration')
+const isRevokeDialogOpen = ref(false)
 
 const onlineCount = computed(
   () => store.devices.filter((device) => device.runtime?.isOnline).length,
@@ -17,13 +20,67 @@ const onlineCount = computed(
 
 const canUnbindSelectedDevice = computed(() => Boolean(selectedDevice.value?.parentAccountId))
 
+const selectedProvisioning = computed(() => {
+  const deviceId = selectedDevice.value?.deviceId
+  if (!deviceId) {
+    return null
+  }
+  return store.provisioningSnapshots[deviceId] ?? null
+})
+
+const selectedProvisioningState = computed<DeviceProvisioning | null>(() => {
+  if (selectedProvisioning.value) {
+    return selectedProvisioning.value
+  }
+  return selectedDevice.value?.runtime?.provisioning ?? null
+})
+
+const recentProvisioningEvents = computed(() =>
+  (selectedProvisioning.value?.events ?? []).slice(0, 8),
+)
+
 onMounted(() => {
   void store.load()
 })
 
 async function openDevice(device: AdminDevice): Promise<void> {
   selectedDevice.value = device
-  await store.loadCommands(device.deviceId)
+  isRevokeDialogOpen.value = false
+  await Promise.all([store.loadCommands(device.deviceId), store.loadProvisioning(device.deviceId)])
+}
+
+function closeDevice(): void {
+  selectedDevice.value = null
+  isRevokeDialogOpen.value = false
+}
+
+function openRevokeDialog(): void {
+  store.revokeError = null
+  isRevokeDialogOpen.value = true
+}
+
+function closeRevokeDialog(): void {
+  if (store.isRevokingSessions) {
+    return
+  }
+  isRevokeDialogOpen.value = false
+}
+
+async function revokeSelectedDeviceSessions(disableDevice: boolean): Promise<void> {
+  const device = selectedDevice.value
+  if (device === null) {
+    return
+  }
+
+  const succeeded = await store.revokeSessions(device.deviceId, disableDevice)
+  if (succeeded) {
+    isRevokeDialogOpen.value = false
+    await store.load()
+    const refreshed = store.devices.find((candidate) => candidate.deviceId === device.deviceId)
+    if (refreshed) {
+      selectedDevice.value = refreshed
+    }
+  }
 }
 
 async function sendCommand(): Promise<void> {
@@ -117,6 +174,93 @@ function timeSyncLabel(value: string): string {
   )
 }
 
+function provisioningStateLabel(value: string | undefined): string {
+  return (
+    {
+      unprovisioned: '未配网',
+      provisioning: '配网中',
+      provisioned: '已配网',
+    }[value ?? ''] ?? '尚未上报'
+  )
+}
+
+function provisioningStateClass(value: string | undefined): string {
+  return (
+    {
+      unprovisioned: 'unprovisioned',
+      provisioning: 'provisioning',
+      provisioned: 'provisioned',
+    }[value ?? ''] ?? 'unknown'
+  )
+}
+
+function sessionStateLabel(value: string | undefined): string {
+  return (
+    {
+      ready: '正常',
+      reauth_required: '需重新认证',
+      revoked: '已吊销',
+    }[value ?? ''] ?? '尚未上报'
+  )
+}
+
+function provisioningEventLabel(value: string): string {
+  return (
+    {
+      provisioning_started: '开始配网',
+      wifi_configured: '无线网络配置完成',
+      wifi_failed: '无线网络配置失败',
+      binding_completed: '设备绑定完成',
+      binding_removed: '设备绑定已解除',
+      network_reconnected: '网络恢复连接',
+      network_lost: '网络连接中断',
+      time_synced: '时间校准完成',
+      auth_revoked: '配套服务授权已撤回',
+      auth_restored: '配套服务授权已恢复',
+      binding_confirmed: '设备绑定已确认',
+      binding_pending: '等待确认设备绑定',
+    }[value] ?? '配网状态发生变化'
+  )
+}
+
+function provisioningEventDetail(event: ProvisioningEvent): string {
+  const detail = provisioningDetailLabel(event.detailCode)
+  const duration =
+    event.durationMs > 0 ? `用时 ${Math.max(1, Math.round(event.durationMs / 1000))} 秒` : ''
+  return [detail, duration].filter(Boolean).join(' · ') || '暂无补充说明'
+}
+
+function provisioningDetailLabel(value: string): string {
+  return (
+    {
+      ble_provisioning: '通过蓝牙完成连接设置',
+      wifi_scan: '无线网络扫描完成',
+      wifi_connect: '无线网络连接完成',
+      wifi_auth_failed: '无线网络密码不正确',
+      wifi_not_found: '没有找到无线网络',
+      network_timeout: '网络连接超时',
+      credentials_rejected: '设备登录信息被拒绝',
+      credentials_restored: '设备登录信息已恢复',
+      binding_confirmed: '绑定信息确认完成',
+      binding_pending: '绑定信息等待确认',
+    }[value] ?? '暂无补充说明'
+  )
+}
+
+function wifiConfiguredLabel(provisioning: DeviceProvisioning | null): string {
+  if (provisioning === null) {
+    return '尚未上报'
+  }
+  return provisioning.wifiConfigured ? '已配置' : '未配置'
+}
+
+function lastProvisionedLabel(provisioning: DeviceProvisioning | null): string {
+  if (provisioning?.lastProvisionedAt === null || provisioning?.lastProvisionedAt === undefined) {
+    return '尚未配网'
+  }
+  return formatTime(provisioning.lastProvisionedAt)
+}
+
 function commandLabel(value: DeviceCommandType): string {
   return (
     {
@@ -203,6 +347,7 @@ function formatTime(value: string): string {
               <th>设备</th>
               <th>状态</th>
               <th>生命周期</th>
+              <th>配网状态</th>
               <th>网络</th>
               <th>时间</th>
               <th>最后连接</th>
@@ -227,6 +372,19 @@ function formatTime(value: string): string {
                 <span class="lifecycle-status">
                   {{ lifecycleStatusLabel(device.lifecycleStatus) }}
                 </span>
+              </td>
+              <td>
+                <span
+                  :class="[
+                    'provisioning-status',
+                    provisioningStateClass(device.runtime?.provisioning?.state),
+                  ]"
+                >
+                  {{ provisioningStateLabel(device.runtime?.provisioning?.state) }}
+                </span>
+                <small class="session-state">
+                  会话：{{ sessionStateLabel(device.runtime?.provisioning?.sessionState) }}
+                </small>
               </td>
               <td>
                 <span v-if="device.runtime">
@@ -254,7 +412,7 @@ function formatTime(value: string): string {
     </Transition>
 
     <Transition name="modal">
-      <div v-if="selectedDevice" class="dialog-backdrop" @click.self="selectedDevice = null">
+      <div v-if="selectedDevice" class="dialog-backdrop" @click.self="closeDevice">
         <section class="dialog">
           <h2>{{ selectedDevice.deviceName || '未命名设备' }}</h2>
           <p class="device-id">{{ selectedDevice.deviceId }}</p>
@@ -267,7 +425,70 @@ function formatTime(value: string): string {
               <dt>最近上报</dt>
               <dd>{{ formatTime(selectedDevice.runtime?.receivedAt ?? '') }}</dd>
             </div>
+            <div>
+              <dt>配网状态</dt>
+              <dd>
+                {{ provisioningStateLabel(selectedProvisioningState?.state) }}
+              </dd>
+            </div>
+            <div>
+              <dt>会话状态</dt>
+              <dd>{{ sessionStateLabel(selectedProvisioningState?.sessionState) }}</dd>
+            </div>
+            <div>
+              <dt>无线网络</dt>
+              <dd>{{ wifiConfiguredLabel(selectedProvisioningState) }}</dd>
+            </div>
+            <div>
+              <dt>最近配网</dt>
+              <dd>{{ lastProvisionedLabel(selectedProvisioningState) }}</dd>
+            </div>
           </dl>
+          <section class="provisioning-panel">
+            <div class="section-heading">
+              <h3>配网事件</h3>
+              <button
+                type="button"
+                class="text-action"
+                :disabled="store.isLoadingProvisioning"
+                @click="store.loadProvisioning(selectedDevice.deviceId)"
+              >
+                {{ store.isLoadingProvisioning ? '正在刷新…' : '刷新记录' }}
+              </button>
+            </div>
+            <p v-if="store.provisioningError" class="inline-error">
+              {{ store.provisioningError.message }}
+              <button
+                v-if="store.provisioningError.retryable"
+                type="button"
+                class="inline-retry"
+                @click="store.loadProvisioning(selectedDevice.deviceId)"
+              >
+                重新读取
+              </button>
+            </p>
+            <div v-else-if="store.isLoadingProvisioning && !selectedProvisioning" class="command-empty">
+              正在读取配网记录…
+            </div>
+            <div v-else-if="recentProvisioningEvents.length === 0" class="command-empty">
+              还没有配网记录。设备完成配网后，这里会显示最近情况。
+            </div>
+            <ol v-else class="provisioning-timeline">
+              <li v-for="event in recentProvisioningEvents" :key="event.eventId">
+                <span class="timeline-dot" aria-hidden="true"></span>
+                <div>
+                  <strong>{{ provisioningEventLabel(event.eventType) }}</strong>
+                  <small>{{ formatTime(event.reportedAt) }} · {{ provisioningEventDetail(event) }}</small>
+                </div>
+              </li>
+            </ol>
+            <p
+              v-if="selectedProvisioning && selectedProvisioning.droppedEvents > 0"
+              class="timeline-note"
+            >
+              更早的 {{ selectedProvisioning.droppedEvents }} 条配网记录已不再保留。
+            </p>
+          </section>
           <div class="capability-panel">
             <h3>设备能力</h3>
             <div v-if="selectedDevice.capabilities.length === 0" class="command-empty">
@@ -320,8 +541,61 @@ function formatTime(value: string): string {
               {{ store.isSubmitting ? '正在解除…' : '解除绑定' }}
             </button>
           </section>
+          <section class="session-zone">
+            <h3>设备会话</h3>
+            <p>
+              吊销后，设备会重新认证。选择同时停用设备后，设备将无法重新认证，需要维护人员重新启用。
+            </p>
+            <p v-if="store.revokeError" class="inline-error">{{ store.revokeError.message }}</p>
+            <button
+              type="button"
+              class="danger-outline"
+              :disabled="store.isRevokingSessions"
+              @click="openRevokeDialog"
+            >
+              {{ store.isRevokingSessions ? '正在吊销…' : '吊销设备会话' }}
+            </button>
+          </section>
           <div class="dialog-actions">
-            <button type="button" class="secondary" @click="selectedDevice = null">关闭</button>
+            <button type="button" class="secondary" @click="closeDevice">关闭</button>
+          </div>
+        </section>
+      </div>
+    </Transition>
+
+    <Transition name="modal">
+      <div v-if="isRevokeDialogOpen" class="dialog-backdrop confirm-backdrop">
+        <section class="confirm-dialog">
+          <h2>吊销设备会话</h2>
+          <p>
+            请选择处理方式。“仅吊销会话”会让设备重新认证；“吊销并停用设备”还会同时停用设备，之后无法重新认证，只能由维护人员重新启用。
+          </p>
+          <p v-if="store.revokeError" class="inline-error">{{ store.revokeError.message }}</p>
+          <div class="confirm-actions">
+            <button
+              type="button"
+              class="secondary"
+              :disabled="store.isRevokingSessions"
+              @click="closeRevokeDialog"
+            >
+              返回
+            </button>
+            <button
+              type="button"
+              class="warning"
+              :disabled="store.isRevokingSessions"
+              @click="revokeSelectedDeviceSessions(false)"
+            >
+              仅吊销会话
+            </button>
+            <button
+              type="button"
+              class="danger"
+              :disabled="store.isRevokingSessions"
+              @click="revokeSelectedDeviceSessions(true)"
+            >
+              {{ store.isRevokingSessions ? '正在处理…' : '吊销并停用设备' }}
+            </button>
           </div>
         </section>
       </div>
@@ -450,6 +724,39 @@ td small {
   color: #4a2e3b;
 }
 
+.provisioning-status {
+  display: inline-flex;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #fff0f2;
+  color: #a12b4a;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.provisioning-status.provisioning {
+  background: #fff3cd;
+  color: #755600;
+}
+
+.provisioning-status.provisioned {
+  background: #e7f8ee;
+  color: #1d6b3f;
+}
+
+.provisioning-status.unknown {
+  background: #fff2f5;
+  color: #6b4f5a;
+}
+
+.session-state {
+  display: block;
+  margin-top: 5px;
+  color: #6b4f5a;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .state-panel {
   display: flex;
   min-height: 132px;
@@ -498,7 +805,6 @@ td small {
   place-items: center;
   padding: 20px;
   background: rgb(74 46 59 / 35%);
-  backdrop-filter: blur(3px);
 }
 
 .dialog {
@@ -560,6 +866,107 @@ td small {
 .capability-panel {
   display: grid;
   gap: 10px;
+}
+
+.provisioning-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #f7d9e2;
+  border-radius: 18px;
+  background: #fffbfc;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-heading h3 {
+  margin: 0;
+}
+
+.text-action {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #f0bdcb;
+  border-radius: 15px;
+  background: #ffffff;
+  color: #c94175;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.text-action:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.inline-error {
+  margin: 0;
+  color: #b3261e;
+  font-size: 13px;
+}
+
+.inline-retry {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #c94175;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.provisioning-timeline {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.provisioning-timeline li {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+}
+
+.timeline-dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border: 2px solid #f7a8bf;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px #fff2f5;
+}
+
+.provisioning-timeline strong,
+.provisioning-timeline small {
+  display: block;
+}
+
+.provisioning-timeline strong {
+  color: #4a2e3b;
+  font-size: 13px;
+}
+
+.provisioning-timeline small,
+.timeline-note {
+  margin-top: 3px;
+  color: #6b4f5a;
+  font-size: 12px;
+}
+
+.timeline-note {
+  margin-bottom: 0;
 }
 
 .capability-panel h3 {
@@ -673,6 +1080,110 @@ td small {
   opacity: 0.55;
 }
 
+.session-zone {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid #f2bfcb;
+  border-radius: 18px;
+  background: #fffbfc;
+}
+
+.session-zone h3,
+.session-zone p {
+  margin: 0;
+}
+
+.session-zone p {
+  color: #6b4f5a;
+  font-size: 13px;
+}
+
+.danger-outline {
+  min-height: 42px;
+  border: 1px solid #c73c63;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #b3264f;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.danger-outline:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.confirm-backdrop {
+  z-index: 2;
+}
+
+.confirm-dialog {
+  display: grid;
+  width: min(100%, 520px);
+  gap: 16px;
+  padding: 26px;
+  border: 1px solid #f0bdcb;
+  border-radius: 26px;
+  background: #ffffff;
+  box-shadow: 0 28px 72px rgb(74 46 59 / 22%);
+}
+
+.confirm-dialog h2,
+.confirm-dialog p {
+  margin: 0;
+}
+
+.confirm-dialog h2 {
+  color: #4a2e3b;
+  font-size: 21px;
+}
+
+.confirm-dialog p {
+  color: #6b4f5a;
+  line-height: 1.65;
+}
+
+.confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.confirm-actions button {
+  min-height: 42px;
+  padding: 0 15px;
+  border-radius: 16px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.confirm-actions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.confirm-actions .secondary {
+  border: 1px solid #f0bdcb;
+  background: #ffffff;
+  color: #6b4f5a;
+}
+
+.confirm-actions .warning {
+  border: 1px solid #d99a2b;
+  background: #fff3cd;
+  color: #755600;
+}
+
+.confirm-actions .danger {
+  border: 1px solid #c73c63;
+  background: #c73c63;
+  color: #ffffff;
+}
+
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
@@ -706,7 +1217,12 @@ td small {
   }
 
   table {
-    min-width: 840px;
+    min-width: 1040px;
+  }
+
+  .confirm-actions {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 }
 

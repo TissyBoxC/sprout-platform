@@ -30,6 +30,9 @@ import (
 	bindingService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 	runtimeRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/repository"
 	runtimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
+	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
+	featureCenterRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/repository"
+	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	operationsRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/repository"
 	operationsService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
 	policyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/repository"
@@ -212,6 +215,144 @@ func Run() error {
 	}
 	defer releaseStore.Close()
 	operations.SetArtifactStore(releaseArtifactStoreAdapter{store: releaseStore})
+	featureCenter, err := featureCenterService.New(featureCenterService.Options{
+		Repository: featureCenterRepository.NewPostgresRepository(
+			databaseStore.Pool(),
+		),
+		HealthProbes: map[string]featureCenterService.HealthProbe{
+			"auth": nonzeroRowProbe(
+				databaseStore.Pool(),
+				"SELECT 1 FROM parent_accounts WHERE status = 'active' LIMIT 1",
+			),
+			"parent_account": nonzeroRowProbe(
+				databaseStore.Pool(),
+				"SELECT 1 FROM parent_accounts WHERE role = 'parent' LIMIT 1",
+			),
+			"child_profile": nonzeroRowProbe(
+				databaseStore.Pool(),
+				"SELECT 1 FROM child_profiles LIMIT 1",
+			),
+			"parent_policy": nonzeroRowProbe(
+				databaseStore.Pool(),
+				"SELECT 1 FROM parent_policies LIMIT 1",
+			),
+			"device_diagnostics": nonzeroRowProbe(
+				databaseStore.Pool(),
+				"SELECT 1 FROM device_boot_events LIMIT 1",
+			),
+			"content_library": nonzeroRowProbe(
+				databaseStore.Pool(),
+				"SELECT 1 FROM content_package_versions LIMIT 1",
+			),
+			"usage_report": nonzeroRowProbe(
+				databaseStore.Pool(),
+				"SELECT 1 FROM device_usage_daily LIMIT 1",
+			),
+			"platform_security": nonzeroRowProbe(
+				databaseStore.Pool(),
+				"SELECT 1 FROM admin_totp_credentials LIMIT 1",
+			),
+			"deployment_infrastructure": featureCenterService.HealthProbeFunc(
+				func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+					if err := databaseStore.Pool().Ping(ctx); err != nil {
+						return featureCenterDomain.HealthUnavailable, nil
+					}
+					if err := redisCache.Client().Ping(ctx).Err(); err != nil {
+						return featureCenterDomain.HealthDegraded, nil
+					}
+					if !mqttClient.Connected() {
+						return featureCenterDomain.HealthDegraded, nil
+					}
+					return featureCenterDomain.HealthHealthy, nil
+				},
+			),
+			"ai_account": featureCenterService.HealthProbeFunc(
+				func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+					if _, err := aiAccountService.RuntimeConfigForAdmin(ctx); err != nil {
+						return featureCenterDomain.HealthUnavailable, nil
+					}
+					return featureCenterDomain.HealthHealthy, nil
+				},
+			),
+			"ai_model_gateway": featureCenterService.HealthProbeFunc(
+				func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+					if _, err := aiAccountService.RuntimeConfigForAdmin(ctx); err != nil {
+						return featureCenterDomain.HealthUnavailable, nil
+					}
+					return featureCenterDomain.HealthHealthy, nil
+				},
+			),
+			"device_runtime": featureCenterService.HealthProbeFunc(
+				func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+					if _, err := deviceRuntimeService.ListAllDeviceStatuses(ctx); err != nil {
+						return featureCenterDomain.HealthDegraded, nil
+					}
+					return featureCenterDomain.HealthHealthy, nil
+				},
+			),
+			"device_binding": featureCenterService.HealthProbeFunc(
+				func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+					if _, err := deviceBindingService.ListAllForAdmin(ctx); err != nil {
+						return featureCenterDomain.HealthDegraded, nil
+					}
+					return featureCenterDomain.HealthHealthy, nil
+				},
+			),
+			"download_server": featureCenterService.HealthProbeFunc(
+				func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+					status, err := releaseStore.IndexStatus(ctx)
+					if err != nil {
+						return featureCenterDomain.HealthUnavailable, nil
+					}
+					if !status.IsAvailable {
+						return featureCenterDomain.HealthDegraded, nil
+					}
+					if status.PendingFileCount > 0 {
+						return featureCenterDomain.HealthDegraded, nil
+					}
+					return featureCenterDomain.HealthHealthy, nil
+				},
+			),
+			"ota_release": featureCenterService.HealthProbeFunc(
+				func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+					releases, err := operations.ListReleases(ctx)
+					if err != nil {
+						return featureCenterDomain.HealthUnavailable, nil
+					}
+					status, err := releaseStore.IndexStatus(ctx)
+					if err != nil || !status.IsAvailable {
+						return featureCenterDomain.HealthDegraded, nil
+					}
+					if len(releases) == 0 {
+						return featureCenterDomain.HealthDegraded, nil
+					}
+					return featureCenterDomain.HealthHealthy, nil
+				},
+			),
+			"service_version": featureCenterService.HealthProbeFunc(
+				func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+					result, err := serviceVersions.SnapshotResult(ctx)
+					if err != nil {
+						return featureCenterDomain.HealthUnavailable, nil
+					}
+					if result.StateSource != "worker" {
+						return featureCenterDomain.HealthUnknown, nil
+					}
+					for _, service := range result.Services {
+						if service.Status == "unknown" {
+							return featureCenterDomain.HealthUnknown, nil
+						}
+					}
+					return featureCenterDomain.HealthHealthy, nil
+				},
+			),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("create feature center service: %w", err)
+	}
+	featureCenter.SetRuntimeSettingsReader(operations)
+	featureCenter.SetModelCatalogReader(aiModelCatalogReader{service: aiAccountService})
 	contentLibraryService, err := contentService.New(contentService.Options{
 		Repository:  contentRepository.NewPostgresRepository(databaseStore.Pool()),
 		AssetReader: contentAssetReader{store: releaseStore},
@@ -243,6 +384,7 @@ func Run() error {
 			RuntimeService:        deviceRuntimeService,
 			DiagnosticService:     diagnosticService,
 			ServiceVersionService: serviceVersions,
+			FeatureCenterService:  featureCenter,
 			ReleaseStoreService:   releaseStore,
 			ContentService:        contentLibraryService,
 			UsageReportService:    usageReports,

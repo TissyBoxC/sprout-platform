@@ -21,6 +21,7 @@ import (
 	contentservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/service"
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
+	featurecenterservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	operationsservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
 	policeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
 	releasestoreservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
@@ -41,6 +42,7 @@ type RouterOptions struct {
 	RuntimeService        *runtimeservice.Service
 	DiagnosticService     auditService
 	ServiceVersionService *serviceversionservice.Service
+	FeatureCenterService  *featurecenterservice.Service
 	ReleaseStoreService   *releasestoreservice.Service
 	ContentService        *contentservice.Service
 	UsageReportService    *usagereportservice.Service
@@ -436,6 +438,13 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/admin/service-version-operations/{operation_id}",
 					authHandler.requireAdmin(adminHandler.getServiceVersionOperation),
+				)
+			}
+			if options.FeatureCenterService != nil {
+				featureCenterHandler := NewFeatureCenterHandler(options.FeatureCenterService)
+				featureCenterHandler.RegisterAdminRoutes(
+					mux,
+					authHandler.requireAdmin,
 				)
 			}
 		}

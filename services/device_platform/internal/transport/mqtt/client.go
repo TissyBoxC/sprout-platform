@@ -87,3 +87,11 @@ func (c *Client) Close() {
 	}
 	c.client.Disconnect(250)
 }
+
+// Connected reports whether the broker connection is currently established.
+func (c *Client) Connected() bool {
+	if c == nil || c.client == nil {
+		return false
+	}
+	return c.client.IsConnectionOpen()
+}

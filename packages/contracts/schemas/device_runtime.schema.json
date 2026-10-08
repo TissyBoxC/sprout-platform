@@ -205,6 +205,11 @@
             "revoked"
           ]
         },
+        "dropped_events": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
         "last_provisioned_at": {
           "oneOf": [
             {

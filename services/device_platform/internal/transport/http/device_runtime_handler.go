@@ -507,6 +507,7 @@ func runtimeStatusResponse(status *domain.RuntimeStatus) map[string]any {
 			"wifi_configured":     status.WiFiConfigured,
 			"session_state":       status.SessionState,
 			"last_provisioned_at": status.LastProvisionedAt,
+			"dropped_events":      status.DroppedEvents,
 		},
 	}
 }

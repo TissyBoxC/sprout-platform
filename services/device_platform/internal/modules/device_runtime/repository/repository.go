@@ -375,6 +375,7 @@ const runtimeStatusSelect = `
 		status.wifi_configured,
 		status.session_state,
 		status.last_provisioned_at,
+		status.provisioning_dropped_events,
 		status.received_at,
 		status.updated_at
 	FROM device_runtime_status AS status
@@ -408,6 +409,7 @@ func scanRuntimeStatus(row runtimeScanner) (*domain.RuntimeStatus, error) {
 	var provisioningState *string
 	var wifiConfigured *bool
 	var sessionState *string
+	var droppedEvents *uint64
 	err := row.Scan(
 		&status.DeviceID,
 		&status.HeartbeatID,
@@ -431,6 +433,7 @@ func scanRuntimeStatus(row runtimeScanner) (*domain.RuntimeStatus, error) {
 		&wifiConfigured,
 		&sessionState,
 		&status.LastProvisionedAt,
+		&droppedEvents,
 		&status.ReceivedAt,
 		&status.UpdatedAt,
 	)
@@ -447,6 +450,9 @@ func scanRuntimeStatus(row runtimeScanner) (*domain.RuntimeStatus, error) {
 	status.SessionState = domain.SessionStateReady
 	if sessionState != nil {
 		status.SessionState = domain.SessionState(*sessionState)
+	}
+	if droppedEvents != nil {
+		status.DroppedEvents = *droppedEvents
 	}
 	return &status, nil
 }

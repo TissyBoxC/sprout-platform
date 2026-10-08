@@ -358,6 +358,14 @@ func (r *PostgresRepository) RevokeDeviceSessionsAndDeleteBinding(
 		`, deviceID); err != nil {
 			return fmt.Errorf("revoke device sessions: %w", err)
 		}
+		if _, err := transaction.Exec(ctx, `
+			UPDATE device_runtime_status
+			SET session_state = 'revoked',
+			    updated_at = NOW()
+			WHERE device_id = $1
+		`, deviceID); err != nil {
+			return fmt.Errorf("mark device runtime session revoked after unbind: %w", err)
+		}
 		tag, err := transaction.Exec(ctx, `
 			DELETE FROM device_bindings
 			WHERE parent_account_id = $1
@@ -402,6 +410,14 @@ func (r *PostgresRepository) RevokeDeviceSessions(
 			  AND revoked_at IS NULL
 		`, deviceID); err != nil {
 			return fmt.Errorf("revoke device sessions: %w", err)
+		}
+		if _, err := transaction.Exec(ctx, `
+			UPDATE device_runtime_status
+			SET session_state = 'revoked',
+			    updated_at = NOW()
+			WHERE device_id = $1
+		`, deviceID); err != nil {
+			return fmt.Errorf("mark device runtime session revoked: %w", err)
 		}
 		if disableDevice {
 			if _, err := transaction.Exec(ctx, `

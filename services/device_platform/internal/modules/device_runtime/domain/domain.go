@@ -137,6 +137,7 @@ type RuntimeStatus struct {
 	WiFiConfigured    bool
 	SessionState      SessionState
 	LastProvisionedAt *time.Time
+	DroppedEvents     uint64
 }
 
 // CommandType is an operator-initiated network maintenance action.

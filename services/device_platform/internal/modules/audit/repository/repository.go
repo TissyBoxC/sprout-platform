@@ -16,6 +16,9 @@ import (
 const (
 	defaultQueryLimit = 20
 	maxQueryLimit     = 100
+	// Keep the provisioning projection ordered by the same device-reported
+	// heartbeat timestamp used by the runtime status upsert.
+	provisioningFreshnessPredicate = "device_runtime_status.reported_at <= $7"
 )
 
 // Repository defines the diagnostic persistence and query contract.
@@ -42,6 +45,10 @@ type Repository interface {
 		deviceID string,
 		limit int,
 	) (*domain.ProvisioningSnapshot, error)
+}
+
+type provisioningStatusScanner interface {
+	Scan(dest ...any) error
 }
 
 // PostgresRepository stores diagnostic events in the platform database.
@@ -466,14 +473,19 @@ func (r *PostgresRepository) SaveProvisioning(
 		SET provisioning_state = $2,
 		    wifi_configured = $3,
 		    session_state = $4,
-		    last_provisioned_at = $5
+		    last_provisioned_at = $5,
+		    provisioning_dropped_events = $6,
+		    updated_at = NOW()
 		WHERE device_id = $1
+		  AND `+provisioningFreshnessPredicate+`
 	`,
 		deviceID,
 		provisioning.State,
 		provisioning.WiFiConfigured,
 		provisioning.SessionState,
 		provisioning.LastProvisionedAt,
+		provisioning.DroppedEvents,
+		reportedAt,
 	); err != nil {
 		return fmt.Errorf("update device provisioning status: %w", err)
 	}
@@ -511,16 +523,21 @@ func (r *PostgresRepository) GetProvisioning(
 	}
 
 	var storedState, storedSessionState *string
-	if err := r.pool.QueryRow(ctx, `
+	var storedWiFiConfigured *bool
+	var storedDroppedEvents *uint64
+	statusRow := r.pool.QueryRow(ctx, `
 		SELECT provisioning_state, wifi_configured, session_state,
-		       last_provisioned_at, updated_at
+		       last_provisioned_at, provisioning_dropped_events, updated_at
 		FROM device_runtime_status
 		WHERE device_id = $1
-	`, deviceID).Scan(
+	`, deviceID)
+	if err := scanProvisioningStatus(
+		statusRow,
 		&storedState,
-		&snapshot.WiFiConfigured,
+		&storedWiFiConfigured,
 		&storedSessionState,
 		&snapshot.LastProvisionedAt,
+		&storedDroppedEvents,
 		&snapshot.UpdatedAt,
 	); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("query device provisioning status: %w", err)
@@ -530,6 +547,12 @@ func (r *PostgresRepository) GetProvisioning(
 	}
 	if storedSessionState != nil {
 		snapshot.SessionState = *storedSessionState
+	}
+	if storedWiFiConfigured != nil {
+		snapshot.WiFiConfigured = *storedWiFiConfigured
+	}
+	if storedDroppedEvents != nil {
+		snapshot.DroppedEvents = *storedDroppedEvents
 	}
 
 	rows, err := r.pool.Query(ctx, `
@@ -570,6 +593,25 @@ func (r *PostgresRepository) GetProvisioning(
 		return nil, domain.ErrEventNotFound
 	}
 	return snapshot, nil
+}
+
+func scanProvisioningStatus(
+	row provisioningStatusScanner,
+	state **string,
+	wifiConfigured **bool,
+	sessionState **string,
+	lastProvisionedAt **time.Time,
+	droppedEvents **uint64,
+	updatedAt *time.Time,
+) error {
+	return row.Scan(
+		state,
+		wifiConfigured,
+		sessionState,
+		lastProvisionedAt,
+		droppedEvents,
+		updatedAt,
+	)
 }
 
 func laterTime(current time.Time, candidate time.Time) time.Time {

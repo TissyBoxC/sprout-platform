@@ -150,6 +150,7 @@ func TestGetProvisioningReturnsEmptyStateForDeviceWithoutHistory(t *testing.T) {
 			DeviceID                   string `json:"device_id"`
 			State                      string `json:"state"`
 			SessionState               string `json:"session_state"`
+			UpdatedAt                  *string `json:"updated_at"`
 			Events                     []any  `json:"events"`
 			RetentionProvisioningEvent int    `json:"retention_provisioning_events"`
 		} `json:"data"`
@@ -160,6 +161,7 @@ func TestGetProvisioningReturnsEmptyStateForDeviceWithoutHistory(t *testing.T) {
 	if envelope.Data.DeviceID != "sprout_device_001" ||
 		envelope.Data.State != domain.ProvisioningStateUnprovisioned ||
 		envelope.Data.SessionState != domain.SessionStateReady ||
+		envelope.Data.UpdatedAt != nil ||
 		envelope.Data.Events == nil ||
 		envelope.Data.RetentionProvisioningEvent != domain.RetentionProvisioning {
 		t.Fatalf("unexpected empty provisioning response: %s", recorder.Body.String())

@@ -30,6 +30,7 @@
     "state": "provisioned",
     "wifi_configured": true,
     "session_state": "ready",
+    "dropped_events": 0,
     "last_provisioned_at": "2026-10-03T09:58:00Z",
     "events": [
       {

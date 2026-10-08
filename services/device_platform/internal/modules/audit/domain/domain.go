@@ -160,6 +160,7 @@ type Provisioning struct {
 	WiFiConfigured    bool                `json:"wifi_configured"`
 	SessionState      string              `json:"session_state"`
 	LastProvisionedAt *time.Time          `json:"last_provisioned_at"`
+	DroppedEvents     uint64              `json:"dropped_events"`
 	Events            []ProvisioningEvent `json:"events"`
 }
 

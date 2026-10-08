@@ -127,6 +127,7 @@ func (h *Handler) GetProvisioning(
 				"newest_sequence":               0,
 				"dropped_events":                0,
 				"events":                        []domain.ProvisioningEvent{},
+				"updated_at":                    nil,
 				"retention_provisioning_events": domain.RetentionProvisioning,
 			})
 			return

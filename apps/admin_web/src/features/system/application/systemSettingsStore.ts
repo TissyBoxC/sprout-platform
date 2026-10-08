@@ -49,6 +49,7 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
   const httpClient = createHttpClient()
   const operationsClient = createAdminOperationsClient(httpClient)
   const settings = ref<SystemSettings>({ ...DEFAULT_SYSTEM_SETTINGS })
+  const version = ref(0)
   const modelOptions = ref<AIModelOption[]>([])
   const defaultBalanceSource = ref('')
   const integrationNotice = ref('')
@@ -64,6 +65,7 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
     try {
       const response = await httpClient.get('/api/v1/admin/settings')
       settings.value = toSettings(response.data.data?.settings ?? {})
+      version.value = numberValue(response.data.data?.version, 0)
     } catch (caught: unknown) {
       error.value = mapApiError(caught)
     } finally {
@@ -80,13 +82,27 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
     try {
       const response = await httpClient.put(
         '/api/v1/admin/settings',
-        toPayload(settings.value),
+        {
+          settings: toPayload(settings.value),
+          expected_version: version.value,
+        },
       )
       settings.value = toSettings(response.data.data?.settings ?? {})
+      version.value = numberValue(response.data.data?.version, version.value)
       lastMessage.value = '系统设置已保存。'
       return true
     } catch (caught: unknown) {
-      error.value = mapApiError(caught)
+      const mapped = mapApiError(caught)
+      if (isSettingsVersionConflict(caught)) {
+        lastMessage.value = ''
+        error.value = {
+          kind: 'validation',
+          message: '系统设置已被其他管理员更新，请刷新后重试',
+          retryable: true,
+        }
+      } else {
+        error.value = mapped
+      }
       return false
     } finally {
       isSaving.value = false
@@ -143,6 +159,13 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
     }
   }
 })
+
+function isSettingsVersionConflict(error: unknown): boolean {
+  const response = (
+    error as { response?: { data?: { error?: { code?: unknown } } } }
+  )?.response
+  return response?.data?.error?.code === 'settings_version_conflict'
+}
 
 function fastestAvailableModel(models: AIModelOption[]): AIModelOption | null {
   const availableModels = models.filter(

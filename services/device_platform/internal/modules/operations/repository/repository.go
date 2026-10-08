@@ -25,6 +25,7 @@ type Repository interface {
 		ctx context.Context,
 		settings *domain.Settings,
 		actorAccountID string,
+		expectedVersion int64,
 	) (int64, error)
 	Overview(
 		ctx context.Context,
@@ -243,33 +244,79 @@ func (r *PostgresRepository) SaveSettings(
 	ctx context.Context,
 	settings *domain.Settings,
 	actorAccountID string,
+	expectedVersion int64,
 ) (int64, error) {
 	encoded, err := json.Marshal(settings)
 	if err != nil {
 		return 0, fmt.Errorf("encode platform settings: %w", err)
 	}
+	if expectedVersion == 0 {
+		var version int64
+		err = r.pool.QueryRow(ctx, `
+			INSERT INTO platform_settings (
+				settings_key,
+				value,
+				version,
+				updated_by,
+				created_at,
+				updated_at
+			)
+			VALUES ($1, $2::jsonb, 1, NULLIF($3, '')::uuid, NOW(), NOW())
+			ON CONFLICT (settings_key) DO NOTHING
+			RETURNING version
+		`, settingsKey, encoded, actorAccountID).Scan(&version)
+		if err == nil {
+			return version, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return 0, fmt.Errorf("insert platform settings: %w", err)
+		}
+		return 0, r.settingsVersionConflict(ctx, expectedVersion)
+	}
+
 	var version int64
 	err = r.pool.QueryRow(ctx, `
-		INSERT INTO platform_settings (
-			settings_key,
-			value,
-			version,
-			updated_by,
-			created_at,
-			updated_at
-		)
-		VALUES ($1, $2::jsonb, 1, NULLIF($3, '')::uuid, NOW(), NOW())
-		ON CONFLICT (settings_key) DO UPDATE
-		SET value = EXCLUDED.value,
+		UPDATE platform_settings
+		SET value = $2::jsonb,
 		    version = platform_settings.version + 1,
-		    updated_by = EXCLUDED.updated_by,
+		    updated_by = NULLIF($3, '')::uuid,
 		    updated_at = NOW()
+		WHERE platform_settings.settings_key = $1
+		  AND platform_settings.version = $4
 		RETURNING version
-	`, settingsKey, encoded, actorAccountID).Scan(&version)
+	`, settingsKey, encoded, actorAccountID, expectedVersion).Scan(&version)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, r.settingsVersionConflict(ctx, expectedVersion)
+		}
 		return 0, fmt.Errorf("save platform settings: %w", err)
 	}
 	return version, nil
+}
+
+func (r *PostgresRepository) settingsVersionConflict(
+	ctx context.Context,
+	expectedVersion int64,
+) error {
+	var currentVersion int64
+	err := r.pool.QueryRow(ctx, `
+		SELECT version
+		FROM platform_settings
+		WHERE settings_key = $1
+	`, settingsKey).Scan(&currentVersion)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return &domain.SettingsVersionConflictError{
+			ExpectedVersion: expectedVersion,
+			CurrentVersion:  0,
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("load current platform settings version: %w", err)
+	}
+	return &domain.SettingsVersionConflictError{
+		ExpectedVersion: expectedVersion,
+		CurrentVersion:  currentVersion,
+	}
 }
 
 // Overview returns dashboard counters from the owning tables.

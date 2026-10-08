@@ -1,6 +1,8 @@
 package http
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -78,19 +80,40 @@ func (handler adminHandler) updateSettings(
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
 	}
-	var payload operationsdomain.Settings
-	if err := decodeJSON(request, &payload); err != nil {
+	body, err := decodeSettingsUpdateRequest(request)
+	if err != nil {
+		if errors.Is(err, errMissingSettingsEnvelope) {
+			writeError(
+				response,
+				request,
+				http.StatusBadRequest,
+				"invalid_request",
+				"请升级管理界面后重新提交设置",
+			)
+			return
+		}
 		writeError(response, request, http.StatusBadRequest, "invalid_request", "请检查填写的内容")
 		return
 	}
 	settings, version, err := handler.operationsService.UpdateSettings(
 		request.Context(),
-		&payload,
+		body.Settings,
 		accountID,
+		body.ExpectedVersion,
 	)
 	if err != nil {
 		if errors.Is(err, operationsdomain.ErrInvalidSettings) {
 			writeError(response, request, http.StatusUnprocessableEntity, "invalid_settings", "请检查设置内容")
+			return
+		}
+		if errors.Is(err, operationsdomain.ErrSettingsVersionConflict) {
+			writeError(
+				response,
+				request,
+				http.StatusConflict,
+				"settings_version_conflict",
+				"系统设置已被其他管理员更新，请刷新后重试",
+			)
 			return
 		}
 		writeError(response, request, http.StatusInternalServerError, "service_error", "设置没有保存，请稍后重试")
@@ -100,6 +123,40 @@ func (handler adminHandler) updateSettings(
 		Settings: *settings,
 		Version:  version,
 	})
+}
+
+type settingsUpdateBody struct {
+	Settings        *operationsdomain.Settings
+	ExpectedVersion int64
+}
+
+var errMissingSettingsEnvelope = errors.New("missing settings envelope")
+
+func decodeSettingsUpdateRequest(request *http.Request) (*settingsUpdateBody, error) {
+	raw := make(map[string]json.RawMessage)
+	if err := json.NewDecoder(request.Body).Decode(&raw); err != nil {
+		return nil, err
+	}
+	settingsRaw, hasSettings := raw["settings"]
+	expectedVersionRaw, hasExpectedVersion := raw["expected_version"]
+	if !hasSettings || !hasExpectedVersion ||
+		bytes.Equal(bytes.TrimSpace(settingsRaw), []byte("null")) ||
+		bytes.Equal(bytes.TrimSpace(expectedVersionRaw), []byte("null")) {
+		return nil, errMissingSettingsEnvelope
+	}
+	if len(raw) != 2 {
+		return nil, errors.New("unexpected settings update field")
+	}
+	var payload settingsUpdateBody
+	settingsDecoder := json.NewDecoder(bytes.NewReader(settingsRaw))
+	settingsDecoder.DisallowUnknownFields()
+	if err := settingsDecoder.Decode(&payload.Settings); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(expectedVersionRaw, &payload.ExpectedVersion); err != nil {
+		return nil, err
+	}
+	return &payload, nil
 }
 
 func (handler adminHandler) getOverview(

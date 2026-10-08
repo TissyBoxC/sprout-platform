@@ -182,8 +182,12 @@ func (s *Service) UpdateSettings(
 	ctx context.Context,
 	settings *domain.Settings,
 	actorAccountID string,
+	expectedVersion int64,
 ) (*domain.Settings, int64, error) {
 	if settings == nil {
+		return nil, 0, domain.ErrInvalidSettings
+	}
+	if expectedVersion < 0 {
 		return nil, 0, domain.ErrInvalidSettings
 	}
 	if err := validateSettings(settings); err != nil {
@@ -193,6 +197,7 @@ func (s *Service) UpdateSettings(
 		ctx,
 		settings,
 		strings.TrimSpace(actorAccountID),
+		expectedVersion,
 	)
 	if err != nil {
 		return nil, 0, err

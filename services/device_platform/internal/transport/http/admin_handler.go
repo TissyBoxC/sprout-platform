@@ -62,6 +62,7 @@ type operationsAdminService interface {
 		ctx context.Context,
 		settings *operationsdomain.Settings,
 		actorAccountID string,
+		expectedVersion int64,
 	) (*operationsdomain.Settings, int64, error)
 	Overview(ctx context.Context) (*operationsdomain.Overview, error)
 	ListFamilyAccounts(ctx context.Context) ([]operationsdomain.FamilyAccount, error)

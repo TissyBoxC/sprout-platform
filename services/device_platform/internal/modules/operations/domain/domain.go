@@ -8,13 +8,34 @@ import (
 )
 
 var (
-	ErrSettingsNotFound      = errors.New("platform settings not found")
-	ErrInvalidSettings       = errors.New("invalid platform settings")
-	ErrReleaseNotFound       = errors.New("platform release not found")
-	ErrReleaseAlreadyExists  = errors.New("platform release already exists")
-	ErrReleaseNotPublishable = errors.New("platform release is not publishable")
-	ErrUpdateNotAvailable    = errors.New("application update not available")
+	ErrSettingsNotFound        = errors.New("platform settings not found")
+	ErrInvalidSettings         = errors.New("invalid platform settings")
+	ErrSettingsVersionConflict = errors.New("platform settings version conflict")
+	ErrReleaseNotFound         = errors.New("platform release not found")
+	ErrReleaseAlreadyExists    = errors.New("platform release already exists")
+	ErrReleaseNotPublishable   = errors.New("platform release is not publishable")
+	ErrUpdateNotAvailable      = errors.New("application update not available")
 )
+
+// SettingsVersionConflictError reports a rejected optimistic update and the
+// version that must be loaded before retrying.
+type SettingsVersionConflictError struct {
+	ExpectedVersion int64
+	CurrentVersion  int64
+}
+
+// Error implements error.
+func (e *SettingsVersionConflictError) Error() string {
+	if e == nil {
+		return ErrSettingsVersionConflict.Error()
+	}
+	return "platform settings version conflict: expected version does not match current version"
+}
+
+// Is allows errors.Is(err, ErrSettingsVersionConflict).
+func (e *SettingsVersionConflictError) Is(target error) bool {
+	return target == ErrSettingsVersionConflict
+}
 
 const (
 	ReleaseKindResource = "resource"

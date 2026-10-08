@@ -201,16 +201,19 @@ func (s *Service) ValidateProvisioning(
 	}
 	if !provisioningStateIsValid(provisioning.State) ||
 		!sessionStateIsValid(provisioning.SessionState) ||
-		provisioning.DroppedEvents > 1_000_000 ||
 		len(provisioning.Events) > 16 {
 		return nil, domain.ErrInvalidDiagnostics
+	}
+	droppedEvents := provisioning.DroppedEvents
+	if droppedEvents > 1_000_000 {
+		droppedEvents = 1_000_000
 	}
 	normalized := &domain.Provisioning{
 		State:             provisioning.State,
 		WiFiConfigured:    provisioning.WiFiConfigured,
 		SessionState:      provisioning.SessionState,
 		LastProvisionedAt: provisioning.LastProvisionedAt,
-		DroppedEvents:     provisioning.DroppedEvents,
+		DroppedEvents:     droppedEvents,
 		Events:            make([]domain.ProvisioningEvent, 0, len(provisioning.Events)),
 	}
 	var newestSequence uint64

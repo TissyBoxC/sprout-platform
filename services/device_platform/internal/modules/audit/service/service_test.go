@@ -316,9 +316,9 @@ func TestValidateProvisioningRejectsUnknownSessionState(t *testing.T) {
 	}
 }
 
-func TestValidateProvisioningRejectsExcessiveDroppedEvents(t *testing.T) {
+func TestValidateProvisioningSaturatesExcessiveDroppedEvents(t *testing.T) {
 	service := &Service{}
-	_, err := service.ValidateProvisioning(
+	normalized, err := service.ValidateProvisioning(
 		"sprout_device_001",
 		&domain.Provisioning{
 			State:         domain.ProvisioningStateProvisioned,
@@ -327,8 +327,11 @@ func TestValidateProvisioningRejectsExcessiveDroppedEvents(t *testing.T) {
 			Events:        []domain.ProvisioningEvent{},
 		},
 	)
-	if err != domain.ErrInvalidDiagnostics {
-		t.Fatalf("expected invalid provisioning for excessive dropped events, got %v", err)
+	if err != nil {
+		t.Fatalf("expected excessive dropped events to saturate, got %v", err)
+	}
+	if normalized == nil || normalized.DroppedEvents != 1_000_000 {
+		t.Fatalf("expected dropped events to saturate at 1000000")
 	}
 }
 

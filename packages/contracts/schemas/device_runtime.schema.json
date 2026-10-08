@@ -176,6 +176,54 @@
         }
       }
     },
+    "provisioning": {
+      "description": "Current network provisioning projection. The bounded event history is included only on the administrator provisioning snapshot; runtime status omits it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "wifi_configured",
+        "session_state"
+      ],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "unprovisioned",
+            "provisioning",
+            "provisioned"
+          ]
+        },
+        "wifi_configured": {
+          "type": "boolean"
+        },
+        "session_state": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "reauth_required",
+            "revoked"
+          ]
+        },
+        "last_provisioned_at": {
+          "oneOf": [
+            {
+              "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "events": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/provisioning_event"
+          }
+        }
+      }
+    },
     "diagnostics": {
       "type": "object",
       "additionalProperties": false,
@@ -387,6 +435,57 @@
             "factory_reset_cancelled",
             "factory_reset_completed",
             "factory_reset_failed"
+          ]
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "detail_code": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.:-]{1,64}$"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600000
+        },
+        "firmware_version": {
+          "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/firmware_version"
+        }
+      }
+    },
+    "provisioning_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "event_type",
+        "sequence",
+        "detail_code",
+        "firmware_version"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{3,63}$"
+        },
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "provisioning_started",
+            "wifi_configured",
+            "wifi_failed",
+            "binding_completed",
+            "binding_removed",
+            "network_reconnected",
+            "network_lost",
+            "time_synced",
+            "auth_revoked",
+            "auth_restored",
+            "binding_confirmed",
+            "binding_pending"
           ]
         },
         "sequence": {

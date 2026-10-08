@@ -26,6 +26,54 @@
     "fallback_active": false,
     "pending_telemetry": 0
   },
+  "provisioning": {
+    "state": "provisioned",
+    "wifi_configured": true,
+    "session_state": "ready",
+    "last_provisioned_at": "2026-10-03T09:58:00Z",
+    "events": [
+      {
+        "event_id": "provisioning_00000001",
+        "event_type": "provisioning_started",
+        "sequence": 1,
+        "detail_code": "first_run",
+        "duration_ms": 0,
+        "firmware_version": "0.7.0"
+      },
+      {
+        "event_id": "provisioning_00000002",
+        "event_type": "wifi_configured",
+        "sequence": 2,
+        "detail_code": "ble_provisioning",
+        "duration_ms": 4200,
+        "firmware_version": "0.7.0"
+      },
+      {
+        "event_id": "provisioning_00000003",
+        "event_type": "network_reconnected",
+        "sequence": 3,
+        "detail_code": "wifi_station",
+        "duration_ms": 1800,
+        "firmware_version": "0.7.0"
+      },
+      {
+        "event_id": "provisioning_00000004",
+        "event_type": "time_synced",
+        "sequence": 4,
+        "detail_code": "sntp",
+        "duration_ms": 900,
+        "firmware_version": "0.7.0"
+      },
+      {
+        "event_id": "provisioning_00000005",
+        "event_type": "binding_confirmed",
+        "sequence": 5,
+        "detail_code": "guardian_binding",
+        "duration_ms": 0,
+        "firmware_version": "0.7.0"
+      }
+    ]
+  },
   "diagnostics": {
     "schema_version": "1.0.0",
     "newest_sequence": 12,

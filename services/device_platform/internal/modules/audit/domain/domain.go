@@ -41,6 +41,37 @@ const (
 	InteractionEventFactoryResetFailed    = "factory_reset_failed"
 )
 
+// Provisioning event types. These mirror the network bring-up steps the
+// firmware reports while it configures Wi-Fi, binds a guardian, synchronizes
+// time, and maintains its device session. The detail code carries a symbolic
+// value only; SSIDs, passwords, and keys never appear in the audit trail.
+const (
+	ProvisioningEventStarted            = "provisioning_started"
+	ProvisioningEventWiFiConfigured     = "wifi_configured"
+	ProvisioningEventWiFiFailed         = "wifi_failed"
+	ProvisioningEventBindingCompleted   = "binding_completed"
+	ProvisioningEventBindingRemoved     = "binding_removed"
+	ProvisioningEventNetworkReconnected = "network_reconnected"
+	ProvisioningEventNetworkLost        = "network_lost"
+	ProvisioningEventTimeSynced         = "time_synced"
+	ProvisioningEventAuthRevoked        = "auth_revoked"
+	ProvisioningEventAuthRestored       = "auth_restored"
+	ProvisioningEventBindingConfirmed   = "binding_confirmed"
+	ProvisioningEventBindingPending     = "binding_pending"
+)
+
+// Provisioning state and session state values shared with the runtime status
+// columns and the admin console.
+const (
+	ProvisioningStateUnprovisioned = "unprovisioned"
+	ProvisioningStateProvisioning  = "provisioning"
+	ProvisioningStateProvisioned   = "provisioned"
+
+	SessionStateReady          = "ready"
+	SessionStateReauthRequired = "reauth_required"
+	SessionStateRevoked        = "revoked"
+)
+
 // Health state values derived from the newest failure and recovery events.
 const (
 	HealthHealthy  = "healthy"
@@ -52,10 +83,11 @@ const (
 // Diagnostic retention is part of the administrator-facing contract, so empty
 // and populated responses must report the same limits.
 const (
-	RetentionBootEvents  = 200
-	RetentionFailures    = 100
-	RetentionRecovery    = 100
-	RetentionInteraction = 300
+	RetentionBootEvents   = 200
+	RetentionFailures     = 100
+	RetentionRecovery     = 100
+	RetentionInteraction  = 300
+	RetentionProvisioning = 300
 )
 
 // BootEvent is one startup record reported by a device.
@@ -106,6 +138,44 @@ type InteractionEvent struct {
 	DurationMS      uint64    `json:"duration_ms"`
 	FirmwareVersion string    `json:"firmware_version"`
 	ReportedAt      time.Time `json:"reported_at"`
+}
+
+// ProvisioningEvent is one bounded network bring-up step reported by a device.
+type ProvisioningEvent struct {
+	EventType       string    `json:"event_type"`
+	EventID         string    `json:"event_id"`
+	Sequence        uint64    `json:"sequence"`
+	DetailCode      string    `json:"detail_code"`
+	DurationMS      uint64    `json:"duration_ms"`
+	FirmwareVersion string    `json:"firmware_version"`
+	ReportedAt      time.Time `json:"reported_at"`
+}
+
+// Provisioning is the optional heartbeat extension carrying the current
+// provisioning state plus the bounded step history. The current state is
+// mirrored into the runtime status row so the admin list can render it
+// without reading the event table.
+type Provisioning struct {
+	State             string              `json:"state"`
+	WiFiConfigured    bool                `json:"wifi_configured"`
+	SessionState      string              `json:"session_state"`
+	LastProvisionedAt *time.Time          `json:"last_provisioned_at"`
+	Events            []ProvisioningEvent `json:"events"`
+}
+
+// ProvisioningSnapshot is the administrator-facing provisioning history for
+// one device.
+type ProvisioningSnapshot struct {
+	DeviceID          string              `json:"device_id"`
+	State             string              `json:"state"`
+	WiFiConfigured    bool                `json:"wifi_configured"`
+	SessionState      string              `json:"session_state"`
+	LastProvisionedAt *time.Time          `json:"last_provisioned_at"`
+	NewestSequence    uint64              `json:"newest_sequence"`
+	DroppedEvents     uint64              `json:"dropped_events"`
+	Events            []ProvisioningEvent `json:"events"`
+	UpdatedAt         time.Time           `json:"updated_at"`
+	RetentionEvents   int                 `json:"retention_provisioning_events"`
 }
 
 // Diagnostics is the optional heartbeat extension accepted by the platform.

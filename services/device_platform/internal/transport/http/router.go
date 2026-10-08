@@ -61,6 +61,21 @@ type auditService interface {
 		reportedAt time.Time,
 		diagnostics *auditdomain.Diagnostics,
 	) error
+	GetProvisioning(
+		ctx context.Context,
+		deviceID string,
+		limit int,
+	) (*auditdomain.ProvisioningSnapshot, error)
+	ValidateProvisioning(
+		deviceID string,
+		provisioning *auditdomain.Provisioning,
+	) (*auditdomain.Provisioning, error)
+	RecordProvisioning(
+		ctx context.Context,
+		deviceID string,
+		reportedAt time.Time,
+		provisioning *auditdomain.Provisioning,
+	) error
 }
 
 // NewRouter returns the HTTP router for the device platform.
@@ -180,6 +195,7 @@ func NewRouter(options RouterOptions) http.Handler {
 				service:           options.RuntimeService,
 				policyService:     options.ParentPolicyService,
 				diagnosticService: options.DiagnosticService,
+				bindingRevoker:    options.BindingService,
 			}
 			mux.HandleFunc(
 				"GET /api/v1/devices/status",
@@ -223,7 +239,15 @@ func NewRouter(options RouterOptions) http.Handler {
 					"GET /api/v1/admin/devices/{device_id}/diagnostics",
 					authHandler.requireAdmin(diagnosticHandler.GetDiagnostics),
 				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/devices/{device_id}/provisioning",
+					authHandler.requireAdmin(diagnosticHandler.GetProvisioning),
+				)
 			}
+			mux.HandleFunc(
+				"POST /api/v1/admin/devices/{device_id}/sessions/revoke",
+				authHandler.requireAdmin(runtimeHandler.revokeSessions),
+			)
 		}
 		if options.AIService != nil {
 			adminHandler := adminHandler{

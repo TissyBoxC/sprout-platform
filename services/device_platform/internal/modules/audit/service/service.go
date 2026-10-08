@@ -185,6 +185,131 @@ func (s *Service) Get(
 	return s.repository.GetDiagnostics(ctx, deviceID, limit)
 }
 
+// ValidateProvisioning normalizes one optional provisioning payload without
+// persisting it. Transport calls this before accepting the runtime heartbeat
+// so an invalid provisioning extension cannot leave a half-applied state.
+func (s *Service) ValidateProvisioning(
+	deviceID string,
+	provisioning *domain.Provisioning,
+) (*domain.Provisioning, error) {
+	if provisioning == nil {
+		return nil, nil
+	}
+	deviceID = strings.TrimSpace(deviceID)
+	if !diagnosticDevicePattern.MatchString(deviceID) {
+		return nil, domain.ErrInvalidDiagnostics
+	}
+	if !provisioningStateIsValid(provisioning.State) ||
+		!sessionStateIsValid(provisioning.SessionState) ||
+		len(provisioning.Events) > 16 {
+		return nil, domain.ErrInvalidDiagnostics
+	}
+	normalized := &domain.Provisioning{
+		State:             provisioning.State,
+		WiFiConfigured:    provisioning.WiFiConfigured,
+		SessionState:      provisioning.SessionState,
+		LastProvisionedAt: provisioning.LastProvisionedAt,
+		Events:            make([]domain.ProvisioningEvent, 0, len(provisioning.Events)),
+	}
+	var newestSequence uint64
+	for index := range provisioning.Events {
+		event := provisioning.Events[index]
+		if !eventIDPattern.MatchString(strings.TrimSpace(event.EventID)) ||
+			event.Sequence == 0 ||
+			!provisioningEventTypeIsValid(event.EventType) ||
+			!symbolicTextPattern.MatchString(event.DetailCode) ||
+			event.DurationMS > 3_600_000 ||
+			!firmwareVersionPattern.MatchString(event.FirmwareVersion) {
+			return nil, domain.ErrInvalidDiagnostics
+		}
+		event.DetailCode = strings.TrimSpace(event.DetailCode)
+		event.FirmwareVersion = strings.TrimSpace(event.FirmwareVersion)
+		if event.Sequence > newestSequence {
+			newestSequence = event.Sequence
+		}
+		normalized.Events = append(normalized.Events, event)
+	}
+	return normalized, nil
+}
+
+// RecordProvisioning validates and persists one provisioning extension. A nil
+// payload is a successful no-op so older firmware stays compatible.
+func (s *Service) RecordProvisioning(
+	ctx context.Context,
+	deviceID string,
+	reportedAt time.Time,
+	provisioning *domain.Provisioning,
+) error {
+	normalized, err := s.ValidateProvisioning(deviceID, provisioning)
+	if err != nil || normalized == nil {
+		return err
+	}
+	return s.repository.SaveProvisioning(
+		ctx,
+		strings.TrimSpace(deviceID),
+		reportedAt.UTC(),
+		normalized,
+	)
+}
+
+// GetProvisioning returns the newest provisioning history for one device.
+func (s *Service) GetProvisioning(
+	ctx context.Context,
+	deviceID string,
+	limit int,
+) (*domain.ProvisioningSnapshot, error) {
+	deviceID = strings.TrimSpace(deviceID)
+	if !diagnosticDevicePattern.MatchString(deviceID) {
+		return nil, domain.ErrEventNotFound
+	}
+	return s.repository.GetProvisioning(ctx, deviceID, limit)
+}
+
+func provisioningStateIsValid(state string) bool {
+	switch state {
+	case domain.ProvisioningStateUnprovisioned,
+		domain.ProvisioningStateProvisioning,
+		domain.ProvisioningStateProvisioned:
+		return true
+	default:
+		return false
+	}
+}
+
+func sessionStateIsValid(state string) bool {
+	switch state {
+	case domain.SessionStateReady,
+		domain.SessionStateReauthRequired,
+		domain.SessionStateRevoked:
+		return true
+	default:
+		return false
+	}
+}
+
+// provisioningEventTypeIsValid keeps the accepted set identical to the values
+// the firmware provisioning reporter publishes. Rejecting unknown types
+// prevents a firmware bug or a crafted payload from widening the stored set.
+func provisioningEventTypeIsValid(eventType string) bool {
+	switch eventType {
+	case domain.ProvisioningEventStarted,
+		domain.ProvisioningEventWiFiConfigured,
+		domain.ProvisioningEventWiFiFailed,
+		domain.ProvisioningEventBindingCompleted,
+		domain.ProvisioningEventBindingRemoved,
+		domain.ProvisioningEventNetworkReconnected,
+		domain.ProvisioningEventNetworkLost,
+		domain.ProvisioningEventTimeSynced,
+		domain.ProvisioningEventAuthRevoked,
+		domain.ProvisioningEventAuthRestored,
+		domain.ProvisioningEventBindingConfirmed,
+		domain.ProvisioningEventBindingPending:
+		return true
+	default:
+		return false
+	}
+}
+
 func validEvent(eventID string, sequence uint64, newestSequence uint64) bool {
 	return eventIDPattern.MatchString(strings.TrimSpace(eventID)) &&
 		sequence > 0 &&

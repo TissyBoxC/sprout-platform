@@ -14,6 +14,11 @@ import (
 // Service is the narrow diagnostic surface required by the transport layer.
 type Service interface {
 	Get(ctx context.Context, deviceID string, limit int) (*domain.Snapshot, error)
+	GetProvisioning(
+		ctx context.Context,
+		deviceID string,
+		limit int,
+	) (*domain.ProvisioningSnapshot, error)
 }
 
 // Handler serves administrator-facing diagnostic history.
@@ -95,4 +100,46 @@ func parseDiagnosticLimit(raw string) int {
 		return defaultLimit
 	}
 	return value
+}
+
+// GetProvisioning handles
+// GET /api/v1/admin/devices/{device_id}/provisioning.
+//
+// The route is mounted behind requireAdmin. A device that has never reported a
+// provisioning payload is a normal empty state, so the response keeps the
+// requested device id and reports the unprovisioned defaults instead of
+// exposing an internal not-found error.
+func (h *Handler) GetProvisioning(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	deviceID := request.PathValue("device_id")
+	limit := parseDiagnosticLimit(request.URL.Query().Get("limit"))
+	snapshot, err := h.service.GetProvisioning(request.Context(), deviceID, limit)
+	if err != nil {
+		if errors.Is(err, domain.ErrEventNotFound) {
+			httpapi.WriteSuccess(response, request, http.StatusOK, map[string]any{
+				"device_id":                     deviceID,
+				"state":                         domain.ProvisioningStateUnprovisioned,
+				"wifi_configured":               false,
+				"session_state":                 domain.SessionStateReady,
+				"last_provisioned_at":           nil,
+				"newest_sequence":               0,
+				"dropped_events":                0,
+				"events":                        []domain.ProvisioningEvent{},
+				"retention_provisioning_events": domain.RetentionProvisioning,
+			})
+			return
+		}
+		httpapi.WriteError(
+			response,
+			request,
+			http.StatusInternalServerError,
+			"service_error",
+			"暂时无法读取设备配网记录",
+			false,
+		)
+		return
+	}
+	httpapi.WriteSuccess(response, request, http.StatusOK, snapshot)
 }

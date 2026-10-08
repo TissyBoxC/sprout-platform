@@ -3,6 +3,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -30,6 +31,17 @@ type Repository interface {
 		deviceID string,
 		limit int,
 	) (*domain.Snapshot, error)
+	SaveProvisioning(
+		ctx context.Context,
+		deviceID string,
+		reportedAt time.Time,
+		provisioning *domain.Provisioning,
+	) error
+	GetProvisioning(
+		ctx context.Context,
+		deviceID string,
+		limit int,
+	) (*domain.ProvisioningSnapshot, error)
 }
 
 // PostgresRepository stores diagnostic events in the platform database.
@@ -181,6 +193,7 @@ func pruneDiagnostics(
 		{name: "failure", table: "device_module_failures", limit: domain.RetentionFailures},
 		{name: "recovery", table: "device_recovery_events", limit: domain.RetentionRecovery},
 		{name: "interaction", table: "device_interaction_events", limit: domain.RetentionInteraction},
+		{name: "provisioning", table: "device_provisioning_events", limit: domain.RetentionProvisioning},
 	}
 	for _, statement := range statements {
 		sql := fmt.Sprintf(`
@@ -400,6 +413,163 @@ func deriveHealthState(snapshot *domain.Snapshot) string {
 		return domain.HealthDegraded
 	}
 	return domain.HealthFaulted
+}
+
+// SaveProvisioning inserts every reported provisioning event idempotently and
+// mirrors the current state into the runtime status row. Both writes share one
+// transaction so the admin list can never show a state that disagrees with the
+// event history it was derived from.
+func (r *PostgresRepository) SaveProvisioning(
+	ctx context.Context,
+	deviceID string,
+	reportedAt time.Time,
+	provisioning *domain.Provisioning,
+) error {
+	if provisioning == nil {
+		return nil
+	}
+
+	transaction, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin provisioning transaction: %w", err)
+	}
+	defer func() {
+		_ = transaction.Rollback(context.Background())
+	}()
+
+	for index := range provisioning.Events {
+		event := provisioning.Events[index]
+		if _, err := transaction.Exec(ctx, `
+			INSERT INTO device_provisioning_events (
+				id, device_id, event_id, sequence, event_type, detail_code,
+				duration_ms, firmware_version, reported_at, received_at
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+			ON CONFLICT (device_id, event_id) DO NOTHING
+		`,
+			uuid.NewString(),
+			deviceID,
+			event.EventID,
+			event.Sequence,
+			event.EventType,
+			event.DetailCode,
+			event.DurationMS,
+			event.FirmwareVersion,
+			reportedAt,
+		); err != nil {
+			return fmt.Errorf("insert device provisioning event: %w", err)
+		}
+	}
+
+	if _, err := transaction.Exec(ctx, `
+		UPDATE device_runtime_status
+		SET provisioning_state = $2,
+		    wifi_configured = $3,
+		    session_state = $4,
+		    last_provisioned_at = $5
+		WHERE device_id = $1
+	`,
+		deviceID,
+		provisioning.State,
+		provisioning.WiFiConfigured,
+		provisioning.SessionState,
+		provisioning.LastProvisionedAt,
+	); err != nil {
+		return fmt.Errorf("update device provisioning status: %w", err)
+	}
+
+	if err := pruneDiagnostics(ctx, transaction, deviceID); err != nil {
+		return err
+	}
+
+	if err := transaction.Commit(ctx); err != nil {
+		return fmt.Errorf("commit provisioning transaction: %w", err)
+	}
+	return nil
+}
+
+// GetProvisioning returns the newest bounded provisioning history for one
+// device together with the current state mirrored on the runtime status row.
+func (r *PostgresRepository) GetProvisioning(
+	ctx context.Context,
+	deviceID string,
+	limit int,
+) (*domain.ProvisioningSnapshot, error) {
+	if limit <= 0 {
+		limit = defaultQueryLimit
+	}
+	if limit > maxQueryLimit {
+		limit = maxQueryLimit
+	}
+
+	snapshot := &domain.ProvisioningSnapshot{
+		DeviceID:        deviceID,
+		State:           domain.ProvisioningStateUnprovisioned,
+		SessionState:    domain.SessionStateReady,
+		Events:          make([]domain.ProvisioningEvent, 0),
+		RetentionEvents: domain.RetentionProvisioning,
+	}
+
+	var storedState, storedSessionState *string
+	if err := r.pool.QueryRow(ctx, `
+		SELECT provisioning_state, wifi_configured, session_state,
+		       last_provisioned_at, updated_at
+		FROM device_runtime_status
+		WHERE device_id = $1
+	`, deviceID).Scan(
+		&storedState,
+		&snapshot.WiFiConfigured,
+		&storedSessionState,
+		&snapshot.LastProvisionedAt,
+		&snapshot.UpdatedAt,
+	); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("query device provisioning status: %w", err)
+	}
+	if storedState != nil {
+		snapshot.State = *storedState
+	}
+	if storedSessionState != nil {
+		snapshot.SessionState = *storedSessionState
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT event_id, sequence, event_type, detail_code,
+		       duration_ms, firmware_version, reported_at
+		FROM device_provisioning_events
+		WHERE device_id = $1
+		ORDER BY sequence DESC, received_at DESC, id DESC
+		LIMIT $2
+	`, deviceID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query device provisioning events: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var event domain.ProvisioningEvent
+		if err := rows.Scan(
+			&event.EventID,
+			&event.Sequence,
+			&event.EventType,
+			&event.DetailCode,
+			&event.DurationMS,
+			&event.FirmwareVersion,
+			&event.ReportedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan device provisioning event: %w", err)
+		}
+		if event.Sequence > snapshot.NewestSequence {
+			snapshot.NewestSequence = event.Sequence
+		}
+		snapshot.Events = append(snapshot.Events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate device provisioning events: %w", err)
+	}
+
+	if snapshot.UpdatedAt.IsZero() && len(snapshot.Events) == 0 {
+		return nil, domain.ErrEventNotFound
+	}
+	return snapshot, nil
 }
 
 func laterTime(current time.Time, candidate time.Time) time.Time {

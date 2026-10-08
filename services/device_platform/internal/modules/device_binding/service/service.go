@@ -512,6 +512,25 @@ func (s *Service) Delete(
 	)
 }
 
+// RevokeSessions revokes every live device session and optionally disables the
+// device credential. The binding is intentionally preserved: an operator
+// revoking sessions for a security response must not silently unbind the
+// family device.
+func (s *Service) RevokeSessions(
+	ctx context.Context,
+	deviceID string,
+	disableDevice bool,
+) error {
+	deviceID = strings.TrimSpace(deviceID)
+	if !deviceIDPattern.MatchString(deviceID) {
+		return domain.ErrInvalidDeviceID
+	}
+	if _, err := s.repository.GetByDeviceID(ctx, deviceID); err != nil {
+		return err
+	}
+	return s.repository.RevokeDeviceSessions(ctx, deviceID, disableDevice)
+}
+
 func normalizeCapabilities(capabilities []string) []string {
 	normalized := make([]string, 0, len(capabilities))
 	seen := make(map[string]struct{}, len(capabilities))

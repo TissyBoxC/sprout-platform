@@ -293,6 +293,26 @@ func (r *memoryRepository) RevokeDeviceSessionsAndDeleteBinding(
 	return nil
 }
 
+func (r *memoryRepository) RevokeDeviceSessions(
+	_ context.Context,
+	deviceID string,
+	disableDevice bool,
+) error {
+	for tokenHash, session := range r.sessions {
+		if session.DeviceID == deviceID {
+			now := time.Now().UTC()
+			session.RevokedAt = &now
+			r.sessions[tokenHash] = session
+		}
+	}
+	if disableDevice {
+		if credential := r.credentials[deviceID]; credential != nil {
+			credential.Status = "disabled"
+		}
+	}
+	return nil
+}
+
 func (r *memoryRepository) CreateRegistrationToken(
 	_ context.Context,
 	token *domain.RegistrationToken,

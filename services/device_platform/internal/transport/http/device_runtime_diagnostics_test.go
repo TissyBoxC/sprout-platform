@@ -62,6 +62,22 @@ func (stub stubRuntimeDiagnosticService) Record(
 	return stub.recordErr
 }
 
+func (stub stubRuntimeDiagnosticService) ValidateProvisioning(
+	_ string,
+	_ *auditdomain.Provisioning,
+) (*auditdomain.Provisioning, error) {
+	return nil, stub.validateErr
+}
+
+func (stub stubRuntimeDiagnosticService) RecordProvisioning(
+	_ context.Context,
+	_ string,
+	_ time.Time,
+	_ *auditdomain.Provisioning,
+) error {
+	return stub.recordErr
+}
+
 func newDiagnosticHeartbeatRequest(t *testing.T) *http.Request {
 	t.Helper()
 	body := `{

@@ -371,6 +371,10 @@ const runtimeStatusSelect = `
 		status.offline_reason,
 		status.fallback_active,
 		status.pending_telemetry,
+		status.provisioning_state,
+		status.wifi_configured,
+		status.session_state,
+		status.last_provisioned_at,
 		status.received_at,
 		status.updated_at
 	FROM device_runtime_status AS status
@@ -398,6 +402,12 @@ type runtimeScanner interface {
 
 func scanRuntimeStatus(row runtimeScanner) (*domain.RuntimeStatus, error) {
 	var status domain.RuntimeStatus
+	// Provisioning columns are nullable so a device that only ever reports the
+	// base heartbeat keeps the unprovisioned defaults instead of failing to
+	// scan. Defaults are applied after the scan when the columns are NULL.
+	var provisioningState *string
+	var wifiConfigured *bool
+	var sessionState *string
 	err := row.Scan(
 		&status.DeviceID,
 		&status.HeartbeatID,
@@ -417,11 +427,26 @@ func scanRuntimeStatus(row runtimeScanner) (*domain.RuntimeStatus, error) {
 		&status.OfflineReason,
 		&status.FallbackActive,
 		&status.PendingTelemetry,
+		&provisioningState,
+		&wifiConfigured,
+		&sessionState,
+		&status.LastProvisionedAt,
 		&status.ReceivedAt,
 		&status.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
+	}
+	status.ProvisioningState = domain.ProvisioningStateUnprovisioned
+	if provisioningState != nil {
+		status.ProvisioningState = domain.ProvisioningState(*provisioningState)
+	}
+	if wifiConfigured != nil {
+		status.WiFiConfigured = *wifiConfigured
+	}
+	status.SessionState = domain.SessionStateReady
+	if sessionState != nil {
+		status.SessionState = domain.SessionState(*sessionState)
 	}
 	return &status, nil
 }

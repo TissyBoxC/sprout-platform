@@ -18,6 +18,13 @@ type deviceRuntimeHandler struct {
 	service           *runtimeservice.Service
 	policyService     deviceRuntimePolicyService
 	diagnosticService deviceRuntimeDiagnosticService
+	bindingRevoker    deviceRuntimeBindingRevoker
+}
+
+// deviceRuntimeBindingRevoker is the narrow device-binding surface required to
+// revoke a device session from the brand management console.
+type deviceRuntimeBindingRevoker interface {
+	RevokeSessions(ctx context.Context, deviceID string, disableDevice bool) error
 }
 
 type deviceRuntimeDiagnosticService interface {
@@ -30,6 +37,16 @@ type deviceRuntimeDiagnosticService interface {
 		deviceID string,
 		reportedAt time.Time,
 		diagnostics *auditdomain.Diagnostics,
+	) error
+	ValidateProvisioning(
+		deviceID string,
+		provisioning *auditdomain.Provisioning,
+	) (*auditdomain.Provisioning, error)
+	RecordProvisioning(
+		ctx context.Context,
+		deviceID string,
+		reportedAt time.Time,
+		provisioning *auditdomain.Provisioning,
 	) error
 }
 
@@ -66,7 +83,8 @@ type recordHeartbeatRequest struct {
 		FallbackActive   bool   `json:"fallback_active"`
 		PendingTelemetry int    `json:"pending_telemetry"`
 	} `json:"offline"`
-	Diagnostics *auditdomain.Diagnostics `json:"diagnostics"`
+	Provisioning *auditdomain.Provisioning `json:"provisioning"`
+	Diagnostics  *auditdomain.Diagnostics  `json:"diagnostics"`
 }
 
 type createRuntimeCommandRequest struct {
@@ -125,6 +143,22 @@ func (handler deviceRuntimeHandler) recordHeartbeat(
 			return
 		}
 	}
+	var normalizedProvisioning *auditdomain.Provisioning
+	if payload.Provisioning != nil {
+		if handler.diagnosticService == nil {
+			writeError(response, request, http.StatusServiceUnavailable, "service_unavailable", "设备配网状态暂时无法接收")
+			return
+		}
+		var validationErr error
+		normalizedProvisioning, validationErr = handler.diagnosticService.ValidateProvisioning(
+			deviceID,
+			payload.Provisioning,
+		)
+		if validationErr != nil {
+			writeError(response, request, http.StatusUnprocessableEntity, "invalid_device_provisioning", "设备配网状态需要重新同步")
+			return
+		}
+	}
 	status, err := handler.service.RecordHeartbeat(
 		request.Context(),
 		deviceSessionToken,
@@ -162,6 +196,25 @@ func (handler deviceRuntimeHandler) recordHeartbeat(
 		); recordErr != nil {
 			writeError(response, request, http.StatusInternalServerError, "service_error", "设备诊断暂时无法保存，请稍后重试")
 			return
+		}
+	}
+	if normalizedProvisioning != nil {
+		if recordErr := handler.diagnosticService.RecordProvisioning(
+			request.Context(),
+			status.DeviceID,
+			reportedAt,
+			normalizedProvisioning,
+		); recordErr != nil {
+			writeError(response, request, http.StatusInternalServerError, "service_error", "设备配网状态暂时无法保存，请稍后重试")
+			return
+		}
+		// The provisioning write mirrors the current state onto the runtime
+		// status row, so re-read it to return the persisted view.
+		if refreshed, refreshErr := handler.service.GetStatus(
+			request.Context(),
+			status.DeviceID,
+		); refreshErr == nil {
+			status = refreshed
 		}
 	}
 	writeSuccess(response, request, http.StatusOK, runtimeStatusResponse(status))
@@ -320,6 +373,42 @@ func (handler deviceRuntimeHandler) acknowledgeCommand(
 	writeSuccess(response, request, http.StatusOK, map[string]any{"acknowledged": true})
 }
 
+type revokeDeviceSessionsRequest struct {
+	DisableDevice bool `json:"disable_device"`
+}
+
+// revokeSessions is an administrator security action. It revokes every live
+// session for one bound device and optionally disables the device credential.
+// The binding is preserved so the family device is not silently unbound.
+func (handler deviceRuntimeHandler) revokeSessions(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	if handler.bindingRevoker == nil {
+		writeError(response, request, http.StatusServiceUnavailable, "service_unavailable", "设备会话暂时无法吊销")
+		return
+	}
+	deviceID := strings.TrimSpace(request.PathValue("device_id"))
+	var payload revokeDeviceSessionsRequest
+	// An empty body is a valid request for the default "revoke only" action.
+	if err := decodeJSON(request, &payload); err != nil {
+		payload = revokeDeviceSessionsRequest{}
+	}
+	if err := handler.bindingRevoker.RevokeSessions(
+		request.Context(),
+		deviceID,
+		payload.DisableDevice,
+	); err != nil {
+		writeDeviceRuntimeError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"device_id":        deviceID,
+		"sessions_revoked": true,
+		"device_disabled":  payload.DisableDevice,
+	})
+}
+
 // getParentPolicy returns the current guardian policy for the authenticated
 // device's family. The path device id is checked against the session owner so
 // one device cannot read another family's policy by changing the path.
@@ -413,6 +502,12 @@ func runtimeStatusResponse(status *domain.RuntimeStatus) map[string]any {
 			"fallback_active":   status.FallbackActive,
 			"pending_telemetry": status.PendingTelemetry,
 		},
+		"provisioning": map[string]any{
+			"state":               status.ProvisioningState,
+			"wifi_configured":     status.WiFiConfigured,
+			"session_state":       status.SessionState,
+			"last_provisioned_at": status.LastProvisionedAt,
+		},
 	}
 }
 
@@ -422,15 +517,15 @@ func deviceStatusResponse(status *domain.DeviceStatus) map[string]any {
 	}
 	return map[string]any{
 		"parent_account_id": status.ParentAccountID,
-		"device_id":        status.DeviceID,
-		"device_name":      status.DeviceName,
-		"hardware_model":   status.HardwareModel,
-		"firmware_version": status.FirmwareVersion,
-		"capabilities":     status.Capabilities,
-		"lifecycle_status": status.LifecycleStatus,
-		"bound_at":         status.BoundAt,
-		"updated_at":       status.UpdatedAt,
-		"runtime":          runtimeStatusResponse(status.Runtime),
+		"device_id":         status.DeviceID,
+		"device_name":       status.DeviceName,
+		"hardware_model":    status.HardwareModel,
+		"firmware_version":  status.FirmwareVersion,
+		"capabilities":      status.Capabilities,
+		"lifecycle_status":  status.LifecycleStatus,
+		"bound_at":          status.BoundAt,
+		"updated_at":        status.UpdatedAt,
+		"runtime":           runtimeStatusResponse(status.Runtime),
 	}
 }
 

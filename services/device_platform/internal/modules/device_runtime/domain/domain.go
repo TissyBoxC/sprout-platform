@@ -82,6 +82,26 @@ const (
 	OfflineReasonServiceUnavailable   OfflineReason = "service_unavailable"
 )
 
+// ProvisioningState is the current network bring-up step reported by a device.
+type ProvisioningState string
+
+const (
+	ProvisioningStateUnprovisioned ProvisioningState = "unprovisioned"
+	ProvisioningStateProvisioning  ProvisioningState = "provisioning"
+	ProvisioningStateProvisioned   ProvisioningState = "provisioned"
+)
+
+// SessionState describes whether the device session is usable. A device that
+// was revoked or must re-authenticate reports this so guardians see the exact
+// reason instead of a generic offline state.
+type SessionState string
+
+const (
+	SessionStateReady          SessionState = "ready"
+	SessionStateReauthRequired SessionState = "reauth_required"
+	SessionStateRevoked        SessionState = "revoked"
+)
+
 // Heartbeat contains one complete device runtime snapshot.
 type Heartbeat struct {
 	DeviceID          string
@@ -110,6 +130,13 @@ type Heartbeat struct {
 type RuntimeStatus struct {
 	Heartbeat
 	IsOnline bool
+	// Provisioning mirrors the provisioning columns on the runtime status row.
+	// They are read-only projections of the provisioning event stream and are
+	// never written through a heartbeat.
+	ProvisioningState ProvisioningState
+	WiFiConfigured    bool
+	SessionState      SessionState
+	LastProvisionedAt *time.Time
 }
 
 // CommandType is an operator-initiated network maintenance action.

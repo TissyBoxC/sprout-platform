@@ -10,9 +10,11 @@ import (
 )
 
 type stubRepository struct {
-	saved *domain.Diagnostics
-	get   *domain.Snapshot
-	err   error
+	saved             *domain.Diagnostics
+	get               *domain.Snapshot
+	savedProvisioning *domain.Provisioning
+	getProvisioning   *domain.ProvisioningSnapshot
+	err               error
 }
 
 func (stub *stubRepository) SaveDiagnostics(
@@ -31,6 +33,24 @@ func (stub *stubRepository) GetDiagnostics(
 	_ int,
 ) (*domain.Snapshot, error) {
 	return stub.get, stub.err
+}
+
+func (stub *stubRepository) SaveProvisioning(
+	_ context.Context,
+	_ string,
+	_ time.Time,
+	provisioning *domain.Provisioning,
+) error {
+	stub.savedProvisioning = provisioning
+	return stub.err
+}
+
+func (stub *stubRepository) GetProvisioning(
+	_ context.Context,
+	_ string,
+	_ int,
+) (*domain.ProvisioningSnapshot, error) {
+	return stub.getProvisioning, stub.err
 }
 
 var _ repository.Repository = (*stubRepository)(nil)
@@ -225,5 +245,120 @@ func TestRecordDelegatesNormalizedDiagnostics(t *testing.T) {
 	if repositoryStub.saved == nil ||
 		repositoryStub.saved.BootEvents[0].EventType != domain.EventTypeBoot {
 		t.Fatalf("expected normalized diagnostics to reach the repository")
+	}
+}
+
+func TestValidateProvisioningAcceptsCanonicalPayload(t *testing.T) {
+	service := &Service{}
+	normalized, err := service.ValidateProvisioning(
+		"sprout_device_001",
+		&domain.Provisioning{
+			State:          domain.ProvisioningStateProvisioned,
+			WiFiConfigured: true,
+			SessionState:   domain.SessionStateReady,
+			Events: []domain.ProvisioningEvent{
+				{
+					EventID:         "provisioning_00000002",
+					EventType:       domain.ProvisioningEventWiFiConfigured,
+					Sequence:        2,
+					DetailCode:      "ble_provisioning",
+					DurationMS:      4200,
+					FirmwareVersion: "0.7.0",
+				},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("expected provisioning to validate, got %v", err)
+	}
+	if normalized == nil ||
+		normalized.State != domain.ProvisioningStateProvisioned ||
+		len(normalized.Events) != 1 {
+		t.Fatalf("unexpected normalized provisioning: %+v", normalized)
+	}
+}
+
+func TestValidateProvisioningRejectsUnknownEventType(t *testing.T) {
+	service := &Service{}
+	_, err := service.ValidateProvisioning(
+		"sprout_device_001",
+		&domain.Provisioning{
+			State:        domain.ProvisioningStateProvisioning,
+			SessionState: domain.SessionStateReady,
+			Events: []domain.ProvisioningEvent{
+				{
+					EventID:         "provisioning_00000001",
+					EventType:       "unknown_provisioning_step",
+					Sequence:        1,
+					DetailCode:      "first_run",
+					FirmwareVersion: "0.7.0",
+				},
+			},
+		},
+	)
+	if err != domain.ErrInvalidDiagnostics {
+		t.Fatalf("expected invalid provisioning for unknown event type, got %v", err)
+	}
+}
+
+func TestValidateProvisioningRejectsUnknownSessionState(t *testing.T) {
+	service := &Service{}
+	_, err := service.ValidateProvisioning(
+		"sprout_device_001",
+		&domain.Provisioning{
+			State:        domain.ProvisioningStateProvisioned,
+			SessionState: "expired",
+			Events:       []domain.ProvisioningEvent{},
+		},
+	)
+	if err != domain.ErrInvalidDiagnostics {
+		t.Fatalf("expected invalid provisioning for unknown session state, got %v", err)
+	}
+}
+
+func TestRecordProvisioningDelegatesNormalizedPayload(t *testing.T) {
+	repositoryStub := &stubRepository{}
+	service := &Service{repository: repositoryStub}
+	err := service.RecordProvisioning(
+		context.Background(),
+		"sprout_device_001",
+		time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC),
+		&domain.Provisioning{
+			State:        domain.ProvisioningStateProvisioned,
+			SessionState: domain.SessionStateReady,
+			Events: []domain.ProvisioningEvent{
+				{
+					EventID:         "provisioning_00000005",
+					EventType:       domain.ProvisioningEventBindingConfirmed,
+					Sequence:        5,
+					DetailCode:      "guardian_binding",
+					FirmwareVersion: "0.7.0",
+				},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("expected record provisioning to succeed, got %v", err)
+	}
+	if repositoryStub.savedProvisioning == nil ||
+		repositoryStub.savedProvisioning.Events[0].EventType !=
+			domain.ProvisioningEventBindingConfirmed {
+		t.Fatalf("expected normalized provisioning to reach the repository")
+	}
+}
+
+func TestRecordProvisioningIgnoresNilPayload(t *testing.T) {
+	repositoryStub := &stubRepository{}
+	service := &Service{repository: repositoryStub}
+	if err := service.RecordProvisioning(
+		context.Background(),
+		"sprout_device_001",
+		time.Now().UTC(),
+		nil,
+	); err != nil {
+		t.Fatalf("expected nil provisioning to be a no-op, got %v", err)
+	}
+	if repositoryStub.savedProvisioning != nil {
+		t.Fatal("expected no repository write for a nil provisioning payload")
 	}
 }

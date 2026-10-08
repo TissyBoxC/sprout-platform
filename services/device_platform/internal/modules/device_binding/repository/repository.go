@@ -34,6 +34,7 @@ type Repository interface {
 		parentAccountID string,
 		deviceID string,
 	) error
+	RevokeDeviceSessions(ctx context.Context, deviceID string, disableDevice bool) error
 	CreateRegistrationToken(ctx context.Context, token *domain.RegistrationToken) error
 	GetRegistrationTokenByHash(
 		ctx context.Context,
@@ -367,6 +368,50 @@ func (r *PostgresRepository) RevokeDeviceSessionsAndDeleteBinding(
 		}
 		if tag.RowsAffected() == 0 {
 			return domain.ErrDeviceNotFound
+		}
+		return nil
+	})
+}
+
+// RevokeDeviceSessions revokes every live session for one device without
+// deleting its binding. Operators use this to force a device to re-authenticate
+// after a credential leak or a support request. Setting disableDevice also
+// marks the device credential inactive so a revoked device cannot immediately
+// obtain a fresh session through the normal challenge flow.
+func (r *PostgresRepository) RevokeDeviceSessions(
+	ctx context.Context,
+	deviceID string,
+	disableDevice bool,
+) error {
+	return withTransaction(ctx, r.pool, func(transaction pgx.Tx) error {
+		var exists bool
+		if err := transaction.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM device_credentials WHERE device_id = $1
+			)
+		`, deviceID).Scan(&exists); err != nil {
+			return fmt.Errorf("check device credential: %w", err)
+		}
+		if !exists {
+			return domain.ErrDeviceNotFound
+		}
+		if _, err := transaction.Exec(ctx, `
+			UPDATE device_sessions
+			SET revoked_at = NOW()
+			WHERE device_id = $1
+			  AND revoked_at IS NULL
+		`, deviceID); err != nil {
+			return fmt.Errorf("revoke device sessions: %w", err)
+		}
+		if disableDevice {
+			if _, err := transaction.Exec(ctx, `
+				UPDATE device_credentials
+				SET status = 'disabled',
+				    updated_at = NOW()
+				WHERE device_id = $1
+			`, deviceID); err != nil {
+				return fmt.Errorf("disable device credential: %w", err)
+			}
 		}
 		return nil
 	})

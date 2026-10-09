@@ -124,6 +124,7 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
                     child: _FamilyToolsCard(
                       onChildProfiles: () => context.push('/me/children'),
                       onUsageReports: () => context.push('/me/usage-reports'),
+                      onNotifications: () => context.push('/me/notifications'),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -178,10 +179,12 @@ class _FamilyToolsCard extends StatelessWidget {
   const _FamilyToolsCard({
     required this.onChildProfiles,
     required this.onUsageReports,
+    required this.onNotifications,
   });
 
   final VoidCallback onChildProfiles;
   final VoidCallback onUsageReports;
+  final VoidCallback onNotifications;
 
   @override
   Widget build(BuildContext context) {
@@ -203,6 +206,14 @@ class _FamilyToolsCard extends StatelessWidget {
             subtitle: const Text('查看每日时长、对话、内容和限制记录'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onUsageReports,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.mark_email_unread_outlined),
+            title: const Text('消息通知'),
+            subtitle: const Text('查看平台通知，给设备留言'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onNotifications,
           ),
         ],
       ),

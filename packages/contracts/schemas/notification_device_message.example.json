@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0.0",
+  "id": "00000000-0000-4000-8000-000000000000",
+  "title": "记得喝水哦",
+  "body": "爸爸妈妈希望你今天多喝水，玩得开心。",
+  "severity": "info",
+  "duration_seconds": 30,
+  "category": "family_message"
+}

@@ -82,7 +82,13 @@ func DefaultRegistry() []Definition {
 		readOnlyFeatureDef("usage_report", "使用报告", "设备使用时长和内容统计。", "family", "家庭平台",
 			"数据保留天数尚未接入自动清理任务，接入后才会开放修改。",
 			metrics("reported_usage_days", "已上报天数", "天")),
-		plannedFeatureDef("notification", "消息通知", "家长通知、短信和消息触达。", "platform", "平台运维"),
+		featureDef("notification", "消息通知", "家长站内通知、远程留言、短信与消息触达。", "platform", "平台运维", false,
+			nil,
+			metrics(
+				"notification_total", "通知总数", "条",
+				"notification_pending_delivery", "待投递", "条",
+				"notification_failed_delivery", "投递失败", "条",
+			)),
 		featureDef("platform_security", "平台安全", "管理员权限、审计与安全策略。", "security", "安全团队", true,
 			configFields(
 				boolField("minor_mode_default", "默认启用未成年人模式", true, true),

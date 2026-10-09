@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0.0",
+  "id": "00000000-0000-4000-8000-000000000000",
+  "category": "service_update",
+  "severity": "info",
+  "title": "平台已完成升级",
+  "body": "语音对话与设备更新服务已升级到最新版本，感谢你的耐心等待。",
+  "audience": "all_parents",
+  "parent_account_id": "",
+  "device_id": "",
+  "action_path": "/services",
+  "action_label": "查看详情",
+  "display_duration_seconds": 0,
+  "channels": [
+    "in_app",
+    "push"
+  ],
+  "source": "system",
+  "created_by": "",
+  "publish_at": "2026-10-09T00:00:00Z",
+  "expires_at": "2027-01-07T00:00:00Z",
+  "created_at": "2026-10-09T00:00:00Z",
+  "updated_at": "2026-10-09T00:00:00Z"
+}

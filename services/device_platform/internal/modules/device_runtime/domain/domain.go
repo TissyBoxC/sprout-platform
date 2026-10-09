@@ -150,6 +150,10 @@ const (
 	// CommandFactoryReset is a destructive, guard-on-device action. The device
 	// must apply its own local confirmation flow before erasing configuration.
 	CommandFactoryReset CommandType = "factory_reset"
+	// CommandDisplayMessage shows a guardian-authored message on the device
+	// screen for a bounded duration. It carries only authored copy and never
+	// child conversation content.
+	CommandDisplayMessage CommandType = "display_message"
 )
 
 // CommandTypeIsValid reports whether a command is part of the stable contract.
@@ -158,7 +162,8 @@ func CommandTypeIsValid(commandType CommandType) bool {
 	case CommandRefreshConfiguration,
 		CommandReconnectNetwork,
 		CommandResyncTime,
-		CommandFactoryReset:
+		CommandFactoryReset,
+		CommandDisplayMessage:
 		return true
 	default:
 		return false

@@ -13,6 +13,8 @@ import '../../features/device/domain/device_payload.dart';
 import '../../features/device/presentation/device_provisioning_page.dart';
 import '../../features/device/presentation/device_qr_scan_page.dart';
 import '../../features/family/presentation/family_home_page.dart';
+import '../../features/notification/presentation/family_message_page.dart';
+import '../../features/notification/presentation/notification_inbox_page.dart';
 import '../../features/ota/presentation/app_update_page.dart';
 import '../../features/parent_policy/presentation/parent_policy_page.dart';
 import '../../features/profile/presentation/profile_page.dart';
@@ -76,6 +78,14 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/usage-reports',
         builder: (context, state) => const UsageReportPage(),
+      ),
+      GoRoute(
+        path: '/me/notifications',
+        builder: (context, state) => const NotificationInboxPage(),
+      ),
+      GoRoute(
+        path: '/me/notifications/message',
+        builder: (context, state) => const FamilyMessagePage(),
       ),
       GoRoute(
         path: '/me/children/:childId/policy',

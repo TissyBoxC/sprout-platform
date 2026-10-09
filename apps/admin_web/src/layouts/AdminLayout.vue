@@ -47,6 +47,10 @@ async function logout(): Promise<void> {
           <span class="nav-dot" aria-hidden="true"></span>
           使用报告
         </RouterLink>
+        <RouterLink to="/notifications">
+          <span class="nav-dot" aria-hidden="true"></span>
+          消息通知
+        </RouterLink>
         <RouterLink to="/devices">
           <span class="nav-dot" aria-hidden="true"></span>
           设备管理

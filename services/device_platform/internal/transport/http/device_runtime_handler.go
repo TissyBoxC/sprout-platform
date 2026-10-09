@@ -340,7 +340,7 @@ func (handler deviceRuntimeHandler) listDeviceCommands(
 	}
 	result := make([]map[string]any, 0, len(commands))
 	for index := range commands {
-		result = append(result, commandResponse(&commands[index]))
+		result = append(result, deviceCommandResponse(&commands[index]))
 	}
 	writeSuccess(response, request, http.StatusOK, map[string]any{"commands": result})
 }
@@ -545,6 +545,23 @@ func commandResponse(command *domain.Command) map[string]any {
 		"acknowledged_at": command.AcknowledgedAt,
 		"result_code":     command.ResultCode,
 	}
+}
+
+// deviceCommandResponse is the device-facing command projection. It adds the
+// authored payload (for example a display_message body) that the device needs
+// to execute the command. Only the device-authenticated command poll uses it;
+// the operator projections stay payload-free.
+func deviceCommandResponse(command *domain.Command) map[string]any {
+	response := commandResponse(command)
+	if response == nil {
+		return nil
+	}
+	if command.Payload == nil {
+		response["payload"] = map[string]any{}
+	} else {
+		response["payload"] = command.Payload
+	}
+	return response
 }
 
 func writeDeviceRuntimeError(

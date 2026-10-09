@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprout.example/contracts/schemas/notification_device_message.schema.json",
+  "title": "Device display message",
+  "description": "Fixed contract for a guardian message rendered by the device screen.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "title",
+    "body",
+    "severity",
+    "duration_seconds",
+    "category"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "body": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "info",
+        "success",
+        "warning",
+        "critical"
+      ]
+    },
+    "duration_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 300
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "account_security",
+        "device_status",
+        "content_release",
+        "service_update",
+        "usage_report",
+        "family_message",
+        "system_announcement"
+      ]
+    }
+  }
+}

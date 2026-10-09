@@ -35,6 +35,8 @@ import (
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	operationsRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/repository"
 	operationsService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
+	notificationRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/repository"
+	notificationService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
 	otaDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/domain"
 	otaRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/repository"
 	otaService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/service"
@@ -421,6 +423,14 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create privacy service: %w", err)
 	}
+	notifications, err := notificationService.New(notificationService.Options{
+		Repository: notificationRepository.NewPostgresRepository(databaseStore.Pool()),
+		Commander:  deviceRuntimeService,
+		Audit:      privacy,
+	})
+	if err != nil {
+		return fmt.Errorf("create notification service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
@@ -444,6 +454,7 @@ func Run() error {
 			VoiceTokenIssuer:      voiceTokenIssuer,
 			VoiceWebSocketURL:     cfg.VoiceGateway.WebSocketURL,
 			PrivacyService:        privacy,
+			NotificationService:   notifications,
 			AuditRecorder:         privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprout.example/contracts/schemas/notification.schema.json",
+  "title": "Guardian notification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "category",
+    "severity",
+    "title",
+    "body",
+    "audience",
+    "parent_account_id",
+    "device_id",
+    "action_path",
+    "action_label",
+    "display_duration_seconds",
+    "channels",
+    "source",
+    "created_by",
+    "publish_at",
+    "expires_at",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "account_security",
+        "device_status",
+        "content_release",
+        "service_update",
+        "usage_report",
+        "family_message",
+        "system_announcement"
+      ]
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "info",
+        "success",
+        "warning",
+        "critical"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "body": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "audience": {
+      "type": "string",
+      "enum": [
+        "parent",
+        "all_parents",
+        "family_devices"
+      ]
+    },
+    "parent_account_id": {
+      "type": "string"
+    },
+    "device_id": {
+      "type": "string"
+    },
+    "action_path": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "action_label": {
+      "type": "string",
+      "maxLength": 24
+    },
+    "display_duration_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 300
+    },
+    "channels": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "in_app",
+          "push",
+          "sms",
+          "email",
+          "device"
+        ]
+      }
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "administrator",
+        "guardian",
+        "system"
+      ]
+    },
+    "created_by": {
+      "type": "string"
+    },
+    "publish_at": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    },
+    "expires_at": {
+      "oneOf": [
+        {
+          "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "created_at": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    }
+  }
+}

@@ -74,6 +74,7 @@ class ProfilePage extends ConsumerWidget {
                     account: account,
                     onChildren: () => context.push('/me/children'),
                     onUsageReports: () => context.push('/me/usage-reports'),
+                    onNotifications: () => context.push('/me/notifications'),
                     onContent: () => context.push('/me/content'),
                     onEmail: () => context.push('/account/email'),
                     onPrivacy: () => context.push('/me/privacy'),
@@ -405,6 +406,7 @@ class _SettingsCard extends StatelessWidget {
     required this.account,
     required this.onChildren,
     required this.onUsageReports,
+    required this.onNotifications,
     required this.onContent,
     required this.onEmail,
     required this.onPrivacy,
@@ -415,6 +417,7 @@ class _SettingsCard extends StatelessWidget {
   final ParentAccount account;
   final VoidCallback onChildren;
   final VoidCallback onUsageReports;
+  final VoidCallback onNotifications;
   final VoidCallback onContent;
   final VoidCallback onEmail;
   final VoidCallback onPrivacy;
@@ -442,6 +445,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('查看每日时长、对话、内容和限制记录'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onUsageReports,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.mark_email_unread_outlined),
+            title: const Text('消息通知'),
+            subtitle: const Text('查看平台通知，给设备留言'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onNotifications,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

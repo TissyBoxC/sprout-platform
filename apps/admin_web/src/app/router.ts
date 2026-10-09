@@ -16,6 +16,7 @@ import ContentLibraryPage from '@/features/content/presentation/ContentLibraryPa
 import DeviceDiagnosticsPage from '@/features/audit/presentation/DeviceDiagnosticsPage.vue'
 import OperationAuditPage from '@/features/audit/presentation/OperationAuditPage.vue'
 import UsageReportPage from '@/features/usage_report/presentation/UsageReportPage.vue'
+import NotificationCenterPage from '@/features/notifications/presentation/NotificationCenterPage.vue'
 import { useAuthStore } from '@/features/auth/application/authStore'
 
 /// Feature routes are registered here so removing a feature only changes its
@@ -49,6 +50,11 @@ export function createAdminRouter() {
         path: '/usage-reports',
         name: 'usage-reports',
         component: UsageReportPage,
+      },
+      {
+        path: '/notifications',
+        name: 'notifications',
+        component: NotificationCenterPage,
       },
       {
         path: '/ai-accounts',

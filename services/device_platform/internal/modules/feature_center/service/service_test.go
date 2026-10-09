@@ -453,7 +453,7 @@ func TestDefaultRegistryMarksUnimplementedFeaturesAsPlanned(t *testing.T) {
 	for _, feature := range features {
 		byID[feature.ID] = feature
 	}
-	for _, featureID := range []string{"ui_text", "notification"} {
+	for _, featureID := range []string{"ui_text"} {
 		feature, ok := byID[featureID]
 		if !ok {
 			t.Fatalf("missing feature %q", featureID)
@@ -465,11 +465,24 @@ func TestDefaultRegistryMarksUnimplementedFeaturesAsPlanned(t *testing.T) {
 			t.Fatalf("%s should explain why it is not editable", featureID)
 		}
 	}
-	if _, err := service.CheckHealth(context.Background(), "notification"); !errors.Is(
+	if _, err := service.CheckHealth(context.Background(), "ui_text"); !errors.Is(
 		err,
 		domain.ErrHealthCheckUnavailable,
 	) {
 		t.Fatalf("planned feature health check should be unavailable, got %v", err)
+	}
+
+	// The notification module is now implemented, so it must be a registered
+	// active capability with a read-only configuration surface.
+	notification, ok := byID["notification"]
+	if !ok {
+		t.Fatalf("missing feature %q", "notification")
+	}
+	if notification.Status != domain.FeatureStatusActive {
+		t.Fatalf("notification status = %q, want active", notification.Status)
+	}
+	if len(notification.ReadOnlyMetrics) == 0 {
+		t.Fatalf("notification should expose read-only delivery metrics")
 	}
 }
 

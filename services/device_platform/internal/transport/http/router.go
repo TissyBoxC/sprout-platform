@@ -24,6 +24,8 @@ import (
 	featurecenterservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	operationsservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
 	otaservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/service"
+	notificationhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/handler"
+	notificationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
 	policeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
 	privacyhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/handler"
 	privacyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/service"
@@ -53,6 +55,7 @@ type RouterOptions struct {
 	VoiceTokenIssuer      bindingservice.VoiceTokenIssuer
 	VoiceWebSocketURL     string
 	PrivacyService        *privacyservice.Service
+	NotificationService   *notificationservice.Service
 	AuditRecorder         auditRecorder
 }
 
@@ -467,30 +470,46 @@ func NewRouter(options RouterOptions) http.Handler {
 					authHandler.requireAdmin,
 				)
 			}
+			// parentScoped resolves the authenticated guardian id and is shared
+			// by guardian-owned routes such as privacy and notifications.
+			parentScoped := func(
+				action func(
+					http.ResponseWriter,
+					*http.Request,
+					string,
+				),
+			) http.HandlerFunc {
+				return func(response http.ResponseWriter, request *http.Request) {
+					accountID, ok := authenticatedAccountID(request)
+					if !ok {
+						writeError(
+							response,
+							request,
+							http.StatusUnauthorized,
+							"unauthenticated",
+							"请重新登录",
+						)
+						return
+					}
+					action(response, request, accountID)
+				}
+			}
+			// adminScoped resolves the authenticated administrator id for
+			// attribution and audit.
+			adminScoped := func(
+				action func(
+					http.ResponseWriter,
+					*http.Request,
+					string,
+				),
+			) http.HandlerFunc {
+				return func(response http.ResponseWriter, request *http.Request) {
+					accountID, _ := authenticatedAccountID(request)
+					action(response, request, accountID)
+				}
+			}
 			if options.PrivacyService != nil {
 				privacyHandler := privacyhandler.New(options.PrivacyService)
-				parentScoped := func(
-					action func(
-						http.ResponseWriter,
-						*http.Request,
-						string,
-					),
-				) http.HandlerFunc {
-					return func(response http.ResponseWriter, request *http.Request) {
-						accountID, ok := authenticatedAccountID(request)
-						if !ok {
-							writeError(
-								response,
-								request,
-								http.StatusUnauthorized,
-								"unauthenticated",
-								"请重新登录",
-							)
-							return
-						}
-						action(response, request, accountID)
-					}
-				}
 				mux.HandleFunc(
 					"GET /api/v1/privacy",
 					authHandler.requireAuthentication(parentScoped(privacyHandler.Status)),
@@ -526,6 +545,66 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/admin/audit",
 					authHandler.requireAdmin(privacyHandler.AdminAudit),
+				)
+			}
+			if options.NotificationService != nil {
+				notificationHandler := notificationhandler.New(options.NotificationService)
+				adminNotificationHandler := notificationhandler.NewAdmin(options.NotificationService)
+				mux.HandleFunc(
+					"GET /api/v1/notifications",
+					authHandler.requireAuthentication(
+						parentScoped(notificationHandler.Inbox),
+					),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/notifications/unread-count",
+					authHandler.requireAuthentication(
+						parentScoped(notificationHandler.UnreadCount),
+					),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/notifications/read-all",
+					authHandler.requireAuthentication(
+						parentScoped(notificationHandler.MarkAllRead),
+					),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/notifications/{notification_id}/read",
+					authHandler.requireAuthentication(
+						parentScoped(notificationHandler.MarkRead),
+					),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/notifications/family-messages",
+					authHandler.requireAuthentication(
+						parentScoped(notificationHandler.SendFamilyMessage),
+					),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/notifications/devices/{device_id}/messages",
+					authHandler.requireAuthentication(
+						parentScoped(notificationHandler.DeviceMessages),
+					),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/notifications",
+					authHandler.requireAdmin(adminNotificationHandler.AdminList),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/admin/notifications",
+					authHandler.requireAdmin(adminScoped(adminNotificationHandler.AdminCreate)),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/notifications/stats",
+					authHandler.requireAdmin(adminNotificationHandler.AdminStats),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/notifications/{notification_id}",
+					authHandler.requireAdmin(adminNotificationHandler.AdminGet),
+				)
+				mux.HandleFunc(
+					"DELETE /api/v1/admin/notifications/{notification_id}",
+					authHandler.requireAdmin(adminScoped(adminNotificationHandler.AdminDelete)),
 				)
 			}
 		}

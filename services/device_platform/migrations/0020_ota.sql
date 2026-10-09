@@ -86,11 +86,7 @@ CREATE TABLE IF NOT EXISTS ota_releases (
         CHECK (length(btrim(signature_key_id)) > 0),
     CONSTRAINT ota_releases_signature_algorithm_valid
         CHECK (
-            signature_algorithm IN (
-                'ed25519',
-                'ecdsa_p256_sha256',
-                'rsa_pss_sha256'
-            )
+            signature_algorithm IN ('ed25519')
         ),
     CONSTRAINT ota_releases_target_scope_valid
         CHECK (target_scope IN ('all', 'group', 'device', 'canary')),
@@ -143,6 +139,8 @@ CREATE INDEX IF NOT EXISTS ota_group_members_device_idx
 CREATE TABLE IF NOT EXISTS ota_deployments (
     id UUID PRIMARY KEY,
     release_id UUID NOT NULL REFERENCES ota_releases(id) ON DELETE RESTRICT,
+    rollback_release_id UUID REFERENCES ota_releases(id) ON DELETE RESTRICT,
+    rollback_of_deployment_id UUID REFERENCES ota_deployments(id) ON DELETE SET NULL,
     device_id TEXT NOT NULL REFERENCES device_credentials(device_id) ON DELETE CASCADE,
     group_id UUID REFERENCES ota_groups(id) ON DELETE SET NULL,
     status TEXT NOT NULL DEFAULT 'queued',
@@ -167,7 +165,14 @@ CREATE TABLE IF NOT EXISTS ota_deployments (
     failed_at TIMESTAMPTZ,
     rolled_back_at TIMESTAMPTZ,
     CONSTRAINT ota_deployments_request_unique UNIQUE (request_id),
-    CONSTRAINT ota_deployments_release_device_unique UNIQUE (release_id, device_id),
+    CONSTRAINT ota_deployments_rollback_coherent
+        CHECK (
+            rollback_of_deployment_id IS NULL
+            OR (
+                rollback_release_id IS NOT NULL
+                AND rollback_release_id = release_id
+            )
+        ),
     CONSTRAINT ota_deployments_status_valid CHECK (
         status IN (
             'queued',
@@ -198,6 +203,10 @@ CREATE TABLE IF NOT EXISTS ota_deployments (
 
 CREATE INDEX IF NOT EXISTS ota_deployments_release_idx
     ON ota_deployments(release_id, status, updated_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ota_deployments_active_release_device_idx
+    ON ota_deployments(release_id, device_id)
+    WHERE rollback_of_deployment_id IS NULL;
 
 CREATE INDEX IF NOT EXISTS ota_deployments_device_idx
     ON ota_deployments(device_id, updated_at DESC);

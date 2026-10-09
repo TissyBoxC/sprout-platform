@@ -39,6 +39,7 @@ type Repository interface {
 		nextStatus domain.ReleaseStatus,
 		actorID string,
 		now time.Time,
+		signatureVerified bool,
 	) (*domain.Release, error)
 	RollbackRelease(
 		ctx context.Context,
@@ -122,6 +123,9 @@ func (r *PostgresRepository) CreateRelease(
 			size_bytes,
 			signature_key_id,
 			signature_algorithm,
+			signature,
+			signature_status,
+			signature_verified_at,
 			rollback_allowed,
 			mandatory,
 			release_notes,
@@ -140,7 +144,7 @@ func (r *PostgresRepository) CreateRelease(
 		VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
 			$11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-			$21, $22, $23, $24, $25
+			$21, $22, $23, $24, $25, $26, $27, $28
 		)
 		ON CONFLICT DO NOTHING
 	`,
@@ -155,6 +159,9 @@ func (r *PostgresRepository) CreateRelease(
 		release.SizeBytes,
 		release.SignatureKeyID,
 		release.SignatureAlgorithm,
+		release.Signature,
+		release.SignatureStatus,
+		release.SignatureVerifiedAt,
 		release.RollbackAllowed,
 		release.Mandatory,
 		release.ReleaseNotes,
@@ -189,7 +196,7 @@ func (r *PostgresRepository) UpdateReleaseDraft(
 		return domain.ErrInvalidRelease
 	}
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE ota_releases
+	UPDATE ota_releases
 		SET version = $2,
 		    channel = $3,
 		    hardware_revision = $4,
@@ -200,20 +207,21 @@ func (r *PostgresRepository) UpdateReleaseDraft(
 		    size_bytes = $9,
 		    signature_key_id = $10,
 		    signature_algorithm = $11,
-		    rollback_allowed = $12,
-		    mandatory = $13,
-		    release_notes = $14,
-		    target_scope = $15,
-		    target_group_id = $16,
-		    target_device_id = $17,
-		    canary_percent = $18,
-		    rollback_release_id = $19,
+		    signature = $12,
+		    rollback_allowed = $13,
+		    mandatory = $14,
+		    release_notes = $15,
+		    target_scope = $16,
+		    target_group_id = $17,
+		    target_device_id = $18,
+		    canary_percent = $19,
+		    rollback_release_id = $20,
 		    record_version = ota_releases.record_version + 1,
-		    updated_by = $20,
-		    updated_at = $21
+		    updated_by = $21,
+		    updated_at = $22
 		WHERE id = $1
 		  AND status = 'draft'
-		  AND record_version = $22
+		  AND record_version = $23
 	`,
 		release.ID,
 		release.Version,
@@ -226,6 +234,7 @@ func (r *PostgresRepository) UpdateReleaseDraft(
 		release.SizeBytes,
 		release.SignatureKeyID,
 		release.SignatureAlgorithm,
+		release.Signature,
 		release.RollbackAllowed,
 		release.Mandatory,
 		release.ReleaseNotes,
@@ -330,6 +339,7 @@ func (r *PostgresRepository) TransitionRelease(
 	nextStatus domain.ReleaseStatus,
 	actorID string,
 	now time.Time,
+	signatureVerified bool,
 ) (*domain.Release, error) {
 	var release *domain.Release
 	err := withTransaction(ctx, r.pool, func(transaction pgx.Tx) error {
@@ -361,6 +371,7 @@ func (r *PostgresRepository) TransitionRelease(
 			actorID,
 			now,
 			false,
+			signatureVerified,
 		)
 		if err != nil {
 			return err
@@ -417,6 +428,7 @@ func (r *PostgresRepository) RollbackRelease(
 			actorID,
 			now,
 			true,
+			false,
 		)
 		if err != nil {
 			return err
@@ -438,6 +450,7 @@ func updateReleaseStatus(
 	actorID string,
 	now time.Time,
 	rollback bool,
+	signatureVerified bool,
 ) (*domain.Release, error) {
 	row := transaction.QueryRow(ctx, `
 		UPDATE ota_releases
@@ -461,7 +474,15 @@ func updateReleaseStatus(
 		        ELSE withdrawn_at
 		    END,
 		    rolled_back_by = CASE WHEN $5 THEN $3 ELSE rolled_back_by END,
-		    rolled_back_at = CASE WHEN $5 THEN $4 ELSE rolled_back_at END
+		    rolled_back_at = CASE WHEN $5 THEN $4 ELSE rolled_back_at END,
+		    signature_status = CASE
+		        WHEN $7 THEN 'verified'
+		        ELSE signature_status
+		    END,
+		    signature_verified_at = CASE
+		        WHEN $7 THEN COALESCE(signature_verified_at, $4)
+		        ELSE signature_verified_at
+		    END
 		WHERE id = $1
 		  AND record_version = $6
 		RETURNING
@@ -476,6 +497,9 @@ func updateReleaseStatus(
 			size_bytes,
 			signature_key_id,
 			signature_algorithm,
+			signature,
+			signature_status,
+			signature_verified_at,
 			rollback_allowed,
 			mandatory,
 			release_notes,
@@ -505,6 +529,7 @@ func updateReleaseStatus(
 		now,
 		rollback,
 		current.RecordVersion,
+		signatureVerified,
 	)
 	updated, err := scanRelease(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -884,6 +909,8 @@ func (r *PostgresRepository) CreateDeployment(
 		INSERT INTO ota_deployments (
 			id,
 			release_id,
+			rollback_release_id,
+			rollback_of_deployment_id,
 			device_id,
 			group_id,
 			status,
@@ -899,12 +926,14 @@ func (r *PostgresRepository) CreateDeployment(
 		)
 		VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-			$11, $12, $13, $14
+			$11, $12, $13, $14, $15, $16
 		)
 		ON CONFLICT (request_id) DO NOTHING
 	`,
 		deployment.ID,
 		deployment.ReleaseID,
+		nullableUUID(deployment.RollbackReleaseID),
+		nullableUUID(deployment.RollbackOfDeploymentID),
 		deployment.DeviceID,
 		nullableUUID(deployment.GroupID),
 		deployment.Status,
@@ -1061,8 +1090,10 @@ func (r *PostgresRepository) RetryDeployment(
 			RETURNING
 				id,
 				release_id,
+				COALESCE(rollback_release_id::text, ''),
+				COALESCE(rollback_of_deployment_id::text, ''),
 				device_id,
-				group_id,
+				COALESCE(group_id::text, ''),
 				status,
 				requested_by,
 				request_id,
@@ -1240,8 +1271,10 @@ func (r *PostgresRepository) RecordEvent(
 			RETURNING
 				id,
 				release_id,
+				COALESCE(rollback_release_id::text, ''),
+				COALESCE(rollback_of_deployment_id::text, ''),
 				device_id,
-				group_id,
+				COALESCE(group_id::text, ''),
 				status,
 				requested_by,
 				request_id,
@@ -1404,6 +1437,9 @@ const releaseSelect = `
 		release.size_bytes,
 		release.signature_key_id,
 		release.signature_algorithm,
+		release.signature,
+		release.signature_status,
+		release.signature_verified_at,
 		release.rollback_allowed,
 		release.mandatory,
 		release.release_notes,
@@ -1433,6 +1469,8 @@ const deploymentSelect = `
 	SELECT
 		deployment.id,
 		deployment.release_id,
+		COALESCE(deployment.rollback_release_id::text, ''),
+		COALESCE(deployment.rollback_of_deployment_id::text, ''),
 		deployment.device_id,
 		COALESCE(deployment.group_id::text, ''),
 		deployment.status,
@@ -1482,6 +1520,9 @@ func scanRelease(row scanner) (*domain.Release, error) {
 		&release.SizeBytes,
 		&release.SignatureKeyID,
 		&release.SignatureAlgorithm,
+		&release.Signature,
+		&release.SignatureStatus,
+		&release.SignatureVerifiedAt,
 		&release.RollbackAllowed,
 		&release.Mandatory,
 		&release.ReleaseNotes,
@@ -1520,6 +1561,8 @@ func scanDeployment(row scanner) (*domain.Deployment, error) {
 	err := row.Scan(
 		&deployment.ID,
 		&deployment.ReleaseID,
+		&deployment.RollbackReleaseID,
+		&deployment.RollbackOfDeploymentID,
 		&deployment.DeviceID,
 		&deployment.GroupID,
 		&deployment.Status,
@@ -1759,7 +1802,8 @@ func mapDeploymentWriteError(err error) error {
 	if errors.As(err, &pgError) {
 		switch pgError.ConstraintName {
 		case "ota_deployments_request_unique",
-			"ota_deployments_release_device_unique":
+			"ota_deployments_release_device_unique",
+			"ota_deployments_active_release_device_idx":
 			return domain.ErrDeploymentAlreadyExists
 		}
 	}

@@ -35,6 +35,9 @@ import (
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	operationsRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/repository"
 	operationsService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
+	otaDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/domain"
+	otaRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/repository"
+	otaService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/service"
 	policyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/repository"
 	policyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
 	privacyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/repository"
@@ -222,6 +225,19 @@ func Run() error {
 	}
 	defer releaseStore.Close()
 	operations.SetArtifactStore(releaseArtifactStoreAdapter{store: releaseStore})
+	firmwareSignatureVerifier, err := otaService.NewEd25519KeyringVerifier(
+		cfg.OTA.FirmwareSignaturePublicKeys,
+	)
+	if err != nil {
+		return fmt.Errorf("create firmware signature verifier: %w", err)
+	}
+	ota, err := otaService.New(otaService.Options{
+		Repository: otaRepository.NewPostgresRepository(databaseStore.Pool()),
+		Verifier:   firmwareSignatureVerifier,
+	})
+	if err != nil {
+		return fmt.Errorf("create OTA service: %w", err)
+	}
 	featureCenterHealthProbes := map[string]featureCenterService.HealthProbe{
 		"auth": nonzeroRowProbe(
 			databaseStore.Pool(),
@@ -330,15 +346,14 @@ func Run() error {
 		),
 		"ota_release": featureCenterService.HealthProbeFunc(
 			func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
-				releases, err := operations.ListReleases(ctx)
+				releases, err := ota.ListReleases(ctx, otaDomain.ReleaseFilter{
+					Page:     1,
+					PageSize: 1,
+				})
 				if err != nil {
 					return featureCenterDomain.HealthUnavailable, nil
 				}
-				status, err := releaseStore.IndexStatus(ctx)
-				if err != nil || !status.IsAvailable {
-					return featureCenterDomain.HealthDegraded, nil
-				}
-				if len(releases) == 0 {
+				if releases.Total == 0 {
 					return featureCenterDomain.HealthDegraded, nil
 				}
 				return featureCenterDomain.HealthHealthy, nil
@@ -423,6 +438,7 @@ func Run() error {
 			ServiceVersionService: serviceVersions,
 			FeatureCenterService:  featureCenter,
 			ReleaseStoreService:   releaseStore,
+			OTAService:            ota,
 			ContentService:        contentLibraryService,
 			UsageReportService:    usageReports,
 			VoiceTokenIssuer:      voiceTokenIssuer,

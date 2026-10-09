@@ -76,7 +76,7 @@ func (s *Service) runtimeValues(
 			"phone_verification_required": settings.Account.PhoneVerificationRequired,
 			"email_login_enabled":         settings.Account.EmailLoginEnabled,
 		}, version, nil
-	case "ota_release":
+	case "app_update":
 		return map[string]any{
 			"default_channel":            settings.Update.Channel,
 			"minimum_client_version":     settings.Update.MinClientVersion,
@@ -145,7 +145,7 @@ func (s *Service) updateRuntimeValues(
 			expectedVersion,
 		)
 		return true, err
-	case "ota_release":
+	case "app_update":
 		if value, ok := strValue(values, "default_channel"); ok {
 			settings.Update.Channel = value
 		}

@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0.0",
+  "event_id": "ota_event_001",
+  "deployment_id": "ota_deployment_001",
+  "release_id": "ota_release_001",
+  "event_type": "downloading",
+  "progress_percent": 42.5,
+  "firmware_version": "0.9.0",
+  "artifact_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "occurred_at": "2026-10-09T00:00:00Z"
+}

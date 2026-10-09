@@ -75,6 +75,11 @@ type OTAConfig struct {
 	ManifestBaseURL string
 	ResourceBaseURL string
 	ClientBaseURL   string
+	// FirmwareSignaturePublicKeys is a JSON object mapping key ids to
+	// base64-encoded Ed25519 public keys. It is optional at startup so a
+	// deployment without firmware signing can still run; publishing any OTA
+	// release requires a trusted key and fails closed otherwise.
+	FirmwareSignaturePublicKeys string
 }
 
 // LogConfig contains logging settings.
@@ -188,6 +193,10 @@ func Load() (Config, error) {
 			ManifestBaseURL: env("DEVICE_PLATFORM_OTA_MANIFEST_BASE_URL", ""),
 			ResourceBaseURL: env("DEVICE_PLATFORM_OTA_RESOURCE_BASE_URL", ""),
 			ClientBaseURL:   env("DEVICE_PLATFORM_OTA_CLIENT_BASE_URL", ""),
+			FirmwareSignaturePublicKeys: env(
+				"DEVICE_PLATFORM_OTA_FIRMWARE_SIGNATURE_PUBLIC_KEYS",
+				"",
+			),
 		},
 		Log: LogConfig{
 			Level: env("DEVICE_PLATFORM_LOG_LEVEL", "info"),

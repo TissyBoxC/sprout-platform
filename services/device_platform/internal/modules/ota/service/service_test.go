@@ -19,6 +19,20 @@ type fakeRepository struct {
 	failReleaseLoad error
 }
 
+type acceptingVerifier struct{}
+
+func (acceptingVerifier) Verify(
+	algorithm string,
+	keyID string,
+	digest string,
+	signature string,
+) error {
+	if algorithm == "" || keyID == "" || digest == "" || signature == "" {
+		return domain.ErrSignatureInvalid
+	}
+	return nil
+}
+
 func newFakeRepository() *fakeRepository {
 	return &fakeRepository{
 		releases:    map[string]*domain.Release{},
@@ -112,6 +126,7 @@ func (repository *fakeRepository) TransitionRelease(
 	nextStatus domain.ReleaseStatus,
 	actorID string,
 	now time.Time,
+	signatureVerified bool,
 ) (*domain.Release, error) {
 	release, ok := repository.releases[releaseID]
 	if !ok {
@@ -133,6 +148,10 @@ func (repository *fakeRepository) TransitionRelease(
 	if nextStatus == domain.ReleaseStatusPublished {
 		release.PublishedBy = actorID
 		release.PublishedAt = &now
+		if signatureVerified {
+			release.SignatureStatus = domain.SignatureStatusVerified
+			release.SignatureVerifiedAt = &now
+		}
 	}
 	if nextStatus == domain.ReleaseStatusPaused {
 		release.PausedBy = actorID
@@ -431,6 +450,7 @@ func validReleaseInput() domain.ReleaseInput {
 		SizeBytes:          1024,
 		SignatureKeyID:     "firmware-prod-2026",
 		SignatureAlgorithm: "ed25519",
+		Signature:          "c2lnbmF0dXJl",
 		RollbackAllowed:    true,
 		Target: domain.Target{
 			Scope: domain.TargetScopeAll,
@@ -441,7 +461,10 @@ func validReleaseInput() domain.ReleaseInput {
 
 func TestCreateReleaseDraftValidatesManifest(t *testing.T) {
 	repository := newFakeRepository()
-	service, err := New(Options{Repository: repository})
+	service, err := New(Options{
+		Repository: repository,
+		Verifier:   acceptingVerifier{},
+	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
 	}
@@ -476,7 +499,10 @@ func TestCreateReleaseDraftValidatesManifest(t *testing.T) {
 
 func TestReleaseStateMachineAndOptimisticConflict(t *testing.T) {
 	repository := newFakeRepository()
-	service, err := New(Options{Repository: repository})
+	service, err := New(Options{
+		Repository: repository,
+		Verifier:   acceptingVerifier{},
+	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
 	}
@@ -508,7 +534,10 @@ func TestReleaseStateMachineAndOptimisticConflict(t *testing.T) {
 
 func TestRollbackRejectedWhenReleaseDoesNotAllowIt(t *testing.T) {
 	repository := newFakeRepository()
-	service, err := New(Options{Repository: repository})
+	service, err := New(Options{
+		Repository: repository,
+		Verifier:   acceptingVerifier{},
+	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
 	}
@@ -558,7 +587,10 @@ func TestRecordEventIsIdempotentAndRejectsDeviceMismatch(t *testing.T) {
 		HardwareRevision: "sprout-v1",
 		CurrentVersion:   "1.0.0",
 	}
-	service, err := New(Options{Repository: repository})
+	service, err := New(Options{
+		Repository: repository,
+		Verifier:   acceptingVerifier{},
+	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
 	}
@@ -609,5 +641,229 @@ func TestRecordEventIsIdempotentAndRejectsDeviceMismatch(t *testing.T) {
 		domain.ErrDeviceNotEligible,
 	) {
 		t.Fatalf("expected device mismatch rejection, got %v", err)
+	}
+}
+
+func TestPublishReleaseRequiresTrustedSignature(t *testing.T) {
+	repository := newFakeRepository()
+	service, err := New(Options{
+		Repository: repository,
+		Verifier:   rejectingVerifier{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	release, err := service.CreateReleaseDraft(context.Background(), validReleaseInput())
+	if err != nil {
+		t.Fatalf("create release: %v", err)
+	}
+	if _, err := service.PublishRelease(
+		context.Background(),
+		release.ID,
+		"admin-1",
+		release.RecordVersion,
+	); !errors.Is(err, domain.ErrSignatureInvalid) {
+		t.Fatalf("expected signature rejection, got %v", err)
+	}
+}
+
+func TestCurrentDeviceUpdateReturnsActiveDeployment(t *testing.T) {
+	repository := newFakeRepository()
+	repository.device = &domain.DeviceContext{
+		DeviceID:         "device-1",
+		HardwareRevision: "sprout-v1",
+		CurrentVersion:   "1.0.0",
+	}
+	service, err := New(Options{
+		Repository: repository,
+		Verifier:   acceptingVerifier{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	release, err := service.CreateReleaseDraft(context.Background(), validReleaseInput())
+	if err != nil {
+		t.Fatalf("create release: %v", err)
+	}
+	release, err = service.PublishRelease(
+		context.Background(),
+		release.ID,
+		"admin-1",
+		release.RecordVersion,
+	)
+	if err != nil {
+		t.Fatalf("publish release: %v", err)
+	}
+	deployment, err := service.AssignRelease(
+		context.Background(),
+		release.ID,
+		"device-1",
+		"request-current",
+		"admin-1",
+	)
+	if err != nil {
+		t.Fatalf("assign release: %v", err)
+	}
+	current, err := service.CurrentDeviceUpdate(context.Background(), "device-1")
+	if err != nil {
+		t.Fatalf("current device update: %v", err)
+	}
+	if current.Deployment.ID != deployment.ID {
+		t.Fatalf("deployment id = %q, want %q", current.Deployment.ID, deployment.ID)
+	}
+	if !current.UpdateAvailable {
+		t.Fatal("queued deployment must be exposed as an available update")
+	}
+}
+
+func TestRollbackDeploymentRequiresAllowedRelease(t *testing.T) {
+	repository := newFakeRepository()
+	repository.device = &domain.DeviceContext{
+		DeviceID:         "device-1",
+		HardwareRevision: "sprout-v1",
+		CurrentVersion:   "1.0.0",
+	}
+	service, err := New(Options{
+		Repository: repository,
+		Verifier:   acceptingVerifier{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	input := validReleaseInput()
+	input.RollbackAllowed = false
+	release, err := service.CreateReleaseDraft(context.Background(), input)
+	if err != nil {
+		t.Fatalf("create release: %v", err)
+	}
+	release, err = service.PublishRelease(
+		context.Background(),
+		release.ID,
+		"admin-1",
+		release.RecordVersion,
+	)
+	if err != nil {
+		t.Fatalf("publish release: %v", err)
+	}
+	deployment, err := service.AssignRelease(
+		context.Background(),
+		release.ID,
+		"device-1",
+		"request-rollback",
+		"admin-1",
+	)
+	if err != nil {
+		t.Fatalf("assign release: %v", err)
+	}
+	if _, err := service.RollbackDeployment(
+		context.Background(),
+		deployment.ID,
+		"parent-1",
+		deployment.RecordVersion,
+	); !errors.Is(err, domain.ErrRollbackNotAllowed) {
+		t.Fatalf("expected rollback rejection, got %v", err)
+	}
+}
+
+type rejectingVerifier struct{}
+
+func (rejectingVerifier) Verify(
+	string,
+	string,
+	string,
+	string,
+) error {
+	return domain.ErrSignatureInvalid
+}
+
+func TestDeviceCurrentVersionFallsBackForUnreportedFirmware(t *testing.T) {
+	repository := newFakeRepository()
+	repository.device = &domain.DeviceContext{
+		DeviceID:         "device-1",
+		HardwareRevision: "sprout-v1",
+		CurrentVersion:   "",
+	}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	version, err := service.DeviceCurrentVersion(context.Background(), "device-1")
+	if err != nil {
+		t.Fatalf("current version: %v", err)
+	}
+	if version != "0.0.0" {
+		t.Fatalf("current version = %q, want 0.0.0", version)
+	}
+	if !domain.ValidVersion(version) {
+		t.Fatalf("fallback version %q must satisfy the device contract", version)
+	}
+}
+
+func TestRollbackDeploymentRejectsNonPublishedTargetRelease(t *testing.T) {
+	repository := newFakeRepository()
+	repository.device = &domain.DeviceContext{
+		DeviceID:         "device-1",
+		HardwareRevision: "sprout-v1",
+		CurrentVersion:   "1.0.0",
+	}
+	service, err := New(Options{
+		Repository: repository,
+		Verifier:   acceptingVerifier{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	previous := validReleaseInput()
+	previous.Version = "1.1.0"
+	previousRelease, err := service.CreateReleaseDraft(context.Background(), previous)
+	if err != nil {
+		t.Fatalf("create previous release: %v", err)
+	}
+	previousRelease, err = service.PublishRelease(
+		context.Background(),
+		previousRelease.ID,
+		"admin-1",
+		previousRelease.RecordVersion,
+	)
+	if err != nil {
+		t.Fatalf("publish previous release: %v", err)
+	}
+	withdraw := validReleaseInput()
+	withdraw.Version = "1.2.0"
+	current, err := service.CreateReleaseDraft(context.Background(), withdraw)
+	if err != nil {
+		t.Fatalf("create current release: %v", err)
+	}
+	repository.releases[current.ID].RollbackReleaseID = previousRelease.ID
+	current, err = service.PublishRelease(
+		context.Background(),
+		current.ID,
+		"admin-1",
+		current.RecordVersion,
+	)
+	if err != nil {
+		t.Fatalf("publish current release: %v", err)
+	}
+	deployment, err := service.AssignRelease(
+		context.Background(),
+		current.ID,
+		"device-1",
+		"request-rollback-target",
+		"admin-1",
+	)
+	if err != nil {
+		t.Fatalf("assign release: %v", err)
+	}
+	// A draft target release must never be selected as a rollback destination.
+	repository.deployments[deployment.ID].Status = domain.DeploymentStatusSucceeded
+	deployment = repository.deployments[deployment.ID]
+	repository.releases[previousRelease.ID].Status = domain.ReleaseStatusDraft
+	if _, err := service.RollbackDeployment(
+		context.Background(),
+		deployment.ID,
+		"parent-1",
+		deployment.RecordVersion,
+	); !errors.Is(err, domain.ErrRollbackNotAllowed) {
+		t.Fatalf("expected draft rollback target rejection, got %v", err)
 	}
 }

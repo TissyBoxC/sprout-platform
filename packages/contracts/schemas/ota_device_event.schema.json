@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprout.example/contracts/schemas/ota_device_event.schema.json",
+  "title": "Device firmware update event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "release_id",
+    "event_type",
+    "progress_percent",
+    "firmware_version",
+    "occurred_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "event_id": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
+    },
+    "deployment_id": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
+    },
+    "release_id": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "started",
+        "downloading",
+        "validated",
+        "installing",
+        "pending_verify",
+        "succeeded",
+        "failed",
+        "rolled_back"
+      ]
+    },
+    "progress_percent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "error_code": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,63}$"
+    },
+    "firmware_version": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/firmware_version"
+    },
+    "artifact_sha256": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/sha256"
+    },
+    "occurred_at": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    }
+  }
+}

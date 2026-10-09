@@ -40,6 +40,12 @@ var (
 	ErrInvalidEvent = errors.New("invalid OTA event")
 	// ErrEventConflict reports an event identifier reused for another payload.
 	ErrEventConflict = errors.New("OTA event conflict")
+	// ErrSignatureInvalid reports a firmware signature that failed verification.
+	ErrSignatureInvalid = errors.New("OTA signature invalid")
+	// ErrSignatureKeyUnknown reports a signature key id without a trusted key.
+	ErrSignatureKeyUnknown = errors.New("OTA signature key unknown")
+	// ErrSignatureRequired reports a publish attempt without a detached signature.
+	ErrSignatureRequired = errors.New("OTA signature required")
 
 	// ErrInvalidTarget reports an invalid release audience.
 	ErrInvalidTarget = errors.New("invalid OTA target")
@@ -66,6 +72,7 @@ var (
 		`^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`,
 	)
 	sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	base64Pattern = regexp.MustCompile(`^[A-Za-z0-9+/]+={0,2}$`)
 )
 
 // Channel is the release audience channel.
@@ -95,6 +102,14 @@ const (
 	ReleaseStatusPublished ReleaseStatus = "published"
 	ReleaseStatusPaused    ReleaseStatus = "paused"
 	ReleaseStatusWithdrawn ReleaseStatus = "withdrawn"
+)
+
+// Detached signature verification states persisted with a release manifest.
+const (
+	SignatureStatusPending  = "pending"
+	SignatureStatusVerified = "verified"
+	SignatureStatusFailed   = "failed"
+	SignatureStatusMissing  = "missing"
 )
 
 // DeploymentStatus tracks one device's installation lifecycle.
@@ -212,55 +227,60 @@ func (target Target) Validate() error {
 
 // Release is an immutable firmware manifest after publication.
 type Release struct {
-	ID                 string        `json:"id"`
-	Version            string        `json:"version"`
+	ID                  string        `json:"id"`
+	Version             string        `json:"firmware_version"`
+	Channel             Channel       `json:"channel"`
+	HardwareRevision    string        `json:"hardware_revision"`
+	MinSourceVersion    string        `json:"min_source_version"`
+	ArtifactURL         string        `json:"artifact_url"`
+	ArtifactKey         string        `json:"artifact_key"`
+	SHA256              string        `json:"sha256"`
+	SizeBytes           int64         `json:"size_bytes"`
+	SignatureKeyID      string        `json:"signature_key_id"`
+	SignatureAlgorithm  string        `json:"signature_algorithm"`
+	Signature           string        `json:"signature"`
+	SignatureStatus     string        `json:"signature_status"`
+	SignatureVerifiedAt *time.Time    `json:"signature_verified_at,omitempty"`
+	RollbackAllowed     bool          `json:"rollback_allowed"`
+	Mandatory           bool          `json:"mandatory"`
+	ReleaseNotes        string        `json:"release_notes"`
+	Status              ReleaseStatus `json:"status"`
+	Target              Target        `json:"target"`
+	RollbackReleaseID   string        `json:"rollback_release_id,omitempty"`
+	RecordVersion       int64         `json:"record_version"`
+	CreatedBy           string        `json:"created_by"`
+	UpdatedBy           string        `json:"updated_by"`
+	PublishedBy         string        `json:"published_by,omitempty"`
+	PausedBy            string        `json:"paused_by,omitempty"`
+	WithdrawnBy         string        `json:"withdrawn_by,omitempty"`
+	RolledBackBy        string        `json:"rolled_back_by,omitempty"`
+	CreatedAt           time.Time     `json:"created_at"`
+	UpdatedAt           time.Time     `json:"updated_at"`
+	PublishedAt         *time.Time    `json:"published_at,omitempty"`
+	PausedAt            *time.Time    `json:"paused_at,omitempty"`
+	WithdrawnAt         *time.Time    `json:"withdrawn_at,omitempty"`
+	RolledBackAt        *time.Time    `json:"rolled_back_at,omitempty"`
+}
+
+// DeviceRelease is the minimal manifest sent to a device.
+type DeviceRelease struct {
+	ReleaseID          string        `json:"release_id"`
+	Version            string        `json:"firmware_version"`
 	Channel            Channel       `json:"channel"`
 	HardwareRevision   string        `json:"hardware_revision"`
-	MinSourceVersion   string        `json:"min_source_version"`
+	MinSourceVersion   string        `json:"min_source_version,omitempty"`
 	ArtifactURL        string        `json:"artifact_url"`
 	ArtifactKey        string        `json:"artifact_key"`
 	SHA256             string        `json:"sha256"`
 	SizeBytes          int64         `json:"size_bytes"`
 	SignatureKeyID     string        `json:"signature_key_id"`
 	SignatureAlgorithm string        `json:"signature_algorithm"`
+	Signature          string        `json:"signature"`
 	RollbackAllowed    bool          `json:"rollback_allowed"`
 	Mandatory          bool          `json:"mandatory"`
-	ReleaseNotes       string        `json:"release_notes"`
 	Status             ReleaseStatus `json:"status"`
-	Target             Target        `json:"target"`
-	RollbackReleaseID  string        `json:"rollback_release_id,omitempty"`
-	RecordVersion      int64         `json:"record_version"`
-	CreatedBy          string        `json:"created_by"`
-	UpdatedBy          string        `json:"updated_by"`
-	PublishedBy        string        `json:"published_by,omitempty"`
-	PausedBy           string        `json:"paused_by,omitempty"`
-	WithdrawnBy        string        `json:"withdrawn_by,omitempty"`
-	RolledBackBy       string        `json:"rolled_back_by,omitempty"`
-	CreatedAt          time.Time     `json:"created_at"`
-	UpdatedAt          time.Time     `json:"updated_at"`
+	ReleaseNotes       string        `json:"release_notes,omitempty"`
 	PublishedAt        *time.Time    `json:"published_at,omitempty"`
-	PausedAt           *time.Time    `json:"paused_at,omitempty"`
-	WithdrawnAt        *time.Time    `json:"withdrawn_at,omitempty"`
-	RolledBackAt       *time.Time    `json:"rolled_back_at,omitempty"`
-}
-
-// DeviceRelease is the minimal manifest sent to a device.
-type DeviceRelease struct {
-	ReleaseID          string     `json:"release_id"`
-	Version            string     `json:"version"`
-	Channel            Channel    `json:"channel"`
-	HardwareRevision   string     `json:"hardware_revision"`
-	MinSourceVersion   string     `json:"min_source_version,omitempty"`
-	ArtifactURL        string     `json:"artifact_url"`
-	ArtifactKey        string     `json:"artifact_key"`
-	SHA256             string     `json:"sha256"`
-	SizeBytes          int64      `json:"size_bytes"`
-	SignatureKeyID     string     `json:"signature_key_id"`
-	SignatureAlgorithm string     `json:"signature_algorithm"`
-	RollbackAllowed    bool       `json:"rollback_allowed"`
-	Mandatory          bool       `json:"mandatory"`
-	ReleaseNotes       string     `json:"release_notes,omitempty"`
-	PublishedAt        *time.Time `json:"published_at,omitempty"`
 }
 
 // ReleaseInput is the validated operator request for a release draft.
@@ -276,6 +296,7 @@ type ReleaseInput struct {
 	SizeBytes          int64
 	SignatureKeyID     string
 	SignatureAlgorithm string
+	Signature          string
 	RollbackAllowed    bool
 	Mandatory          bool
 	ReleaseNotes       string
@@ -286,31 +307,33 @@ type ReleaseInput struct {
 
 // Deployment is one release task assigned to one device.
 type Deployment struct {
-	ID                    string           `json:"id"`
-	ReleaseID             string           `json:"release_id"`
-	DeviceID              string           `json:"device_id"`
-	GroupID               string           `json:"group_id,omitempty"`
-	Status                DeploymentStatus `json:"status"`
-	RequestedBy           string           `json:"requested_by"`
-	RequestID             string           `json:"request_id"`
-	ProgressPercent       int              `json:"progress_percent"`
-	BytesReceived         int64            `json:"bytes_received"`
-	BytesTotal            int64            `json:"bytes_total"`
-	FailureCode           string           `json:"failure_code,omitempty"`
-	FailureMessage        string           `json:"failure_message,omitempty"`
-	RetryCount            int              `json:"retry_count"`
-	RecordVersion         int64            `json:"record_version"`
-	LastEventSequence     int64            `json:"last_event_sequence"`
-	CreatedAt             time.Time        `json:"created_at"`
-	UpdatedAt             time.Time        `json:"updated_at"`
-	OfferedAt             *time.Time       `json:"offered_at,omitempty"`
-	DownloadStartedAt     *time.Time       `json:"download_started_at,omitempty"`
-	ValidatedAt           *time.Time       `json:"validated_at,omitempty"`
-	InstallStartedAt      *time.Time       `json:"install_started_at,omitempty"`
-	VerificationStartedAt *time.Time       `json:"verification_started_at,omitempty"`
-	CompletedAt           *time.Time       `json:"completed_at,omitempty"`
-	FailedAt              *time.Time       `json:"failed_at,omitempty"`
-	RolledBackAt          *time.Time       `json:"rolled_back_at,omitempty"`
+	ID                     string           `json:"id"`
+	ReleaseID              string           `json:"release_id"`
+	RollbackReleaseID      string           `json:"rollback_release_id,omitempty"`
+	RollbackOfDeploymentID string           `json:"rollback_of_deployment_id,omitempty"`
+	DeviceID               string           `json:"device_id"`
+	GroupID                string           `json:"group_id,omitempty"`
+	Status                 DeploymentStatus `json:"status"`
+	RequestedBy            string           `json:"requested_by"`
+	RequestID              string           `json:"request_id"`
+	ProgressPercent        int              `json:"progress_percent"`
+	BytesReceived          int64            `json:"bytes_received"`
+	BytesTotal             int64            `json:"bytes_total"`
+	FailureCode            string           `json:"failure_code,omitempty"`
+	FailureMessage         string           `json:"failure_message,omitempty"`
+	RetryCount             int              `json:"retry_count"`
+	RecordVersion          int64            `json:"record_version"`
+	LastEventSequence      int64            `json:"last_event_sequence"`
+	CreatedAt              time.Time        `json:"created_at"`
+	UpdatedAt              time.Time        `json:"updated_at"`
+	OfferedAt              *time.Time       `json:"offered_at,omitempty"`
+	DownloadStartedAt      *time.Time       `json:"download_started_at,omitempty"`
+	ValidatedAt            *time.Time       `json:"validated_at,omitempty"`
+	InstallStartedAt       *time.Time       `json:"install_started_at,omitempty"`
+	VerificationStartedAt  *time.Time       `json:"verification_started_at,omitempty"`
+	CompletedAt            *time.Time       `json:"completed_at,omitempty"`
+	FailedAt               *time.Time       `json:"failed_at,omitempty"`
+	RolledBackAt           *time.Time       `json:"rolled_back_at,omitempty"`
 }
 
 // Event is one idempotent device progress update.
@@ -613,6 +636,7 @@ func ValidateRelease(release *Release) error {
 	release.SHA256 = NormalizeSHA256(release.SHA256)
 	release.SignatureKeyID = strings.TrimSpace(release.SignatureKeyID)
 	release.SignatureAlgorithm = strings.TrimSpace(release.SignatureAlgorithm)
+	release.Signature = strings.TrimSpace(release.Signature)
 	release.ReleaseNotes = strings.TrimSpace(release.ReleaseNotes)
 
 	if !ValidVersion(release.Version) ||
@@ -628,6 +652,7 @@ func ValidateRelease(release *Release) error {
 		release.SignatureKeyID == "" ||
 		len(release.SignatureKeyID) > 128 ||
 		!ValidSignatureAlgorithm(release.SignatureAlgorithm) ||
+		!ValidSignature(release.Signature) ||
 		len([]rune(release.ReleaseNotes)) > 4000 ||
 		release.Target.Validate() != nil {
 		return ErrInvalidRelease
@@ -636,6 +661,16 @@ func ValidateRelease(release *Release) error {
 		return ErrInvalidRelease
 	}
 	return nil
+}
+
+// ValidSignature reports whether a detached signature is a bounded-base64
+// value. Cryptographic verification happens against the trusted keyring before
+// publication, because a regex cannot prove authenticity.
+func ValidSignature(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" &&
+		len(value) <= 8192 &&
+		base64Pattern.MatchString(value)
 }
 
 // ValidateDeployment checks a new release/device assignment.
@@ -686,9 +721,7 @@ func ValidateEvent(event *Event) error {
 // supported. The private key is never part of the manifest.
 func ValidSignatureAlgorithm(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "ed25519",
-		"ecdsa_p256_sha256",
-		"rsa_pss_sha256":
+	case "ed25519":
 		return true
 	default:
 		return false
@@ -790,8 +823,10 @@ func (release Release) DeviceManifest() DeviceRelease {
 		SizeBytes:          release.SizeBytes,
 		SignatureKeyID:     release.SignatureKeyID,
 		SignatureAlgorithm: release.SignatureAlgorithm,
+		Signature:          release.Signature,
 		RollbackAllowed:    release.RollbackAllowed,
 		Mandatory:          release.Mandatory,
+		Status:             release.Status,
 		ReleaseNotes:       release.ReleaseNotes,
 		PublishedAt:        release.PublishedAt,
 	}

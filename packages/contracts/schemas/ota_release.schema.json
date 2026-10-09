@@ -11,11 +11,16 @@
     "hardware_revision",
     "channel",
     "artifact_key",
+    "artifact_url",
     "sha256",
     "size_bytes",
     "signature_key_id",
+    "signature_algorithm",
+    "signature",
+    "signature_status",
     "rollback_allowed",
-    "published_at"
+    "min_source_version",
+    "status"
   ],
   "properties": {
     "schema_version": {
@@ -23,6 +28,9 @@
       "const": "1.0.0"
     },
     "release_id": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
+    },
+    "id": {
       "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
     },
     "firmware_version": {
@@ -40,8 +48,23 @@
         "internal"
       ]
     },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "published",
+        "paused",
+        "withdrawn"
+      ]
+    },
     "artifact_key": {
       "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/object_key"
+    },
+    "artifact_url": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://",
+      "maxLength": 2048
     },
     "sha256": {
       "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/sha256"
@@ -54,10 +77,81 @@
     "signature_key_id": {
       "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
     },
+    "signature_algorithm": {
+      "type": "string",
+      "enum": [
+        "ed25519"
+      ]
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]+={0,2}$",
+      "maxLength": 8192
+    },
+    "signature_status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "verified",
+        "failed",
+        "missing"
+      ]
+    },
+    "signature_verified_at": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    },
     "rollback_allowed": {
       "type": "boolean"
     },
+    "mandatory": {
+      "type": "boolean"
+    },
+    "rollback_release_id": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
+    },
+    "record_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "min_source_version": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 0
+        },
+        {
+          "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/firmware_version"
+        }
+      ]
+    },
     "published_at": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    },
+    "canary_percent": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "target_type": {
+      "type": "string",
+      "enum": [
+        "all",
+        "device",
+        "group"
+      ]
+    },
+    "target_id": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "release_notes": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "created_at": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
       "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
     }
   }

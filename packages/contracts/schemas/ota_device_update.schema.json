@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprout.example/contracts/schemas/ota_device_update.schema.json",
+  "title": "Device firmware update state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "device_id",
+    "status",
+    "current_version",
+    "update_available",
+    "rollback_available",
+    "checked_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "device_id": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
+    },
+    "deployment_id": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
+    },
+    "rollback_release_id": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
+    },
+    "rollback_of_deployment_id": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "up_to_date",
+        "available",
+        "queued",
+        "downloading",
+        "validating",
+        "installing",
+        "pending_verify",
+        "succeeded",
+        "failed",
+        "rollback_available",
+        "rolled_back"
+      ]
+    },
+    "current_version": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/firmware_version"
+    },
+    "target_version": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/firmware_version"
+    },
+    "update_available": {
+      "type": "boolean"
+    },
+    "rollback_available": {
+      "type": "boolean"
+    },
+    "progress_percent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "record_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "error_code": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,63}$"
+    },
+    "error_message": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "checked_at": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    },
+    "release": {
+      "$ref": "https://sprout.example/contracts/schemas/ota_release.schema.json"
+    }
+  }
+}

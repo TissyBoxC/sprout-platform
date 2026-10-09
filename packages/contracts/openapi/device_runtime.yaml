@@ -97,6 +97,157 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '409':
           $ref: '#/components/responses/Conflict'
+  /api/v1/devices/{device_id}/ota:
+    get:
+      operationId: getDeviceFirmwareUpdate
+      summary: Read the firmware update state for an authenticated device
+      description: |
+        The device session token identifies the owner and the path device id
+        must match that owner. The response contains the same immutable
+        release manifest the device will verify before downloading.
+      security:
+        - deviceSession: []
+      parameters:
+        - $ref: '#/components/parameters/DeviceID'
+      responses:
+        '200':
+          description: Current firmware update state and available release
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceOtaEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/devices/{device_id}/ota/events:
+    post:
+      operationId: recordDeviceOtaEvent
+      summary: Record one idempotent firmware update event
+      security:
+        - deviceSession: []
+      parameters:
+        - $ref: '#/components/parameters/DeviceID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/ota_device_event.schema.json'
+      responses:
+        '200':
+          description: Event accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaEventAcceptedEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/devices/{device_id}/ota/install:
+    post:
+      operationId: startDeviceFirmwareUpdate
+      summary: Ask one guardian-owned device to start the offered firmware update
+      security:
+        - parentSession: []
+      parameters:
+        - $ref: '#/components/parameters/DeviceID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                deployment_id:
+                  type: string
+                  maxLength: 128
+      responses:
+        '202':
+          description: Update accepted for the device
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceOtaEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/devices/{device_id}/ota/status:
+    get:
+      operationId: getGuardianDeviceFirmwareUpdateStatus
+      summary: Read firmware update progress for one guardian-owned device
+      security:
+        - parentSession: []
+      parameters:
+        - $ref: '#/components/parameters/DeviceID'
+      responses:
+        '200':
+          description: Current firmware update progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceOtaEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/devices/{device_id}/ota/retry:
+    post:
+      operationId: retryDeviceFirmwareUpdate
+      summary: Retry a failed firmware update for one guardian-owned device
+      security:
+        - parentSession: []
+      parameters:
+        - $ref: '#/components/parameters/DeviceID'
+      responses:
+        '202':
+          description: Retry accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceOtaEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/devices/{device_id}/ota/rollback:
+    post:
+      operationId: rollbackDeviceFirmwareUpdate
+      summary: Request rollback to the last verified firmware for one device
+      security:
+        - parentSession: []
+      parameters:
+        - $ref: '#/components/parameters/DeviceID'
+      responses:
+        '202':
+          description: Rollback accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceOtaEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
   /api/v1/devices/{device_id}/runtime/parent-policy:
     get:
       operationId: getEffectiveDeviceParentPolicy
@@ -305,6 +456,319 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/admin/ota/releases:
+    get:
+      operationId: listAdminOtaReleases
+      summary: List immutable firmware OTA releases
+      security:
+        - adminSession: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              - draft
+              - published
+              - paused
+              - withdrawn
+        - name: channel
+          in: query
+          schema:
+            type: string
+            enum:
+              - stable
+              - canary
+              - internal
+        - name: version
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Firmware release page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaReleasePageEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createAdminOtaRelease
+      summary: Create an immutable firmware release draft
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtaReleaseMutation'
+      responses:
+        '201':
+          description: Draft created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaReleaseEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/admin/ota/releases/{release_id}:
+    get:
+      operationId: getAdminOtaRelease
+      summary: Read one firmware release and its deployment summary
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/OtaReleaseID'
+      responses:
+        '200':
+          description: Firmware release detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaReleaseDetailEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      operationId: updateAdminOtaRelease
+      summary: Update a firmware release draft using optimistic concurrency
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/OtaReleaseID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtaReleaseMutation'
+      responses:
+        '200':
+          description: Draft updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaReleaseEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/admin/ota/releases/{release_id}/publish:
+    post:
+      operationId: publishAdminOtaRelease
+      summary: Publish a firmware release after signature and artifact validation
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/OtaReleaseID'
+      responses:
+        '200':
+          description: Release published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaReleaseEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/admin/ota/releases/{release_id}/pause:
+    post:
+      operationId: pauseAdminOtaRelease
+      summary: Pause new offers for a firmware release
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/OtaReleaseID'
+      responses:
+        '200':
+          description: Release paused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaReleaseEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/admin/ota/releases/{release_id}/withdraw:
+    post:
+      operationId: withdrawAdminOtaRelease
+      summary: Withdraw a firmware release from all future offers
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/OtaReleaseID'
+      responses:
+        '200':
+          description: Release withdrawn
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaReleaseEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/admin/ota/releases/{release_id}/rollback:
+    post:
+      operationId: rollbackAdminOtaRelease
+      summary: Start a controlled rollback for devices assigned to a release
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/OtaReleaseID'
+      responses:
+        '202':
+          description: Rollback operation accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaReleaseEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/admin/ota/releases/{release_id}/deployments:
+    get:
+      operationId: listAdminOtaDeployments
+      summary: List device-level state for one firmware release
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/OtaReleaseID'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              - queued
+              - offered
+              - downloading
+              - validating
+              - installing
+              - pending_verify
+              - succeeded
+              - failed
+              - rolled_back
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Deployment page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaDeploymentPageEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/admin/ota/deployments/{deployment_id}/retry:
+    post:
+      operationId: retryAdminOtaDeployment
+      summary: Retry one failed device firmware deployment
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/OtaDeploymentID'
+      responses:
+        '202':
+          description: Retry accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaDeploymentEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/admin/ota/statistics:
+    get:
+      operationId: getAdminOtaStatistics
+      summary: Read OTA release, deployment, failure, and rollback statistics
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: OTA statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaStatisticsEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/admin/devices/{device_id}/diagnostics:
     get:
       operationId: getAdminDeviceDiagnostics
@@ -438,6 +902,20 @@ components:
             format: uuid
           - type: string
             pattern: '^[a-z][a-z0-9]*(?:_[a-z0-9]+){1,7}$'
+    OtaReleaseID:
+      name: release_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z][a-z0-9]*(?:_[a-z0-9]+){1,7}$'
+    OtaDeploymentID:
+      name: deployment_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z][a-z0-9]*(?:_[a-z0-9]+){1,7}$'
   schemas:
     RuntimeEnvelope:
       allOf:
@@ -513,6 +991,312 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/DeviceDiagnostics'
+    DeviceOtaEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '../schemas/ota_device_update.schema.json'
+    OtaEventAcceptedEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - accepted
+              properties:
+                accepted:
+                  type: boolean
+                duplicate:
+                  type: boolean
+    OtaReleaseEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '../schemas/ota_release.schema.json'
+    OtaReleasePageEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - releases
+                - total
+                - page
+                - page_size
+              properties:
+                releases:
+                  type: array
+                  items:
+                    $ref: '../schemas/ota_release.schema.json'
+                total:
+                  type: integer
+                  minimum: 0
+                page:
+                  type: integer
+                  minimum: 1
+                page_size:
+                  type: integer
+                  minimum: 1
+    OtaReleaseDetailEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - release
+                - versions
+                - rollback
+              properties:
+                release:
+                  $ref: '../schemas/ota_release.schema.json'
+                versions:
+                  type: array
+                  items:
+                    $ref: '../schemas/ota_release.schema.json'
+                rollback:
+                  type: object
+                  additionalProperties: false
+                  required:
+                    - allowed
+                    - target_version
+                  properties:
+                    allowed:
+                      type: boolean
+                    target_version:
+                      type: string
+    OtaReleaseMutation:
+      type: object
+      additionalProperties: false
+      required:
+        - firmware_version
+        - hardware_revision
+        - channel
+        - artifact_key
+        - artifact_url
+        - sha256
+        - size_bytes
+        - signature_key_id
+        - signature_algorithm
+        - signature
+        - rollback_allowed
+        - min_source_version
+        - release_notes
+      properties:
+        firmware_version:
+          type: string
+        hardware_revision:
+          type: string
+        channel:
+          type: string
+          enum:
+            - stable
+            - canary
+            - internal
+        artifact_key:
+          type: string
+        artifact_url:
+          type: string
+          format: uri
+          pattern: ^https://
+        sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        size_bytes:
+          type: integer
+          minimum: 1
+          maximum: 16777216
+        signature_key_id:
+          type: string
+        signature_algorithm:
+          type: string
+          enum:
+            - ed25519
+        signature:
+          type: string
+        signature_status:
+          type: string
+          enum:
+            - pending
+            - verified
+            - failed
+            - missing
+        signature_verified_at:
+          type: string
+          format: date-time
+        mandatory:
+          type: boolean
+        rollback_allowed:
+          type: boolean
+        min_source_version:
+          type: string
+        release_notes:
+          type: string
+          maxLength: 4000
+        target_type:
+          type: string
+          enum:
+            - all
+            - device
+            - group
+            - canary
+        target_id:
+          type: string
+          maxLength: 128
+        canary_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        expected_version:
+          type: integer
+          minimum: 1
+    OtaDeploymentEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/OtaDeployment'
+    OtaDeploymentPageEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - deployments
+                - total
+                - page
+                - page_size
+              properties:
+                deployments:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/OtaDeployment'
+                total:
+                  type: integer
+                  minimum: 0
+                page:
+                  type: integer
+                  minimum: 1
+                page_size:
+                  type: integer
+                  minimum: 1
+    OtaDeployment:
+      type: object
+      additionalProperties: false
+      required:
+        - deployment_id
+        - release_id
+        - device_id
+        - status
+        - progress_percent
+        - created_at
+      properties:
+        deployment_id:
+          type: string
+        release_id:
+          type: string
+        device_id:
+          type: string
+        device_name:
+          type: string
+        hardware_revision:
+          type: string
+        status:
+          type: string
+          enum:
+            - queued
+            - offered
+            - downloading
+            - validating
+            - installing
+            - pending_verify
+            - succeeded
+            - failed
+            - rolled_back
+        progress_percent:
+          type: number
+          minimum: 0
+          maximum: 100
+        error_code:
+          type: string
+        error_message:
+          type: string
+        retry_count:
+          type: integer
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        completed_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+    OtaStatisticsEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/OtaStatistics'
+    OtaStatistics:
+      type: object
+      additionalProperties: false
+      required:
+        - published_release_count
+        - canary_release_count
+        - active_deployment_count
+        - succeeded_deployment_count
+        - failed_deployment_count
+        - rollback_count
+        - failure_rate
+        - rollback_rate
+      properties:
+        published_release_count:
+          type: integer
+          minimum: 0
+        canary_release_count:
+          type: integer
+          minimum: 0
+        active_deployment_count:
+          type: integer
+          minimum: 0
+        succeeded_deployment_count:
+          type: integer
+          minimum: 0
+        failed_deployment_count:
+          type: integer
+          minimum: 0
+        rollback_count:
+          type: integer
+          minimum: 0
+        failure_rate:
+          type: number
+          minimum: 0
+          maximum: 1
+        rollback_rate:
+          type: number
+          minimum: 0
+          maximum: 1
     DeviceDiagnostics:
       type: object
       additionalProperties: false

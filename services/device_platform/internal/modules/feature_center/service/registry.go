@@ -46,7 +46,16 @@ func DefaultRegistry() []Definition {
 		readOnlyFeatureDef("content_library", "内容库", "儿童内容包的审核、发布与下发。", "content", "内容平台",
 			"内容包在内容库页面审核和发布，功能中心只提供能力状态和统计。",
 			metrics("published_content_count", "已发布内容", "个")),
-		featureDef("ota_release", "设备更新", "设备固件和应用更新发布。", "release", "发布平台", true,
+		readOnlyFeatureDef(
+			"ota_release",
+			"设备更新",
+			"设备固件版本的签名、灰度与回滚发布。",
+			"release",
+			"发布平台",
+			"固件版本在设备 OTA 页面发布和管理，功能中心只提供能力状态和统计。",
+			metrics("published_firmware_count", "已发布版本", "个"),
+		),
+		featureDef("app_update", "应用更新", "家长端应用的版本提示和强制更新策略。", "release", "发布平台", true,
 			configFields(
 				selectField("default_channel", "默认渠道", "stable", []domain.ConfigOption{
 					{Value: "stable", Label: "稳定版"},
@@ -56,7 +65,7 @@ func DefaultRegistry() []Definition {
 				stringField("minimum_client_version", "最低客户端版本", "", true),
 				stringField("mandatory_update_threshold", "强制更新线", "", true),
 			),
-			metrics("published_firmware_count", "已发布版本", "个")),
+			metrics("app_release_count", "已发布应用版本", "个")),
 		featureDef("download_server", "下载服务", "内容、更新和应用文件的分发。", "release", "发布平台", false,
 			nil,
 			metrics("download_file_count", "发布文件", "个")),

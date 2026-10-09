@@ -16,12 +16,35 @@ import (
 type Service struct {
 	repository repository.Repository
 	timeSource clock.Clock
+	verifier   SignatureVerifier
 }
 
 // Options contains OTA service dependencies.
 type Options struct {
 	Repository repository.Repository
 	Clock      clock.Clock
+	Verifier   SignatureVerifier
+}
+
+// SignatureVerifier validates a detached firmware signature against a trusted
+// keyring. Production must configure one before OTA release publication.
+type SignatureVerifier interface {
+	Verify(
+		algorithm string,
+		keyID string,
+		digest string,
+		signature string,
+	) error
+}
+
+// CurrentDeviceUpdate is the active deployment (if any) plus the release it
+// targets. It is returned to devices before offering a new release so the
+// resume/retry path observes the same deployment id.
+type CurrentDeviceUpdate struct {
+	Release         domain.Release
+	Deployment      domain.Deployment
+	UpdateAvailable bool
+	CurrentVersion  string
 }
 
 // New creates the OTA service.
@@ -36,6 +59,7 @@ func New(options Options) (*Service, error) {
 	return &Service{
 		repository: options.Repository,
 		timeSource: timeSource,
+		verifier:   options.Verifier,
 	}, nil
 }
 
@@ -67,6 +91,8 @@ func (s *Service) CreateReleaseDraft(
 		SizeBytes:          input.SizeBytes,
 		SignatureKeyID:     input.SignatureKeyID,
 		SignatureAlgorithm: input.SignatureAlgorithm,
+		Signature:          input.Signature,
+		SignatureStatus:    domain.SignatureStatusPending,
 		RollbackAllowed:    input.RollbackAllowed,
 		Mandatory:          input.Mandatory,
 		ReleaseNotes:       input.ReleaseNotes,
@@ -121,6 +147,7 @@ func (s *Service) UpdateReleaseDraft(
 	release.SizeBytes = input.SizeBytes
 	release.SignatureKeyID = input.SignatureKeyID
 	release.SignatureAlgorithm = input.SignatureAlgorithm
+	release.Signature = input.Signature
 	release.RollbackAllowed = input.RollbackAllowed
 	release.Mandatory = input.Mandatory
 	release.ReleaseNotes = input.ReleaseNotes
@@ -176,12 +203,51 @@ func (s *Service) PublishRelease(
 	actorID string,
 	expectedVersion int64,
 ) (*domain.Release, error) {
+	actorID, err := validateActor(actorID)
+	if err != nil {
+		return nil, err
+	}
+	releaseID = strings.TrimSpace(releaseID)
+	if releaseID == "" || expectedVersion <= 0 {
+		return nil, domain.ErrInvalidRelease
+	}
+	release, err := s.repository.GetRelease(ctx, releaseID)
+	if err != nil {
+		return nil, err
+	}
+	if release.RecordVersion != expectedVersion {
+		return nil, &domain.ReleaseVersionConflictError{
+			ExpectedVersion: expectedVersion,
+			CurrentVersion:  release.RecordVersion,
+		}
+	}
+	if release.Status != domain.ReleaseStatusDraft {
+		return nil, domain.ErrReleaseStateConflict
+	}
+	if strings.TrimSpace(release.Signature) == "" {
+		return nil, domain.ErrSignatureRequired
+	}
+	if s.verifier == nil {
+		return nil, domain.ErrSignatureKeyUnknown
+	}
+	if err := s.verifier.Verify(
+		release.SignatureAlgorithm,
+		release.SignatureKeyID,
+		release.SHA256,
+		release.Signature,
+	); err != nil {
+		return nil, err
+	}
+	now := s.timeSource.Now().UTC()
+	release.SignatureStatus = domain.SignatureStatusVerified
+	release.SignatureVerifiedAt = &now
 	return s.transition(
 		ctx,
 		releaseID,
 		actorID,
 		expectedVersion,
 		domain.ReleaseStatusPublished,
+		true,
 	)
 }
 
@@ -248,6 +314,7 @@ func (s *Service) transition(
 	actorID string,
 	expectedVersion int64,
 	status domain.ReleaseStatus,
+	signatureVerified ...bool,
 ) (*domain.Release, error) {
 	actorID, err := validateActor(actorID)
 	if err != nil {
@@ -264,6 +331,7 @@ func (s *Service) transition(
 		status,
 		actorID,
 		s.timeSource.Now().UTC(),
+		len(signatureVerified) > 0 && signatureVerified[0],
 	)
 }
 
@@ -426,6 +494,70 @@ func (s *Service) DeviceUpdate(
 	return &manifest, nil
 }
 
+// DeviceCurrentVersion returns the firmware version a device reported in its
+// runtime state. Callers use it to build a correct current/target version pair
+// instead of treating the offered release version as the installed one.
+func (s *Service) DeviceCurrentVersion(
+	ctx context.Context,
+	deviceID string,
+) (string, error) {
+	deviceID = strings.TrimSpace(deviceID)
+	if deviceID == "" {
+		return "", domain.ErrDeviceNotFound
+	}
+	device, err := s.repository.GetDeviceContext(ctx, deviceID)
+	if err != nil {
+		return "", err
+	}
+	currentVersion := strings.TrimSpace(device.CurrentVersion)
+	if !domain.ValidVersion(currentVersion) {
+		return "0.0.0", nil
+	}
+	return currentVersion, nil
+}
+
+// CurrentDeviceUpdate returns the newest in-progress or terminal deployment
+// for a device. Callers fall back to DeviceUpdate when there is none.
+func (s *Service) CurrentDeviceUpdate(
+	ctx context.Context,
+	deviceID string,
+) (*CurrentDeviceUpdate, error) {
+	deviceID = strings.TrimSpace(deviceID)
+	if deviceID == "" {
+		return nil, domain.ErrDeviceNotFound
+	}
+	page, err := s.repository.ListDeployments(ctx, domain.DeploymentFilter{
+		DeviceID: deviceID,
+		Page:     1,
+		PageSize: 1,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(page.Items) == 0 {
+		return nil, domain.ErrNoUpdateAvailable
+	}
+	deployment := page.Items[0]
+	switch deployment.Status {
+	case domain.DeploymentStatusSucceeded, domain.DeploymentStatusRolledBack:
+		return nil, domain.ErrNoUpdateAvailable
+	}
+	release, err := s.repository.GetRelease(ctx, deployment.ReleaseID)
+	if err != nil {
+		return nil, err
+	}
+	device, err := s.repository.GetDeviceContext(ctx, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	return &CurrentDeviceUpdate{
+		Release:         *release,
+		Deployment:      deployment,
+		UpdateAvailable: deployment.Status != domain.DeploymentStatusFailed,
+		CurrentVersion:  device.CurrentVersion,
+	}, nil
+}
+
 // AssignRelease creates one device deployment. A repeated request id returns
 // the same deployment, which makes guardian retries safe.
 func (s *Service) AssignRelease(
@@ -490,6 +622,18 @@ func (s *Service) ListDeployments(
 	return s.repository.ListDeployments(ctx, normalizeDeploymentFilter(filter))
 }
 
+// GetDeployment returns one deployment.
+func (s *Service) GetDeployment(
+	ctx context.Context,
+	deploymentID string,
+) (*domain.Deployment, error) {
+	deploymentID = strings.TrimSpace(deploymentID)
+	if deploymentID == "" {
+		return nil, domain.ErrDeploymentNotFound
+	}
+	return s.repository.GetDeployment(ctx, deploymentID)
+}
+
 // Statistics returns rollout counts and failure rates.
 func (s *Service) Statistics(
 	ctx context.Context,
@@ -520,6 +664,81 @@ func (s *Service) RetryDeployment(
 		expectedVersion,
 		s.timeSource.Now().UTC(),
 	)
+}
+
+// RollbackDeployment requeues a device deployment as a rollback. The physical
+// partition switch remains the device's responsibility; the platform records
+// the authorized target and the device reports rollback_started/rolled_back.
+func (s *Service) RollbackDeployment(
+	ctx context.Context,
+	deploymentID string,
+	actorID string,
+	expectedVersion int64,
+) (*domain.Deployment, error) {
+	actorID, err := validateActor(actorID)
+	if err != nil {
+		return nil, err
+	}
+	deploymentID = strings.TrimSpace(deploymentID)
+	if deploymentID == "" || expectedVersion <= 0 {
+		return nil, domain.ErrInvalidDeployment
+	}
+	current, err := s.repository.GetDeployment(ctx, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	if current.RecordVersion != expectedVersion {
+		return nil, &domain.DeploymentVersionConflictError{
+			ExpectedVersion: expectedVersion,
+			CurrentVersion:  current.RecordVersion,
+		}
+	}
+	release, err := s.repository.GetRelease(ctx, current.ReleaseID)
+	if err != nil {
+		return nil, err
+	}
+	if !release.RollbackAllowed {
+		return nil, domain.ErrRollbackNotAllowed
+	}
+	if current.Status != domain.DeploymentStatusFailed &&
+		current.Status != domain.DeploymentStatusSucceeded &&
+		current.Status != domain.DeploymentStatusPendingVerify {
+		return nil, domain.ErrDeploymentStateConflict
+	}
+	targetReleaseID := strings.TrimSpace(release.RollbackReleaseID)
+	if targetReleaseID == "" {
+		return nil, domain.ErrRollbackNotAllowed
+	}
+	targetRelease, err := s.repository.GetRelease(ctx, targetReleaseID)
+	if err != nil {
+		return nil, err
+	}
+	if targetRelease.HardwareRevision != release.HardwareRevision {
+		return nil, domain.ErrRollbackNotAllowed
+	}
+	if targetRelease.Status != domain.ReleaseStatusPublished {
+		return nil, domain.ErrRollbackNotAllowed
+	}
+	now := s.timeSource.Now().UTC()
+	rollback := &domain.Deployment{
+		ID:                     uuid.NewString(),
+		ReleaseID:              targetRelease.ID,
+		RollbackReleaseID:      targetRelease.ID,
+		RollbackOfDeploymentID: current.ID,
+		DeviceID:               current.DeviceID,
+		GroupID:                targetRelease.Target.GroupID,
+		Status:                 domain.DeploymentStatusQueued,
+		RequestedBy:            actorID,
+		RequestID:              "rollback:" + current.ID + ":" + targetRelease.ID,
+		BytesTotal:             targetRelease.SizeBytes,
+		RecordVersion:          1,
+		CreatedAt:              now,
+		UpdatedAt:              now,
+	}
+	if err := domain.ValidateDeployment(rollback); err != nil {
+		return nil, err
+	}
+	return s.repository.CreateDeployment(ctx, rollback)
 }
 
 // RecordEvent records device-authenticated installation progress.
@@ -640,6 +859,7 @@ func validateRollbackReference(
 		return err
 	}
 	if rollbackRelease.Status == domain.ReleaseStatusWithdrawn ||
+		rollbackRelease.Status != domain.ReleaseStatusPublished ||
 		rollbackRelease.HardwareRevision != release.HardwareRevision {
 		return domain.ErrInvalidRelease
 	}

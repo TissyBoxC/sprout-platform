@@ -23,6 +23,7 @@ import (
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
 	featurecenterservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	operationsservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
+	otaservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/service"
 	policeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
 	privacyhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/handler"
 	privacyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/service"
@@ -46,6 +47,7 @@ type RouterOptions struct {
 	ServiceVersionService *serviceversionservice.Service
 	FeatureCenterService  *featurecenterservice.Service
 	ReleaseStoreService   *releasestoreservice.Service
+	OTAService            *otaservice.Service
 	ContentService        *contentservice.Service
 	UsageReportService    *usagereportservice.Service
 	VoiceTokenIssuer      bindingservice.VoiceTokenIssuer
@@ -718,6 +720,22 @@ func NewRouter(options RouterOptions) http.Handler {
 		}
 	}
 
+	if options.OTAService != nil {
+		ota := newOTAHandler(
+			options.OTAService,
+			options.BindingService,
+			guardianDeviceVerifierFromBinding(options.BindingService),
+		)
+		var requireAuthentication func(http.HandlerFunc) http.HandlerFunc
+		var requireAdmin func(http.HandlerFunc) http.HandlerFunc
+		if options.AuthService != nil {
+			authHandler := authHandler{service: options.AuthService}
+			requireAuthentication = authHandler.requireAuthentication
+			requireAdmin = authHandler.requireAdmin
+		}
+		ota.registerRoutes(mux, requireAuthentication, requireAdmin)
+	}
+
 	return observability.WithRequestLabels(observability.WithRequestMetadata(
 		observability.WithAccessLog(
 			mux,
@@ -728,6 +746,36 @@ func NewRouter(options RouterOptions) http.Handler {
 			},
 		),
 	))
+}
+
+func guardianDeviceVerifierFromBinding(
+	bindingService *bindingservice.Service,
+) GuardianDeviceVerifier {
+	if bindingService == nil {
+		return nil
+	}
+	return bindingGuardianVerifier{bindingService: bindingService}
+}
+
+type bindingGuardianVerifier struct {
+	bindingService *bindingservice.Service
+}
+
+func (verifier bindingGuardianVerifier) DeviceBelongsToParent(
+	ctx context.Context,
+	parentAccountID string,
+	deviceID string,
+) (bool, error) {
+	bindings, err := verifier.bindingService.List(ctx, parentAccountID)
+	if err != nil {
+		return false, err
+	}
+	for _, binding := range bindings {
+		if strings.TrimSpace(binding.DeviceID) == strings.TrimSpace(deviceID) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func healthHandler(response http.ResponseWriter, _ *http.Request) {

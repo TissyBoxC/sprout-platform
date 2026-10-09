@@ -63,6 +63,10 @@ async function logout(): Promise<void> {
           <span class="nav-dot" aria-hidden="true"></span>
           内容发布
         </RouterLink>
+        <RouterLink to="/device-ota">
+          <span class="nav-dot" aria-hidden="true"></span>
+          设备 OTA
+        </RouterLink>
         <RouterLink to="/content">
           <span class="nav-dot" aria-hidden="true"></span>
           内容库

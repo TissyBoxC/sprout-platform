@@ -6,6 +6,7 @@ import '../../../core/error/app_exception.dart';
 import '../../../core/theme/app_motion.dart';
 import '../../../shared/widgets/app_reveal.dart';
 import '../../../shared/widgets/app_state_switcher.dart';
+import '../../ota/device_firmware/presentation/device_firmware_update_panel.dart';
 import '../application/device_binding_controller.dart';
 import '../data/device_binding_api.dart';
 import '../domain/device_provisioning_status.dart';
@@ -331,42 +332,58 @@ class DeviceListPage extends ConsumerWidget {
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                device.deviceName,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _deviceSubtitle(device),
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 16),
-              _ProvisioningStatusPanel(
-                status: device.runtime?.provisioning,
-                onReconnect: () => Navigator.of(context).pop(true),
-              ),
-              const SizedBox(height: 20),
-              Text('设备能力', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              if (device.capabilities.isEmpty)
-                const Text('设备暂时没有上报可用能力。')
-              else
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final capability in device.capabilities)
-                      Chip(label: Text(_capabilityLabel(capability))),
-                  ],
+      builder: (sheetContext) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.9,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  device.deviceName,
+                  style: Theme.of(sheetContext).textTheme.titleLarge,
                 ),
-            ],
+                const SizedBox(height: 8),
+                Text(
+                  _deviceSubtitle(device),
+                  style: Theme.of(sheetContext).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 16),
+                _ProvisioningStatusPanel(
+                  status: device.runtime?.provisioning,
+                  onReconnect: () => Navigator.of(sheetContext).pop(true),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  '设备能力',
+                  style: Theme.of(sheetContext).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                if (device.capabilities.isEmpty)
+                  const Text('设备暂时没有上报可用能力。')
+                else
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final capability in device.capabilities)
+                        Chip(label: Text(_capabilityLabel(capability))),
+                    ],
+                  ),
+                const SizedBox(height: 24),
+                const Divider(),
+                const SizedBox(height: 12),
+                DeviceFirmwareUpdatePanel(
+                  deviceId: device.deviceId,
+                  deviceName: device.deviceName,
+                  isDeviceOnline: device.runtime?.isOnline == true,
+                ),
+              ],
+            ),
           ),
         ),
       ),

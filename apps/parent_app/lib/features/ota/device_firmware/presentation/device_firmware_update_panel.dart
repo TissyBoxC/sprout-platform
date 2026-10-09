@@ -231,15 +231,25 @@ class _FirmwareActions extends ConsumerWidget {
             icon: const Icon(Icons.system_update_alt_rounded),
             label: Text(isDeviceOnline ? '开始更新设备固件' : '设备离线，暂时不能更新'),
           )
-        else if (state.canRetry)
+        else if (state.canRetry) ...[
           FilledButton.icon(
             onPressed: isDeviceOnline && !isBusy
                 ? () => _confirmRetry(context, notifier, deviceName)
                 : null,
             icon: const Icon(Icons.refresh_rounded),
             label: const Text('重试设备固件更新'),
-          )
-        else if (state.canRollback)
+          ),
+          if (state.canRollback) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: isDeviceOnline && !isBusy
+                  ? () => _confirmRollback(context, notifier, deviceName)
+                  : null,
+              icon: const Icon(Icons.undo_rounded),
+              label: const Text('回退到上一个版本'),
+            ),
+          ],
+        ] else if (state.canRollback)
           OutlinedButton.icon(
             onPressed: isDeviceOnline && !isBusy
                 ? () => _confirmRollback(context, notifier, deviceName)
@@ -258,7 +268,25 @@ class _FirmwareActions extends ConsumerWidget {
             label: Text(deviceFirmwareStatusLabel(update.status)),
           )
         else if (update.status == DeviceFirmwareUpdateStatus.upToDate)
-          const _UpToDateNotice(),
+          const _UpToDateNotice()
+        else if (update.status == DeviceFirmwareUpdateStatus.succeeded)
+          const _InlineNotice(
+            icon: Icons.verified_rounded,
+            message: '设备固件更新完成，正在使用新版本。',
+            color: Colors.green,
+          )
+        else if (update.status == DeviceFirmwareUpdateStatus.rolledBack)
+          const _InlineNotice(
+            icon: Icons.undo_rounded,
+            message: '设备已恢复到上一个可用版本。',
+            color: Colors.blueGrey,
+          )
+        else
+          const _InlineNotice(
+            icon: Icons.info_outline_rounded,
+            message: '当前没有可执行的固件操作。',
+            color: Colors.blueGrey,
+          ),
       ],
     );
   }
@@ -304,10 +332,10 @@ class _ReleaseSummary extends StatelessWidget {
             '${_formatBytes(release.sizeBytes)} · '
             '${_formatDateTime(release.publishedAt)}',
           ),
-          if (release.releaseNotes.trim().isNotEmpty) ...[
+          if (release.releaseNotes?.trim().isNotEmpty == true) ...[
             const SizedBox(height: 12),
             Text(
-              release.releaseNotes,
+              release.releaseNotes!,
               style: Theme.of(context).textTheme.bodyMedium,
             ),
           ],

@@ -11,17 +11,20 @@ import {
   createAdminOtaClient,
   type CreateOtaReleaseInput,
   type OtaDeployment,
+  type OtaDeploymentStatus,
   type OtaRelease,
   type OtaReleaseChannel,
   type OtaReleaseDetail,
   type OtaReleaseStatus,
   type OtaStatistics,
+  type OtaTargetType,
   type UpdateOtaReleaseInput,
 } from '@/api/adminOta'
 import { createHttpClient } from '@/api/httpClient'
 
 export type OtaReleaseStatusFilter = OtaReleaseStatus | 'all'
 export type OtaReleaseChannelFilter = OtaReleaseChannel | 'all'
+export type OtaDeploymentStatusFilter = OtaDeploymentStatus | 'all'
 
 export interface OtaReleaseFilters {
   status: OtaReleaseStatusFilter
@@ -43,12 +46,12 @@ export interface OtaFirmwareUploadInput {
 export const emptyOtaStatistics: OtaStatistics = {
   publishedReleaseCount: 0,
   canaryReleaseCount: 0,
-  inProgressDeploymentCount: 0,
+  activeDeploymentCount: 0,
   succeededDeploymentCount: 0,
   failedDeploymentCount: 0,
-  rolledBackDeploymentCount: 0,
-  rollbackRatePercent: 0,
-  generatedAt: '',
+  rollbackCount: 0,
+  failureRate: 0,
+  rollbackRate: 0,
 }
 
 /// Owns the complete device firmware OTA management surface: release
@@ -69,7 +72,7 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
   const statistics = ref<OtaStatistics>({ ...emptyOtaStatistics })
   const detail = ref<OtaReleaseDetail | null>(null)
   const selectedReleaseId = ref('')
-  const deploymentStatus = ref('all')
+  const deploymentStatus = ref<OtaDeploymentStatusFilter>('all')
   const deploymentPage = ref(1)
   const deploymentTotal = ref(0)
   const firmwareFiles = ref<DownloadFile[]>([])
@@ -88,13 +91,6 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
       ? 1
       : Math.max(1, Math.ceil(releasesTotal.value / filters.value.pageSize)),
   )
-  const visibleDeployments = computed(() => {
-    const deployments = detail.value?.deployments ?? []
-    if (deploymentStatus.value === 'all') {
-      return deployments
-    }
-    return deployments.filter((deployment) => deployment.status === deploymentStatus.value)
-  })
   const deploymentPageCount = computed(() =>
     deploymentTotal.value <= 0
       ? 1
@@ -149,11 +145,13 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
     isLoadingDetail.value = true
     error.value = null
     try {
-      detail.value = await client.loadRelease(normalizedReleaseId)
+      const result = await client.loadRelease(normalizedReleaseId)
+      detail.value = result
       selectedReleaseId.value = normalizedReleaseId
       deploymentStatus.value = 'all'
       deploymentPage.value = 1
-      deploymentTotal.value = detail.value.deploymentsTotal
+      deploymentTotal.value = 0
+      await loadDeploymentPage(1)
     } catch (caught: unknown) {
       error.value = mapApiError(caught)
     } finally {
@@ -177,6 +175,7 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
     error.value = null
     try {
       const result = await client.loadDeployments(releaseId, {
+        status: deploymentStatus.value,
         page: nextPage,
         pageSize: filters.value.pageSize,
       })
@@ -194,6 +193,11 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
     } finally {
       isLoadingDetail.value = false
     }
+  }
+
+  async function applyDeploymentFilter(): Promise<void> {
+    deploymentPage.value = 1
+    await loadDeploymentPage(1)
   }
 
   async function createRelease(input: CreateOtaReleaseInput): Promise<boolean> {
@@ -235,23 +239,12 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
     )
   }
 
-  async function rollbackRelease(release: OtaRelease, reason: string): Promise<boolean> {
+  async function rollbackRelease(release: OtaRelease): Promise<boolean> {
     return submitReleaseAction(
       release,
-      () => client.rollbackRelease(release.releaseId, reason),
+      () => client.rollbackRelease(release.releaseId),
       '回滚任务已创建。',
     )
-  }
-
-  async function deleteRelease(release: OtaRelease): Promise<boolean> {
-    return submitAction('固件版本已删除。', async () => {
-      await client.deleteRelease(release.releaseId)
-      if (selectedReleaseId.value === release.releaseId) {
-        detail.value = null
-        selectedReleaseId.value = ''
-      }
-      await load()
-    })
   }
 
   async function retryDeployment(deployment: OtaDeployment): Promise<boolean> {
@@ -387,12 +380,12 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
   }
 
   return {
+    applyDeploymentFilter,
     applyFilters,
     clearFilters,
     clearMessages,
     closeRelease,
     createRelease,
-    deleteRelease,
     deploymentStatus,
     deploymentPage,
     deploymentPageCount,
@@ -428,7 +421,7 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
     uploadFirmware,
     uploadProgress,
     uploading,
-    visibleDeployments,
+    visibleDeployments: computed(() => detail.value?.deployments ?? []),
     withdrawRelease,
   }
 })
@@ -439,7 +432,6 @@ export function otaReleaseStatusLabel(value: OtaReleaseStatus): string {
     published: '已发布',
     paused: '已暂停',
     withdrawn: '已撤回',
-    rolled_back: '已回滚',
   }[value]
 }
 
@@ -451,16 +443,26 @@ export function otaReleaseChannelLabel(value: OtaReleaseChannel): string {
   }[value]
 }
 
+export function otaTargetTypeLabel(value: OtaTargetType): string {
+  return {
+    all: '全部设备',
+    device: '指定设备',
+    group: '设备分组',
+  }[value]
+}
+
 export function otaDeploymentStatusLabel(value: string): string {
   return (
     {
-      pending: '等待设备',
+      queued: '等待下发',
+      offered: '已通知设备',
       downloading: '正在下载',
+      validating: '正在校验',
       installing: '正在安装',
+      pending_verify: '等待确认',
       succeeded: '升级成功',
       failed: '升级失败',
       rolled_back: '已回滚',
-      cancelled: '已取消',
     }[value] ?? '状态待确认'
   )
 }
@@ -468,7 +470,7 @@ export function otaDeploymentStatusLabel(value: string): string {
 export function otaSignatureStatusLabel(value: string): string {
   return (
     {
-      pending: '等待校验',
+      pending: '等待验证',
       verified: '签名有效',
       failed: '签名无效',
       missing: '缺少签名',
@@ -476,16 +478,14 @@ export function otaSignatureStatusLabel(value: string): string {
   )
 }
 
-export function otaAuditActionLabel(value: string): string {
-  return (
-    {
-      create: '创建版本',
-      update: '更新配置',
-      publish: '发布版本',
-      pause: '暂停发布',
-      withdraw: '撤回版本',
-      rollback: '回滚版本',
-      delete: '删除版本',
-    }[value] ?? '版本操作'
-  )
+export function otaReleaseRailClass(value: OtaReleaseStatus): string {
+  return value === 'withdrawn' ? 'rolled-back' : value
+}
+
+export function otaDeploymentRailClass(value: OtaDeploymentStatus): string {
+  return value === 'rolled_back' ? 'rolled-back' : value
+}
+
+export function formatOtaRate(value: number): string {
+  return `${Math.round(Math.min(1, Math.max(0, value)) * 100)}%`
 }

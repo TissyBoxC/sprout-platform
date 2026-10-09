@@ -6,6 +6,9 @@ import 'package:parent_app/features/device/application/device_binding_controller
 import 'package:parent_app/features/device/data/device_binding_api.dart';
 import 'package:parent_app/features/device/domain/device_provisioning_status.dart';
 import 'package:parent_app/features/device/presentation/device_list_page.dart';
+import 'package:parent_app/features/ota/device_firmware/application/device_firmware_controller.dart';
+import 'package:parent_app/features/ota/device_firmware/data/device_firmware_api.dart';
+import 'package:parent_app/features/ota/device_firmware/domain/device_firmware_update.dart';
 
 void main() {
   testWidgets('shows provisioning and session state for a bound device', (
@@ -118,11 +121,40 @@ void main() {
     expect(find.text('请让“初芽”保持开机，并让设备显示绑定二维码。'), findsOneWidget);
     expect(find.text('扫描设备绑定码'), findsWidgets);
   });
+
+  testWidgets('opens device details with the firmware update panel', (
+    tester,
+  ) async {
+    final device = BoundDevice(
+      deviceId: 'device_demo_003',
+      deviceName: '初芽',
+      hardwareModel: 'sprout_initial',
+      firmwareVersion: '0.9.0',
+      capabilities: ['wifi'],
+      lifecycleStatus: 'active',
+      boundAt: _boundAt,
+      runtime: _onlineRuntime(),
+    );
+    await tester.pumpWidget(
+      _buildApp(
+        DeviceBindingState(isScanning: false, devices: [], bindings: [device]),
+        firmwareApi: _FakeDeviceFirmwareApi(_availableUpdate()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('初芽'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('初芽 的固件'), findsOneWidget);
+    expect(find.text('当前版本 0.9.0 · 可更新至 0.10.0'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, '开始更新设备固件'), findsOneWidget);
+  });
 }
 
 final _boundAt = DateTime.utc(2026, 10, 1, 8);
 
-Widget _buildApp(DeviceBindingState state) {
+Widget _buildApp(DeviceBindingState state, {DeviceFirmwareApi? firmwareApi}) {
   final router = GoRouter(
     initialLocation: '/devices',
     routes: [
@@ -142,9 +174,97 @@ Widget _buildApp(DeviceBindingState state) {
       deviceBindingControllerProvider.overrideWith(
         () => _FakeDeviceBindingController(state),
       ),
+      if (firmwareApi != null)
+        deviceFirmwareApiProvider.overrideWithValue(firmwareApi),
     ],
     child: MaterialApp.router(routerConfig: router),
   );
+}
+
+DeviceRuntimeStatus _onlineRuntime() {
+  return DeviceRuntimeStatus(
+    isOnline: true,
+    connectionState: 'online',
+    transport: 'wifi',
+    networkQuality: 'good',
+    rssiDbm: -58,
+    latencyMs: 42,
+    packetLossPercent: 1,
+    timeSyncState: 'synchronized',
+    lastSyncedAt: null,
+    offlineState: 'online',
+    offlineReason: 'none',
+    fallbackActive: false,
+    pendingTelemetry: 0,
+    reportedAt: null,
+    receivedAt: null,
+    provisioning: DeviceProvisioningStatus(
+      state: 'provisioned',
+      wifiConfigured: true,
+      sessionState: 'ready',
+      droppedEvents: 0,
+      lastProvisionedAt: null,
+    ),
+  );
+}
+
+DeviceFirmwareUpdate _availableUpdate() {
+  return DeviceFirmwareUpdate(
+    deviceId: 'device_demo_003',
+    deploymentId: 'ota_deployment_001',
+    status: DeviceFirmwareUpdateStatus.available,
+    currentVersion: '0.9.0',
+    targetVersion: '0.10.0',
+    updateAvailable: true,
+    rollbackAvailable: false,
+    progressPercent: 0,
+    checkedAt: DateTime.parse('2026-10-09T00:00:00Z'),
+    release: DeviceFirmwareRelease(
+      releaseId: 'ota_release_001',
+      firmwareVersion: '0.10.0',
+      hardwareRevision: 's3_n16r8',
+      channel: 'stable',
+      status: 'published',
+      artifactKey: '0.10.0/stable/esp32_s3/firmware/sprout.bin',
+      artifactUrl: 'https://api.clarkhub.cn/releases/0.10.0/sprout.bin',
+      sha256:
+          'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      sizeBytes: 4194304,
+      signatureKeyId: 'ota_signing_001',
+      signature: 'MEUCIQDExampleSignatureForContractValidationOnly',
+      rollbackAllowed: true,
+      minSourceVersion: '0.9.0',
+      publishedAt: DateTime(2026, 10, 9),
+      releaseNotes: '提升设备更新稳定性。',
+    ),
+  );
+}
+
+class _FakeDeviceFirmwareApi implements DeviceFirmwareApi {
+  _FakeDeviceFirmwareApi(this.update);
+
+  DeviceFirmwareUpdate update;
+
+  @override
+  Future<DeviceFirmwareUpdate> fetch(String deviceId) async => update;
+
+  @override
+  Future<DeviceFirmwareUpdate> install(
+    String deviceId, {
+    String? deploymentId,
+  }) async {
+    update = update.copyWith(status: DeviceFirmwareUpdateStatus.downloading);
+    return update;
+  }
+
+  @override
+  Future<DeviceFirmwareUpdate> retry(String deviceId) async => update;
+
+  @override
+  Future<DeviceFirmwareUpdate> rollback(String deviceId) async => update;
+
+  @override
+  Future<DeviceFirmwareUpdate> status(String deviceId) async => update;
 }
 
 class _FakeDeviceBindingController extends DeviceBindingController {

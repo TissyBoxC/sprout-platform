@@ -7,6 +7,7 @@ import LoginPage from '@/features/auth/presentation/LoginPage.vue'
 import FamilyAccountsPage from '@/features/family/presentation/FamilyAccountsPage.vue'
 import ChildProfilesPage from '@/features/child/presentation/ChildProfilesPage.vue'
 import ReleasePage from '@/features/ota/presentation/ReleasePage.vue'
+import DeviceOtaPage from '@/features/ota/presentation/DeviceOtaPage.vue'
 import SystemSettingsPage from '@/features/system/presentation/SystemSettingsPage.vue'
 import VersionManagementPage from '@/features/version_management/presentation/VersionManagementPage.vue'
 import FeatureCenterPage from '@/features/feature_center/presentation/FeatureCenterPage.vue'
@@ -57,6 +58,11 @@ export function createAdminRouter() {
         path: '/releases',
         name: 'releases',
         component: ReleasePage,
+      },
+      {
+        path: '/device-ota',
+        name: 'device-ota',
+        component: DeviceOtaPage,
       },
       {
         path: '/downloads',

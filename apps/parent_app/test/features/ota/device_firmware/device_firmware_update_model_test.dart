@@ -33,6 +33,43 @@ void main() {
       expect(() => DeviceFirmwareUpdate.fromJson(json), throwsFormatException);
     });
 
+    test('accepts legacy version while keeping the canonical field first', () {
+      final release = (_deviceUpdateJson()['release'] as Map<String, Object?>)
+          .clone();
+      release.remove('firmware_version');
+      release['version'] = '0.10.1';
+      final json = _deviceUpdateJson()..['release'] = release;
+
+      final update = DeviceFirmwareUpdate.fromJson(json);
+
+      expect(update.release?.firmwareVersion, '0.10.1');
+    });
+
+    test('requires a real signature instead of accepting a checksum', () {
+      final release =
+          (_deviceUpdateJson()['release'] as Map<String, Object?>).clone()
+            ..remove('signature');
+      final json = _deviceUpdateJson()..['release'] = release;
+
+      expect(() => DeviceFirmwareUpdate.fromJson(json), throwsFormatException);
+    });
+
+    test('accepts optional audience fields being absent', () {
+      final release =
+          (_deviceUpdateJson()['release'] as Map<String, Object?>).clone()
+            ..remove('target_type')
+            ..remove('canary_percent')
+            ..remove('release_notes');
+      final json = _deviceUpdateJson()..['release'] = release;
+
+      final update = DeviceFirmwareUpdate.fromJson(json);
+
+      expect(update.release?.targetType, isNull);
+      expect(update.release?.canaryPercent, isNull);
+      expect(update.release?.releaseNotes, isNull);
+      expect(update.release?.isInstallable, isTrue);
+    });
+
     test('clamps progress and tolerates missing release metadata', () {
       final json = _deviceUpdateJson()
         ..['release'] = null

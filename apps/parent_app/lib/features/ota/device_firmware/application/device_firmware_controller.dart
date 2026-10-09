@@ -38,6 +38,7 @@ class DeviceFirmwareState {
 
   bool get canStartUpdate =>
       update != null &&
+      update!.status == DeviceFirmwareUpdateStatus.available &&
       update!.updateAvailable &&
       update!.release?.isInstallable == true &&
       !update!.status.isInProgress;
@@ -169,7 +170,7 @@ class DeviceFirmwareController extends AsyncNotifier<DeviceFirmwareState> {
       return false;
     }
     return _performAction(
-      () => _api.install(deviceId),
+      () => _api.install(deviceId, deploymentId: current.update?.deploymentId),
       failureFallback: '暂时无法开始设备固件更新，请稍后重试',
     );
   }

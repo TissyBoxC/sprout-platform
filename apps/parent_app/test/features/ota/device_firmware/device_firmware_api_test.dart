@@ -10,11 +10,12 @@ void main() {
     await api.fetch('device_demo_001');
     expect(client.calls.last, 'GET /api/v1/devices/device_demo_001/ota');
 
-    await api.install('device_demo_001');
+    await api.install('device_demo_001', deploymentId: 'ota_deployment_001');
     expect(
       client.calls.last,
       'POST /api/v1/devices/device_demo_001/ota/install',
     );
+    expect(client.lastBody, {'deployment_id': 'ota_deployment_001'});
 
     await api.status('device_demo_001');
     expect(client.calls.last, 'GET /api/v1/devices/device_demo_001/ota/status');
@@ -42,6 +43,7 @@ void main() {
 
 class _RecordingApiClient implements ApiClient {
   final List<String> calls = <String>[];
+  Object? lastBody;
 
   @override
   Future<Map<String, Object?>> get(
@@ -55,6 +57,7 @@ class _RecordingApiClient implements ApiClient {
   @override
   Future<Map<String, Object?>> post(String path, {Object? body}) async {
     calls.add('POST $path');
+    lastBody = body;
     return _response;
   }
 

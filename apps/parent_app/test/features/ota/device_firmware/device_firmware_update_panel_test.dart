@@ -118,6 +118,7 @@ DeviceFirmwareUpdate _availableUpdate() {
       hardwareRevision: 's3_n16r8',
       channel: 'stable',
       status: 'published',
+      artifactKey: '0.10.0/stable/esp32_s3/firmware/sprout.bin',
       artifactUrl: 'https://api.clarkhub.cn/releases/0.10.0/sprout.bin',
       sha256:
           'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
@@ -145,7 +146,10 @@ class _FakeDeviceFirmwareApi implements DeviceFirmwareApi {
   Future<DeviceFirmwareUpdate> fetch(String deviceId) async => update;
 
   @override
-  Future<DeviceFirmwareUpdate> install(String deviceId) async {
+  Future<DeviceFirmwareUpdate> install(
+    String deviceId, {
+    String? deploymentId,
+  }) async {
     installCalls++;
     update = update.copyWith(
       status: DeviceFirmwareUpdateStatus.downloading,

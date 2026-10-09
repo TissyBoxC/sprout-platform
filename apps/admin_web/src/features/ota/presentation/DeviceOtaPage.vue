@@ -6,18 +6,23 @@ import type {
   OtaDeployment,
   OtaRelease,
   OtaReleaseChannel,
+  OtaTargetType,
+  UpdateOtaReleaseInput,
 } from '@/api/adminOta'
 import type { DownloadFile } from '@/api/adminDownloadFiles'
 import {
-  otaAuditActionLabel,
+  otaDeploymentRailClass,
   otaDeploymentStatusLabel,
   otaReleaseChannelLabel,
+  otaReleaseRailClass,
   otaReleaseStatusLabel,
+  otaTargetTypeLabel,
+  formatOtaRate,
   otaSignatureStatusLabel,
   useDeviceOtaStore,
 } from '@/features/ota/application/deviceOtaStore'
 
-type OtaActionKind = 'publish' | 'pause' | 'withdraw' | 'rollback' | 'delete'
+type OtaActionKind = 'publish' | 'pause' | 'withdraw' | 'rollback'
 
 interface PendingAction {
   kind: OtaActionKind
@@ -31,7 +36,6 @@ const isFilePickerOpen = ref(false)
 const isDetailOpen = ref(false)
 const editingRelease = ref<OtaRelease | null>(null)
 const pendingAction = ref<PendingAction | null>(null)
-const rollbackReason = ref('')
 const formError = ref('')
 const uploadFormError = ref('')
 const uploadForm = reactive({
@@ -46,16 +50,19 @@ const releaseForm = reactive<CreateOtaReleaseInput>({
   firmwareVersion: '',
   hardwareRevision: '',
   channel: 'stable',
-  rolloutPercentage: 0,
-  targetGroup: '',
+  artifactKey: '',
   artifactUrl: '',
-  artifactFileName: '',
   sha256: '',
-  signatureKeyId: '',
   sizeBytes: 0,
+  signatureKeyId: '',
+  signatureAlgorithm: 'ed25519',
+  signature: '',
   rollbackAllowed: false,
-  minimumSourceVersion: '',
+  minSourceVersion: '',
   releaseNotes: '',
+  targetType: 'all',
+  targetId: '',
+  canaryPercent: 0,
 })
 
 const isEditing = computed(() => editingRelease.value !== null)
@@ -74,6 +81,10 @@ const canGoPreviousDeploymentPage = computed(
 )
 const canGoNextDeploymentPage = computed(
   () => store.deploymentPage < store.deploymentPageCount && !store.isLoadingDetail,
+)
+const rollbackTargetVersion = computed(() => store.detail?.rollback.targetVersion ?? '')
+const rollbackRequested = computed(
+  () => detailRelease.value !== null && detailRelease.value.status === 'withdrawn',
 )
 
 onMounted(() => {
@@ -94,16 +105,19 @@ function openEditRelease(release: OtaRelease): void {
   releaseForm.firmwareVersion = release.firmwareVersion
   releaseForm.hardwareRevision = release.hardwareRevision
   releaseForm.channel = release.channel
-  releaseForm.rolloutPercentage = release.rolloutPercentage
-  releaseForm.targetGroup = release.targetGroup
+  releaseForm.artifactKey = release.artifactKey
   releaseForm.artifactUrl = release.artifactUrl
-  releaseForm.artifactFileName = release.artifactFileName
   releaseForm.sha256 = release.sha256
-  releaseForm.signatureKeyId = release.signatureKeyId
   releaseForm.sizeBytes = release.sizeBytes
+  releaseForm.signatureKeyId = release.signatureKeyId
+  releaseForm.signatureAlgorithm = release.signatureAlgorithm
+  releaseForm.signature = release.signature
   releaseForm.rollbackAllowed = release.rollbackAllowed
-  releaseForm.minimumSourceVersion = release.minimumSourceVersion
+  releaseForm.minSourceVersion = release.minSourceVersion
   releaseForm.releaseNotes = release.releaseNotes
+  releaseForm.targetType = release.targetType
+  releaseForm.targetId = release.targetId
+  releaseForm.canaryPercent = release.canaryPercent
   formError.value = ''
   isReleaseFormOpen.value = true
 }
@@ -121,16 +135,19 @@ function resetReleaseForm(): void {
   releaseForm.firmwareVersion = ''
   releaseForm.hardwareRevision = ''
   releaseForm.channel = 'stable'
-  releaseForm.rolloutPercentage = 0
-  releaseForm.targetGroup = ''
+  releaseForm.artifactKey = ''
   releaseForm.artifactUrl = ''
-  releaseForm.artifactFileName = ''
   releaseForm.sha256 = ''
-  releaseForm.signatureKeyId = ''
   releaseForm.sizeBytes = 0
+  releaseForm.signatureKeyId = ''
+  releaseForm.signatureAlgorithm = 'ed25519'
+  releaseForm.signature = ''
   releaseForm.rollbackAllowed = false
-  releaseForm.minimumSourceVersion = ''
+  releaseForm.minSourceVersion = ''
   releaseForm.releaseNotes = ''
+  releaseForm.targetType = 'all'
+  releaseForm.targetId = ''
+  releaseForm.canaryPercent = 0
 }
 
 async function submitReleaseForm(): Promise<void> {
@@ -142,21 +159,27 @@ async function submitReleaseForm(): Promise<void> {
     firmwareVersion: releaseForm.firmwareVersion.trim(),
     hardwareRevision: releaseForm.hardwareRevision.trim(),
     channel: releaseForm.channel,
-    rolloutPercentage: clampPercentage(releaseForm.rolloutPercentage),
-    targetGroup: releaseForm.targetGroup.trim(),
+    artifactKey: releaseForm.artifactKey.trim(),
     artifactUrl: releaseForm.artifactUrl.trim(),
-    artifactFileName: releaseForm.artifactFileName.trim(),
     sha256: releaseForm.sha256.trim().toLowerCase(),
-    signatureKeyId: releaseForm.signatureKeyId.trim(),
     sizeBytes: Math.max(0, Math.trunc(releaseForm.sizeBytes)),
+    signatureKeyId: releaseForm.signatureKeyId.trim(),
+    signatureAlgorithm: releaseForm.signatureAlgorithm,
+    signature: releaseForm.signature.trim(),
     rollbackAllowed: releaseForm.rollbackAllowed,
-    minimumSourceVersion: releaseForm.minimumSourceVersion.trim(),
+    minSourceVersion: releaseForm.minSourceVersion.trim(),
     releaseNotes: releaseForm.releaseNotes.trim(),
+    targetType: releaseForm.targetType,
+    targetId: releaseForm.targetId.trim(),
+    canaryPercent: clampPercentage(releaseForm.canaryPercent),
   }
   const succeeded =
     editingRelease.value === null
       ? await store.createRelease(payload)
-      : await store.updateRelease(editingRelease.value.releaseId, payload)
+      : await store.updateRelease(editingRelease.value.releaseId, {
+          ...payload,
+          expectedVersion: editingRelease.value.recordVersion,
+        })
   if (succeeded) {
     closeReleaseForm()
   }
@@ -178,13 +201,22 @@ function validateReleaseForm(): string {
   if (!releaseForm.signatureKeyId.trim()) {
     return '请填写签名密钥编号，便于设备确认固件来源。'
   }
+  if (!releaseForm.signature.trim()) {
+    return '请填写固件签名，平台发布前会验证签名。'
+  }
   if (releaseForm.sizeBytes <= 0) {
     return '文件大小需要大于 0。'
   }
+  if (releaseForm.artifactKey.trim() === '') {
+    return '请填写固件对象键。'
+  }
+  if (releaseForm.targetType !== 'all' && releaseForm.targetId.trim() === '') {
+    return '请填写目标设备或设备分组。'
+  }
   if (
-    !Number.isFinite(releaseForm.rolloutPercentage) ||
-    releaseForm.rolloutPercentage < 0 ||
-    releaseForm.rolloutPercentage > 100
+    !Number.isFinite(releaseForm.canaryPercent) ||
+    releaseForm.canaryPercent < 0 ||
+    releaseForm.canaryPercent > 100
   ) {
     return '灰度比例需要在 0 到 100 之间。'
   }
@@ -268,7 +300,7 @@ function selectFirmwareFile(file: DownloadFile): void {
 
 function applyFirmwareFile(file: DownloadFile): void {
   releaseForm.artifactUrl = file.downloadUrl
-  releaseForm.artifactFileName = file.name
+  releaseForm.artifactKey = file.relativePath
   releaseForm.sha256 = file.sha256
   releaseForm.sizeBytes = file.sizeBytes
   if (!releaseForm.firmwareVersion) {
@@ -279,7 +311,6 @@ function applyFirmwareFile(file: DownloadFile): void {
 function requestAction(kind: OtaActionKind, release: OtaRelease): void {
   store.clearMessages()
   pendingAction.value = { kind, release }
-  rollbackReason.value = ''
 }
 
 function closeActionDialog(): void {
@@ -287,7 +318,6 @@ function closeActionDialog(): void {
     return
   }
   pendingAction.value = null
-  rollbackReason.value = ''
 }
 
 async function confirmAction(): Promise<void> {
@@ -303,12 +333,7 @@ async function confirmAction(): Promise<void> {
   } else if (action.kind === 'withdraw') {
     succeeded = await store.withdrawRelease(action.release)
   } else if (action.kind === 'rollback') {
-    if (!rollbackReason.value.trim()) {
-      return
-    }
-    succeeded = await store.rollbackRelease(action.release, rollbackReason.value)
-  } else {
-    succeeded = await store.deleteRelease(action.release)
+    succeeded = await store.rollbackRelease(action.release)
   }
   if (succeeded) {
     closeActionDialog()
@@ -366,20 +391,18 @@ function sha256Summary(value: string): string {
 }
 
 function rolloutLabel(release: OtaRelease): string {
-  if (release.status === 'published' && release.rolloutPercentage > 0) {
-    return `灰度 ${release.rolloutPercentage}%`
+  if (release.status === 'published' && release.canaryPercent > 0) {
+    return `灰度 ${release.canaryPercent}%`
   }
-  return release.rolloutPercentage > 0 ? `${release.rolloutPercentage}%` : '等待发布'
+  return release.canaryPercent > 0 ? `${release.canaryPercent}%` : '等待发布'
 }
 
 function targetLabel(release: OtaRelease): string {
-  const group = release.targetGroup.trim()
-  if (group) {
-    return group
+  const target = release.targetId.trim()
+  if (release.targetType !== 'all' && target) {
+    return `${otaTargetTypeLabel(release.targetType)}：${target}`
   }
-  return release.targetDeviceCount > 0
-    ? `已分配 ${release.targetDeviceCount} 台设备`
-    : '全部符合条件的设备'
+  return otaTargetTypeLabel(release.targetType)
 }
 
 function actionTitle(action: OtaActionKind): string {
@@ -388,18 +411,16 @@ function actionTitle(action: OtaActionKind): string {
     pause: '暂停这个版本的灰度发布？',
     withdraw: '撤回这个固件版本？',
     rollback: '回滚这个固件版本？',
-    delete: '删除这个固件版本？',
   }[action]
 }
 
 function actionDescription(action: OtaActionKind, release: OtaRelease): string {
   const version = release.firmwareVersion || '该版本'
   return {
-    publish: `发布后，${targetLabel(release)} 会按 ${release.rolloutPercentage || 100}% 的比例收到 ${version} 的更新任务。`,
+    publish: `发布后，${targetLabel(release)} 会按 ${release.canaryPercent || 100}% 的比例收到 ${version} 的更新任务。`,
     pause: `暂停后不会再向新的设备下发 ${version}，已经开始的设备升级不会被强制中断。`,
     withdraw: `撤回后 ${version} 会从可选版本中移除，后续设备不会再收到这个版本。`,
     rollback: `回滚会让已经安装 ${version} 的设备回到上一个稳定版本。设备可能在重启后短暂不可用。`,
-    delete: `删除后版本 ${version} 的发布记录会消失，已经安装的设备不受影响。`,
   }[action]
 }
 
@@ -409,22 +430,15 @@ function actionConfirmLabel(action: OtaActionKind): string {
     pause: '确认暂停',
     withdraw: '确认撤回',
     rollback: '确认回滚',
-    delete: '确认删除',
   }[action]
 }
 
 function actionIsDangerous(action: OtaActionKind): boolean {
-  return action === 'withdraw' || action === 'rollback' || action === 'delete'
+  return action === 'withdraw' || action === 'rollback'
 }
 
 function actionCanSubmit(): boolean {
-  if (pendingAction.value === null || store.isSubmitting) {
-    return false
-  }
-  if (pendingAction.value.kind === 'rollback') {
-    return rollbackReason.value.trim().length >= 4
-  }
-  return true
+  return pendingAction.value !== null && !store.isSubmitting
 }
 
 function statusClass(value: string): string {
@@ -495,9 +509,9 @@ function deploymentProgress(deployment: OtaDeployment): number {
         <span>正在灰度</span>
         <strong>{{ store.statistics.canaryReleaseCount }}</strong>
       </div>
-      <div :class="{ attention: store.statistics.inProgressDeploymentCount > 0 }">
+      <div :class="{ attention: store.statistics.activeDeploymentCount > 0 }">
         <span>升级进行中</span>
-        <strong>{{ store.statistics.inProgressDeploymentCount }}</strong>
+        <strong>{{ store.statistics.activeDeploymentCount }}</strong>
       </div>
       <div>
         <span>升级成功</span>
@@ -509,7 +523,7 @@ function deploymentProgress(deployment: OtaDeployment): number {
       </div>
       <div>
         <span>回滚率</span>
-        <strong>{{ store.statistics.rollbackRatePercent }}%</strong>
+        <strong>{{ formatOtaRate(store.statistics.rollbackRate) }}</strong>
       </div>
     </div>
 
@@ -648,9 +662,7 @@ function deploymentProgress(deployment: OtaDeployment): number {
                       }}</small>
                     </td>
                     <td>
-                      <span class="file-copy">{{
-                        release.artifactFileName || '文件名未填写'
-                      }}</span>
+                      <span class="file-copy">{{ release.artifactKey || '对象键未填写' }}</span>
                       <small class="size-copy">
                         {{ formatBytes(release.sizeBytes) }} ·
                         <code :title="release.sha256">{{ sha256Summary(release.sha256) }}</code>
@@ -708,15 +720,6 @@ function deploymentProgress(deployment: OtaDeployment): number {
                           @click="requestAction('rollback', release)"
                         >
                           回滚
-                        </button>
-                        <button
-                          v-if="release.status === 'draft'"
-                          type="button"
-                          class="compact danger"
-                          :disabled="store.isSubmitting"
-                          @click="requestAction('delete', release)"
-                        >
-                          删除
                         </button>
                       </div>
                     </td>
@@ -800,9 +803,17 @@ function deploymentProgress(deployment: OtaDeployment): number {
               </select>
             </label>
             <label>
+              <span>目标范围</span>
+              <select v-model="releaseForm.targetType">
+                <option value="all">全部符合条件的设备</option>
+                <option value="group">指定设备分组</option>
+                <option value="device">指定设备</option>
+              </select>
+            </label>
+            <label>
               <span>灰度比例</span>
               <input
-                v-model.number="releaseForm.rolloutPercentage"
+                v-model.number="releaseForm.canaryPercent"
                 type="number"
                 min="0"
                 max="100"
@@ -810,11 +821,20 @@ function deploymentProgress(deployment: OtaDeployment): number {
               />
             </label>
             <label class="span-two">
-              <span>目标范围或分组</span>
+              <span>{{
+                releaseForm.targetType === 'group' ? '设备分组编号' : '目标设备编号'
+              }}</span>
               <input
-                v-model.trim="releaseForm.targetGroup"
+                v-model.trim="releaseForm.targetId"
                 type="text"
-                placeholder="例如 内部测试、华东试点；留空表示全部符合条件的设备"
+                :disabled="releaseForm.targetType === 'all'"
+                :placeholder="
+                  releaseForm.targetType === 'all'
+                    ? '全部符合条件的设备'
+                    : releaseForm.targetType === 'group'
+                      ? '输入需要接收更新的设备分组编号'
+                      : '输入需要接收更新的设备编号'
+                "
               />
             </label>
             <label class="span-two">
@@ -827,8 +847,8 @@ function deploymentProgress(deployment: OtaDeployment): number {
               />
             </label>
             <label>
-              <span>文件名</span>
-              <input v-model.trim="releaseForm.artifactFileName" type="text" required />
+              <span>对象键</span>
+              <input v-model.trim="releaseForm.artifactKey" type="text" required />
             </label>
             <label>
               <span>文件大小（字节）</span>
@@ -848,9 +868,18 @@ function deploymentProgress(deployment: OtaDeployment): number {
               />
             </label>
             <label class="span-two">
+              <span>固件签名</span>
+              <textarea
+                v-model.trim="releaseForm.signature"
+                rows="3"
+                required
+                placeholder="发布前平台会使用对应的公钥验证这段 detached signature"
+              ></textarea>
+            </label>
+            <label class="span-two">
               <span>最低可升级版本</span>
               <input
-                v-model.trim="releaseForm.minimumSourceVersion"
+                v-model.trim="releaseForm.minSourceVersion"
                 type="text"
                 placeholder="低于该版本时不提供此更新"
               />
@@ -1022,14 +1051,6 @@ function deploymentProgress(deployment: OtaDeployment): number {
           <p class="eyebrow">需要确认</p>
           <h2>{{ actionTitle(pendingAction.kind) }}</h2>
           <p>{{ actionDescription(pendingAction.kind, pendingAction.release) }}</p>
-          <label v-if="pendingAction.kind === 'rollback'" class="span-two">
-            <span>回滚原因</span>
-            <textarea
-              v-model.trim="rollbackReason"
-              rows="3"
-              placeholder="请说明回滚原因，至少 4 个字"
-            ></textarea>
-          </label>
           <div class="dialog-actions">
             <button
               type="button"
@@ -1091,7 +1112,7 @@ function deploymentProgress(deployment: OtaDeployment): number {
               </div>
               <div>
                 <dt>灰度比例</dt>
-                <dd>{{ detailRelease.rolloutPercentage }}%</dd>
+                <dd>{{ detailRelease.canaryPercent }}%</dd>
               </div>
               <div>
                 <dt>目标范围</dt>
@@ -1099,7 +1120,7 @@ function deploymentProgress(deployment: OtaDeployment): number {
               </div>
               <div>
                 <dt>最低源版本</dt>
-                <dd>{{ detailRelease.minimumSourceVersion || '不限制' }}</dd>
+                <dd>{{ detailRelease.minSourceVersion || '不限制' }}</dd>
               </div>
               <div>
                 <dt>允许回滚</dt>
@@ -1120,20 +1141,26 @@ function deploymentProgress(deployment: OtaDeployment): number {
                 </dd>
               </div>
               <div class="span-two">
+                <dt>对象键</dt>
+                <dd>
+                  <code>{{ detailRelease.artifactKey || '未填写' }}</code>
+                </dd>
+              </div>
+              <div class="span-two">
                 <dt>SHA-256</dt>
                 <dd>
                   <code>{{ detailRelease.sha256 || '未填写' }}</code>
                 </dd>
               </div>
               <div class="span-two">
-                <dt>版本说明</dt>
-                <dd class="notes">{{ detailRelease.releaseNotes || '没有填写版本说明。' }}</dd>
+                <dt>固件签名</dt>
+                <dd>
+                  <code>{{ detailRelease.signature || '未填写' }}</code>
+                </dd>
               </div>
               <div class="span-two">
-                <dt>完整清单</dt>
-                <dd>
-                  <pre>{{ detailRelease.manifest || '服务端没有返回清单内容。' }}</pre>
-                </dd>
+                <dt>版本说明</dt>
+                <dd class="notes">{{ detailRelease.releaseNotes || '没有填写版本说明。' }}</dd>
               </div>
             </dl>
 
@@ -1145,11 +1172,14 @@ function deploymentProgress(deployment: OtaDeployment): number {
               <div class="deployment-filter">
                 <label>
                   <span>状态筛选</span>
-                  <select v-model="store.deploymentStatus">
+                  <select v-model="store.deploymentStatus" @change="store.applyDeploymentFilter">
                     <option value="all">全部状态</option>
-                    <option value="pending">等待设备</option>
+                    <option value="queued">等待下发</option>
+                    <option value="offered">已通知设备</option>
                     <option value="downloading">正在下载</option>
+                    <option value="validating">正在校验</option>
                     <option value="installing">正在安装</option>
+                    <option value="pending_verify">等待确认</option>
                     <option value="succeeded">升级成功</option>
                     <option value="failed">升级失败</option>
                     <option value="rolled_back">已回滚</option>
@@ -1164,11 +1194,11 @@ function deploymentProgress(deployment: OtaDeployment): number {
                   <thead>
                     <tr>
                       <th>设备</th>
-                      <th>版本变化</th>
+                      <th>硬件版本</th>
                       <th>状态</th>
                       <th>进度</th>
                       <th>失败信息</th>
-                      <th>最近事件</th>
+                      <th>最近更新</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -1181,10 +1211,7 @@ function deploymentProgress(deployment: OtaDeployment): number {
                         <strong>{{ deployment.deviceName || deployment.deviceId }}</strong>
                         <small>{{ deployment.deviceId }}</small>
                       </td>
-                      <td class="version-cell">
-                        {{ deployment.currentVersion || '未知' }} →
-                        {{ deployment.targetVersion || '未知' }}
-                      </td>
+                      <td>{{ deployment.hardwareRevision || '未记录' }}</td>
                       <td>
                         <span :class="['status', statusClass(deployment.status)]">
                           {{ otaDeploymentStatusLabel(deployment.status) }}
@@ -1197,17 +1224,15 @@ function deploymentProgress(deployment: OtaDeployment): number {
                         </div>
                       </td>
                       <td>
-                        <span v-if="deployment.failureCode || deployment.failureMessage">
+                        <span v-if="deployment.errorCode || deployment.errorMessage">
                           <strong class="failure-code">{{
-                            deployment.failureCode || '升级未完成'
+                            deployment.errorCode || '升级未完成'
                           }}</strong>
-                          <small>{{
-                            deployment.failureMessage || '设备会在下次联网后重试。'
-                          }}</small>
+                          <small>{{ deployment.errorMessage || '设备会在下次联网后重试。' }}</small>
                         </span>
                         <span v-else class="muted-copy">没有失败信息</span>
                       </td>
-                      <td class="time-cell">{{ formatTime(deployment.lastEventAt) }}</td>
+                      <td class="time-cell">{{ formatTime(deployment.updatedAt) }}</td>
                       <td>
                         <button
                           v-if="deployment.status === 'failed'"
@@ -1251,24 +1276,46 @@ function deploymentProgress(deployment: OtaDeployment): number {
 
             <section class="detail-section">
               <div class="section-heading">
-                <h3>发布记录</h3>
-                <span>{{ store.detail?.audits.length ?? 0 }} 条</span>
+                <h3>版本历史</h3>
+                <span>{{ store.detail?.versions.length ?? 0 }} 个版本</span>
               </div>
-              <div v-if="(store.detail?.audits.length ?? 0) === 0" class="empty-copy">
-                还没有发布记录。
+              <div v-if="(store.detail?.versions.length ?? 0) === 0" class="empty-copy">
+                当前没有可对照的历史版本。
               </div>
-              <ul v-else class="audit-list">
-                <li v-for="audit in store.detail?.audits ?? []" :key="audit.id">
-                  <div>
-                    <strong>{{ otaAuditActionLabel(audit.action) }}</strong>
-                    <small
-                      >{{ audit.actorAccountId || '系统' }} ·
-                      {{ formatTime(audit.createdAt) }}</small
-                    >
-                  </div>
-                  <span v-if="audit.message">{{ audit.message }}</span>
-                </li>
-              </ul>
+              <div v-else class="table-scroll compact-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>版本</th>
+                      <th>渠道</th>
+                      <th>状态</th>
+                      <th>签名</th>
+                      <th>发布时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="version in store.detail?.versions ?? []" :key="version.releaseId">
+                      <td>
+                        <button type="button" class="version-link" @click="openDetail(version)">
+                          <strong>{{ version.firmwareVersion }}</strong>
+                          <small>{{ version.hardwareRevision || '通用硬件版本' }}</small>
+                        </button>
+                      </td>
+                      <td>{{ otaReleaseChannelLabel(version.channel) }}</td>
+                      <td>{{ otaReleaseStatusLabel(version.status) }}</td>
+                      <td>{{ otaSignatureStatusLabel(version.signatureStatus) }}</td>
+                      <td class="time-cell">
+                        {{ formatTime(version.publishedAt || version.updatedAt) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div v-if="detailRelease.rollbackAllowed" class="rollback-summary">
+                <strong>可回滚版本</strong>
+                <span>{{ rollbackTargetVersion || '发布时未指定回滚目标' }}</span>
+                <small v-if="rollbackRequested">回滚请求已提交，等待设备执行。</small>
+              </div>
             </section>
           </template>
         </section>
@@ -1705,7 +1752,10 @@ td small {
 }
 
 .status.paused,
-.status.pending,
+.status.queued,
+.status.offered,
+.status.validating,
+.status.pending_verify,
 .status.downloading,
 .status.installing {
   background: #eaf5ff;
@@ -2104,6 +2154,30 @@ progress::-moz-progress-bar {
   background: #fffbfc;
   color: var(--sprout-text-muted);
   font-size: 13px;
+}
+
+.rollback-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 13px 14px;
+  border: 1px solid var(--sprout-outline-soft);
+  border-radius: 16px;
+  background: #fffbfc;
+}
+
+.rollback-summary strong {
+  color: var(--sprout-text);
+}
+
+.rollback-summary span {
+  color: #b23a68;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.rollback-summary small {
+  color: var(--sprout-text-muted);
 }
 
 .compact-table table {

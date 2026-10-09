@@ -12,8 +12,14 @@ class DeviceFirmwareApi {
     return _parseUpdate(response);
   }
 
-  Future<DeviceFirmwareUpdate> install(String deviceId) async {
-    final response = await _apiClient.post(_installPath(deviceId));
+  Future<DeviceFirmwareUpdate> install(
+    String deviceId, {
+    String? deploymentId,
+  }) async {
+    final response = await _apiClient.post(
+      _installPath(deviceId),
+      body: deploymentId == null ? null : {'deployment_id': deploymentId},
+    );
     return _parseUpdate(response);
   }
 

@@ -514,6 +514,7 @@ docker compose down -v
 | `SPROUT_OTA_MANIFEST_BASE_URL` | 版本清单入口，用于判断是否有小升级或大升级 |
 | `SPROUT_OTA_RESOURCE_BASE_URL` | 资源包入口，用于文案、主题和内容资源的小升级 |
 | `SPROUT_OTA_CLIENT_BASE_URL` | APK 或客户端安装包入口，用于大升级下载 |
+| `SPROUT_OTA_FIRMWARE_SIGNATURE_PUBLIC_KEYS` | 固件签名公钥环，JSON 格式，键为密钥编号、值为 Base64 Ed25519 公钥；发布固件前必须配置 |
 
 这些地址必须是 HTTPS，默认都指向 `https://download.clarkhub.cn`。发布流水线
 会在每次版本 Release 后上传 APK、管理端包、契约包、服务二进制和

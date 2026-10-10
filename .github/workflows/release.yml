@@ -333,6 +333,10 @@ jobs:
       - name: Publish release artifacts
         id: upload_release
         if: steps.detect.outputs.should_release == 'true'
+        # The download service upload depends on external network and proxy
+        # configuration. A timeout there must not block the GitHub release,
+        # which carries the tag, checksums, and CI-built assets independently.
+        continue-on-error: true
         shell: bash
         env:
           RELEASE_UPLOAD_TOKEN: ${{ secrets.SPROUT_RELEASE_UPLOAD_TOKEN }}

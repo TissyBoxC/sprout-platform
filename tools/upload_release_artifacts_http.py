@@ -13,6 +13,7 @@ import hashlib
 import json
 import mimetypes
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -22,6 +23,15 @@ from typing import Any
 
 class UploadError(RuntimeError):
     """Raised when the management API rejects a release publication."""
+
+
+# Large mobile artifacts are tens of megabytes; a short socket timeout drops
+# the connection mid-upload on slow or proxied links. Use a generous timeout
+# and retry transient network failures instead of failing the whole release.
+REQUEST_TIMEOUT_SECONDS = 900
+MAX_ATTEMPTS = 4
+RETRY_BACKOFF_SECONDS = 5
+RETRYABLE_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
 
 
 def parse_args() -> argparse.Namespace:
@@ -83,14 +93,41 @@ def request_json(
     request: urllib.request.Request,
     operation: str,
 ) -> dict[str, Any]:
-    try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            payload = response.read()
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")[:1000]
-        raise UploadError(f"{operation} failed with HTTP {error.code}: {detail}") from error
-    except urllib.error.URLError as error:
-        raise UploadError(f"{operation} network error: {error.reason}") from error
+    last_error: Exception | None = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            ) as response:
+                payload = response.read()
+            break
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode("utf-8", errors="replace")[:1000]
+            if error.code not in RETRYABLE_STATUS:
+                raise UploadError(
+                    f"{operation} failed with HTTP {error.code}: {detail}"
+                ) from error
+            last_error = UploadError(
+                f"{operation} failed with HTTP {error.code}: {detail}"
+            )
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            reason = getattr(error, "reason", error)
+            last_error = UploadError(
+                f"{operation} network error: {reason}"
+            )
+        if attempt < MAX_ATTEMPTS:
+            delay = RETRY_BACKOFF_SECONDS * attempt
+            print(
+                f"{operation} attempt {attempt} failed "
+                f"({last_error}); retrying in {delay}s",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+    else:
+        raise last_error if last_error is not None else UploadError(
+            f"{operation} failed after {MAX_ATTEMPTS} attempts"
+        )
     try:
         decoded = json.loads(payload)
     except json.JSONDecodeError as error:

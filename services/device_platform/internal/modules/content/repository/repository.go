@@ -54,4 +54,29 @@ type Repository interface {
 		ctx context.Context,
 		packageID string,
 	) (*domain.PackageVersion, error)
+	AddFavorite(
+		ctx context.Context,
+		parentAccountID string,
+		packageID string,
+		now time.Time,
+	) (domain.Favorite, error)
+	RemoveFavorite(
+		ctx context.Context,
+		parentAccountID string,
+		packageID string,
+	) (bool, error)
+	ListFavorites(
+		ctx context.Context,
+		parentAccountID string,
+	) ([]domain.FavoriteView, error)
+	RecordPlayback(
+		ctx context.Context,
+		input domain.PlayRecordInput,
+		limit int,
+		now time.Time,
+	) (domain.PlayRecord, error)
+	ListPlayHistory(
+		ctx context.Context,
+		query domain.PlayHistoryQuery,
+	) ([]domain.PlayRecord, error)
 }

@@ -22,10 +22,10 @@ import (
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
 	featurecenterservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
-	operationsservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
-	otaservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/service"
 	notificationhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/handler"
 	notificationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
+	operationsservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
+	otaservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/service"
 	policeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
 	privacyhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/handler"
 	privacyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/service"
@@ -679,6 +679,18 @@ func NewRouter(options RouterOptions) http.Handler {
 				"GET /api/v1/content/packages/{package_id}/download",
 				authHandler.requireAuthentication(contentHandler.download),
 			)
+			mux.HandleFunc(
+				"GET /api/v1/content/favorites",
+				authHandler.requireAuthentication(contentHandler.listFavorites),
+			)
+			mux.HandleFunc(
+				"PUT /api/v1/content/favorites/{package_id}",
+				authHandler.requireAuthentication(contentHandler.addFavorite),
+			)
+			mux.HandleFunc(
+				"DELETE /api/v1/content/favorites/{package_id}",
+				authHandler.requireAuthentication(contentHandler.removeFavorite),
+			)
 		}
 		// Firmware devices never receive a guardian credential, so the same
 		// manifest and download lookup are also exposed behind a device
@@ -696,6 +708,14 @@ func NewRouter(options RouterOptions) http.Handler {
 			mux.HandleFunc(
 				"GET /api/v1/devices/{device_id}/content/packages/{package_id}/download",
 				deviceHandler.download,
+			)
+			mux.HandleFunc(
+				"POST /api/v1/devices/{device_id}/content/playback",
+				deviceHandler.recordPlayback,
+			)
+			mux.HandleFunc(
+				"GET /api/v1/devices/{device_id}/content/playback",
+				deviceHandler.listPlayHistory,
 			)
 		}
 	}

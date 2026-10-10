@@ -718,3 +718,221 @@ func isUniqueViolation(err error) bool {
 	var stateError sqlStateError
 	return errors.As(err, &stateError) && stateError.SQLState() == "23505"
 }
+
+// AddFavorite records one guardian bookmark. A repeated add is reported as
+// ErrFavoriteExists so the HTTP layer can answer idempotently.
+func (r *PostgresRepository) AddFavorite(
+	ctx context.Context,
+	parentAccountID string,
+	packageID string,
+	now time.Time,
+) (domain.Favorite, error) {
+	var createdAt time.Time
+	err := r.pool.QueryRow(
+		ctx,
+		`INSERT INTO content_favorites (parent_account_id, package_id, created_at)
+		 VALUES ($1, $2, $3)
+		 RETURNING created_at`,
+		parentAccountID,
+		packageID,
+		now,
+	).Scan(&createdAt)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return domain.Favorite{}, domain.ErrFavoriteExists
+		}
+		return domain.Favorite{}, fmt.Errorf("add content favorite: %w", err)
+	}
+	return domain.Favorite{PackageID: packageID, CreatedAt: createdAt}, nil
+}
+
+// RemoveFavorite deletes one bookmark and reports whether a row was removed.
+func (r *PostgresRepository) RemoveFavorite(
+	ctx context.Context,
+	parentAccountID string,
+	packageID string,
+) (bool, error) {
+	tag, err := r.pool.Exec(
+		ctx,
+		`DELETE FROM content_favorites
+		 WHERE parent_account_id = $1 AND package_id = $2`,
+		parentAccountID,
+		packageID,
+	)
+	if err != nil {
+		return false, fmt.Errorf("remove content favorite: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// ListFavorites returns the guardian's bookmarks joined with the currently
+// published version so a withdrawn package still appears with Available false.
+func (r *PostgresRepository) ListFavorites(
+	ctx context.Context,
+	parentAccountID string,
+) ([]domain.FavoriteView, error) {
+	rows, err := r.pool.Query(
+		ctx,
+		`SELECT f.package_id,
+		        COALESCE(v.title, ''),
+		        COALESCE(v.category, ''),
+		        COALESCE(v.age_tiers, ARRAY[]::TEXT[]),
+		        COALESCE(v.package_version, 0),
+		        (v.package_id IS NOT NULL) AS available,
+		        f.created_at
+		 FROM content_favorites f
+		 LEFT JOIN content_package_versions v
+		   ON v.package_id = f.package_id
+		  AND v.status = 'published'
+		 WHERE f.parent_account_id = $1
+		 ORDER BY f.created_at DESC, f.package_id ASC`,
+		parentAccountID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list content favorites: %w", err)
+	}
+	defer rows.Close()
+	views := make([]domain.FavoriteView, 0)
+	for rows.Next() {
+		var (
+			view     domain.FavoriteView
+			category string
+			ageTiers []string
+		)
+		if err := rows.Scan(
+			&view.PackageID,
+			&view.Title,
+			&category,
+			&ageTiers,
+			&view.PackageVersion,
+			&view.Available,
+			&view.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan content favorite: %w", err)
+		}
+		view.Category = domain.Category(category)
+		view.AgeTiers = make([]domain.AgeTier, 0, len(ageTiers))
+		for _, tier := range ageTiers {
+			view.AgeTiers = append(view.AgeTiers, domain.AgeTier(tier))
+		}
+		views = append(views, view)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate content favorites: %w", err)
+	}
+	return views, nil
+}
+
+// RecordPlayback appends one bounded history row and prunes older rows for the
+// same device so a long-lived device cannot grow the table without limit. The
+// insert and prune run in one transaction so a crash cannot leave the table
+// unbounded between the two writes.
+func (r *PostgresRepository) RecordPlayback(
+	ctx context.Context,
+	input domain.PlayRecordInput,
+	limit int,
+	now time.Time,
+) (domain.PlayRecord, error) {
+	if limit < 1 {
+		limit = 50
+	}
+	recordID := uuid.NewString()
+	transaction, err := r.pool.Begin(ctx)
+	if err != nil {
+		return domain.PlayRecord{}, fmt.Errorf("begin playback record: %w", err)
+	}
+	defer func() { _ = transaction.Rollback(ctx) }()
+	var stored domain.PlayRecord
+	if err := transaction.QueryRow(
+		ctx,
+		`INSERT INTO content_play_history (
+		     id, device_id, package_id, package_version, outcome,
+		     played_seconds, played_at
+		 )
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		 RETURNING id, device_id, package_id, package_version, outcome,
+		           played_seconds, played_at`,
+		recordID,
+		input.DeviceID,
+		input.PackageID,
+		input.PackageVersion,
+		string(input.Outcome),
+		input.PlayedSeconds,
+		now,
+	).Scan(
+		&stored.ID,
+		&stored.DeviceID,
+		&stored.PackageID,
+		&stored.PackageVersion,
+		&stored.Outcome,
+		&stored.PlayedSeconds,
+		&stored.PlayedAt,
+	); err != nil {
+		return domain.PlayRecord{}, fmt.Errorf("insert content play history: %w", err)
+	}
+	if _, err := transaction.Exec(
+		ctx,
+		`DELETE FROM content_play_history
+		 WHERE device_id = $1
+		   AND id NOT IN (
+		       SELECT id FROM content_play_history
+		       WHERE device_id = $1
+		       ORDER BY played_at DESC, id DESC
+		       LIMIT $2
+		   )`,
+		input.DeviceID,
+		limit,
+	); err != nil {
+		return domain.PlayRecord{}, fmt.Errorf("prune content play history: %w", err)
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return domain.PlayRecord{}, fmt.Errorf("commit playback record: %w", err)
+	}
+	return stored, nil
+}
+
+// ListPlayHistory returns the bounded, newest-first history for one device.
+func (r *PostgresRepository) ListPlayHistory(
+	ctx context.Context,
+	query domain.PlayHistoryQuery,
+) ([]domain.PlayRecord, error) {
+	limit := query.Limit
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+	rows, err := r.pool.Query(
+		ctx,
+		`SELECT id, device_id, package_id, package_version, outcome,
+		        played_seconds, played_at
+		 FROM content_play_history
+		 WHERE device_id = $1
+		 ORDER BY played_at DESC, id DESC
+		 LIMIT $2`,
+		query.DeviceID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list content play history: %w", err)
+	}
+	defer rows.Close()
+	records := make([]domain.PlayRecord, 0)
+	for rows.Next() {
+		var record domain.PlayRecord
+		if err := rows.Scan(
+			&record.ID,
+			&record.DeviceID,
+			&record.PackageID,
+			&record.PackageVersion,
+			&record.Outcome,
+			&record.PlayedSeconds,
+			&record.PlayedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan content play history: %w", err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate content play history: %w", err)
+	}
+	return records, nil
+}

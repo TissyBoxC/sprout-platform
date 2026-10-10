@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,12 +28,15 @@ type memoryRepository struct {
 	logs         []domain.ReviewLog
 	revision     int64
 	revisionLock chan struct{}
+	favorites    map[string]domain.Favorite
+	history      []domain.PlayRecord
 }
 
 func newMemoryRepository() *memoryRepository {
 	return &memoryRepository{
 		versions:     make(map[string]*domain.PackageVersion),
 		revisionLock: make(chan struct{}, 1),
+		favorites:    make(map[string]domain.Favorite),
 	}
 }
 
@@ -468,6 +472,19 @@ func validMetadata() domain.MetadataInput {
 		AssetKey:  "content/story/moon-night-v1.bin",
 		SHA256:    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		SizeBytes: 1024,
+	}
+}
+
+// validAssetReader returns the content asset that matches validMetadata so a
+// package can be driven through publish, which verifies the stored checksum.
+func validAssetReader() fakeAssetReader {
+	return fakeAssetReader{
+		asset: &domain.Asset{
+			Key:         "content/story/moon-night-v1.bin",
+			SHA256:      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			SizeBytes:   1024,
+			DownloadURL: "https://download.example.test/content/story/moon-night-v1.bin",
+		},
 	}
 }
 
@@ -1154,4 +1171,308 @@ func categoryAllowedByQuery(category domain.Category, allowed []string) bool {
 		}
 	}
 	return false
+}
+
+func memoryFavoriteKey(parentAccountID string, packageID string) string {
+	return parentAccountID + "\x00" + packageID
+}
+
+func (repository *memoryRepository) AddFavorite(
+	_ context.Context,
+	parentAccountID string,
+	packageID string,
+	now time.Time,
+) (domain.Favorite, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	key := memoryFavoriteKey(parentAccountID, packageID)
+	if _, exists := repository.favorites[key]; exists {
+		return domain.Favorite{}, domain.ErrFavoriteExists
+	}
+	favorite := domain.Favorite{PackageID: packageID, CreatedAt: now}
+	repository.favorites[key] = favorite
+	return favorite, nil
+}
+
+func (repository *memoryRepository) RemoveFavorite(
+	_ context.Context,
+	parentAccountID string,
+	packageID string,
+) (bool, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	key := memoryFavoriteKey(parentAccountID, packageID)
+	if _, exists := repository.favorites[key]; !exists {
+		return false, nil
+	}
+	delete(repository.favorites, key)
+	return true, nil
+}
+
+func (repository *memoryRepository) ListFavorites(
+	_ context.Context,
+	parentAccountID string,
+) ([]domain.FavoriteView, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	views := make([]domain.FavoriteView, 0)
+	for key, favorite := range repository.favorites {
+		if !strings.HasPrefix(key, parentAccountID+"\x00") {
+			continue
+		}
+		view := domain.FavoriteView{
+			PackageID: favorite.PackageID,
+			CreatedAt: favorite.CreatedAt,
+			AgeTiers:  []domain.AgeTier{},
+		}
+		for _, version := range repository.versions {
+			if version.PackageID == favorite.PackageID &&
+				version.Status == domain.StatusPublished {
+				view.Title = version.Title
+				view.Category = version.Category
+				view.AgeTiers = append([]domain.AgeTier(nil), version.AgeTiers...)
+				view.PackageVersion = version.PackageVersion
+				view.Available = true
+				break
+			}
+		}
+		views = append(views, view)
+	}
+	sort.Slice(views, func(i, j int) bool {
+		return views[i].CreatedAt.After(views[j].CreatedAt)
+	})
+	return views, nil
+}
+
+func (repository *memoryRepository) RecordPlayback(
+	_ context.Context,
+	input domain.PlayRecordInput,
+	limit int,
+	now time.Time,
+) (domain.PlayRecord, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	if limit < 1 {
+		limit = 50
+	}
+	record := domain.PlayRecord{
+		ID:             fmt.Sprintf("play-%d", len(repository.history)+1),
+		DeviceID:       input.DeviceID,
+		PackageID:      input.PackageID,
+		PackageVersion: input.PackageVersion,
+		Outcome:        input.Outcome,
+		PlayedSeconds:  input.PlayedSeconds,
+		PlayedAt:       now,
+	}
+	repository.history = append([]domain.PlayRecord{record}, repository.history...)
+	perDevice := 0
+	kept := make([]domain.PlayRecord, 0, len(repository.history))
+	for _, item := range repository.history {
+		if item.DeviceID == input.DeviceID {
+			perDevice++
+			if perDevice > limit {
+				continue
+			}
+		}
+		kept = append(kept, item)
+	}
+	repository.history = kept
+	return record, nil
+}
+
+func (repository *memoryRepository) ListPlayHistory(
+	_ context.Context,
+	query domain.PlayHistoryQuery,
+) ([]domain.PlayRecord, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	limit := query.Limit
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+	records := make([]domain.PlayRecord, 0)
+	for _, item := range repository.history {
+		if item.DeviceID != query.DeviceID {
+			continue
+		}
+		records = append(records, item)
+		if len(records) >= limit {
+			break
+		}
+	}
+	return records, nil
+}
+
+func TestFavoritesAddListRemove(t *testing.T) {
+	repository := newMemoryRepository()
+	service := newContentService(t, repository, validAssetReader())
+	published := publishPackage(t, service, validMetadata())
+
+	added, err := service.AddFavorite(
+		context.Background(),
+		"parent-001",
+		published.PackageID,
+	)
+	if err != nil {
+		t.Fatalf("add favorite: %v", err)
+	}
+	if added.PackageID != published.PackageID {
+		t.Fatalf("favorite package = %q, want %q", added.PackageID, published.PackageID)
+	}
+
+	// A repeated add is a stable conflict the handler turns into 200.
+	if _, err := service.AddFavorite(
+		context.Background(),
+		"parent-001",
+		published.PackageID,
+	); !errors.Is(err, domain.ErrFavoriteExists) {
+		t.Fatalf("repeat add error = %v, want ErrFavoriteExists", err)
+	}
+
+	views, err := service.ListFavorites(context.Background(), "parent-001")
+	if err != nil {
+		t.Fatalf("list favorites: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("favorite count = %d, want 1", len(views))
+	}
+	if !views[0].Available || views[0].PackageVersion != published.PackageVersion {
+		t.Fatalf("favorite view not resolved: %+v", views[0])
+	}
+
+	// Another guardian sees nothing: favourites are account-scoped.
+	other, err := service.ListFavorites(context.Background(), "parent-002")
+	if err != nil {
+		t.Fatalf("list other favorites: %v", err)
+	}
+	if len(other) != 0 {
+		t.Fatalf("other guardian favorite count = %d, want 0", len(other))
+	}
+
+	removed, err := service.RemoveFavorite(
+		context.Background(),
+		"parent-001",
+		published.PackageID,
+	)
+	if err != nil || !removed {
+		t.Fatalf("remove favorite = %v, %v; want true, nil", removed, err)
+	}
+	// Removing twice is not an error.
+	removed, err = service.RemoveFavorite(
+		context.Background(),
+		"parent-001",
+		published.PackageID,
+	)
+	if err != nil || removed {
+		t.Fatalf("second remove favorite = %v, %v; want false, nil", removed, err)
+	}
+}
+
+func TestAddFavoriteRejectsUnknownPackage(t *testing.T) {
+	service := newContentService(t, newMemoryRepository(), fakeAssetReader{})
+	if _, err := service.AddFavorite(
+		context.Background(),
+		"parent-001",
+		"content_missing_001",
+	); !errors.Is(err, domain.ErrPackageNotFound) {
+		t.Fatalf("add unknown favorite error = %v, want ErrPackageNotFound", err)
+	}
+}
+
+func TestFavoriteAvailabilityFollowsPublishedVersion(t *testing.T) {
+	repository := newMemoryRepository()
+	service := newContentService(t, repository, validAssetReader())
+	published := publishPackage(t, service, validMetadata())
+	if _, err := service.AddFavorite(
+		context.Background(),
+		"parent-001",
+		published.PackageID,
+	); err != nil {
+		t.Fatalf("add favorite: %v", err)
+	}
+	if _, err := service.Withdraw(
+		context.Background(),
+		published.PackageID,
+		published.PackageVersion,
+		"admin-001",
+		"需要重新审核",
+	); err != nil {
+		t.Fatalf("withdraw: %v", err)
+	}
+	views, err := service.ListFavorites(context.Background(), "parent-001")
+	if err != nil {
+		t.Fatalf("list favorites: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("favorite count = %d, want 1", len(views))
+	}
+	if views[0].Available {
+		t.Fatalf("withdrawn favorite reported available: %+v", views[0])
+	}
+	if views[0].AgeTiers == nil {
+		t.Fatalf("available=false favorite must still carry empty age tiers slice")
+	}
+}
+
+func TestRecordPlaybackValidatesAndBounds(t *testing.T) {
+	repository := newMemoryRepository()
+	service := newContentService(t, repository, validAssetReader())
+	published := publishPackage(t, service, validMetadata())
+
+	if _, err := service.RecordPlayback(
+		context.Background(),
+		domain.PlayRecordInput{
+			DeviceID:       "sprout_device_001",
+			PackageID:      published.PackageID,
+			PackageVersion: published.PackageVersion,
+			Outcome:        domain.PlayOutcome("bogus"),
+			PlayedSeconds:  1,
+		},
+	); !errors.Is(err, domain.ErrPlayOutcomeInvalid) {
+		t.Fatalf("bad outcome error = %v, want ErrPlayOutcomeInvalid", err)
+	}
+
+	if _, err := service.RecordPlayback(
+		context.Background(),
+		domain.PlayRecordInput{
+			DeviceID:       "sprout_device_001",
+			PackageID:      published.PackageID,
+			PackageVersion: published.PackageVersion,
+			Outcome:        domain.PlayOutcomeCompleted,
+			PlayedSeconds:  -5,
+		},
+	); !errors.Is(err, domain.ErrPlayDurationInvalid) {
+		t.Fatalf("bad duration error = %v, want ErrPlayDurationInvalid", err)
+	}
+
+	// Insert more rows than the retention limit and confirm pruning.
+	for index := 0; index < playHistoryRetentionLimit+10; index++ {
+		if _, err := service.RecordPlayback(
+			context.Background(),
+			domain.PlayRecordInput{
+				DeviceID:       "sprout_device_001",
+				PackageID:      published.PackageID,
+				PackageVersion: published.PackageVersion,
+				Outcome:        domain.PlayOutcomeCompleted,
+				PlayedSeconds:  index,
+			},
+		); err != nil {
+			t.Fatalf("record playback %d: %v", index, err)
+		}
+	}
+	history, err := service.ListPlayHistory(
+		context.Background(),
+		"sprout_device_001",
+		200,
+	)
+	if err != nil {
+		t.Fatalf("list history: %v", err)
+	}
+	if len(history) != playHistoryRetentionLimit {
+		t.Fatalf("history length = %d, want %d", len(history), playHistoryRetentionLimit)
+	}
+	// Newest first: the last written record has the largest played_seconds.
+	if history[0].PlayedSeconds != playHistoryRetentionLimit+9 {
+		t.Fatalf("newest history seconds = %d, want %d", history[0].PlayedSeconds, playHistoryRetentionLimit+9)
+	}
 }

@@ -83,6 +83,96 @@ var (
 	assetKeyPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9._/-]*$`)
 )
 
+// PlayOutcome classifies how one device playback attempt ended.
+type PlayOutcome string
+
+const (
+	// PlayOutcomeCompleted reports the item played to the end.
+	PlayOutcomeCompleted PlayOutcome = "completed"
+	// PlayOutcomeInterrupted reports playback stopped before the end.
+	PlayOutcomeInterrupted PlayOutcome = "interrupted"
+)
+
+var (
+	// ErrFavoriteExists reports a duplicate favourite for one guardian.
+	ErrFavoriteExists = errors.New("content favorite already exists")
+	// ErrPlayOutcomeInvalid reports an unsupported playback outcome.
+	ErrPlayOutcomeInvalid = errors.New("content play outcome invalid")
+	// ErrPlayDurationInvalid reports a negative or oversized play duration.
+	ErrPlayDurationInvalid = errors.New("content play duration invalid")
+)
+
+// Favorite is one guardian-scoped content bookmark.
+type Favorite struct {
+	PackageID string    `json:"package_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// FavoriteView couples a favourite with the currently published version so the
+// guardian console can render a playable card or a "withdrawn" placeholder.
+type FavoriteView struct {
+	PackageID      string    `json:"package_id"`
+	Title          string    `json:"title"`
+	Category       Category  `json:"category"`
+	AgeTiers       []AgeTier `json:"age_tiers"`
+	PackageVersion int       `json:"package_version"`
+	Available      bool      `json:"available"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// PlayRecord is one bounded device playback history row.
+type PlayRecord struct {
+	ID             string      `json:"id"`
+	DeviceID       string      `json:"device_id"`
+	PackageID      string      `json:"package_id"`
+	PackageVersion int         `json:"package_version"`
+	Outcome        PlayOutcome `json:"outcome"`
+	PlayedSeconds  int         `json:"played_seconds"`
+	PlayedAt       time.Time   `json:"played_at"`
+}
+
+// PlayRecordInput is the validated payload for recording one playback event.
+type PlayRecordInput struct {
+	DeviceID       string
+	PackageID      string
+	PackageVersion int
+	Outcome        PlayOutcome
+	PlayedSeconds  int
+}
+
+// PlayHistoryQuery bounds a device history read.
+type PlayHistoryQuery struct {
+	DeviceID string
+	Limit    int
+}
+
+// ValidatePlayRecord normalizes and validates one playback event.
+//
+// The package id and device id follow the same shape used elsewhere so a bad
+// firmware float or a forged path value cannot create an unbounded row.
+func ValidatePlayRecord(input PlayRecordInput) (PlayRecordInput, error) {
+	input.DeviceID = strings.TrimSpace(input.DeviceID)
+	input.PackageID = strings.TrimSpace(input.PackageID)
+	if !packageIDPattern.MatchString(input.PackageID) {
+		return PlayRecordInput{}, ErrInvalidMetadata
+	}
+	if input.DeviceID == "" || len([]rune(input.DeviceID)) > 128 {
+		return PlayRecordInput{}, ErrInvalidMetadata
+	}
+	if input.PackageVersion < 1 {
+		return PlayRecordInput{}, ErrInvalidMetadata
+	}
+	switch input.Outcome {
+	case PlayOutcomeCompleted, PlayOutcomeInterrupted:
+	default:
+		return PlayRecordInput{}, ErrPlayOutcomeInvalid
+	}
+	if input.PlayedSeconds < 0 || input.PlayedSeconds > 86400 {
+		return PlayRecordInput{}, ErrPlayDurationInvalid
+	}
+	return input, nil
+}
+
 // PackageVersion is one immutable identity plus mutable review metadata.
 type PackageVersion struct {
 	PackageID       string     `json:"package_id"`

@@ -473,6 +473,108 @@ func categoryAllowed(category domain.Category, allowed []string) bool {
 	return false
 }
 
+// AddFavorite bookmarks one published package for a guardian.
+//
+// The package must exist in some version so a guardian cannot favourite an
+// arbitrary id. A repeat add is reported as ErrPackageNotFound-free conflict
+// via ErrFavoriteExists so the handler can answer 200 idempotently.
+func (s *Service) AddFavorite(
+	ctx context.Context,
+	parentAccountID string,
+	packageID string,
+) (domain.Favorite, error) {
+	parentAccountID = strings.TrimSpace(parentAccountID)
+	packageID = strings.TrimSpace(packageID)
+	if parentAccountID == "" {
+		return domain.Favorite{}, domain.ErrInvalidMetadata
+	}
+	if _, err := s.repository.GetDetail(ctx, packageID); err != nil {
+		return domain.Favorite{}, err
+	}
+	return s.repository.AddFavorite(ctx, parentAccountID, packageID, s.clock.Now())
+}
+
+// RemoveFavorite deletes one bookmark. A missing row is not an error so the
+// console can call it without first checking existence.
+func (s *Service) RemoveFavorite(
+	ctx context.Context,
+	parentAccountID string,
+	packageID string,
+) (bool, error) {
+	parentAccountID = strings.TrimSpace(parentAccountID)
+	packageID = strings.TrimSpace(packageID)
+	if parentAccountID == "" || packageID == "" {
+		return false, domain.ErrInvalidMetadata
+	}
+	return s.repository.RemoveFavorite(ctx, parentAccountID, packageID)
+}
+
+// ListFavorites returns the guardian's bookmarks with availability resolved
+// against the currently published version.
+func (s *Service) ListFavorites(
+	ctx context.Context,
+	parentAccountID string,
+) ([]domain.FavoriteView, error) {
+	parentAccountID = strings.TrimSpace(parentAccountID)
+	if parentAccountID == "" {
+		return nil, domain.ErrInvalidMetadata
+	}
+	views, err := s.repository.ListFavorites(ctx, parentAccountID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range views {
+		if views[index].AgeTiers == nil {
+			views[index].AgeTiers = []domain.AgeTier{}
+		}
+	}
+	return views, nil
+}
+
+// RecordPlayback validates and stores one bounded device playback event.
+// The retention limit keeps the per-device history table bounded.
+func (s *Service) RecordPlayback(
+	ctx context.Context,
+	input domain.PlayRecordInput,
+) (domain.PlayRecord, error) {
+	normalized, err := domain.ValidatePlayRecord(input)
+	if err != nil {
+		return domain.PlayRecord{}, err
+	}
+	return s.repository.RecordPlayback(
+		ctx,
+		normalized,
+		playHistoryRetentionLimit,
+		s.clock.Now(),
+	)
+}
+
+// ListPlayHistory returns the bounded, newest-first history for one device.
+func (s *Service) ListPlayHistory(
+	ctx context.Context,
+	deviceID string,
+	limit int,
+) ([]domain.PlayRecord, error) {
+	deviceID = strings.TrimSpace(deviceID)
+	if deviceID == "" {
+		return nil, domain.ErrInvalidMetadata
+	}
+	records, err := s.repository.ListPlayHistory(ctx, domain.PlayHistoryQuery{
+		DeviceID: deviceID,
+		Limit:    limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if records == nil {
+		records = []domain.PlayRecord{}
+	}
+	return records, nil
+}
+
+// playHistoryRetentionLimit is the number of history rows kept per device.
+const playHistoryRetentionLimit = 50
+
 func intersectCategories(requested []string, allowed []string) []string {
 	if len(allowed) == 0 {
 		return []string{}

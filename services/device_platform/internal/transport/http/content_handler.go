@@ -503,6 +503,149 @@ func contentAgeTiers(values []string) []contentdomain.AgeTier {
 	return ageTiers
 }
 
+// listFavorites returns the guardian's content bookmarks.
+func (handler contentHandler) listFavorites(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	accountID, ok := authenticatedAccountID(request)
+	if !ok {
+		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
+		return
+	}
+	favorites, err := handler.service.ListFavorites(request.Context(), accountID)
+	if err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"favorites": favorites,
+	})
+}
+
+// addFavorite bookmarks one package. A repeat add is idempotent.
+func (handler contentHandler) addFavorite(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	accountID, ok := authenticatedAccountID(request)
+	if !ok {
+		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
+		return
+	}
+	favorite, err := handler.service.AddFavorite(
+		request.Context(),
+		accountID,
+		request.PathValue("package_id"),
+	)
+	if errors.Is(err, contentdomain.ErrFavoriteExists) {
+		// A repeated bookmark is success: the console sends the same request
+		// after a retry and expects the favourite to already be present.
+		writeSuccess(response, request, http.StatusOK, map[string]any{
+			"package_id": request.PathValue("package_id"),
+		})
+		return
+	}
+	if err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusCreated, map[string]any{
+		"package_id": favorite.PackageID,
+		"created_at": favorite.CreatedAt,
+	})
+}
+
+// removeFavorite deletes one bookmark; a missing row is still success.
+func (handler contentHandler) removeFavorite(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	accountID, ok := authenticatedAccountID(request)
+	if !ok {
+		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
+		return
+	}
+	if _, err := handler.service.RemoveFavorite(
+		request.Context(),
+		accountID,
+		request.PathValue("package_id"),
+	); err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"package_id": request.PathValue("package_id"),
+	})
+}
+
+type recordPlaybackRequest struct {
+	PackageID      string `json:"package_id"`
+	PackageVersion int    `json:"package_version"`
+	Outcome        string `json:"outcome"`
+	PlayedSeconds  int    `json:"played_seconds"`
+}
+
+// recordPlayback stores one device playback event after verifying the session
+// token belongs to the path device.
+func (handler deviceContentHandler) recordPlayback(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	if _, ok := handler.verifyDeviceFamily(response, request); !ok {
+		return
+	}
+	var payload recordPlaybackRequest
+	if err := decodeJSON(request, &payload); err != nil {
+		writeError(response, request, http.StatusBadRequest, "invalid_request", "请检查播放记录")
+		return
+	}
+	record, err := handler.contentHandler.service.RecordPlayback(
+		request.Context(),
+		contentdomain.PlayRecordInput{
+			DeviceID:       strings.TrimSpace(request.PathValue("device_id")),
+			PackageID:      payload.PackageID,
+			PackageVersion: payload.PackageVersion,
+			Outcome:        contentdomain.PlayOutcome(payload.Outcome),
+			PlayedSeconds:  payload.PlayedSeconds,
+		},
+	)
+	if err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusCreated, map[string]any{
+		"record": record,
+	})
+}
+
+// listPlayHistory returns the bounded playback history for the path device.
+func (handler deviceContentHandler) listPlayHistory(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	if _, ok := handler.verifyDeviceFamily(response, request); !ok {
+		return
+	}
+	limit, err := contentPositiveInt(request.URL.Query().Get("limit"), 50)
+	if err != nil {
+		writeError(response, request, http.StatusUnprocessableEntity, "invalid_limit", "请检查分页参数")
+		return
+	}
+	records, err := handler.contentHandler.service.ListPlayHistory(
+		request.Context(),
+		request.PathValue("device_id"),
+		limit,
+	)
+	if err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"history": records,
+	})
+}
+
 func writeContentError(
 	response http.ResponseWriter,
 	request *http.Request,
@@ -511,6 +654,12 @@ func writeContentError(
 	switch {
 	case errors.Is(err, contentdomain.ErrInvalidMetadata):
 		writeError(response, request, http.StatusUnprocessableEntity, "invalid_content", "请检查内容包信息")
+	case errors.Is(err, contentdomain.ErrFavoriteExists):
+		writeError(response, request, http.StatusConflict, "favorite_exists", "这个内容已经收藏")
+	case errors.Is(err, contentdomain.ErrPlayOutcomeInvalid):
+		writeError(response, request, http.StatusUnprocessableEntity, "invalid_play_outcome", "请检查播放结果")
+	case errors.Is(err, contentdomain.ErrPlayDurationInvalid):
+		writeError(response, request, http.StatusUnprocessableEntity, "invalid_play_duration", "请检查播放时长")
 	case errors.Is(err, contentdomain.ErrPackageNotFound):
 		writeError(response, request, http.StatusNotFound, "content_not_found", "没有找到这个内容包")
 	case errors.Is(err, contentdomain.ErrVersionExists):

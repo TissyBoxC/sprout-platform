@@ -20,13 +20,16 @@ import (
 )
 
 type contentTestRepository struct {
-	mu       sync.Mutex
-	versions map[string]*contentdomain.PackageVersion
+	mu        sync.Mutex
+	versions  map[string]*contentdomain.PackageVersion
+	favorites map[string]contentdomain.Favorite
+	history   []contentdomain.PlayRecord
 }
 
 func newContentTestRepository() *contentTestRepository {
 	return &contentTestRepository{
-		versions: make(map[string]*contentdomain.PackageVersion),
+		versions:  make(map[string]*contentdomain.PackageVersion),
+		favorites: make(map[string]contentdomain.Favorite),
 	}
 }
 
@@ -594,6 +597,239 @@ func TestRouterMountsDeviceContentRoutes(t *testing.T) {
 
 func contentTestKey(packageID string, packageVersion int) string {
 	return fmt.Sprintf("%s/%d", packageID, packageVersion)
+}
+
+func TestContentFavoriteLifecycleEndpoints(t *testing.T) {
+	repository := newContentTestRepository()
+	repository.versions[contentTestKey("content_story_001", 1)] = &contentdomain.PackageVersion{
+		PackageID:      "content_story_001",
+		PackageVersion: 1,
+		Title:          "月亮晚安故事",
+		Category:       contentdomain.CategoryStory,
+		AgeTiers:       []contentdomain.AgeTier{contentdomain.AgeTier3To4},
+		Status:         contentdomain.StatusPublished,
+	}
+	service, err := contentservice.New(contentservice.Options{
+		Repository:  repository,
+		AssetReader: contentTestAssetReader{},
+	})
+	if err != nil {
+		t.Fatalf("create content service: %v", err)
+	}
+	handler := contentHandler{service: service}
+
+	authed := func(method string, target string) *http.Request {
+		request := httptest.NewRequest(method, target, nil)
+		request.SetPathValue("package_id", "content_story_001")
+		return request.WithContext(context.WithValue(
+			request.Context(),
+			authenticatedAccountKey{},
+			"parent-001",
+		))
+	}
+
+	// Add.
+	recorder := httptest.NewRecorder()
+	handler.addFavorite(recorder, authed(http.MethodPut, "/api/v1/content/favorites/content_story_001"))
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("add favorite status = %d, want %d: %s", recorder.Code, http.StatusCreated, recorder.Body.String())
+	}
+
+	// Repeat add is idempotent (200, not 409).
+	recorder = httptest.NewRecorder()
+	handler.addFavorite(recorder, authed(http.MethodPut, "/api/v1/content/favorites/content_story_001"))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("repeat favorite status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+
+	// List.
+	recorder = httptest.NewRecorder()
+	handler.listFavorites(recorder, authed(http.MethodGet, "/api/v1/content/favorites"))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("list favorite status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	var listEnvelope struct {
+		Data struct {
+			Favorites []struct {
+				PackageID string `json:"package_id"`
+				Available bool   `json:"available"`
+			} `json:"favorites"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &listEnvelope); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listEnvelope.Data.Favorites) != 1 ||
+		!listEnvelope.Data.Favorites[0].Available {
+		t.Fatalf("unexpected favorite list: %s", recorder.Body.String())
+	}
+
+	// Remove.
+	recorder = httptest.NewRecorder()
+	handler.removeFavorite(recorder, authed(http.MethodDelete, "/api/v1/content/favorites/content_story_001"))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("remove favorite status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+}
+
+func TestContentFavoriteRequiresAuthentication(t *testing.T) {
+	handler := newContentHandlerForTest(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/content/favorites", nil)
+	recorder := httptest.NewRecorder()
+	handler.listFavorites(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestDevicePlaybackRequiresMatchingDeviceSession(t *testing.T) {
+	handler := deviceContentHandler{
+		contentHandler: newContentHandlerForTest(t),
+		bindingService: contentTestBindingService{sessionDeviceID: "sprout_device_001"},
+		runtimeService: contentTestRuntimeService{familyID: "family-001"},
+	}
+	for _, path := range []string{
+		"/api/v1/devices/sprout_device_001/content/playback",
+	} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.SetPathValue("device_id", "sprout_device_002")
+		recorder := httptest.NewRecorder()
+		handler.listPlayHistory(recorder, request)
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusUnauthorized, recorder.Body.String())
+		}
+	}
+}
+
+func contentFavoriteKey(parentAccountID string, packageID string) string {
+	return parentAccountID + "\x00" + packageID
+}
+
+func (repository *contentTestRepository) AddFavorite(
+	_ context.Context,
+	parentAccountID string,
+	packageID string,
+	now time.Time,
+) (contentdomain.Favorite, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	key := contentFavoriteKey(parentAccountID, packageID)
+	if _, exists := repository.favorites[key]; exists {
+		return contentdomain.Favorite{}, contentdomain.ErrFavoriteExists
+	}
+	favorite := contentdomain.Favorite{PackageID: packageID, CreatedAt: now}
+	repository.favorites[key] = favorite
+	return favorite, nil
+}
+
+func (repository *contentTestRepository) RemoveFavorite(
+	_ context.Context,
+	parentAccountID string,
+	packageID string,
+) (bool, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	key := contentFavoriteKey(parentAccountID, packageID)
+	if _, exists := repository.favorites[key]; !exists {
+		return false, nil
+	}
+	delete(repository.favorites, key)
+	return true, nil
+}
+
+func (repository *contentTestRepository) ListFavorites(
+	_ context.Context,
+	parentAccountID string,
+) ([]contentdomain.FavoriteView, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	views := make([]contentdomain.FavoriteView, 0)
+	for key, favorite := range repository.favorites {
+		if !strings.HasPrefix(key, parentAccountID+"\x00") {
+			continue
+		}
+		view := contentdomain.FavoriteView{
+			PackageID: favorite.PackageID,
+			CreatedAt: favorite.CreatedAt,
+			AgeTiers:  []contentdomain.AgeTier{},
+		}
+		for _, version := range repository.versions {
+			if version.PackageID == favorite.PackageID &&
+				version.Status == contentdomain.StatusPublished {
+				view.Title = version.Title
+				view.Category = version.Category
+				view.AgeTiers = append([]contentdomain.AgeTier(nil), version.AgeTiers...)
+				view.PackageVersion = version.PackageVersion
+				view.Available = true
+				break
+			}
+		}
+		views = append(views, view)
+	}
+	return views, nil
+}
+
+func (repository *contentTestRepository) RecordPlayback(
+	_ context.Context,
+	input contentdomain.PlayRecordInput,
+	limit int,
+	now time.Time,
+) (contentdomain.PlayRecord, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	if limit < 1 {
+		limit = 50
+	}
+	record := contentdomain.PlayRecord{
+		ID:             fmt.Sprintf("play-%d", len(repository.history)+1),
+		DeviceID:       input.DeviceID,
+		PackageID:      input.PackageID,
+		PackageVersion: input.PackageVersion,
+		Outcome:        input.Outcome,
+		PlayedSeconds:  input.PlayedSeconds,
+		PlayedAt:       now,
+	}
+	repository.history = append([]contentdomain.PlayRecord{record}, repository.history...)
+	deviceRecords := make([]contentdomain.PlayRecord, 0, len(repository.history))
+	for _, item := range repository.history {
+		if item.DeviceID == input.DeviceID {
+			deviceRecords = append(deviceRecords, item)
+		}
+	}
+	if len(deviceRecords) > limit {
+		deviceRecords = deviceRecords[:limit]
+	}
+	kept := make([]contentdomain.PlayRecord, 0, len(repository.history))
+	for _, item := range repository.history {
+		if item.DeviceID != input.DeviceID {
+			kept = append(kept, item)
+		}
+	}
+	repository.history = append(kept, deviceRecords...)
+	return record, nil
+}
+
+func (repository *contentTestRepository) ListPlayHistory(
+	_ context.Context,
+	query contentdomain.PlayHistoryQuery,
+) ([]contentdomain.PlayRecord, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	limit := query.Limit
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+	records := make([]contentdomain.PlayRecord, 0)
+	for _, item := range repository.history {
+		if item.DeviceID != query.DeviceID {
+			continue
+		}
+		records = append(records, item)
+		if len(records) >= limit {
+			break
+		}
+	}
+	return records, nil
 }
 
 func cloneContentTestVersion(

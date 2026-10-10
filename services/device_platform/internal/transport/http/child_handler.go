@@ -80,11 +80,19 @@ type disabledPeriodRequest struct {
 }
 
 type parentPolicyRequest struct {
-	PolicyVersion     int                     `json:"policy_version"`
-	DailyLimitMinutes int                     `json:"daily_limit_minutes"`
-	AllowedCategories []string                `json:"allowed_categories"`
-	DisabledPeriods   []disabledPeriodRequest `json:"disabled_periods"`
-	MaxVolumePercent  int                     `json:"max_volume_percent"`
+	PolicyVersion     int                          `json:"policy_version"`
+	DailyLimitMinutes int                          `json:"daily_limit_minutes"`
+	AllowedCategories []string                     `json:"allowed_categories"`
+	DisabledPeriods   []disabledPeriodRequest      `json:"disabled_periods"`
+	MaxVolumePercent  int                          `json:"max_volume_percent"`
+	VoiceConversation voiceConversationPolicyInput `json:"voice_conversation"`
+}
+
+type voiceConversationPolicyInput struct {
+	ContinuousConversationEnabled bool `json:"continuous_conversation_enabled"`
+	IdleWindowSeconds             int  `json:"idle_window_seconds"`
+	BargeInEnabled                bool `json:"barge_in_enabled"`
+	FarFieldEnabled               bool `json:"far_field_enabled"`
 }
 
 func (handler childHandler) list(
@@ -255,6 +263,12 @@ func (handler childHandler) updatePolicy(
 			AllowedCategories: payload.AllowedCategories,
 			DisabledPeriods:   periods,
 			MaxVolumePercent:  payload.MaxVolumePercent,
+			VoiceConversation: policydomain.VoiceConversationPolicy{
+				ContinuousConversationEnabled: payload.VoiceConversation.ContinuousConversationEnabled,
+				IdleWindowSeconds:             payload.VoiceConversation.IdleWindowSeconds,
+				BargeInEnabled:                payload.VoiceConversation.BargeInEnabled,
+				FarFieldEnabled:               payload.VoiceConversation.FarFieldEnabled,
+			},
 		},
 		payload.PolicyVersion,
 	)
@@ -305,7 +319,13 @@ func parentPolicyResponse(policy *policydomain.Policy) map[string]any {
 		"allowed_categories":  policy.AllowedCategories,
 		"disabled_periods":    disabledPeriods,
 		"max_volume_percent":  policy.MaxVolumePercent,
-		"updated_at":          policy.UpdatedAt,
+		"voice_conversation": map[string]any{
+			"continuous_conversation_enabled": policy.VoiceConversation.ContinuousConversationEnabled,
+			"idle_window_seconds":             policy.VoiceConversation.IdleWindowSeconds,
+			"barge_in_enabled":                policy.VoiceConversation.BargeInEnabled,
+			"far_field_enabled":               policy.VoiceConversation.FarFieldEnabled,
+		},
+		"updated_at": policy.UpdatedAt,
 	}
 }
 

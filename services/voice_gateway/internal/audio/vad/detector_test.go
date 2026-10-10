@@ -119,6 +119,32 @@ func TestEnergyDetectorRejectsNoiseLikeHighZeroCrossing(t *testing.T) {
 	}
 }
 
+func TestEnergyDetectorStatsAreBounded(t *testing.T) {
+	testCases := []struct {
+		name   string
+		pcm    []byte
+		frames int
+	}{
+		{name: "speech", pcm: makeTone(frame.SamplesPerFrame, 300, 8000), frames: 3},
+		{name: "silence", pcm: makePCM(frame.SamplesPerFrame), frames: 3},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			detector := NewEnergyDetector(Config{})
+			for index := 0; index < testCase.frames; index++ {
+				detector.IsSpeech(testCase.pcm)
+			}
+			stats := detector.Stats()
+			if stats.Confidence < 0 || stats.Confidence > 1024 {
+				t.Fatalf("confidence outside bounds: %d", stats.Confidence)
+			}
+			if stats.NoiseFloor < 0 || stats.NoiseFloor > 1 {
+				t.Fatalf("noise floor outside bounds: %f", stats.NoiseFloor)
+			}
+		})
+	}
+}
+
 func makePCM(samples int) []byte {
 	return make([]byte, samples*2)
 }

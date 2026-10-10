@@ -13,6 +13,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/packages/go/httpapi"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/config"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/session"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/usage"
 )
 
@@ -96,6 +97,47 @@ func TestInternalAPIContractDocumentsRuntimeEndpoint(t *testing.T) {
 	if !bytes.Contains(contract, []byte("/internal/v1/runtime")) {
 		t.Fatal("expected runtime endpoint in internal API contract")
 	}
+}
+
+func TestInternalVoiceQualityEndpointReturnsReadOnlyMetrics(t *testing.T) {
+	options := newTestRouterOptions()
+	options.InternalAPIConfig = config.InternalAPIConfig{
+		Enabled:   true,
+		AuthToken: strings.Repeat("t", 32),
+	}
+	options.SessionMetrics = staticSessionMetrics{snapshots: []session.QualitySnapshot{
+		{
+			SessionID:       "session_quality",
+			DeviceID:        "device_001",
+			State:           session.StateListening,
+			EchoConvergence: 512,
+			NoiseFloor:      0.002,
+			AgcGain:         1.5,
+			VADConfidence:   640,
+		},
+	}}
+
+	request := httptest.NewRequest(stdhttp.MethodGet, "/internal/v1/voice/quality", nil)
+	request.Header.Set("Authorization", "Bearer "+strings.Repeat("t", 32))
+	recorder := httptest.NewRecorder()
+	NewRouter(options).ServeHTTP(recorder, request)
+
+	if recorder.Code != stdhttp.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", stdhttp.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"echo_convergence":512`) ||
+		!strings.Contains(body, `"vad_confidence":640`) {
+		t.Fatalf("unexpected quality response: %s", body)
+	}
+}
+
+type staticSessionMetrics struct {
+	snapshots []session.QualitySnapshot
+}
+
+func (metrics staticSessionMetrics) QualitySnapshots() []session.QualitySnapshot {
+	return metrics.snapshots
 }
 
 func TestInternalUsageEndpointRequiresServiceToken(t *testing.T) {

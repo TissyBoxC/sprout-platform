@@ -76,6 +76,18 @@ func DefaultRegistry() []Definition {
 		readOnlyFeatureDef("voice_gateway", "语音网关", "儿童实时语音会话和语音安全。", "voice", "语音平台",
 			"语音网关的连接、密钥和会话策略由部署配置管理，功能中心只提供健康状态和统计。",
 			metrics("active_voice_session_count", "实时会话", "路")),
+		featureDef("voice_conversation", "语音对话", "全双工、连续会话与远场拾音的默认策略。", "voice", "语音平台", true,
+			configFields(
+				boolField("continuous_conversation_enabled", "默认启用连续会话", true, true),
+				integerField("idle_window_seconds", "空闲保持时长", 8, true, true, "秒"),
+				boolField("barge_in_enabled", "允许打断语音", true, true),
+				boolField("far_field_enabled", "启用远场拾音", true, true),
+			),
+			metrics(
+				"voice_session_turn_count", "对话轮次", "次",
+				"voice_session_barge_in_count", "打断次数", "次",
+				"voice_session_continuous_rate", "连续会话占比", "percent",
+			)),
 		readOnlyFeatureDef("ai_model_gateway", "模型网关", "模型路由、限额与供应商健康。", "ai", "AI 服务",
 			"模型供应商和路由由 AI 服务统一管理，功能中心只提供健康状态和统计。",
 			metrics("model_request_count", "模型调用", "次")),

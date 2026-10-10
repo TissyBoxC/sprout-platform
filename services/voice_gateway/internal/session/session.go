@@ -30,6 +30,7 @@ var (
 	ErrSessionClosed        = errors.New("voice session is closed")
 	ErrSessionIdleTimeout   = errors.New("voice session idle timeout")
 	ErrSessionDurationLimit = errors.New("voice session duration limit reached")
+	ErrSessionWindowExpired = errors.New("voice session continuity window expired")
 	ErrSessionIdentity      = errors.New("voice session identity does not match the frame")
 	ErrOutOfOrderFrame      = errors.New("audio frame sequence is older than the accepted stream")
 	ErrSegmentQueueFull     = errors.New("voice segment queue is full")
@@ -95,6 +96,24 @@ type SessionStats struct {
 	LastActivity     time.Time
 }
 
+// QualitySnapshot is a read-only preprocessing quality view for one session.
+//
+// The snapshot intentionally contains only scalar quality metrics. It never
+// exposes PCM, filtered audio, provider payloads, or conversation content.
+type QualitySnapshot struct {
+	SessionID             string    `json:"session_id"`
+	DeviceID              string    `json:"device_id"`
+	State                 State     `json:"state"`
+	EchoCancellationReady bool      `json:"echo_cancellation_ready"`
+	EchoConvergence       int       `json:"echo_convergence"`
+	NoiseFloor            float64   `json:"noise_floor"`
+	AgcGain               float64   `json:"agc_gain"`
+	VADConfidence         int       `json:"vad_confidence"`
+	VADNoiseFloor         float64   `json:"vad_noise_floor"`
+	LastActivity          time.Time `json:"last_activity"`
+	MetricsAt             time.Time `json:"metrics_at"`
+}
+
 // Session represents one active device conversation.
 //
 // AcceptFrame is safe for concurrent callers; it serialises codec, sequence,
@@ -138,6 +157,8 @@ type Session struct {
 	outOfOrderFrames     uint64
 	segmentsEmitted      uint64
 	lastActivity         time.Time
+	metricsAt            time.Time
+	quality              QualitySnapshot
 	segmentActive        bool
 	segmentSequenceStart uint32
 	segmentSequenceEnd   uint32
@@ -314,6 +335,20 @@ func (s *Session) Transition(event Event) error {
 	return nil
 }
 
+// KeepAlive refreshes the idle watchdog without accepting audio.
+//
+// The transport calls it when a continuity window starts so the configured
+// window, rather than the ordinary idle timeout, decides when a parked
+// conversation is released.
+func (s *Session) KeepAlive() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.touchLocked()
+	s.mu.Unlock()
+}
+
 // AcceptFrame validates, decodes, buffers, and segments one inbound frame.
 //
 // Duplicate and stale sequences are counted and rejected. The method blocks
@@ -379,6 +414,7 @@ func (s *Session) AcceptFrame(ctx context.Context, audioFrame frame.Frame) error
 			s.mu.Unlock()
 			return fmt.Errorf("preprocess audio frame: %w", processErr)
 		}
+		s.updatePreprocessQualityLocked()
 	}
 
 	if err := s.buffer.Push(audioFrame); err != nil {
@@ -392,6 +428,8 @@ func (s *Session) AcceptFrame(ctx context.Context, audioFrame frame.Frame) error
 	s.advanceListeningLocked()
 
 	isSpeech := s.detector.IsSpeech(int16Bytes(pcm))
+	s.updateDetectorQualityLocked()
+	s.metricsAt = time.Now().UTC()
 	segment, hasSegment, err := s.consumeSpeechLocked(audioFrame, pcm, isSpeech)
 	if err != nil {
 		s.mu.Unlock()
@@ -448,6 +486,24 @@ func (s *Session) Stats() SessionStats {
 	}
 }
 
+// Quality returns the latest bounded preprocessing quality snapshot.
+func (s *Session) Quality() QualitySnapshot {
+	if s == nil {
+		return QualitySnapshot{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snapshot := s.quality
+	snapshot.SessionID = s.id
+	snapshot.DeviceID = s.deviceID
+	snapshot.State = s.state
+	snapshot.LastActivity = s.lastActivity
+	if snapshot.MetricsAt.IsZero() {
+		snapshot.MetricsAt = s.lastActivity
+	}
+	return snapshot
+}
+
 func (s *Session) watchTimeouts() {
 	idleTimer := time.NewTimer(s.idleTimeout)
 	defer idleTimer.Stop()
@@ -487,6 +543,27 @@ func (s *Session) touchLocked() {
 	select {
 	case s.activity <- struct{}{}:
 	default:
+	}
+}
+
+func (s *Session) updatePreprocessQualityLocked() {
+	stats := s.processor.Stats()
+	s.quality.EchoCancellationReady = stats.EchoCancelled > 0
+	s.quality.EchoConvergence = stats.EchoConvergence
+	s.quality.NoiseFloor = stats.NoiseFloor
+	s.quality.AgcGain = stats.CurrentGain
+}
+
+func (s *Session) updateDetectorQualityLocked() {
+	observer, ok := s.detector.(vad.ObservingDetector)
+	if !ok {
+		return
+	}
+	stats := observer.Stats()
+	s.quality.VADConfidence = stats.Confidence
+	s.quality.VADNoiseFloor = stats.NoiseFloor
+	if s.quality.NoiseFloor == 0 && stats.NoiseFloor > 0 {
+		s.quality.NoiseFloor = stats.NoiseFloor
 	}
 }
 

@@ -29,3 +29,10 @@ security:
 # service is required. Set this to the platform PostgreSQL DSN in production.
 database:
   dsn: "postgres://sprout:change-me@127.0.0.1:5432/sprout_device_platform?sslmode=disable"
+
+websocket:
+  # Keep the realtime endpoint disabled until the device token verifier is set.
+  enabled: false
+  path: "/v1/voice"
+  # Keep a completed conversation reusable for this short follow-up window.
+  continuity_window_seconds: 60

@@ -35,6 +35,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResponseEnvelope"
+  /internal/v1/voice/quality:
+    get:
+      summary: Read bounded preprocessing quality for active voice sessions
+      description: Returns only scalar AEC, noise, AGC, and VAD metrics. It never returns PCM, audio, recognized text, or provider payloads.
+      responses:
+        "200":
+          description: Active session quality snapshots
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          description: Service authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
 components:
   securitySchemes:
     serviceToken:

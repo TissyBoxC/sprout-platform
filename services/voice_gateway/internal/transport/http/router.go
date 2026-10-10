@@ -13,6 +13,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/packages/go/httpapi"
 	"github.com/TissyBoxC/sprout-platform/packages/go/observability"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/config"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/session"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/usage"
 )
 
@@ -25,6 +26,11 @@ type RouterOptions struct {
 	// caller owns authentication and upgrade; the router only routes to it.
 	RealtimeHandler http.Handler
 	RealtimePath    string
+	// SessionMetrics exposes read-only preprocessing quality for active voice
+	// sessions. Values are bounded scalars and never include audio content.
+	SessionMetrics interface {
+		QualitySnapshots() []session.QualitySnapshot
+	}
 }
 
 // NewRouter returns the HTTP router for the voice gateway.
@@ -57,6 +63,26 @@ func NewRouter(options RouterOptions) http.Handler {
 				requireServiceToken(
 					options.InternalAPIConfig.AuthToken,
 					http.HandlerFunc(usageHandler.recordConversation),
+				),
+			)
+		}
+		if options.SessionMetrics != nil {
+			mux.Handle(
+				"GET /internal/v1/voice/quality",
+				requireServiceToken(
+					options.InternalAPIConfig.AuthToken,
+					http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+						snapshots := options.SessionMetrics.QualitySnapshots()
+						if snapshots == nil {
+							snapshots = []session.QualitySnapshot{}
+						}
+						httpapi.WriteSuccess(
+							response,
+							request,
+							http.StatusOK,
+							map[string]any{"sessions": snapshots},
+						)
+					}),
 				),
 			)
 		}

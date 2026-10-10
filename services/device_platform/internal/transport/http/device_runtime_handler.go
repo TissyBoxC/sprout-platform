@@ -463,9 +463,15 @@ func effectivePolicyResponse(policy *policydomain.EffectivePolicy) map[string]an
 		"allowed_categories":  policy.AllowedCategories,
 		"disabled_periods":    disabledPeriods,
 		"max_volume_percent":  policy.MaxVolumePercent,
-		"source_child_count":  policy.SourceChildCount,
-		"aggregation_mode":    "most_restrictive",
-		"updated_at":          policy.UpdatedAt.UTC(),
+		"voice_conversation": map[string]any{
+			"continuous_conversation_enabled": policy.VoiceConversation.ContinuousConversationEnabled,
+			"idle_window_seconds":             policy.VoiceConversation.IdleWindowSeconds,
+			"barge_in_enabled":                policy.VoiceConversation.BargeInEnabled,
+			"far_field_enabled":               policy.VoiceConversation.FarFieldEnabled,
+		},
+		"source_child_count": policy.SourceChildCount,
+		"aggregation_mode":   "most_restrictive",
+		"updated_at":         policy.UpdatedAt.UTC(),
 	}
 }
 

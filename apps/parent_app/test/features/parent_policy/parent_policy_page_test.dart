@@ -98,6 +98,12 @@ ParentPolicy _policy({List<DisabledPeriod> periods = const []}) {
     allowedCategories: ChildContentCategory.values,
     disabledPeriods: periods,
     maxVolumePercent: 70,
+    voiceConversation: const VoiceConversationPolicy(
+      continuousConversationEnabled: true,
+      idleWindowSeconds: 8,
+      bargeInEnabled: true,
+      farFieldEnabled: true,
+    ),
     updatedAt: DateTime.utc(2026, 10, 8),
   );
 }

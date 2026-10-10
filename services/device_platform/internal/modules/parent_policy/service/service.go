@@ -23,6 +23,18 @@ const DefaultDailyLimitMinutes = 60
 // DefaultMaxVolumePercent keeps first use quiet until a guardian changes it.
 const DefaultMaxVolumePercent = 70
 
+// Voice conversation bounds. The idle window keeps follow-up turns snappy
+// without leaving the microphone hot for long, and every value must be inside
+// the closed range the firmware and gateway accept.
+const (
+	DefaultContinuousConversationEnabled = true
+	DefaultBargeInEnabled                = true
+	DefaultFarFieldEnabled               = true
+	DefaultVoiceIdleWindowSeconds        = 8
+	MinVoiceIdleWindowSeconds            = 2
+	MaxVoiceIdleWindowSeconds            = 60
+)
+
 // Service owns time, content, and volume restrictions.
 type Service struct {
 	repository repository.Repository
@@ -69,10 +81,22 @@ func (s *Service) CreateDefaultForChild(
 		AllowedCategories: categories,
 		DisabledPeriods:   []domain.DisabledPeriod{},
 		MaxVolumePercent:  DefaultMaxVolumePercent,
+		VoiceConversation: defaultVoiceConversationPolicy(),
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
 	return s.repository.Create(ctx, policy)
+}
+
+// defaultVoiceConversationPolicy is the conservative realtime voice profile a
+// new child receives before a guardian changes it.
+func defaultVoiceConversationPolicy() domain.VoiceConversationPolicy {
+	return domain.VoiceConversationPolicy{
+		ContinuousConversationEnabled: DefaultContinuousConversationEnabled,
+		IdleWindowSeconds:             DefaultVoiceIdleWindowSeconds,
+		BargeInEnabled:                DefaultBargeInEnabled,
+		FarFieldEnabled:               DefaultFarFieldEnabled,
+	}
 }
 
 // DeleteForChild removes one dependent policy.
@@ -185,11 +209,16 @@ func (s *Service) updateWithVersion(
 	if err != nil {
 		return nil, err
 	}
+	voice, err := validateVoiceConversation(input.VoiceConversation)
+	if err != nil {
+		return nil, err
+	}
 	policy.PolicyVersion++
 	policy.DailyLimitMinutes = input.DailyLimitMinutes
 	policy.AllowedCategories = categories
 	policy.DisabledPeriods = periods
 	policy.MaxVolumePercent = input.MaxVolumePercent
+	policy.VoiceConversation = voice
 	policy.UpdatedAt = s.timeSource.Now().UTC()
 	if err := s.repository.UpdateWithVersion(ctx, policy, expectedVersion); err != nil {
 		return nil, err
@@ -241,6 +270,7 @@ func aggregateMostRestrictive(
 	periodSet := make(map[string]domain.DisabledPeriod)
 	dailyLimit := policies[0].DailyLimitMinutes
 	maxVolume := policies[0].MaxVolumePercent
+	voice := policies[0].VoiceConversation
 	updatedAt := policies[0].UpdatedAt
 	for _, policy := range policies {
 		for category := range allowedSet {
@@ -257,10 +287,22 @@ func aggregateMostRestrictive(
 		if policy.MaxVolumePercent < maxVolume {
 			maxVolume = policy.MaxVolumePercent
 		}
+		// Voice conversation is a shared device capability: any child who
+		// disables it, or shortens the idle window, tightens the family result.
+		voice.ContinuousConversationEnabled =
+			voice.ContinuousConversationEnabled && policy.VoiceConversation.ContinuousConversationEnabled
+		voice.BargeInEnabled =
+			voice.BargeInEnabled && policy.VoiceConversation.BargeInEnabled
+		voice.FarFieldEnabled =
+			voice.FarFieldEnabled && policy.VoiceConversation.FarFieldEnabled
+		if policy.VoiceConversation.IdleWindowSeconds < voice.IdleWindowSeconds {
+			voice.IdleWindowSeconds = policy.VoiceConversation.IdleWindowSeconds
+		}
 		if policy.UpdatedAt.After(updatedAt) {
 			updatedAt = policy.UpdatedAt
 		}
 	}
+	voice = resolveEffectiveVoiceWindow(voice)
 	allowed = allowed[:0]
 	for _, category := range policies[0].AllowedCategories {
 		if _, ok := allowedSet[category]; ok {
@@ -282,9 +324,26 @@ func aggregateMostRestrictive(
 		AllowedCategories: allowed,
 		DisabledPeriods:   periods,
 		MaxVolumePercent:  maxVolume,
+		VoiceConversation: voice,
 		SourceChildCount:  len(policies),
 		UpdatedAt:         updatedAt,
 	}, nil
+}
+
+// resolveEffectiveVoiceWindow keeps the aggregated window inside the accepted
+// bounds even when a stored row predates the current clamp rules.
+func resolveEffectiveVoiceWindow(
+	value domain.VoiceConversationPolicy,
+) domain.VoiceConversationPolicy {
+	idle := value.IdleWindowSeconds
+	if idle < MinVoiceIdleWindowSeconds {
+		idle = MinVoiceIdleWindowSeconds
+	}
+	if idle > MaxVoiceIdleWindowSeconds {
+		idle = MaxVoiceIdleWindowSeconds
+	}
+	value.IdleWindowSeconds = idle
+	return value
 }
 
 func containsString(values []string, expected string) bool {
@@ -346,4 +405,31 @@ func isApprovedCategory(category string) bool {
 		}
 	}
 	return false
+}
+
+// validateVoiceConversation clamps an out-of-range idle window to the accepted
+// bounds and rejects the whole update when the window is negative, so a
+// malformed guardian payload never reaches the device as a live session rule.
+func validateVoiceConversation(
+	value domain.VoiceConversationPolicy,
+) (domain.VoiceConversationPolicy, error) {
+	if value.IdleWindowSeconds < 0 {
+		return domain.VoiceConversationPolicy{}, domain.ErrInvalidVoiceConversation
+	}
+	idle := value.IdleWindowSeconds
+	if idle == 0 {
+		idle = DefaultVoiceIdleWindowSeconds
+	}
+	if idle < MinVoiceIdleWindowSeconds {
+		idle = MinVoiceIdleWindowSeconds
+	}
+	if idle > MaxVoiceIdleWindowSeconds {
+		idle = MaxVoiceIdleWindowSeconds
+	}
+	return domain.VoiceConversationPolicy{
+		ContinuousConversationEnabled: value.ContinuousConversationEnabled,
+		IdleWindowSeconds:             idle,
+		BargeInEnabled:                value.BargeInEnabled,
+		FarFieldEnabled:               value.FarFieldEnabled,
+	}, nil
 }

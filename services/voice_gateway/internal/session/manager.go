@@ -193,6 +193,26 @@ func (m *Manager) Snapshot() []string {
 	return identifiers
 }
 
+// QualitySnapshots returns read-only preprocessing metrics for every active
+// session. The returned values contain only bounded scalars.
+func (m *Manager) QualitySnapshots() []QualitySnapshot {
+	if m == nil {
+		return nil
+	}
+	m.mutex.RLock()
+	active := make([]*Session, 0, len(m.sessions))
+	for _, voiceSession := range m.sessions {
+		active = append(active, voiceSession)
+	}
+	m.mutex.RUnlock()
+
+	snapshots := make([]QualitySnapshot, 0, len(active))
+	for _, voiceSession := range active {
+		snapshots = append(snapshots, voiceSession.Quality())
+	}
+	return snapshots
+}
+
 // CloseAll closes and forgets every session.
 //
 // It blocks until all session watchdogs have observed cancellation, which

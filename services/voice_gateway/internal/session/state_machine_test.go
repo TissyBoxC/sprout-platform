@@ -50,3 +50,48 @@ func TestFinishTurnIsRejectedWhileSpeaking(t *testing.T) {
 		t.Fatal("expected speaking -> finish_turn to be rejected")
 	}
 }
+
+func TestSuspendParksOnlyRecoverableStates(t *testing.T) {
+	testCases := []struct {
+		name    string
+		state   State
+		want    State
+		wantErr bool
+	}{
+		{name: "listening", state: StateListening, want: StateIdle},
+		{name: "speaking", state: StateSpeaking, want: StateIdle},
+		{name: "idle", state: StateIdle, wantErr: true},
+		{name: "thinking", state: StateThinking, wantErr: true},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			next, err := testCase.state.Transition(EventSuspend)
+			if testCase.wantErr {
+				if err == nil {
+					t.Fatalf("expected %s -> suspend to be rejected", testCase.state)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("suspend from %s failed: %v", testCase.state, err)
+			}
+			if next != testCase.want {
+				t.Fatalf("expected %s, got %s", testCase.want, next)
+			}
+		})
+	}
+}
+
+func TestSuspendThenResumeListening(t *testing.T) {
+	suspended, err := StateListening.Transition(EventSuspend)
+	if err != nil {
+		t.Fatalf("listening -> suspend failed: %v", err)
+	}
+	resumed, err := suspended.Transition(EventStartListening)
+	if err != nil {
+		t.Fatalf("idle -> listening failed: %v", err)
+	}
+	if resumed != StateListening {
+		t.Fatalf("expected listening after resume, got %s", resumed)
+	}
+}

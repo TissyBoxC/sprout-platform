@@ -327,6 +327,155 @@ func TestAggregateMostRestrictiveRejectsEmptyFamily(t *testing.T) {
 	}
 }
 
+func TestCreateDefaultForChildEnablesVoiceConversationDefaults(t *testing.T) {
+	repository := newMemoryPolicyRepository()
+	service, err := New(Options{Repository: repository, Clock: fixedClock{}})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	if err := service.CreateDefaultForChild(
+		context.Background(),
+		"family_1",
+		"child_1",
+		nil,
+	); err != nil {
+		t.Fatalf("create default policy: %v", err)
+	}
+	policy, err := service.Get(context.Background(), "family_1", "child_1")
+	if err != nil {
+		t.Fatalf("get policy: %v", err)
+	}
+	voice := policy.VoiceConversation
+	if !voice.ContinuousConversationEnabled || !voice.BargeInEnabled || !voice.FarFieldEnabled {
+		t.Fatalf("expected continuous/barge-in/far-field enabled, got %+v", voice)
+	}
+	if voice.IdleWindowSeconds != DefaultVoiceIdleWindowSeconds {
+		t.Fatalf("idle window = %d, want %d", voice.IdleWindowSeconds, DefaultVoiceIdleWindowSeconds)
+	}
+}
+
+func TestUpdateVoiceConversationClampsIdleWindowAndRejectsNegative(t *testing.T) {
+	repository := newMemoryPolicyRepository()
+	service, err := New(Options{Repository: repository, Clock: fixedClock{}})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	if err := service.CreateDefaultForChild(
+		context.Background(),
+		"family_1",
+		"child_1",
+		nil,
+	); err != nil {
+		t.Fatalf("create default policy: %v", err)
+	}
+	// A window far above the accepted maximum clamps down to the ceiling.
+	updated, err := service.Update(
+		context.Background(),
+		"family_1",
+		"child_1",
+		domain.PolicyInput{
+			DailyLimitMinutes: 60,
+			AllowedCategories: []string{"story"},
+			MaxVolumePercent:  70,
+			VoiceConversation: domain.VoiceConversationPolicy{
+				ContinuousConversationEnabled: true,
+				IdleWindowSeconds:             9999,
+				BargeInEnabled:                false,
+				FarFieldEnabled:               true,
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("update policy: %v", err)
+	}
+	if updated.VoiceConversation.IdleWindowSeconds != MaxVoiceIdleWindowSeconds {
+		t.Fatalf(
+			"clamped window = %d, want %d",
+			updated.VoiceConversation.IdleWindowSeconds,
+			MaxVoiceIdleWindowSeconds,
+		)
+	}
+	if updated.VoiceConversation.BargeInEnabled {
+		t.Fatal("expected barge-in to stay disabled after guardian update")
+	}
+
+	// A negative window is a malformed payload and must be rejected outright.
+	if _, err := service.Update(
+		context.Background(),
+		"family_1",
+		"child_1",
+		domain.PolicyInput{
+			DailyLimitMinutes: 60,
+			AllowedCategories: []string{"story"},
+			MaxVolumePercent:  70,
+			VoiceConversation: domain.VoiceConversationPolicy{
+				IdleWindowSeconds: -1,
+			},
+		},
+	); !errors.Is(err, domain.ErrInvalidVoiceConversation) {
+		t.Fatalf("expected invalid voice conversation error, got %v", err)
+	}
+}
+
+func TestGetEffectiveVoiceConversationUsesMostRestrictive(t *testing.T) {
+	repository := newMemoryPolicyRepository()
+	service, err := New(Options{Repository: repository, Clock: fixedClock{}})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	inputs := map[string]domain.VoiceConversationPolicy{
+		"child_1": {
+			ContinuousConversationEnabled: true,
+			IdleWindowSeconds:             20,
+			BargeInEnabled:                true,
+			FarFieldEnabled:               true,
+		},
+		"child_2": {
+			ContinuousConversationEnabled: true,
+			IdleWindowSeconds:             5,
+			BargeInEnabled:                false,
+			FarFieldEnabled:               true,
+		},
+	}
+	for childID, voice := range inputs {
+		if err := service.CreateDefaultForChild(
+			context.Background(),
+			"family_1",
+			childID,
+			nil,
+		); err != nil {
+			t.Fatalf("create policy %s: %v", childID, err)
+		}
+		if _, err := service.Update(
+			context.Background(),
+			"family_1",
+			childID,
+			domain.PolicyInput{
+				DailyLimitMinutes: 60,
+				AllowedCategories: []string{"story"},
+				MaxVolumePercent:  70,
+				VoiceConversation: voice,
+			},
+		); err != nil {
+			t.Fatalf("update policy %s: %v", childID, err)
+		}
+	}
+	effective, err := service.GetEffective(context.Background(), "family_1")
+	if err != nil {
+		t.Fatalf("get effective policy: %v", err)
+	}
+	voice := effective.VoiceConversation
+	if voice.IdleWindowSeconds != 5 {
+		t.Fatalf("expected shortest idle window, got %d", voice.IdleWindowSeconds)
+	}
+	if voice.BargeInEnabled {
+		t.Fatal("expected barge-in disabled because one child forbids it")
+	}
+	if !voice.ContinuousConversationEnabled || !voice.FarFieldEnabled {
+		t.Fatalf("expected shared capabilities to stay enabled, got %+v", voice)
+	}
+}
+
 func TestUpdateWithVersionRejectsStaleGuardianWrite(t *testing.T) {
 	repository := newMemoryPolicyRepository()
 	service, err := New(Options{Repository: repository, Clock: fixedClock{}})

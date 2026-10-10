@@ -116,11 +116,11 @@ func TestSessionStartAudioFrameAndClose(t *testing.T) {
 	if idle.Type != controlTypeSessionState || idle.State != string(session.StateIdle) {
 		t.Fatalf("unexpected idle state frame: %+v", idle)
 	}
-	closed := readControl(t, connection)
-	if closed.Type != controlTypeSessionClosed || closed.Reason != "user_finished" {
-		t.Fatalf("unexpected session_closed frame: %+v", closed)
+	// session_end keeps the conversation alive for the continuity window so a
+	// follow-up turn needs no new wake word.
+	if manager.Count() != 1 {
+		t.Fatalf("expected continuity session to remain active, got %d", manager.Count())
 	}
-	waitFor(t, time.Second, func() bool { return manager.Count() == 0 })
 }
 
 func TestMalformedControlFrameReturnsStableError(t *testing.T) {
@@ -352,6 +352,33 @@ func TestSessionStateFromClientIsRejected(t *testing.T) {
 	stateFrame := NewControlFrame(controlTypeSessionState, "session_state_direction", "device_alpha")
 	stateFrame.State = string(session.StateListening)
 	writeControl(t, connection, stateFrame)
+
+	errorFrame := readControl(t, connection)
+	if errorFrame.Type != controlTypeError || errorFrame.Code != errorCodeInvalidControl {
+		t.Fatalf("expected invalid_control, got %+v", errorFrame)
+	}
+}
+
+func TestQualityMetricsFromClientIsRejected(t *testing.T) {
+	server, manager := newTestServer(t)
+	defer manager.CloseAll()
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, "valid-token")
+	defer connection.Close()
+	writeControl(t, connection, sessionStartFrame("session_quality_direction", "device_alpha"))
+	_ = readControl(t, connection)
+	_ = readControl(t, connection)
+
+	quality := NewControlFrame(controlTypeQualityMetrics, "session_quality_direction", "device_alpha")
+	quality.Quality = &QualityMetrics{
+		EchoConvergence: 512,
+		NoiseFloor:      0.01,
+		AgcGain:         1.5,
+		VADConfidence:   640,
+	}
+	writeControl(t, connection, quality)
 
 	errorFrame := readControl(t, connection)
 	if errorFrame.Type != controlTypeError || errorFrame.Code != errorCodeInvalidControl {
@@ -878,6 +905,76 @@ func TestWakeDetectedFrameRejectsInvalidConfidence(t *testing.T) {
 	}
 }
 
+func TestBargeInFrameRoundTrip(t *testing.T) {
+	control := NewControlFrame(controlTypeBargeIn, "session_barge", "device_alpha")
+	control.Reason = "child_spoke"
+	encoded, err := control.Encode()
+	if err != nil {
+		t.Fatalf("encode barge-in: %v", err)
+	}
+	decoded, err := DecodeControlFrame(encoded)
+	if err != nil {
+		t.Fatalf("decode barge-in: %v", err)
+	}
+	if decoded.Type != controlTypeBargeIn || decoded.Reason != control.Reason {
+		t.Fatalf("barge-in frame changed during round trip: %+v", decoded)
+	}
+}
+
+func TestQualityMetricsFrameValidation(t *testing.T) {
+	valid := NewControlFrame(controlTypeQualityMetrics, "session_quality", "device_alpha")
+	valid.Quality = &QualityMetrics{
+		EchoConvergence: 512,
+		NoiseFloor:      0.01,
+		AgcGain:         1.5,
+		VADConfidence:   640,
+	}
+	if _, err := valid.Encode(); err != nil {
+		t.Fatalf("valid quality frame was rejected: %v", err)
+	}
+
+	testCases := []struct {
+		name   string
+		mutate func(*QualityMetrics)
+	}{
+		{
+			name: "echo convergence",
+			mutate: func(quality *QualityMetrics) {
+				quality.EchoConvergence = 1025
+			},
+		},
+		{
+			name: "noise floor",
+			mutate: func(quality *QualityMetrics) {
+				quality.NoiseFloor = 1.1
+			},
+		},
+		{
+			name: "agc gain",
+			mutate: func(quality *QualityMetrics) {
+				quality.AgcGain = -0.1
+			},
+		},
+		{
+			name: "vad confidence",
+			mutate: func(quality *QualityMetrics) {
+				quality.VADConfidence = -1
+			},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			control := valid
+			quality := *valid.Quality
+			control.Quality = &quality
+			testCase.mutate(control.Quality)
+			if _, err := control.Encode(); err == nil {
+				t.Fatalf("invalid %s was accepted", testCase.name)
+			}
+		})
+	}
+}
+
 func TestAudioEnvelopeRoundTrip(t *testing.T) {
 	envelope := AudioEnvelope{
 		SessionID:  "session_roundtrip",
@@ -1214,6 +1311,184 @@ func TestBargeInStateTransition(t *testing.T) {
 		t.Fatalf("expected session listening after barge-in, ok=%v", ok)
 	}
 	close(releaseHandler)
+}
+
+func TestExplicitBargeInIsIdempotent(t *testing.T) {
+	manager := session.NewManager(session.ManagerConfig{MaxSessions: 8, MaxSessionsPerDevice: 2})
+	defer manager.CloseAll()
+	releaseHandler := make(chan struct{})
+	server, err := NewServer(ServerConfig{
+		Manager:  manager,
+		Verifier: testTokenVerifier{},
+		DetectorFactory: func() vad.Detector {
+			return &scriptedWebSocketDetector{values: []bool{true, true, false}}
+		},
+		SegmentHandler: func(segment session.AudioSegment, sink AudioSink) {
+			reply := make([]int16, frame.SamplesPerFrame)
+			_ = sink.EnqueueAudio("explicit_barge_reply", playback.PriorityConversation, reply, true, nil)
+			<-releaseHandler
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("create websocket server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, "valid-token")
+	defer connection.Close()
+	writeControl(t, connection, sessionStartFrame("session_explicit_barge", "device_alpha"))
+	_ = readControl(t, connection)
+	_ = readControl(t, connection)
+
+	writeCompletedUtterance(t, connection, "session_explicit_barge", 1)
+	_ = waitForControl(t, connection, func(control ControlFrame) bool {
+		return control.Type == controlTypeSessionState &&
+			control.State == string(session.StateSpeaking)
+	})
+
+	for attempt := 0; attempt < 2; attempt++ {
+		barge := NewControlFrame(controlTypeBargeIn, "session_explicit_barge", "device_alpha")
+		barge.Reason = "child_spoke"
+		writeControl(t, connection, barge)
+	}
+	_ = waitForControl(t, connection, func(control ControlFrame) bool {
+		return control.Type == controlTypeSessionState &&
+			control.State == string(session.StateListening)
+	})
+	active, ok := manager.Get("session_explicit_barge")
+	if !ok {
+		t.Fatal("expected barge-in session to remain active")
+	}
+	if active.State() != session.StateListening {
+		t.Fatalf("expected listening after repeated barge-in, got %s", active.State())
+	}
+	close(releaseHandler)
+}
+
+func TestSessionEndKeepsContinuityWindowSessionReusable(t *testing.T) {
+	manager := session.NewManager(session.ManagerConfig{MaxSessions: 8, MaxSessionsPerDevice: 2})
+	defer manager.CloseAll()
+	server, err := NewServer(ServerConfig{
+		Manager:          manager,
+		Verifier:         testTokenVerifier{},
+		ContinuityWindow: time.Second,
+		DetectorFactory: func() vad.Detector {
+			return &scriptedWebSocketDetector{values: []bool{true, true, false}}
+		},
+		OnSegmentReady: func(session.AudioSegment) {},
+	}, nil)
+	if err != nil {
+		t.Fatalf("create websocket server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, "valid-token")
+	defer connection.Close()
+	writeControl(t, connection, sessionStartFrame("session_continuity", "device_alpha"))
+	_ = readControl(t, connection)
+	_ = readControl(t, connection)
+
+	writeControl(t, connection, endFrame("session_continuity", "device_alpha", "turn_complete"))
+	idle := readControl(t, connection)
+	if idle.Type != controlTypeSessionState || idle.State != string(session.StateIdle) {
+		t.Fatalf("expected idle continuity state, got %+v", idle)
+	}
+	if manager.Count() != 1 {
+		t.Fatalf("expected continuity session to remain active, got %d", manager.Count())
+	}
+
+	// A follow-up frame for the same session resumes listening without a wake.
+	if err := connection.WriteMessage(
+		websocket.BinaryMessage,
+		makeAudioEnvelope(t, "session_continuity", 1),
+	); err != nil {
+		t.Fatalf("write follow-up audio: %v", err)
+	}
+	listening := waitForControl(t, connection, func(control ControlFrame) bool {
+		return control.Type == controlTypeSessionState &&
+			control.State == string(session.StateListening)
+	})
+	if listening.SessionID != "session_continuity" {
+		t.Fatalf("unexpected resumed session: %+v", listening)
+	}
+}
+
+func TestWakeResumesParkedContinuitySession(t *testing.T) {
+	manager := session.NewManager(session.ManagerConfig{MaxSessions: 8, MaxSessionsPerDevice: 2})
+	defer manager.CloseAll()
+	server, err := NewServer(ServerConfig{
+		Manager:          manager,
+		Verifier:         testTokenVerifier{},
+		ContinuityWindow: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatalf("create websocket server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, "valid-token")
+	defer connection.Close()
+	writeControl(t, connection, sessionStartFrame("session_wake_resume", "device_alpha"))
+	_ = readControl(t, connection)
+	_ = readControl(t, connection)
+
+	writeControl(t, connection, endFrame("session_wake_resume", "device_alpha", "turn_complete"))
+	_ = readControl(t, connection)
+
+	confidence := 900
+	wake := NewControlFrame(controlTypeWakeDetected, "session_wake_resume", "device_alpha")
+	wake.StreamID = "stream_alpha"
+	wake.WakeWord = "nihaoxiaozhi"
+	wake.WakeConfidence = &confidence
+	writeControl(t, connection, wake)
+
+	listening := waitForControl(t, connection, func(control ControlFrame) bool {
+		return control.Type == controlTypeSessionState &&
+			control.State == string(session.StateListening)
+	})
+	if listening.SessionID != "session_wake_resume" {
+		t.Fatalf("unexpected resumed session: %+v", listening)
+	}
+}
+
+func TestContinuityWindowExpiresAndReleasesSession(t *testing.T) {
+	manager := session.NewManager(session.ManagerConfig{MaxSessions: 8, MaxSessionsPerDevice: 2})
+	defer manager.CloseAll()
+	expired := make(chan string, 1)
+	server, err := NewServer(ServerConfig{
+		Manager:          manager,
+		Verifier:         testTokenVerifier{},
+		ContinuityWindow: 30 * time.Millisecond,
+		OnContinuityExpired: func(sessionID string) {
+			expired <- sessionID
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("create websocket server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, "valid-token")
+	defer connection.Close()
+	writeControl(t, connection, sessionStartFrame("session_expiry", "device_alpha"))
+	_ = readControl(t, connection)
+	_ = readControl(t, connection)
+	writeControl(t, connection, endFrame("session_expiry", "device_alpha", "turn_complete"))
+	_ = readControl(t, connection)
+
+	select {
+	case expiredID := <-expired:
+		if expiredID != "session_expiry" {
+			t.Fatalf("unexpected expired session: %q", expiredID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("continuity window did not expire")
+	}
+	waitFor(t, time.Second, func() bool { return manager.Count() == 0 })
 }
 
 // The scheduler dequeues a frame and calls SendAudio after releasing its own

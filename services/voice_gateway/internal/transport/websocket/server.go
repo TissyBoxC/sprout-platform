@@ -38,6 +38,7 @@ const (
 	defaultWriteTimeout        = 10 * time.Second
 	defaultHandshakeTimeout    = 10 * time.Second
 	defaultSessionTTL          = 15 * time.Minute
+	defaultContinuityWindow    = 60 * time.Second
 	defaultMaxFramesPerSecond  = 80
 	defaultMaxBytesPerSecond   = 128 * 1024
 	defaultSendQueueDropPolicy = SendQueueDisconnect
@@ -57,8 +58,12 @@ type ServerConfig struct {
 	MaxFramesPerSecond int
 	MaxBytesPerSecond  int
 	SessionTTL         time.Duration
-	Manager            *session.Manager
-	Verifier           TokenVerifier
+	// ContinuityWindow keeps a finished session recoverable for follow-up turns
+	// without a new wake word. The session is released when the window expires,
+	// the connection closes, or a new session replaces it.
+	ContinuityWindow time.Duration
+	Manager          *session.Manager
+	Verifier         TokenVerifier
 	// Authorizer re-checks the guardian's platform state before the upgrade so
 	// a withdrawn consent or disabled account blocks new voice sessions. It is
 	// optional for tests and legacy deployments; production enables it whenever
@@ -74,8 +79,11 @@ type ServerConfig struct {
 	// A nil provider or nil result means speaker output is silent.
 	ReferenceAudio  func(deviceID string) []int16
 	OnSessionClosed func(sessionID string, cause error)
-	OnSegmentReady  func(segment session.AudioSegment)
-	OnBackpressure  func(deviceID string, dropped uint64)
+	// OnContinuityExpired reports the session identifier when the idle grace
+	// window elapses and the session resources are released.
+	OnContinuityExpired func(sessionID string)
+	OnSegmentReady      func(segment session.AudioSegment)
+	OnBackpressure      func(deviceID string, dropped uint64)
 	// TokenRevoker invalidates the authenticated session token when this
 	// connection closes. Production uses the HMAC verifier's revocation list;
 	// test and legacy verifiers may leave it nil.
@@ -259,6 +267,10 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 	defer writer.Close()
 
 	var currentSession *session.Session
+	var continuityGeneration atomic.Uint64
+	var continuityTimer *time.Timer
+	var continuityKeepAliveStop chan struct{}
+	var sessionMu sync.Mutex
 	var playbackGeneration atomic.Uint64
 	var sessionMutex sync.RWMutex
 	getSession := func() *session.Session {
@@ -270,6 +282,69 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 		sessionMutex.Lock()
 		currentSession = voiceSession
 		sessionMutex.Unlock()
+	}
+	stopContinuityTimer := func() {
+		sessionMu.Lock()
+		continuityGeneration.Add(1)
+		if continuityTimer != nil {
+			continuityTimer.Stop()
+			continuityTimer = nil
+		}
+		if continuityKeepAliveStop != nil {
+			close(continuityKeepAliveStop)
+			continuityKeepAliveStop = nil
+		}
+		sessionMu.Unlock()
+	}
+	startContinuityTimer := func(voiceSession *session.Session) {
+		if voiceSession == nil || s.config.ContinuityWindow <= 0 {
+			return
+		}
+		generation := continuityGeneration.Add(1)
+		sessionMu.Lock()
+		if continuityTimer != nil {
+			continuityTimer.Stop()
+		}
+		if continuityKeepAliveStop != nil {
+			close(continuityKeepAliveStop)
+		}
+		keepAliveStop := make(chan struct{})
+		continuityKeepAliveStop = keepAliveStop
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-keepAliveStop:
+					return
+				case <-ticker.C:
+					voiceSession.KeepAlive()
+				}
+			}
+		}()
+		continuityTimer = time.AfterFunc(s.config.ContinuityWindow, func() {
+			if continuityGeneration.Load() != generation {
+				return
+			}
+			active := getSession()
+			if active == nil || active.ID() != voiceSession.ID() {
+				return
+			}
+			sessionMu.Lock()
+			if continuityGeneration.Load() != generation {
+				sessionMu.Unlock()
+				return
+			}
+			continuityTimer = nil
+			sessionMu.Unlock()
+			stopContinuityTimer()
+			setSession(nil)
+			s.config.Manager.Remove(voiceSession.ID())
+			if s.config.OnContinuityExpired != nil {
+				s.config.OnContinuityExpired(voiceSession.ID())
+			}
+		})
+		sessionMu.Unlock()
 	}
 
 	writer.start()
@@ -346,6 +421,7 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 		})
 	}
 	attachSession := func(voiceSession *session.Session) {
+		stopContinuityTimer()
 		setSession(voiceSession)
 		generation := playbackGeneration.Add(1)
 		go s.clearPlaybackOnSessionEnd(
@@ -449,6 +525,7 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 
 			switch control.Type {
 			case controlTypeWakeDetected:
+				stopContinuityTimer()
 				voiceSession := getSession()
 				if voiceSession == nil {
 					if control.SessionID == "" || control.StreamID == "" {
@@ -508,6 +585,7 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 					s.sendError(writer, getSession(), errorCodeInvalidControl, "当前已有进行中的监听", false)
 					continue
 				}
+				stopContinuityTimer()
 				voiceSession, createErr := createSession(control)
 				if createErr != nil {
 					s.sendError(writer, nil, mapSessionError(createErr), "当前无法开始监听，请稍后重试", true)
@@ -526,6 +604,19 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 					goto closed
 				}
 				sink.notifyState(voiceSession, string(session.StateListening))
+			case controlTypeBargeIn:
+				voiceSession := getSession()
+				if voiceSession == nil {
+					s.sendError(writer, nil, errorCodeSessionNotFound, "当前没有进行中的收听", false)
+					continue
+				}
+				if voiceSession.State() != session.StateSpeaking {
+					// Repeated or out-of-order barge-in is idempotent: the
+					// current state is already safe, so acknowledge nothing and
+					// keep the connection usable.
+					continue
+				}
+				scheduleBargeIn(voiceSession)
 			case controlTypeSessionEnd, controlTypeCancel:
 				voiceSession := getSession()
 				if voiceSession == nil {
@@ -535,6 +626,24 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 				reason := control.Reason
 				if reason == "" {
 					reason = "client_request"
+				}
+				if control.Type == controlTypeSessionEnd {
+					// Keep the conversation alive for the configured continuity
+					// window. The next audio or wake frame reuses the same
+					// session; the timer releases it if no follow-up arrives.
+					if voiceSession.State() != session.StateIdle {
+						if transitionErr := voiceSession.Transition(session.EventSuspend); transitionErr != nil {
+							s.sendError(writer, voiceSession, errorCodeInternal, "当前无法结束监听，请稍后重试", true)
+							continue
+						}
+						sink.notifyState(voiceSession, string(session.StateIdle))
+					}
+					sink.turnMu.Lock()
+					sink.turnEpoch.Add(1)
+					scheduler.Clear(false)
+					sink.turnMu.Unlock()
+					startContinuityTimer(voiceSession)
+					continue
 				}
 				if contErr := voiceSession.Transition(session.EventReset); contErr != nil {
 					s.sendError(writer, voiceSession, errorCodeInternal, "当前无法结束监听，请稍后重试", true)
@@ -560,6 +669,9 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 				}
 			case controlTypePong:
 				continue
+			case controlTypeQualityMetrics:
+				s.stats.malformedFrames.Add(1)
+				s.sendError(writer, getSession(), errorCodeInvalidControl, "控制信息方向不正确", false)
 			case controlTypeSessionStarted, controlTypeSessionState, controlTypeSessionClosed, controlTypeError:
 				s.stats.malformedFrames.Add(1)
 				s.sendError(writer, getSession(), errorCodeInvalidControl, "控制信息方向不正确", false)
@@ -589,6 +701,14 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 				s.stats.malformedFrames.Add(1)
 				s.sendError(writer, voiceSession, errorCodeSessionNotFound, "会话已结束，请重新开始", false)
 				continue
+			}
+			stopContinuityTimer()
+			if voiceSession.State() == session.StateIdle {
+				if transitionErr := voiceSession.Transition(session.EventStartListening); transitionErr != nil {
+					s.sendError(writer, voiceSession, errorCodeInternal, "当前无法开始监听，请稍后重试", true)
+					continue
+				}
+				sink.notifyState(voiceSession, string(session.StateListening))
 			}
 			if voiceSession.State() == session.StateSpeaking {
 				scheduleBargeIn(voiceSession)
@@ -1077,6 +1197,9 @@ func normalizeServerConfig(config ServerConfig) ServerConfig {
 	if config.SessionTTL <= 0 {
 		config.SessionTTL = defaultSessionTTL
 	}
+	if config.ContinuityWindow <= 0 {
+		config.ContinuityWindow = defaultContinuityWindow
+	}
 	return config
 }
 
@@ -1089,7 +1212,8 @@ func mapSessionError(err error) string {
 		return errorCodeSessionNotFound
 	case errors.Is(err, session.ErrSessionClosed),
 		errors.Is(err, session.ErrSessionIdleTimeout),
-		errors.Is(err, session.ErrSessionDurationLimit):
+		errors.Is(err, session.ErrSessionDurationLimit),
+		errors.Is(err, session.ErrSessionWindowExpired):
 		return errorCodeSessionExpired
 	case errors.Is(err, session.ErrOutOfOrderFrame),
 		errors.Is(err, session.ErrSessionIdentity),

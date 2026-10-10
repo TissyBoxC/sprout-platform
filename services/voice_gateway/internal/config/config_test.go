@@ -125,3 +125,49 @@ func TestLoadReadsWebsiteSocketLimits(t *testing.T) {
 		t.Fatalf("expected 2048 max frame bytes, got %d", cfg.WebSocket.MaxFrameBytes)
 	}
 }
+
+func TestContinuityWindowDefaultsAndBounds(t *testing.T) {
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.WebSocket.ContinuityWindowSeconds != 60 {
+		t.Fatalf(
+			"continuity window = %d, want 60",
+			cfg.WebSocket.ContinuityWindowSeconds,
+		)
+	}
+
+	testCases := []struct {
+		name    string
+		value   string
+		want    int
+		wantErr bool
+	}{
+		{name: "minimum", value: "5", want: 5},
+		{name: "maximum", value: "600", want: 600},
+		{name: "too short", value: "4", wantErr: true},
+		{name: "too long", value: "601", wantErr: true},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Setenv("VOICE_GATEWAY_WS_ENABLED", "true")
+			t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
+			t.Setenv("VOICE_GATEWAY_WS_CONTINUITY_WINDOW_SECONDS", testCase.value)
+			cfg, err := Load()
+			if testCase.wantErr && err == nil {
+				t.Fatalf("expected continuity window %s to be rejected", testCase.value)
+			}
+			if !testCase.wantErr && err != nil {
+				t.Fatalf("continuity window %s was rejected: %v", testCase.value, err)
+			}
+			if !testCase.wantErr && cfg.WebSocket.ContinuityWindowSeconds != testCase.want {
+				t.Fatalf(
+					"continuity window = %d, want %d",
+					cfg.WebSocket.ContinuityWindowSeconds,
+					testCase.want,
+				)
+			}
+		})
+	}
+}

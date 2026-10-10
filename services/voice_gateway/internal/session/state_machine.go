@@ -22,7 +22,10 @@ const (
 	// EventFinishTurn returns a session to listening after a turn produced no
 	// reply audio; a turn that did speak finishes via EventStartListening.
 	EventFinishTurn Event = "finish_turn"
-	EventReset      Event = "reset"
+	// EventSuspend keeps the session object alive but parks it in idle during
+	// the continuity window so no new turn starts until the device resumes.
+	EventSuspend Event = "suspend"
+	EventReset   Event = "reset"
 )
 
 // Transition applies one event and returns the next session state.
@@ -46,6 +49,10 @@ func (s State) Transition(event Event) (State, error) {
 	case EventFinishTurn:
 		if s == StateThinking {
 			return StateListening, nil
+		}
+	case EventSuspend:
+		if s == StateListening || s == StateSpeaking {
+			return StateIdle, nil
 		}
 	case EventReset:
 		return StateIdle, nil

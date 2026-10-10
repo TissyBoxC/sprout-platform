@@ -27,6 +27,8 @@
         "session_end",
         "session_closed",
         "cancel",
+        "barge_in",
+        "quality_metrics",
         "error",
         "ping",
         "pong"
@@ -108,10 +110,44 @@
         "frame_too_large",
         "rate_limited",
         "session_expired",
+        "not_speaking",
+        "barge_in_rejected",
         "transport_closed",
         "provider_unavailable",
         "internal_error"
       ]
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "echo_convergence",
+        "noise_floor",
+        "agc_gain",
+        "vad_confidence"
+      ],
+      "properties": {
+        "echo_convergence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1024
+        },
+        "noise_floor": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "agc_gain": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "vad_confidence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1024
+        }
+      }
     },
     "message": {
       "type": "string",
@@ -187,6 +223,30 @@
           "state": {}
         },
         "required": ["state"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "type": { "const": "barge_in" } },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "reason": {}
+        },
+        "required": ["reason"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "type": { "const": "quality_metrics" } },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "quality": {}
+        },
+        "required": ["quality"]
       }
     },
     {

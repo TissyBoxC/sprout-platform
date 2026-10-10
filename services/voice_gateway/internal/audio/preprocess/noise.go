@@ -126,6 +126,20 @@ func (n *noiseSuppressor) process(audioFrame []int16) bool {
 	return suppressed
 }
 
+// noiseFloor returns the mean normalized noise estimate across the analysis
+// bands. It is intentionally a scalar so telemetry never exposes spectral or
+// audio content.
+func (n *noiseSuppressor) noiseFloor() float64 {
+	if n == nil {
+		return 0
+	}
+	total := 0.0
+	for band := 0; band < bandCount; band++ {
+		total += n.noisePower[band]
+	}
+	return total / float64(bandCount) / (32768.0 * 32768.0)
+}
+
 // reset clears the noise estimate between conversations so a quiet room is not
 // measured against the previous room's noise floor.
 func (n *noiseSuppressor) reset() {

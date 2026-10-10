@@ -148,3 +148,33 @@ func TestResetClearsAdaptiveState(t *testing.T) {
 		t.Fatalf("expected counters to reset, got %d frames", stats.FramesProcessed)
 	}
 }
+
+func TestStatsExposeBoundedQualityMetrics(t *testing.T) {
+	options := DefaultOptions()
+	options.EchoFilterLengthSamples = frameSamples
+	processor, err := NewProcessor(options, frameSamples)
+	if err != nil {
+		t.Fatalf("NewProcessor returned unexpected error: %v", err)
+	}
+	reference := make([]int16, frameSamples)
+	frame := make([]int16, frameSamples)
+	for index := range reference {
+		reference[index] = int16(2000 * math.Sin(2*math.Pi*500*float64(index)/16000))
+		frame[index] = reference[index] / 2
+	}
+	for iteration := 0; iteration < 20; iteration++ {
+		if _, err := processor.Process(frame, reference); err != nil {
+			t.Fatalf("Process returned unexpected error: %v", err)
+		}
+	}
+	stats := processor.Stats()
+	if stats.EchoConvergence < 0 || stats.EchoConvergence > 1024 {
+		t.Fatalf("echo convergence outside bounds: %d", stats.EchoConvergence)
+	}
+	if stats.NoiseFloor < 0 || stats.NoiseFloor > 1 {
+		t.Fatalf("noise floor outside bounds: %f", stats.NoiseFloor)
+	}
+	if stats.CurrentGain <= 0 || stats.CurrentGain > options.MaxGain {
+		t.Fatalf("AGC gain outside bounds: %f", stats.CurrentGain)
+	}
+}

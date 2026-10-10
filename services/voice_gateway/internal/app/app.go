@@ -68,7 +68,7 @@ func Run() error {
 		deviceAuthorizer = securityauth.NewPostgresDeviceAuthorizer(databaseStore)
 	}
 
-	realtimeHandler, realtimeShutdown, err := buildRealtimeTransport(
+	realtimeHandler, realtimeManager, realtimeShutdown, err := buildRealtimeTransport(
 		cfg,
 		logger,
 		policyResolver,
@@ -83,6 +83,7 @@ func Run() error {
 		Logger:            logger,
 		InternalAPIConfig: cfg.Internal,
 		UsageRecorder:     usageRecorder,
+		SessionMetrics:    realtimeManager,
 	}
 	if realtimeHandler != nil {
 		routerOptions.RealtimeHandler = realtimeHandler
@@ -129,20 +130,20 @@ func buildRealtimeTransport(
 	logger *slog.Logger,
 	policyResolver content_policy.Resolver,
 	deviceAuthorizer websocket.DeviceAuthorizer,
-) (http.Handler, func(), error) {
+) (http.Handler, *session.Manager, func(), error) {
 	if !cfg.WebSocket.Enabled {
 		logger.Info("device realtime endpoint is disabled")
-		return nil, func() {}, nil
+		return nil, nil, func() {}, nil
 	}
 
 	verifier, err := websocket.NewHMACDeviceTokenVerifier(cfg.WebSocket.AuthTokenSecret, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create device token verifier: %w", err)
+		return nil, nil, nil, fmt.Errorf("create device token verifier: %w", err)
 	}
 
 	adapters, err := pipeline.Build(cfg.Audio)
 	if err != nil {
-		return nil, nil, fmt.Errorf("build audio adapters: %w", err)
+		return nil, nil, nil, fmt.Errorf("build audio adapters: %w", err)
 	}
 
 	references := reference.NewBus()
@@ -150,7 +151,7 @@ func buildRealtimeTransport(
 	var devicePolicy content_policy.DevicePolicy
 	if cfg.Security.ContentPolicyEnabled {
 		if policyResolver == nil {
-			return nil, nil, errors.New("content policy is enabled but no policy resolver is configured")
+			return nil, nil, nil, errors.New("content policy is enabled but no policy resolver is configured")
 		}
 		devicePolicy = content_policy.NewDeviceEvaluator(policyResolver, 0)
 	}
@@ -171,7 +172,7 @@ func buildRealtimeTransport(
 		},
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("build conversation pipeline: %w", err)
+		return nil, nil, nil, fmt.Errorf("build conversation pipeline: %w", err)
 	}
 
 	manager := session.NewManager(session.ManagerConfig{
@@ -201,6 +202,7 @@ func buildRealtimeTransport(
 		MaxFramesPerSecond: cfg.WebSocket.MaxFramesPerSecond,
 		MaxBytesPerSecond:  cfg.WebSocket.MaxBytesPerSecond,
 		SessionTTL:         seconds(cfg.WebSocket.SessionTokenTTLSeconds),
+		ContinuityWindow:   seconds(cfg.WebSocket.ContinuityWindowSeconds),
 		Manager:            manager,
 		Verifier:           verifier,
 		Authorizer:         deviceAuthorizer,
@@ -237,14 +239,14 @@ func buildRealtimeTransport(
 		},
 	}, logger)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create realtime transport: %w", err)
+		return nil, nil, nil, fmt.Errorf("create realtime transport: %w", err)
 	}
 
 	shutdown := func() {
 		manager.CloseAll()
 	}
 	logger.Info("device realtime endpoint enabled", "path", cfg.WebSocket.Path)
-	return realtimeServer.Handler(), shutdown, nil
+	return realtimeServer.Handler(), manager, shutdown, nil
 }
 
 func seconds(value int) time.Duration {

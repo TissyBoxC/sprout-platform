@@ -64,10 +64,14 @@ func (r *PostgresRepository) Create(
 			allowed_categories,
 			disabled_periods,
 			max_volume_percent,
+			voice_continuous_enabled,
+			voice_idle_window_seconds,
+			voice_barge_in_enabled,
+			voice_far_field_enabled,
 			created_at,
 			updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 	`,
 		policy.ID,
 		policy.FamilyID,
@@ -77,6 +81,10 @@ func (r *PostgresRepository) Create(
 		policy.AllowedCategories,
 		disabledPeriods,
 		policy.MaxVolumePercent,
+		policy.VoiceConversation.ContinuousConversationEnabled,
+		policy.VoiceConversation.IdleWindowSeconds,
+		policy.VoiceConversation.BargeInEnabled,
+		policy.VoiceConversation.FarFieldEnabled,
 		policy.CreatedAt,
 		policy.UpdatedAt,
 	)
@@ -186,7 +194,11 @@ func (r *PostgresRepository) update(
 		    allowed_categories = $5,
 		    disabled_periods = $6,
 		    max_volume_percent = $7,
-		    updated_at = $8
+		    voice_continuous_enabled = $8,
+		    voice_idle_window_seconds = $9,
+		    voice_barge_in_enabled = $10,
+		    voice_far_field_enabled = $11,
+		    updated_at = $12
 		WHERE family_id = $1
 		  AND child_id = $2
 	`
@@ -198,10 +210,14 @@ func (r *PostgresRepository) update(
 		policy.AllowedCategories,
 		disabledPeriods,
 		policy.MaxVolumePercent,
+		policy.VoiceConversation.ContinuousConversationEnabled,
+		policy.VoiceConversation.IdleWindowSeconds,
+		policy.VoiceConversation.BargeInEnabled,
+		policy.VoiceConversation.FarFieldEnabled,
 		policy.UpdatedAt,
 	}
 	if expectedVersion > 0 {
-		query += " AND policy_version = $9"
+		query += " AND policy_version = $13"
 		args = append(args, expectedVersion)
 	}
 	tag, err := r.pool.Exec(ctx, query, args...)
@@ -310,6 +326,10 @@ const parentPolicySelect = `
 		allowed_categories,
 		disabled_periods,
 		max_volume_percent,
+		voice_continuous_enabled,
+		voice_idle_window_seconds,
+		voice_barge_in_enabled,
+		voice_far_field_enabled,
 		created_at,
 		updated_at
 	FROM parent_policies
@@ -331,6 +351,10 @@ func scanPolicy(row rowScanner) (*domain.Policy, error) {
 		&policy.AllowedCategories,
 		&disabledPeriods,
 		&policy.MaxVolumePercent,
+		&policy.VoiceConversation.ContinuousConversationEnabled,
+		&policy.VoiceConversation.IdleWindowSeconds,
+		&policy.VoiceConversation.BargeInEnabled,
+		&policy.VoiceConversation.FarFieldEnabled,
 		&policy.CreatedAt,
 		&policy.UpdatedAt,
 	); err != nil {

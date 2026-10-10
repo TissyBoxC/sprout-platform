@@ -103,11 +103,16 @@ class _ParentPolicyFormState extends ConsumerState<_ParentPolicyForm> {
   late Set<ChildContentCategory> _allowedCategories;
   late List<DisabledPeriod> _disabledPeriods;
   late int _maxVolumePercent;
+  late bool _continuousConversationEnabled;
+  late int _voiceIdleWindowSeconds;
+  late bool _bargeInEnabled;
+  late bool _farFieldEnabled;
   late int _policyVersion;
   bool _isSaving = false;
   String? _errorMessage;
   String? _dailyLimitError;
   String? _volumeError;
+  String? _voiceError;
   String? _disabledPeriodError;
   String? _categoryError;
   bool _showVersionConflict = false;
@@ -119,13 +124,24 @@ class _ParentPolicyFormState extends ConsumerState<_ParentPolicyForm> {
     _allowedCategories = widget.initialPolicy.allowedCategories.toSet();
     _disabledPeriods = [...widget.initialPolicy.disabledPeriods];
     _maxVolumePercent = widget.initialPolicy.maxVolumePercent;
+    final voice = widget.initialPolicy.voiceConversation;
+    _continuousConversationEnabled = voice.continuousConversationEnabled;
+    _voiceIdleWindowSeconds = voice.idleWindowSeconds;
+    _bargeInEnabled = voice.bargeInEnabled;
+    _farFieldEnabled = voice.farFieldEnabled;
     _policyVersion = widget.initialPolicy.policyVersion;
   }
 
   bool get _hasUnsavedChanges {
     final initial = widget.initialPolicy;
+    final initialVoice = initial.voiceConversation;
     return _dailyLimitMinutes != initial.dailyLimitMinutes ||
         _maxVolumePercent != initial.maxVolumePercent ||
+        _continuousConversationEnabled !=
+            initialVoice.continuousConversationEnabled ||
+        _voiceIdleWindowSeconds != initialVoice.idleWindowSeconds ||
+        _bargeInEnabled != initialVoice.bargeInEnabled ||
+        _farFieldEnabled != initialVoice.farFieldEnabled ||
         !_sameCategories(_allowedCategories, initial.allowedCategories) ||
         !_samePeriods(_disabledPeriods, initial.disabledPeriods);
   }
@@ -149,6 +165,12 @@ class _ParentPolicyFormState extends ConsumerState<_ParentPolicyForm> {
               allowedCategories: _allowedCategories.toList(growable: false),
               disabledPeriods: _disabledPeriods,
               maxVolumePercent: _maxVolumePercent,
+              voiceConversation: VoiceConversationPolicy(
+                continuousConversationEnabled: _continuousConversationEnabled,
+                idleWindowSeconds: _voiceIdleWindowSeconds,
+                bargeInEnabled: _bargeInEnabled,
+                farFieldEnabled: _farFieldEnabled,
+              ),
             ),
           );
       if (mounted) {
@@ -228,15 +250,21 @@ class _ParentPolicyFormState extends ConsumerState<_ParentPolicyForm> {
         : null;
     final categoryError = _allowedCategories.isEmpty ? '请至少保留一个内容分类' : null;
     final periodError = _validateDisabledPeriods(_disabledPeriods);
+    final voiceError =
+        _voiceIdleWindowSeconds < 2 || _voiceIdleWindowSeconds > 60
+        ? '连续对话等待时间需要在 2 到 60 秒之间'
+        : null;
     setState(() {
       _dailyLimitError = dailyLimitError;
       _volumeError = volumeError;
+      _voiceError = voiceError;
       _categoryError = categoryError;
       _disabledPeriodError = periodError;
       _errorMessage = null;
     });
     return dailyLimitError == null &&
         volumeError == null &&
+        voiceError == null &&
         categoryError == null &&
         periodError == null;
   }
@@ -259,6 +287,12 @@ class _ParentPolicyFormState extends ConsumerState<_ParentPolicyForm> {
       _allowedCategories = refreshed.allowedCategories.toSet();
       _disabledPeriods = [...refreshed.disabledPeriods];
       _maxVolumePercent = refreshed.maxVolumePercent;
+      final refreshedVoice = refreshed.voiceConversation;
+      _continuousConversationEnabled =
+          refreshedVoice.continuousConversationEnabled;
+      _voiceIdleWindowSeconds = refreshedVoice.idleWindowSeconds;
+      _bargeInEnabled = refreshedVoice.bargeInEnabled;
+      _farFieldEnabled = refreshedVoice.farFieldEnabled;
       _policyVersion = refreshed.policyVersion;
       _showVersionConflict = false;
       _errorMessage = null;
@@ -556,6 +590,85 @@ class _ParentPolicyFormState extends ConsumerState<_ParentPolicyForm> {
                       padding: const EdgeInsets.only(top: 8),
                       child: Text(
                         _volumeError!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.mic_rounded),
+                      const SizedBox(width: 10),
+                      Text(
+                        '语音对话',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  const Text('调整设备与孩子对话时的回应方式和拾音表现。'),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('连续对话'),
+                    subtitle: const Text('孩子说完后不用重新叫醒，可以接着聊。'),
+                    value: _continuousConversationEnabled,
+                    onChanged: (value) => setState(
+                      () => _continuousConversationEnabled = value,
+                    ),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('允许打断'),
+                    subtitle: const Text('孩子说话时可以打断设备正在播放的内容。'),
+                    value: _bargeInEnabled,
+                    onChanged: (value) => setState(
+                      () => _bargeInEnabled = value,
+                    ),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('远场拾音'),
+                    subtitle: const Text('在房间稍远的位置说话也能被听清。'),
+                    value: _farFieldEnabled,
+                    onChanged: (value) => setState(
+                      () => _farFieldEnabled = value,
+                    ),
+                  ),
+                  if (_continuousConversationEnabled) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '等待时间：$_voiceIdleWindowSeconds 秒',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const Text('这段时间内没有新的话就先暂停对话。'),
+                    Slider(
+                      value: _voiceIdleWindowSeconds.toDouble(),
+                      min: 2,
+                      max: 60,
+                      divisions: 29,
+                      label: '$_voiceIdleWindowSeconds',
+                      onChanged: (value) => setState(
+                        () => _voiceIdleWindowSeconds = value.round(),
+                      ),
+                    ),
+                  ],
+                  if (_voiceError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        _voiceError!,
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.error,
                         ),

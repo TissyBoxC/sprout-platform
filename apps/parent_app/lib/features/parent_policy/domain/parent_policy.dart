@@ -23,6 +23,54 @@ class DisabledPeriod {
 }
 
 /// Time, content, and volume limits applied to one child.
+///
+/// Realtime voice behaviour (continuous conversation, barge-in, far-field) is
+/// carried alongside the time and content limits so a guardian can tune how
+/// the device holds a conversation without a separate screen.
+class VoiceConversationPolicy {
+  const VoiceConversationPolicy({
+    required this.continuousConversationEnabled,
+    required this.idleWindowSeconds,
+    required this.bargeInEnabled,
+    required this.farFieldEnabled,
+  });
+
+  final bool continuousConversationEnabled;
+  final int idleWindowSeconds;
+  final bool bargeInEnabled;
+  final bool farFieldEnabled;
+
+  factory VoiceConversationPolicy.fromJson(Map<String, Object?> json) {
+    return VoiceConversationPolicy(
+      continuousConversationEnabled: _requiredBool(
+        json['continuous_conversation_enabled'],
+        'continuous_conversation_enabled',
+      ),
+      idleWindowSeconds: _requiredInt(
+        json['idle_window_seconds'],
+        'idle_window_seconds',
+      ),
+      bargeInEnabled: _requiredBool(
+        json['barge_in_enabled'],
+        'barge_in_enabled',
+      ),
+      farFieldEnabled: _requiredBool(
+        json['far_field_enabled'],
+        'far_field_enabled',
+      ),
+    );
+  }
+
+  Map<String, Object?> toJson() {
+    return {
+      'continuous_conversation_enabled': continuousConversationEnabled,
+      'idle_window_seconds': idleWindowSeconds,
+      'barge_in_enabled': bargeInEnabled,
+      'far_field_enabled': farFieldEnabled,
+    };
+  }
+}
+
 class ParentPolicy {
   const ParentPolicy({
     required this.policyId,
@@ -33,6 +81,7 @@ class ParentPolicy {
     required this.allowedCategories,
     required this.disabledPeriods,
     required this.maxVolumePercent,
+    required this.voiceConversation,
     required this.updatedAt,
   });
 
@@ -44,6 +93,7 @@ class ParentPolicy {
   final List<ChildContentCategory> allowedCategories;
   final List<DisabledPeriod> disabledPeriods;
   final int maxVolumePercent;
+  final VoiceConversationPolicy voiceConversation;
   final DateTime updatedAt;
 
   factory ParentPolicy.fromJson(Map<String, Object?> json) {
@@ -66,6 +116,9 @@ class ParentPolicy {
         json['max_volume_percent'],
         'max_volume_percent',
       ),
+      voiceConversation: VoiceConversationPolicy.fromJson(
+        _requiredMap(json['voice_conversation'], 'voice_conversation'),
+      ),
       updatedAt: _requiredDateTime(json['updated_at'], 'updated_at'),
     );
   }
@@ -79,6 +132,7 @@ class ParentPolicyDraft {
     required this.allowedCategories,
     required this.disabledPeriods,
     required this.maxVolumePercent,
+    required this.voiceConversation,
   });
 
   final int policyVersion;
@@ -86,6 +140,7 @@ class ParentPolicyDraft {
   final List<ChildContentCategory> allowedCategories;
   final List<DisabledPeriod> disabledPeriods;
   final int maxVolumePercent;
+  final VoiceConversationPolicy voiceConversation;
 
   Map<String, Object?> toJson() {
     return {
@@ -98,6 +153,7 @@ class ParentPolicyDraft {
           .map((period) => period.toJson())
           .toList(growable: false),
       'max_volume_percent': maxVolumePercent,
+      'voice_conversation': voiceConversation.toJson(),
     };
   }
 }
@@ -112,6 +168,20 @@ String _requiredString(Object? value, String field) {
 int _requiredInt(Object? value, String field) {
   if (value is num) {
     return value.toInt();
+  }
+  throw FormatException('missing $field');
+}
+
+bool _requiredBool(Object? value, String field) {
+  if (value is bool) {
+    return value;
+  }
+  throw FormatException('missing $field');
+}
+
+Map<String, Object?> _requiredMap(Object? value, String field) {
+  if (value is Map) {
+    return Map<String, Object?>.from(value);
   }
   throw FormatException('missing $field');
 }

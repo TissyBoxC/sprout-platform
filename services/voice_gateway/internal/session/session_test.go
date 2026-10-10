@@ -10,6 +10,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/buffer"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/codec"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/frame"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/preprocess"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/vad"
 )
 
@@ -244,6 +245,68 @@ func TestSessionContextCancellationStopsSegmentWait(t *testing.T) {
 	cancel()
 	if _, err := voiceSession.NextSegment(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected caller cancellation, got %v", err)
+	}
+}
+
+func TestSessionQualitySnapshotRemainsScalarAndBounded(t *testing.T) {
+	config := testSessionConfig("session_quality", "device-1", "stream-1")
+	config.PreprocessFactory = func() (preprocess.Processor, error) {
+		return preprocess.NewProcessor(preprocess.Options{
+			EchoCancellation: false,
+			NoiseSuppression: false,
+			GainCalibration:  true,
+			TargetRmsDbfs:    -24,
+			MinGain:          1,
+			MaxGain:          4,
+			AgcAttack:        0.6,
+			AgcRelease:       0.02,
+		}, frame.SamplesPerFrame)
+	}
+	config.DetectorFactory = func() vad.Detector {
+		return vad.NewEnergyDetector(vad.Config{})
+	}
+	voiceSession, err := NewSession(config)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer voiceSession.Close()
+
+	if err := voiceSession.AcceptFrame(context.Background(), testAudioFrame(1)); err != nil {
+		t.Fatalf("accept audio frame: %v", err)
+	}
+	snapshot := voiceSession.Quality()
+	if snapshot.SessionID != "session_quality" || snapshot.DeviceID != "device-1" {
+		t.Fatalf("unexpected quality identity: %+v", snapshot)
+	}
+	if snapshot.AgcGain < 1 || snapshot.AgcGain > 4 {
+		t.Fatalf("AGC gain outside configured bounds: %f", snapshot.AgcGain)
+	}
+	if snapshot.VADConfidence < 0 || snapshot.VADConfidence > 1024 {
+		t.Fatalf("VAD confidence outside bounds: %d", snapshot.VADConfidence)
+	}
+	if snapshot.NoiseFloor < 0 || snapshot.NoiseFloor > 1 {
+		t.Fatalf("noise floor outside bounds: %f", snapshot.NoiseFloor)
+	}
+	if snapshot.EchoConvergence < 0 || snapshot.EchoConvergence > 1024 {
+		t.Fatalf("echo convergence outside bounds: %d", snapshot.EchoConvergence)
+	}
+}
+
+func TestManagerQualitySnapshotsCoverActiveSessions(t *testing.T) {
+	manager := NewManager(ManagerConfig{MaxSessions: 4, MaxSessionsPerDevice: 2})
+	defer manager.CloseAll()
+	voiceSession, err := manager.Create(
+		testSessionConfig("session_quality_manager", "device-1", "stream-1"),
+	)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := voiceSession.AcceptFrame(context.Background(), testAudioFrame(1)); err != nil {
+		t.Fatalf("accept audio frame: %v", err)
+	}
+	snapshots := manager.QualitySnapshots()
+	if len(snapshots) != 1 || snapshots[0].SessionID != voiceSession.ID() {
+		t.Fatalf("unexpected quality snapshots: %+v", snapshots)
 	}
 }
 

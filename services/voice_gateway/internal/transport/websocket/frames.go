@@ -24,6 +24,8 @@ const (
 	controlTypeSessionEnd     = "session_end"
 	controlTypeSessionClosed  = "session_closed"
 	controlTypeCancel         = "cancel"
+	controlTypeBargeIn        = "barge_in"
+	controlTypeQualityMetrics = "quality_metrics"
 	controlTypeError          = "error"
 	controlTypePing           = "ping"
 	controlTypePong           = "pong"
@@ -36,6 +38,8 @@ const (
 	errorCodeFrameTooLarge   = "frame_too_large"
 	errorCodeRateLimited     = "rate_limited"
 	errorCodeSessionExpired  = "session_expired"
+	errorCodeNotSpeaking     = "not_speaking"
+	errorCodeBargeInRejected = "barge_in_rejected"
 	errorCodeTransportClosed = "transport_closed"
 	errorCodeProvider        = "provider_unavailable"
 	errorCodeInternal        = "internal_error"
@@ -82,6 +86,8 @@ var allowedErrorCodes = map[string]struct{}{
 	errorCodeFrameTooLarge:   {},
 	errorCodeRateLimited:     {},
 	errorCodeSessionExpired:  {},
+	errorCodeNotSpeaking:     {},
+	errorCodeBargeInRejected: {},
 	errorCodeTransportClosed: {},
 	errorCodeProvider:        {},
 	errorCodeInternal:        {},
@@ -125,6 +131,18 @@ type ControlFrame struct {
 	// the age-tier prompt and does not pretend a restricted category was
 	// approved.
 	ContentCategory string `json:"content_category,omitempty"`
+	// Quality carries read-only preprocessing metrics. It is only populated on
+	// quality_metrics frames and never contains PCM or provider payloads.
+	Quality *QualityMetrics `json:"quality,omitempty"`
+}
+
+// QualityMetrics is the bounded, privacy-preserving preprocessing snapshot
+// sent to the device and management plane.
+type QualityMetrics struct {
+	EchoConvergence int     `json:"echo_convergence"`
+	NoiseFloor      float64 `json:"noise_floor"`
+	AgcGain         float64 `json:"agc_gain"`
+	VADConfidence   int     `json:"vad_confidence"`
 }
 
 // AudioEnvelope is the fixed binary envelope used for one inbound Opus frame.
@@ -239,9 +257,26 @@ func (control ControlFrame) Validate() error {
 			return err
 		}
 		return control.validateContentCategory()
-	case controlTypeSessionEnd, controlTypeSessionClosed, controlTypeCancel:
+	case controlTypeSessionEnd, controlTypeSessionClosed, controlTypeCancel, controlTypeBargeIn:
 		if !validReason(control.Reason) {
 			return errors.New("control frame reason is required")
+		}
+		return nil
+	case controlTypeQualityMetrics:
+		if control.Quality == nil {
+			return errors.New("control frame quality is required")
+		}
+		if control.Quality.EchoConvergence < 0 || control.Quality.EchoConvergence > 1024 {
+			return errors.New("control frame echo_convergence is invalid")
+		}
+		if control.Quality.VADConfidence < 0 || control.Quality.VADConfidence > 1024 {
+			return errors.New("control frame vad_confidence is invalid")
+		}
+		if control.Quality.NoiseFloor < 0 || control.Quality.NoiseFloor > 1 {
+			return errors.New("control frame noise_floor is invalid")
+		}
+		if control.Quality.AgcGain < 0 || control.Quality.AgcGain > 64 {
+			return errors.New("control frame agc_gain is invalid")
 		}
 		return nil
 	case controlTypeError:

@@ -35,6 +35,22 @@ type Detector interface {
 	IsSpeech(data []byte) bool
 }
 
+// Stats reports bounded speech-detection quality for one stream.
+//
+// Confidence is normalized to 0..1024 and NoiseFloor is normalized ambient
+// energy. The values are scalar quality signals, never audio.
+type Stats struct {
+	Confidence int
+	NoiseFloor float64
+}
+
+// ObservingDetector is implemented by detectors that can expose quality
+// metrics without changing the minimal Detector contract used by test doubles.
+type ObservingDetector interface {
+	Detector
+	Stats() Stats
+}
+
 // Config controls the adaptive energy and zero-crossing detector.
 //
 // Zero values select safe defaults. Durations are expressed as frame counts
@@ -63,6 +79,7 @@ type EnergyDetector struct {
 	activationFrames int
 	hangoverFrames   int
 	active           bool
+	lastConfidence   int
 }
 
 // NewEnergyDetector creates a detector for the fixed 16 kHz mono frame profile.
@@ -101,6 +118,12 @@ func (d *EnergyDetector) IsSpeech(data []byte) bool {
 		d.noiseFloor*d.config.SpeechThresholdRatio,
 	)
 	candidate := energy >= threshold && zeroCrossingRate <= d.config.ZeroCrossingRateMax
+	d.lastConfidence = normalizedConfidence(
+		energy,
+		threshold,
+		zeroCrossingRate,
+		d.config.ZeroCrossingRateMax,
+	)
 
 	if d.active {
 		if candidate {
@@ -135,6 +158,17 @@ func (d *EnergyDetector) IsSpeech(data []byte) bool {
 	return false
 }
 
+// Stats returns the latest bounded detector quality snapshot.
+func (d *EnergyDetector) Stats() Stats {
+	if d == nil {
+		return Stats{}
+	}
+	return Stats{
+		Confidence: d.lastConfidence,
+		NoiseFloor: d.noiseFloor,
+	}
+}
+
 // Reset clears segment state while preserving the learned noise floor.
 func (d *EnergyDetector) Reset() {
 	if d == nil {
@@ -143,6 +177,7 @@ func (d *EnergyDetector) Reset() {
 	d.activationFrames = 0
 	d.hangoverFrames = 0
 	d.active = false
+	d.lastConfidence = 0
 }
 
 // NoiseFloor returns the current normalized ambient-energy estimate.
@@ -165,6 +200,38 @@ func (d *EnergyDetector) adaptNoiseFloor(energy float64) {
 	case d.noiseFloor > d.config.NoiseFloorMaximum:
 		d.noiseFloor = d.config.NoiseFloorMaximum
 	}
+}
+
+func normalizedConfidence(
+	energy float64,
+	threshold float64,
+	zeroCrossingRate float64,
+	maxZeroCrossingRate float64,
+) int {
+	if threshold <= 0 || maxZeroCrossingRate <= 0 {
+		return 0
+	}
+	energyRatio := energy / threshold
+	if energyRatio < 0 {
+		energyRatio = 0
+	}
+	if energyRatio > 4 {
+		energyRatio = 4
+	}
+	zcrPenalty := 1.0
+	if zeroCrossingRate > maxZeroCrossingRate {
+		zcrPenalty = 0
+	} else {
+		zcrPenalty = 1 - zeroCrossingRate/maxZeroCrossingRate
+	}
+	confidence := int((energyRatio/4.0)*zcrPenalty*1024 + 0.5)
+	if confidence < 0 {
+		return 0
+	}
+	if confidence > 1024 {
+		return 1024
+	}
+	return confidence
 }
 
 func frameStatistics(data []byte) (float64, float64) {

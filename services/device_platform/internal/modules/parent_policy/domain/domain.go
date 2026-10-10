@@ -7,15 +7,32 @@ import (
 )
 
 var (
-	ErrPolicyNotFound        = errors.New("parent policy not found")
-	ErrInvalidPolicy         = errors.New("invalid parent policy")
-	ErrInvalidDailyLimit     = errors.New("invalid daily limit")
-	ErrInvalidCategories     = errors.New("invalid allowed categories")
-	ErrInvalidDisabledHours  = errors.New("invalid disabled periods")
-	ErrInvalidVolume         = errors.New("invalid maximum volume")
-	ErrNoFamilyPolicy        = errors.New("family has no parent policy")
-	ErrPolicyVersionConflict = errors.New("parent policy version conflict")
+	ErrPolicyNotFound           = errors.New("parent policy not found")
+	ErrInvalidPolicy            = errors.New("invalid parent policy")
+	ErrInvalidDailyLimit        = errors.New("invalid daily limit")
+	ErrInvalidCategories        = errors.New("invalid allowed categories")
+	ErrInvalidDisabledHours     = errors.New("invalid disabled periods")
+	ErrInvalidVolume            = errors.New("invalid maximum volume")
+	ErrNoFamilyPolicy           = errors.New("family has no parent policy")
+	ErrPolicyVersionConflict    = errors.New("parent policy version conflict")
+	ErrInvalidVoiceConversation = errors.New("invalid voice conversation settings")
 )
+
+// VoiceConversationPolicy controls the guardian-visible realtime voice
+// behaviour a family-bound device must honour. The zero value means "use the
+// platform default", so callers must resolve defaults before executing.
+type VoiceConversationPolicy struct {
+	// ContinuousConversationEnabled keeps a session alive for follow-up turns
+	// without a new wake word.
+	ContinuousConversationEnabled bool
+	// IdleWindowSeconds is how long an idle session stays open before it
+	// closes. Device and gateway clamp this to the platform bounds.
+	IdleWindowSeconds int
+	// BargeInEnabled lets a child interrupt playback by speaking.
+	BargeInEnabled bool
+	// FarFieldEnabled enables the far-field preprocessing chain.
+	FarFieldEnabled bool
+}
 
 // EffectivePolicy is the most restrictive runtime policy for every child in
 // one guardian account. A device is bound to a guardian account rather than a
@@ -27,6 +44,7 @@ type EffectivePolicy struct {
 	AllowedCategories []string
 	DisabledPeriods   []DisabledPeriod
 	MaxVolumePercent  int
+	VoiceConversation VoiceConversationPolicy
 	SourceChildCount  int
 	UpdatedAt         time.Time
 }
@@ -48,6 +66,7 @@ type Policy struct {
 	AllowedCategories []string
 	DisabledPeriods   []DisabledPeriod
 	MaxVolumePercent  int
+	VoiceConversation VoiceConversationPolicy
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }
@@ -61,4 +80,5 @@ type PolicyInput struct {
 	AllowedCategories []string
 	DisabledPeriods   []DisabledPeriod
 	MaxVolumePercent  int
+	VoiceConversation VoiceConversationPolicy
 }

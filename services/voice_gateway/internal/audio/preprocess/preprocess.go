@@ -63,6 +63,12 @@ type Stats struct {
 	GainAdjusted     int
 	DoubleTalkFrames int
 	CurrentGain      float64
+	// EchoConvergence is a bounded 0..1024 estimate of how well the current
+	// echo path is modelled. It is reported as a scalar so callers never need
+	// raw filter coefficients or audio samples.
+	EchoConvergence int
+	// NoiseFloor is the current normalized ambient-energy estimate.
+	NoiseFloor float64
 }
 
 // Processor applies one preprocessing chain to inbound audio frames.
@@ -143,12 +149,14 @@ func (p *pipeline) Process(audioFrame []int16, reference []int16) ([]int16, erro
 			p.stats.DoubleTalkFrames++
 		}
 		p.stats.EchoCancelled++
+		p.stats.EchoConvergence = p.echo.convergence()
 	}
 
 	if p.noise != nil {
 		if suppressed := p.noise.process(audioFrame); suppressed {
 			p.stats.NoiseSuppressed++
 		}
+		p.stats.NoiseFloor = p.noise.noiseFloor()
 	}
 
 	if p.gain != nil {

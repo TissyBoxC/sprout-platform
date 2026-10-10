@@ -38,6 +38,9 @@ type WebSocketConfig struct {
 	SessionTokenTTLSeconds int
 	// SessionTimeoutSeconds ends an idle session even if the socket stays open.
 	SessionTimeoutSeconds int
+	// ContinuityWindowSeconds keeps a finished conversation recoverable for
+	// follow-up turns without requiring a new wake word.
+	ContinuityWindowSeconds int
 	// MaxSessionsPerDevice caps concurrent conversations for one device.
 	MaxSessionsPerDevice int
 	// MaxTotalSessions caps concurrent conversations across the gateway.
@@ -240,6 +243,7 @@ func Load() (Config, error) {
 			AuthTokenSecret:           env("VOICE_GATEWAY_WS_TOKEN_SECRET", ""),
 			SessionTokenTTLSeconds:    envInt("VOICE_GATEWAY_WS_SESSION_TOKEN_TTL_SECONDS", 300),
 			SessionTimeoutSeconds:     envInt("VOICE_GATEWAY_WS_SESSION_TIMEOUT_SECONDS", 120),
+			ContinuityWindowSeconds:   envInt("VOICE_GATEWAY_WS_CONTINUITY_WINDOW_SECONDS", 60),
 			MaxSessionsPerDevice:      envInt("VOICE_GATEWAY_WS_MAX_SESSIONS_PER_DEVICE", 1),
 			MaxTotalSessions:          envInt("VOICE_GATEWAY_WS_MAX_TOTAL_SESSIONS", 512),
 			MaxFrameBytes:             envInt("VOICE_GATEWAY_WS_MAX_FRAME_BYTES", 1024),
@@ -326,6 +330,8 @@ func Load() (Config, error) {
 			cfg.WebSocket.WriteQueueDepth < 1 ||
 			cfg.WebSocket.SessionTokenTTLSeconds < 30 ||
 			cfg.WebSocket.SessionTokenTTLSeconds > 900 ||
+			cfg.WebSocket.ContinuityWindowSeconds < 5 ||
+			cfg.WebSocket.ContinuityWindowSeconds > 600 ||
 			cfg.WebSocket.PongWaitSeconds < 1 ||
 			cfg.WebSocket.PingIntervalSeconds < 1 ||
 			cfg.WebSocket.PongWaitSeconds <= cfg.WebSocket.PingIntervalSeconds ||

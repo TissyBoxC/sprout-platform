@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:parent_app/features/content_management/application/content_favorites_controller.dart';
 import 'package:parent_app/features/content_management/application/content_library_controller.dart';
 import 'package:parent_app/features/content_management/domain/content_package.dart';
 import 'package:parent_app/features/content_management/presentation/content_library_page.dart';
@@ -15,6 +16,11 @@ void main() {
           contentLibraryControllerProvider.overrideWith(
             () => _FakeContentLibraryController(
               const ContentLibraryState.initial(),
+            ),
+          ),
+          contentFavoritesControllerProvider.overrideWith(
+            () => _FakeContentFavoritesController(
+              const ContentFavoritesState.initial(),
             ),
           ),
         ],
@@ -62,6 +68,11 @@ void main() {
               ),
             ),
           ),
+          contentFavoritesControllerProvider.overrideWith(
+            () => _FakeContentFavoritesController(
+              const ContentFavoritesState.initial(),
+            ),
+          ),
         ],
         child: const MaterialApp(home: ContentLibraryPage()),
       ),
@@ -72,6 +83,110 @@ void main() {
     expect(find.text('已下载'), findsOneWidget);
     expect(find.text('故事 · 3～4 岁 · 1.0 MB'), findsOneWidget);
   });
+
+  testWidgets('label a bookmarked package with a filled star', (tester) async {
+    final package = ContentPackage(
+      packageId: 'story_001',
+      packageVersion: 1,
+      title: '会发光的种子',
+      category: ContentCategory.story,
+      ageTiers: const [ContentAgeTier.age3to4],
+      assetKey: 'story_001',
+      sha256: 'a' * 64,
+      sizeBytes: 1048576,
+      publishedAt: DateTime.utc(2026, 10, 8),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          contentLibraryControllerProvider.overrideWith(
+            () => _FakeContentLibraryController(
+              ContentLibraryState(
+                entries: [
+                  ContentLibraryEntry(
+                    package: package,
+                    status: ContentDownloadStatus.notDownloaded,
+                    downloadProgress: 0,
+                    errorMessage: null,
+                  ),
+                ],
+                catalogRevision: 1,
+                filter: const ContentLibraryFilter(),
+                hasLoadedOnce: true,
+              ),
+            ),
+          ),
+          contentFavoritesControllerProvider.overrideWith(
+            () => _FakeContentFavoritesController(
+              ContentFavoritesState(
+                favorites: [
+                  ContentFavorite(
+                    packageId: 'story_001',
+                    title: '会发光的种子',
+                    category: ContentCategory.story,
+                    ageTiers: const [ContentAgeTier.age3to4],
+                    packageVersion: 1,
+                    available: true,
+                    createdAt: DateTime.utc(2026, 10, 8),
+                  ),
+                ],
+                pendingPackageIds: const <String>{},
+                hasLoadedOnce: true,
+              ),
+            ),
+          ),
+        ],
+        child: const MaterialApp(home: ContentLibraryPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.star_rounded), findsWidgets);
+    expect(find.byTooltip('取消收藏'), findsOneWidget);
+  });
+
+  testWidgets('renders the favorites tab with bookmarked packages', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          contentLibraryControllerProvider.overrideWith(
+            () => _FakeContentLibraryController(
+              const ContentLibraryState.initial(),
+            ),
+          ),
+          contentFavoritesControllerProvider.overrideWith(
+            () => _FakeContentFavoritesController(
+              ContentFavoritesState(
+                favorites: [
+                  ContentFavorite(
+                    packageId: 'poem_009',
+                    title: '静夜思',
+                    category: ContentCategory.poetry,
+                    ageTiers: const [ContentAgeTier.age5to6],
+                    packageVersion: 2,
+                    available: true,
+                    createdAt: DateTime.utc(2026, 10, 9),
+                  ),
+                ],
+                pendingPackageIds: const <String>{},
+                hasLoadedOnce: true,
+              ),
+            ),
+          ),
+        ],
+        child: const MaterialApp(home: ContentLibraryPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('我的收藏'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('静夜思'), findsOneWidget);
+    expect(find.text('古诗 · 5～6 岁'), findsOneWidget);
+  });
 }
 
 class _FakeContentLibraryController extends ContentLibraryController {
@@ -81,4 +196,13 @@ class _FakeContentLibraryController extends ContentLibraryController {
 
   @override
   Future<ContentLibraryState> build() async => value;
+}
+
+class _FakeContentFavoritesController extends ContentFavoritesController {
+  _FakeContentFavoritesController(this.value);
+
+  final ContentFavoritesState value;
+
+  @override
+  Future<ContentFavoritesState> build() async => value;
 }

@@ -45,6 +45,81 @@ void main() {
       'age_tier': 'age_3_4',
     });
   });
+
+  test('parses the favorites envelope returned by the platform', () async {
+    final api = HttpContentManagementApi(
+      _FakeApiClient(
+        response: <String, Object?>{
+          'data': <String, Object?>{
+            'favorites': <Object?>[
+              <String, Object?>{
+                'package_id': 'story_001',
+                'title': '会发光的种子',
+                'category': 'story',
+                'age_tiers': <Object?>['age_3_4'],
+                'package_version': 3,
+                'available': true,
+                'created_at': '2026-10-09T08:30:00Z',
+              },
+            ],
+          },
+        },
+      ),
+    );
+
+    final favorites = await api.fetchFavorites();
+
+    expect(favorites, hasLength(1));
+    expect(favorites.single.packageId, 'story_001');
+    expect(favorites.single.title, '会发光的种子');
+    expect(favorites.single.category, ContentCategory.story);
+    expect(favorites.single.ageTiers, <ContentAgeTier>[
+      ContentAgeTier.age3to4,
+    ]);
+    expect(favorites.single.packageVersion, 3);
+    expect(favorites.single.available, isTrue);
+  });
+
+  test('treats a withdrawn favorite as unavailable', () async {
+    final api = HttpContentManagementApi(
+      _FakeApiClient(
+        response: <String, Object?>{
+          'data': <String, Object?>{
+            'favorites': <Object?>[
+              <String, Object?>{
+                'package_id': 'story_001',
+                'title': '会发光的种子',
+                'category': 'story',
+                'age_tiers': <Object?>['age_3_4'],
+                'package_version': 3,
+                'available': false,
+                'created_at': '2026-10-09T08:30:00Z',
+              },
+            ],
+          },
+        },
+      ),
+    );
+
+    final favorites = await api.fetchFavorites();
+
+    expect(favorites.single.available, isFalse);
+  });
+
+  test('add and remove favorite target the package path', () async {
+    final client = _FakeApiClient(
+      response: <String, Object?>{'data': <String, Object?>{}},
+    );
+    final api = HttpContentManagementApi(client);
+
+    await api.addFavorite('story_001');
+    await api.removeFavorite('story_001');
+
+    expect(client.putPaths, <String>['/api/v1/content/favorites/story_001']);
+    expect(client.deletePaths, <String>[
+      '/api/v1/content/favorites/story_001',
+    ]);
+  });
 }
 
 class _FakeApiClient implements ApiClient {
@@ -52,6 +127,8 @@ class _FakeApiClient implements ApiClient {
 
   final Map<String, Object?> response;
   Map<String, String>? lastQueryParameters;
+  final List<String> putPaths = <String>[];
+  final List<String> deletePaths = <String>[];
 
   @override
   Future<Map<String, Object?>> get(
@@ -64,7 +141,8 @@ class _FakeApiClient implements ApiClient {
 
   @override
   Future<Map<String, Object?>> delete(String path) {
-    throw UnimplementedError();
+    deletePaths.add(path);
+    return Future<Map<String, Object?>>.value(response);
   }
 
   @override
@@ -83,6 +161,7 @@ class _FakeApiClient implements ApiClient {
 
   @override
   Future<Map<String, Object?>> put(String path, {Object? body}) {
-    throw UnimplementedError();
+    putPaths.add(path);
+    return Future<Map<String, Object?>>.value(response);
   }
 }

@@ -5,15 +5,26 @@ import 'package:go_router/go_router.dart';
 import '../../../core/error/app_exception.dart';
 import '../../../shared/widgets/app_reveal.dart';
 import '../../../shared/widgets/app_state_switcher.dart';
+import '../application/content_favorites_controller.dart';
 import '../application/content_library_controller.dart';
 import '../domain/content_package.dart';
 
+/// Which slice of the library the page is showing.
+enum _LibraryTab { catalog, favorites }
+
 /// Guardian-facing content library with filters and download controls.
-class ContentLibraryPage extends ConsumerWidget {
+class ContentLibraryPage extends ConsumerStatefulWidget {
   const ContentLibraryPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ContentLibraryPage> createState() => _ContentLibraryPageState();
+}
+
+class _ContentLibraryPageState extends ConsumerState<ContentLibraryPage> {
+  _LibraryTab _tab = _LibraryTab.catalog;
+
+  @override
+  Widget build(BuildContext context) {
     final library = ref.watch(contentLibraryControllerProvider);
     return PopScope(
       canPop: false,
@@ -31,30 +42,59 @@ class ContentLibraryPage extends ConsumerWidget {
             icon: const Icon(Icons.arrow_back_rounded),
           ),
         ),
-        body: AppStateSwitcher(
-          stateKey: library.when(
-            data: (value) => value.isEmpty
-                ? 'content-empty'
-                : 'content-list-${value.catalogRevision}',
-            error: (_, _) => 'content-error',
-            loading: () => 'content-loading',
-          ),
-          child: library.when(
-            loading: () => const Center(
-              key: ValueKey<String>('content-loading'),
-              child: CircularProgressIndicator(),
+        body: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: SegmentedButton<_LibraryTab>(
+                segments: const [
+                  ButtonSegment<_LibraryTab>(
+                    value: _LibraryTab.catalog,
+                    label: Text('全部内容'),
+                    icon: Icon(Icons.grid_view_rounded),
+                  ),
+                  ButtonSegment<_LibraryTab>(
+                    value: _LibraryTab.favorites,
+                    label: Text('我的收藏'),
+                    icon: Icon(Icons.star_rounded),
+                  ),
+                ],
+                selected: <_LibraryTab>{_tab},
+                onSelectionChanged: (selection) =>
+                    setState(() => _tab = selection.first),
+              ),
             ),
-            error: (error, _) => _ErrorState(
-              key: const ValueKey<String>('content-error'),
-              message: _messageFor(error),
-              onRetry: () =>
-                  ref.read(contentLibraryControllerProvider.notifier).refresh(),
+            Expanded(
+              child: _tab == _LibraryTab.catalog
+                  ? AppStateSwitcher(
+                      stateKey: library.when(
+                        data: (value) => value.isEmpty
+                            ? 'content-empty'
+                            : 'content-list-${value.catalogRevision}',
+                        error: (_, _) => 'content-error',
+                        loading: () => 'content-loading',
+                      ),
+                      child: library.when(
+                        loading: () => const Center(
+                          key: ValueKey<String>('content-loading'),
+                          child: CircularProgressIndicator(),
+                        ),
+                        error: (error, _) => _ErrorState(
+                          key: const ValueKey<String>('content-error'),
+                          message: _messageFor(error),
+                          onRetry: () => ref
+                              .read(contentLibraryControllerProvider.notifier)
+                              .refresh(),
+                        ),
+                        data: (state) => _ContentList(
+                          key: const ValueKey<String>('content-content'),
+                          state: state,
+                        ),
+                      ),
+                    )
+                  : const _FavoritesList(),
             ),
-            data: (state) => _ContentList(
-              key: const ValueKey<String>('content-content'),
-              state: state,
-            ),
-          ),
+          ],
         ),
       ),
     );
@@ -98,6 +138,149 @@ class _ContentList extends ConsumerWidget {
                 ),
               ),
         ],
+      ),
+    );
+  }
+}
+
+class _FavoritesList extends ConsumerWidget {
+  const _FavoritesList();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final favorites = ref.watch(contentFavoritesControllerProvider);
+    return AppStateSwitcher(
+      stateKey: favorites.when(
+        data: (value) => value.isEmpty ? 'favorites-empty' : 'favorites-list',
+        error: (_, _) => 'favorites-error',
+        loading: () => 'favorites-loading',
+      ),
+      child: favorites.when(
+        loading: () => const Center(
+          key: ValueKey<String>('favorites-loading'),
+          child: CircularProgressIndicator(),
+        ),
+        error: (error, _) => _ErrorState(
+          key: const ValueKey<String>('favorites-error'),
+          message: _messageFor(error),
+          onRetry: () =>
+              ref.read(contentFavoritesControllerProvider.notifier).refresh(),
+        ),
+        data: (state) => RefreshIndicator(
+          key: const ValueKey<String>('favorites-content'),
+          onRefresh: () =>
+              ref.read(contentFavoritesControllerProvider.notifier).refresh(),
+          child: state.isEmpty
+              ? const _FavoritesEmptyList()
+              : ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                  children: [
+                    if (state.errorMessage != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          state.errorMessage!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ),
+                    for (var index = 0; index < state.favorites.length; index++)
+                      AppReveal(
+                        delay: Duration(milliseconds: 45 * index.clamp(0, 6)),
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _FavoriteCard(
+                            favorite: state.favorites[index],
+                            pending: state.isPending(
+                              state.favorites[index].packageId,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FavoriteCard extends ConsumerWidget {
+  const _FavoriteCard({required this.favorite, required this.pending});
+
+  final ContentFavorite favorite;
+  final bool pending;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Card(
+      child: ListTile(
+        contentPadding: const EdgeInsets.fromLTRB(18, 8, 10, 8),
+        leading: CircleAvatar(
+          backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+          child: Icon(_categoryIcon(favorite.category)),
+        ),
+        title: Text(favorite.title),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(_favoriteSubtitle(favorite)),
+        ),
+        trailing: IconButton(
+          tooltip: '取消收藏',
+          onPressed: pending
+              ? null
+              : () => ref
+                    .read(contentFavoritesControllerProvider.notifier)
+                    .toggle(favorite.packageId),
+          icon: pending
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.star_rounded, color: Color(0xFFE0A800)),
+        ),
+      ),
+    );
+  }
+}
+
+class _FavoritesEmptyList extends StatelessWidget {
+  const _FavoritesEmptyList();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+      children: const [
+        AppReveal(child: _FavoritesEmptyCard()),
+      ],
+    );
+  }
+}
+
+class _FavoritesEmptyCard extends StatelessWidget {
+  const _FavoritesEmptyCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          children: [
+            Icon(
+              Icons.star_border_rounded,
+              size: 48,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(height: 12),
+            Text('还没有收藏的内容', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 6),
+            const Text('在全部内容里点一下星星，收藏就会出现在这里。', textAlign: TextAlign.center),
+          ],
+        ),
       ),
     );
   }
@@ -201,6 +384,11 @@ class _PackageCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final package = entry.package;
+    final favorites = ref.watch(contentFavoritesControllerProvider);
+    final favoriteState = favorites.value;
+    final isFavorite = favoriteState?.isFavorite(package.packageId) ?? false;
+    final isFavoritePending =
+        favoriteState?.isPending(package.packageId) ?? false;
     return Card(
       child: ExpansionTile(
         tilePadding: const EdgeInsets.fromLTRB(18, 8, 14, 8),
@@ -218,7 +406,32 @@ class _PackageCard extends ConsumerWidget {
             '${formatContentSize(package.sizeBytes)}',
           ),
         ),
-        trailing: _StatusBadge(status: entry.status),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              tooltip: isFavorite ? '取消收藏' : '收藏',
+              onPressed: isFavoritePending
+                  ? null
+                  : () => ref
+                        .read(contentFavoritesControllerProvider.notifier)
+                        .toggle(package.packageId),
+              icon: isFavoritePending
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(
+                      isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
+                      color: isFavorite
+                          ? const Color(0xFFE0A800)
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+            ),
+            _StatusBadge(status: entry.status),
+          ],
+        ),
         children: [
           const Divider(height: 1),
           const SizedBox(height: 14),
@@ -475,6 +688,16 @@ String _statusLabel(ContentDownloadStatus status, double progress) {
     ContentDownloadStatus.updateAvailable => '需更新',
     ContentDownloadStatus.withdrawn => '已撤回',
   };
+}
+
+String _favoriteSubtitle(ContentFavorite favorite) {
+  final parts = <String>[
+    favorite.category.label,
+    if (favorite.ageTiers.isNotEmpty)
+      favorite.ageTiers.map((tier) => tier.label).join('、'),
+    if (!favorite.available) '已下架',
+  ];
+  return parts.join(' · ');
 }
 
 String _formatDate(DateTime value) {

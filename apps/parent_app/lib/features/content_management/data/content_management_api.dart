@@ -10,6 +10,15 @@ abstract interface class ContentManagementApi {
   });
 
   Future<ContentDownloadSpec> fetchDownloadSpec(String packageId);
+
+  /// Lists the guardian's bookmarked packages, newest bookmark first.
+  Future<List<ContentFavorite>> fetchFavorites();
+
+  /// Bookmarks one package. A repeat call is idempotent on the platform.
+  Future<void> addFavorite(String packageId);
+
+  /// Removes one bookmark. A missing bookmark is treated as success.
+  Future<void> removeFavorite(String packageId);
 }
 
 /// Production implementation backed by the authenticated API client.
@@ -55,5 +64,34 @@ class HttpContentManagementApi implements ContentManagementApi {
       throw const FormatException('missing download data');
     }
     return ContentDownloadSpec.fromJson(Map<String, Object?>.from(download));
+  }
+
+  @override
+  Future<List<ContentFavorite>> fetchFavorites() async {
+    final response = await _apiClient.get('/api/v1/content/favorites');
+    final data = response['data'];
+    if (data is! Map) {
+      throw const FormatException('missing favorites data');
+    }
+    final favorites = data['favorites'];
+    if (favorites is! List) {
+      return const <ContentFavorite>[];
+    }
+    return favorites
+        .whereType<Map>()
+        .map(
+          (item) => ContentFavorite.fromJson(Map<String, Object?>.from(item)),
+        )
+        .toList(growable: false);
+  }
+
+  @override
+  Future<void> addFavorite(String packageId) async {
+    await _apiClient.put('/api/v1/content/favorites/$packageId');
+  }
+
+  @override
+  Future<void> removeFavorite(String packageId) async {
+    await _apiClient.delete('/api/v1/content/favorites/$packageId');
   }
 }

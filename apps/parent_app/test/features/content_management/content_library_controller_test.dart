@@ -88,4 +88,13 @@ class _FakeContentManagementApi implements ContentManagementApi {
   Future<ContentDownloadSpec> fetchDownloadSpec(String packageId) {
     throw UnimplementedError();
   }
+
+  @override
+  Future<List<ContentFavorite>> fetchFavorites() async => const [];
+
+  @override
+  Future<void> addFavorite(String packageId) async {}
+
+  @override
+  Future<void> removeFavorite(String packageId) async {}
 }

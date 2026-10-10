@@ -168,6 +168,118 @@ class ContentDownloadSpec {
   }
 }
 
+/// One guardian-scoped content bookmark.
+///
+/// The platform couples the bookmark with the currently published version so
+/// the console can either offer a playable card or a "withdrawn" placeholder.
+class ContentFavorite {
+  const ContentFavorite({
+    required this.packageId,
+    required this.title,
+    required this.category,
+    required this.ageTiers,
+    required this.packageVersion,
+    required this.available,
+    required this.createdAt,
+  });
+
+  final String packageId;
+  final String title;
+  final ContentCategory category;
+  final List<ContentAgeTier> ageTiers;
+  final int packageVersion;
+  final bool available;
+  final DateTime createdAt;
+
+  factory ContentFavorite.fromJson(Map<String, Object?> json) {
+    final category = ContentCategory.fromApiValue(
+      _requiredString(json['category'], 'category'),
+    );
+    if (category == null) {
+      throw const FormatException('unknown content category');
+    }
+    return ContentFavorite(
+      packageId: _requiredString(json['package_id'], 'package_id'),
+      title: _requiredString(json['title'], 'title'),
+      category: category,
+      ageTiers: _stringList(json['age_tiers'])
+          .map(ContentAgeTier.fromApiValue)
+          .whereType<ContentAgeTier>()
+          .toList(growable: false),
+      packageVersion: _requiredInt(
+        json['package_version'],
+        'package_version',
+      ),
+      available: json['available'] == true,
+      createdAt: _requiredDateTime(json['created_at'], 'created_at'),
+    );
+  }
+}
+
+/// Outcome recorded for one finished or interrupted playback session.
+enum PlayOutcome {
+  completed('completed', '已听完'),
+  skipped('skipped', '已跳过'),
+  interrupted('interrupted', '中途退出'),
+  failed('failed', '播放失败');
+
+  const PlayOutcome(this.apiValue, this.label);
+
+  final String apiValue;
+  final String label;
+
+  static PlayOutcome? fromApiValue(String value) {
+    for (final outcome in PlayOutcome.values) {
+      if (outcome.apiValue == value) {
+        return outcome;
+      }
+    }
+    return null;
+  }
+}
+
+/// One device playback history row shown to the guardian.
+class ContentPlayRecord {
+  const ContentPlayRecord({
+    required this.id,
+    required this.deviceId,
+    required this.packageId,
+    required this.packageVersion,
+    required this.outcome,
+    required this.playedSeconds,
+    required this.playedAt,
+  });
+
+  final String id;
+  final String deviceId;
+  final String packageId;
+  final int packageVersion;
+  final PlayOutcome outcome;
+  final int playedSeconds;
+  final DateTime playedAt;
+
+  factory ContentPlayRecord.fromJson(Map<String, Object?> json) {
+    final outcome = PlayOutcome.fromApiValue(
+      _requiredString(json['outcome'], 'outcome'),
+    );
+    if (outcome == null) {
+      throw const FormatException('unknown play outcome');
+    }
+    return ContentPlayRecord(
+      id: _requiredString(json['id'], 'id'),
+      deviceId: _requiredString(json['device_id'], 'device_id'),
+      packageId: _requiredString(json['package_id'], 'package_id'),
+      packageVersion: _requiredInt(
+        json['package_version'],
+        'package_version',
+      ),
+      outcome: outcome,
+      playedSeconds: _requiredInt(json['played_seconds'], 'played_seconds'),
+      playedAt: _requiredDateTime(json['played_at'], 'played_at'),
+    );
+  }
+}
+
 /// Local lifecycle of a package that has entered the guardian library.
 enum ContentDownloadStatus {
   notDownloaded,

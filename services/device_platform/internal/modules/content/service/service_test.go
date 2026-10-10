@@ -1476,3 +1476,74 @@ func TestRecordPlaybackValidatesAndBounds(t *testing.T) {
 		t.Fatalf("newest history seconds = %d, want %d", history[0].PlayedSeconds, playHistoryRetentionLimit+9)
 	}
 }
+
+func TestListPlayHistoryForParentMergesOwnedDevices(t *testing.T) {
+	repository := newMemoryRepository()
+	service := newContentService(t, repository, validAssetReader())
+	published := publishPackage(t, service, validMetadata())
+
+	record := func(deviceID string, seconds int) {
+		t.Helper()
+		if _, err := service.RecordPlayback(
+			context.Background(),
+			domain.PlayRecordInput{
+				DeviceID:       deviceID,
+				PackageID:      published.PackageID,
+				PackageVersion: published.PackageVersion,
+				Outcome:        domain.PlayOutcomeCompleted,
+				PlayedSeconds:  seconds,
+			},
+		); err != nil {
+			t.Fatalf("record playback %s/%d: %v", deviceID, seconds, err)
+		}
+	}
+	record("sprout_device_001", 1)
+	record("sprout_device_002", 2)
+	record("sprout_device_003", 3)
+	record("sprout_device_001", 4)
+
+	// Only the two owned devices contribute; the unrelated third device is
+	// excluded even though it has history rows.
+	merged, err := service.ListPlayHistoryForParent(
+		context.Background(),
+		[]string{"sprout_device_001", "sprout_device_002"},
+		50,
+	)
+	if err != nil {
+		t.Fatalf("merge play history: %v", err)
+	}
+	if len(merged) != 3 {
+		t.Fatalf("merged history length = %d, want 3", len(merged))
+	}
+	for _, item := range merged {
+		if item.DeviceID == "sprout_device_003" {
+			t.Fatalf("merged history leaked unrelated device %q", item.DeviceID)
+		}
+	}
+	// Newest-first across devices: the most recently written row leads.
+	if merged[0].PlayedSeconds != 4 {
+		t.Fatalf("merged newest seconds = %d, want 4", merged[0].PlayedSeconds)
+	}
+
+	// The limit caps the merged result.
+	capped, err := service.ListPlayHistoryForParent(
+		context.Background(),
+		[]string{"sprout_device_001", "sprout_device_002"},
+		2,
+	)
+	if err != nil {
+		t.Fatalf("merge capped history: %v", err)
+	}
+	if len(capped) != 2 {
+		t.Fatalf("capped history length = %d, want 2", len(capped))
+	}
+
+	// A guardian with no bound devices sees an empty, non-nil list.
+	empty, err := service.ListPlayHistoryForParent(context.Background(), nil, 50)
+	if err != nil {
+		t.Fatalf("merge empty history: %v", err)
+	}
+	if empty == nil || len(empty) != 0 {
+		t.Fatalf("empty history = %v, want empty slice", empty)
+	}
+}

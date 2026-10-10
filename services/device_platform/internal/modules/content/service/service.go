@@ -4,6 +4,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/domain"
@@ -574,6 +575,48 @@ func (s *Service) ListPlayHistory(
 
 // playHistoryRetentionLimit is the number of history rows kept per device.
 const playHistoryRetentionLimit = 50
+
+// ListPlayHistoryForParent merges the playback history of the guardian's
+// devices into a single newest-first list.
+//
+// The parent app holds only a guardian credential, so it cannot authenticate
+// against the device-scoped history route. The caller resolves the guardian's
+// device ids (already scoped to the account) and this method merges the bounded
+// per-device history, capping the merged result at the requested limit.
+func (s *Service) ListPlayHistoryForParent(
+	ctx context.Context,
+	deviceIDs []string,
+	limit int,
+) ([]domain.PlayRecord, error) {
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+	merged := make([]domain.PlayRecord, 0, limit)
+	for _, rawDeviceID := range deviceIDs {
+		deviceID := strings.TrimSpace(rawDeviceID)
+		if deviceID == "" {
+			continue
+		}
+		records, err := s.repository.ListPlayHistory(ctx, domain.PlayHistoryQuery{
+			DeviceID: deviceID,
+			Limit:    limit,
+		})
+		if err != nil {
+			return nil, err
+		}
+		merged = append(merged, records...)
+	}
+	sort.SliceStable(merged, func(left int, right int) bool {
+		if merged[left].PlayedAt.Equal(merged[right].PlayedAt) {
+			return merged[left].ID > merged[right].ID
+		}
+		return merged[left].PlayedAt.After(merged[right].PlayedAt)
+	})
+	if len(merged) > limit {
+		merged = merged[:limit]
+	}
+	return merged, nil
+}
 
 func intersectCategories(requested []string, allowed []string) []string {
 	if len(allowed) == 0 {

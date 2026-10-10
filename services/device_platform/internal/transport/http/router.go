@@ -667,7 +667,10 @@ func NewRouter(options RouterOptions) http.Handler {
 	}
 
 	if options.ContentService != nil {
-		contentHandler := contentHandler{service: options.ContentService}
+		contentHandler := contentHandler{
+			service:         options.ContentService,
+			guardianDevices: guardianDeviceListerFromBinding(options.BindingService),
+		}
 		// The parent app reads the catalog with a guardian session.
 		if options.AuthService != nil {
 			authHandler := authHandler{service: options.AuthService}
@@ -690,6 +693,10 @@ func NewRouter(options RouterOptions) http.Handler {
 			mux.HandleFunc(
 				"DELETE /api/v1/content/favorites/{package_id}",
 				authHandler.requireAuthentication(contentHandler.removeFavorite),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/content/play-history",
+				authHandler.requireAuthentication(contentHandler.listPlayHistoryForGuardian),
 			)
 		}
 		// Firmware devices never receive a guardian credential, so the same
@@ -856,6 +863,18 @@ func guardianDeviceVerifierFromBinding(
 	return bindingGuardianVerifier{bindingService: bindingService}
 }
 
+// guardianDeviceListerFromBinding exposes the binding-derived resolver as a
+// device-id lister for the guardian content surface. It returns nil when no
+// binding service is configured so the route can fail closed.
+func guardianDeviceListerFromBinding(
+	bindingService *bindingservice.Service,
+) guardianDeviceLister {
+	if bindingService == nil {
+		return nil
+	}
+	return bindingGuardianVerifier{bindingService: bindingService}
+}
+
 type bindingGuardianVerifier struct {
 	bindingService *bindingservice.Service
 }
@@ -875,6 +894,26 @@ func (verifier bindingGuardianVerifier) DeviceBelongsToParent(
 		}
 	}
 	return false, nil
+}
+
+// DeviceIDsForParent lists every device id bound to one guardian account.
+func (verifier bindingGuardianVerifier) DeviceIDsForParent(
+	ctx context.Context,
+	parentAccountID string,
+) ([]string, error) {
+	bindings, err := verifier.bindingService.List(ctx, parentAccountID)
+	if err != nil {
+		return nil, err
+	}
+	deviceIDs := make([]string, 0, len(bindings))
+	for _, binding := range bindings {
+		deviceID := strings.TrimSpace(binding.DeviceID)
+		if deviceID == "" {
+			continue
+		}
+		deviceIDs = append(deviceIDs, deviceID)
+	}
+	return deviceIDs, nil
 }
 
 func healthHandler(response http.ResponseWriter, _ *http.Request) {

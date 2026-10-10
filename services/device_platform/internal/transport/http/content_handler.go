@@ -13,6 +13,16 @@ import (
 
 type contentHandler struct {
 	service *contentservice.Service
+	// guardianDevices resolves the devices the guardian account owns. When it
+	// is nil the guardian-scoped history route is not registered.
+	guardianDevices guardianDeviceLister
+}
+
+// guardianDeviceLister lists the device ids bound to one guardian account.
+// It is implemented by the binding-derived guardian verifier so the parent
+// app can read an aggregate playback history without a device session.
+type guardianDeviceLister interface {
+	DeviceIDsForParent(ctx context.Context, parentAccountID string) ([]string, error)
 }
 
 // deviceContentHandler wraps the content read surface with device-session
@@ -584,6 +594,64 @@ type recordPlaybackRequest struct {
 	PackageVersion int    `json:"package_version"`
 	Outcome        string `json:"outcome"`
 	PlayedSeconds  int    `json:"played_seconds"`
+}
+
+// listPlayHistoryForGuardian returns the merged playback history of every
+// device owned by the authenticated guardian. The parent app holds a guardian
+// credential rather than a device session, so it uses this route instead of
+// the device-scoped one. An optional device_id narrows the result to a single
+// owned device; an unowned device id is rejected.
+func (handler contentHandler) listPlayHistoryForGuardian(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	accountID, ok := authenticatedAccountID(request)
+	if !ok {
+		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
+		return
+	}
+	if handler.guardianDevices == nil {
+		writeError(response, request, http.StatusServiceUnavailable, "history_unavailable", "播放历史暂时不可用")
+		return
+	}
+	limit, err := contentPositiveInt(request.URL.Query().Get("limit"), 50)
+	if err != nil {
+		writeError(response, request, http.StatusUnprocessableEntity, "invalid_limit", "请检查分页参数")
+		return
+	}
+	deviceIDs, err := handler.guardianDevices.DeviceIDsForParent(request.Context(), accountID)
+	if err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	if requested := strings.TrimSpace(request.URL.Query().Get("device_id")); requested != "" {
+		if !guardianOwnsDevice(deviceIDs, requested) {
+			writeError(response, request, http.StatusNotFound, "device_not_found", "没有找到这个设备")
+			return
+		}
+		deviceIDs = []string{requested}
+	}
+	records, err := handler.service.ListPlayHistoryForParent(
+		request.Context(),
+		deviceIDs,
+		limit,
+	)
+	if err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"history": records,
+	})
+}
+
+func guardianOwnsDevice(deviceIDs []string, deviceID string) bool {
+	for _, candidate := range deviceIDs {
+		if strings.TrimSpace(candidate) == deviceID {
+			return true
+		}
+	}
+	return false
 }
 
 // recordPlayback stores one device playback event after verifying the session

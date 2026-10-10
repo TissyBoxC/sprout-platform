@@ -701,6 +701,135 @@ func TestDevicePlaybackRequiresMatchingDeviceSession(t *testing.T) {
 	}
 }
 
+// contentTestDeviceLister returns a fixed set of owned devices.
+type contentTestDeviceLister struct {
+	deviceIDs []string
+	err       error
+}
+
+func (lister contentTestDeviceLister) DeviceIDsForParent(
+	_ context.Context,
+	_ string,
+) ([]string, error) {
+	if lister.err != nil {
+		return nil, lister.err
+	}
+	return lister.deviceIDs, nil
+}
+
+func TestGuardianPlayHistoryMergesOwnedDevices(t *testing.T) {
+	repository := newContentTestRepository()
+	service, err := contentservice.New(contentservice.Options{
+		Repository:  repository,
+		AssetReader: contentTestAssetReader{},
+	})
+	if err != nil {
+		t.Fatalf("create content service: %v", err)
+	}
+	record := func(deviceID string, seconds int) {
+		t.Helper()
+		if _, err := service.RecordPlayback(
+			context.Background(),
+			contentdomain.PlayRecordInput{
+				DeviceID:       deviceID,
+				PackageID:      "content_story_001",
+				PackageVersion: 1,
+				Outcome:        contentdomain.PlayOutcomeCompleted,
+				PlayedSeconds:  seconds,
+			},
+		); err != nil {
+			t.Fatalf("record playback: %v", err)
+		}
+	}
+	record("sprout_device_001", 1)
+	record("sprout_device_002", 2)
+	record("sprout_device_009", 9)
+
+	handler := contentHandler{
+		service: service,
+		guardianDevices: contentTestDeviceLister{
+			deviceIDs: []string{"sprout_device_001", "sprout_device_002"},
+		},
+	}
+	authed := func(target string) *http.Request {
+		request := httptest.NewRequest(http.MethodGet, target, nil)
+		return request.WithContext(context.WithValue(
+			request.Context(),
+			authenticatedAccountKey{},
+			"parent-001",
+		))
+	}
+	decodeHistory := func(body []byte) []struct {
+		DeviceID      string `json:"device_id"`
+		PlayedSeconds int    `json:"played_seconds"`
+	} {
+		t.Helper()
+		var envelope struct {
+			Data struct {
+				History []struct {
+					DeviceID      string `json:"device_id"`
+					PlayedSeconds int    `json:"played_seconds"`
+				} `json:"history"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			t.Fatalf("decode history response: %v", err)
+		}
+		return envelope.Data.History
+	}
+
+	// No device filter: both owned devices merge and the unrelated one is gone.
+	recorder := httptest.NewRecorder()
+	handler.listPlayHistoryForGuardian(recorder, authed("/api/v1/content/play-history"))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	history := decodeHistory(recorder.Body.Bytes())
+	if len(history) != 2 {
+		t.Fatalf("history length = %d, want 2: %s", len(history), recorder.Body.String())
+	}
+	for _, item := range history {
+		if item.DeviceID == "sprout_device_009" {
+			t.Fatalf("history leaked unowned device: %s", recorder.Body.String())
+		}
+	}
+
+	// A device filter narrows to a single owned device.
+	recorder = httptest.NewRecorder()
+	handler.listPlayHistoryForGuardian(
+		recorder,
+		authed("/api/v1/content/play-history?device_id=sprout_device_001"),
+	)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("filtered status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	filtered := decodeHistory(recorder.Body.Bytes())
+	if len(filtered) != 1 || filtered[0].DeviceID != "sprout_device_001" {
+		t.Fatalf("filtered history = %s, want only sprout_device_001", recorder.Body.String())
+	}
+
+	// An unowned device filter is rejected instead of silently returning empty.
+	recorder = httptest.NewRecorder()
+	handler.listPlayHistoryForGuardian(
+		recorder,
+		authed("/api/v1/content/play-history?device_id=sprout_device_009"),
+	)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("unowned device status = %d, want %d", recorder.Code, http.StatusNotFound)
+	}
+}
+
+func TestGuardianPlayHistoryRequiresAuthentication(t *testing.T) {
+	handler := newContentHandlerForTest(t)
+	handler.guardianDevices = contentTestDeviceLister{deviceIDs: []string{"sprout_device_001"}}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/content/play-history", nil)
+	recorder := httptest.NewRecorder()
+	handler.listPlayHistoryForGuardian(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+}
+
 func contentFavoriteKey(parentAccountID string, packageID string) string {
 	return parentAccountID + "\x00" + packageID
 }

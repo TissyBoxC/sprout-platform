@@ -38,6 +38,8 @@ import (
 	releasestoreservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
 	serviceversionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
 	usagereportservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
+	visionhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/handler"
+	visionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/service"
 )
 
 // RouterOptions contains dependencies for the device platform HTTP transport.
@@ -68,6 +70,7 @@ type RouterOptions struct {
 	VoiceWebSocketURL           string
 	PrivacyService              *privacyservice.Service
 	NotificationService         *notificationservice.Service
+	VisionService               *visionservice.Service
 	AuditRecorder               auditRecorder
 }
 
@@ -751,6 +754,43 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/admin/audit",
 					authHandler.requireAdmin(privacyHandler.AdminAudit),
+				)
+			}
+			if options.VisionService != nil {
+				visionHandler := visionhandler.New(options.VisionService)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/vision/capability",
+					authHandler.requireAuthentication(visionHandler.GetCapability),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/vision/tasks",
+					authHandler.requireAuthentication(
+						parentScoped(visionHandler.CreateTask),
+					),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/vision/tasks",
+					authHandler.requireAuthentication(visionHandler.ListTasks),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/vision/tasks/{task_id}/cancel",
+					authHandler.requireAuthentication(
+						parentScoped(func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							visionHandler.CancelTask(response, request)
+						}),
+					),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/vision/results",
+					authHandler.requireAuthentication(visionHandler.ListResults),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/vision/results/{task_id}",
+					authHandler.requireAuthentication(visionHandler.GetResult),
 				)
 			}
 			if options.NotificationService != nil {

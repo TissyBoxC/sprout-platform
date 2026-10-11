@@ -205,6 +205,24 @@ func (s *Service) Status(
 	return status, nil
 }
 
+// ImageConsentForParent reports whether a guardian currently allows image
+// upload for their child's device. It is the narrow consent surface used by
+// the camera/vision module, and it is deny-by-default.
+func (s *Service) ImageConsentForParent(
+	ctx context.Context,
+	parentAccountID string,
+) (bool, error) {
+	account, err := s.parentAccounts.GetParentAccountByID(ctx, parentAccountID)
+	if err != nil {
+		return false, err
+	}
+	events, err := s.repository.ListConsentEvents(ctx, parentAccountID)
+	if err != nil {
+		return false, err
+	}
+	return consentStatus(account, events).Active, nil
+}
+
 // Export returns a redacted, guardian-owned data copy. Raw audio, images,
 // conversations, credentials, provider identifiers, tokens, and password
 // hashes are never included.

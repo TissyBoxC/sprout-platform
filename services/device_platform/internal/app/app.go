@@ -60,6 +60,8 @@ import (
 	serviceVersionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
 	usageReportRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/repository"
 	usageReportService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
+	visionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/repository"
+	visionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/service"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/cache"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/database"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/security"
@@ -492,6 +494,20 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create notification service: %w", err)
 	}
+	vision, err := visionService.New(visionService.Options{
+		Repository: visionRepository.NewPostgresRepository(databaseStore.Pool()),
+		ConsentReader: visionConsentReader{
+			bindings: bindingPersistence,
+			privacy:  privacy,
+		},
+		DeviceReader: visionConsentReader{
+			bindings: bindingPersistence,
+			privacy:  privacy,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("create vision service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
@@ -522,6 +538,7 @@ func Run() error {
 			VoiceWebSocketURL:           cfg.VoiceGateway.WebSocketURL,
 			PrivacyService:              privacy,
 			NotificationService:         notifications,
+			VisionService:               vision,
 			AuditRecorder:               privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

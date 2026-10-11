@@ -876,6 +876,23 @@ func NewRouter(options RouterOptions) http.Handler {
 				authHandler.requireAdmin(contentHandler.deleteThemePack),
 			)
 		}
+		if options.ContentOfflinePolicyService != nil {
+			adminOfflinePolicyHandler := contentOfflinePolicyHandler{
+				service: options.ContentOfflinePolicyService,
+			}
+			mux.HandleFunc(
+				"GET /api/v1/admin/content/offline-policy",
+				authHandler.requireAdmin(adminOfflinePolicyHandler.adminCurrent),
+			)
+			mux.HandleFunc(
+				"PUT /api/v1/admin/content/offline-policy",
+				authHandler.requireAdmin(adminOfflinePolicyHandler.adminPublish),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/admin/content/offline-policy/acknowledgements",
+				authHandler.requireAdmin(adminOfflinePolicyHandler.acknowledgementsForAdmin),
+			)
+		}
 	}
 
 	if options.UsageReportService != nil && options.AuthService != nil {

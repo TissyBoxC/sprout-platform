@@ -102,6 +102,53 @@ func (handler contentOfflinePolicyHandler) acknowledgements(
 	})
 }
 
+// adminCurrent is the admin-console variant of current.
+func (handler contentOfflinePolicyHandler) adminCurrent(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	handler.current(response, request)
+}
+
+// adminPublish is the admin-console variant of publish.
+func (handler contentOfflinePolicyHandler) adminPublish(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	handler.publish(response, request)
+}
+
+// acknowledgementsForAdmin lists applied revisions for one family. The admin
+// console selects the family with a query parameter and the platform scopes
+// the read to that family.
+func (handler contentOfflinePolicyHandler) acknowledgementsForAdmin(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	familyID := strings.TrimSpace(request.URL.Query().Get("family_id"))
+	if familyID == "" {
+		writeError(response, request, http.StatusUnprocessableEntity, "invalid_request", "请选择家庭")
+		return
+	}
+	acks, err := handler.service.Acknowledgements(request.Context(), familyID)
+	if err != nil {
+		writeContentOfflinePolicyError(response, request, err)
+		return
+	}
+	devices := make([]map[string]any, 0, len(acks))
+	for index := range acks {
+		devices = append(devices, map[string]any{
+			"device_id":  acks[index].DeviceID,
+			"revision":   acks[index].Revision,
+			"up_to_date": acks[index].UpToDate,
+		})
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"family_id": familyID,
+		"devices":   devices,
+	})
+}
+
 func (handler contentOfflinePolicyHandler) publish(
 	response http.ResponseWriter,
 	request *http.Request,

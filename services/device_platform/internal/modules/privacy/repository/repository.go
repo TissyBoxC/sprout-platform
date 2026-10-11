@@ -459,6 +459,100 @@ func (r *PostgresRepository) PurgeParentData(
 			label string
 		}{
 			{
+				query: `DELETE FROM ota_events WHERE deployment_id IN (
+					SELECT id FROM ota_deployments WHERE device_id = ANY($1)
+				)`,
+				label: "OTA events",
+			},
+			{
+				query: `DELETE FROM ota_deployments WHERE device_id = ANY($1)`,
+				label: "OTA deployments",
+			},
+			{
+				query: `DELETE FROM ota_group_members WHERE device_id = ANY($1)`,
+				label: "OTA group members",
+			},
+			{
+				query: `DELETE FROM playback_requests WHERE device_id = ANY($1)`,
+				label: "playback requests",
+			},
+			{
+				query: `DELETE FROM content_play_history WHERE device_id = ANY($1)`,
+				label: "content play history",
+			},
+			{
+				query: `DELETE FROM vision_results WHERE device_id = ANY($1)`,
+				label: "vision results",
+			},
+			{
+				query: `DELETE FROM vision_tasks WHERE device_id = ANY($1)`,
+				label: "vision tasks",
+			},
+			{
+				query: `DELETE FROM video_calls WHERE device_id = ANY($1)`,
+				label: "video calls",
+			},
+			{
+				query: `DELETE FROM wearable_sos_events WHERE device_id = ANY($1)`,
+				label: "wearable SOS events",
+			},
+			{
+				query: `DELETE FROM wearable_device_status WHERE device_id = ANY($1)`,
+				label: "wearable device status",
+			},
+			{
+				query: `DELETE FROM device_group_members WHERE device_id = ANY($1)`,
+				label: "device group members",
+			},
+			{
+				query: `DELETE FROM screen_video_playback WHERE device_id = ANY($1)`,
+				label: "screen video playback",
+			},
+			{
+				query: `DELETE FROM screen_device_status WHERE device_id = ANY($1)`,
+				label: "screen device status",
+			},
+			{
+				query: `DELETE FROM device_connectivity_status WHERE device_id = ANY($1)`,
+				label: "device connectivity status",
+			},
+			{
+				query: `DELETE FROM device_form_factor WHERE device_id = ANY($1)`,
+				label: "device form factor status",
+			},
+			{
+				query: `DELETE FROM device_motion_status WHERE device_id = ANY($1)`,
+				label: "device motion status",
+			},
+			{
+				query: `DELETE FROM device_power_status WHERE device_id = ANY($1)`,
+				label: "device power status",
+			},
+			{
+				query: `DELETE FROM device_video_status WHERE device_id = ANY($1)`,
+				label: "device video status",
+			},
+			{
+				query: `DELETE FROM display_device_status WHERE device_id = ANY($1)`,
+				label: "display device status",
+			},
+			{
+				query: `DELETE FROM touch_device_status WHERE device_id = ANY($1)`,
+				label: "touch device status",
+			},
+			{
+				query: `DELETE FROM device_provisioning_events WHERE device_id = ANY($1)`,
+				label: "provisioning events",
+			},
+			{
+				query: `DELETE FROM device_crash_events WHERE device_id = ANY($1)`,
+				label: "crash events",
+			},
+			{
+				query: `DELETE FROM notifications WHERE device_id = ANY($1)`,
+				label: "device notifications",
+			},
+			{
 				query: `DELETE FROM device_runtime_commands WHERE device_id = ANY($1)`,
 				label: "runtime commands",
 			},
@@ -526,9 +620,40 @@ func (r *PostgresRepository) PurgeParentData(
 		query string
 		label string
 	}{
+		{`DELETE FROM notification_deliveries WHERE parent_account_id = $1`, "notification deliveries"},
+		{`DELETE FROM notifications WHERE parent_account_id = $1`, "notifications"},
+		{`DELETE FROM companionship_growth_records WHERE family_id = $1`, "companionship growth records"},
+		{`DELETE FROM companionship_habit_reminders WHERE family_id = $1`, "companionship habit reminders"},
+		{`DELETE FROM english_practice_attempts WHERE family_id = $1`, "english practice attempts"},
+		{`DELETE FROM local_commands WHERE family_id = $1`, "local commands"},
+		{`DELETE FROM local_command_revisions WHERE family_id = $1`, "local command revisions"},
+		{`DELETE FROM content_favorites WHERE parent_account_id = $1`, "content favorites"},
+		{`DELETE FROM content_sync_states WHERE family_id = $1`, "content sync states"},
+		{`DELETE FROM video_calls WHERE family_id = $1`, "video calls"},
+		{`DELETE FROM video_contacts WHERE family_id = $1`, "video contacts"},
+		{`DELETE FROM wearable_sos_events WHERE family_id = $1`, "wearable SOS events"},
+		{`DELETE FROM wearable_device_status WHERE family_id = $1`, "wearable device status"},
+		{`DELETE FROM wearable_geofences WHERE family_id = $1`, "wearable geofences"},
+		{`DELETE FROM wearable_location_policy WHERE family_id = $1`, "wearable location policy"},
+		{`DELETE FROM wearable_contacts WHERE family_id = $1`, "wearable contacts"},
+		{`DELETE FROM screen_video_playback WHERE family_id = $1`, "screen video playback"},
+		{`DELETE FROM screen_point_read_entries WHERE family_id = $1`, "screen point-read entries"},
+		{`DELETE FROM screen_policies WHERE family_id = $1`, "screen policies"},
+		{`DELETE FROM device_messages WHERE family_id = $1`, "device messages"},
+		{`DELETE FROM device_group_members WHERE family_id = $1`, "device group members"},
+		{`DELETE FROM device_groups WHERE family_id = $1`, "device groups"},
+		{`DELETE FROM cellular_policies WHERE family_id = $1`, "cellular policies"},
+		{`DELETE FROM display_policies WHERE family_id = $1`, "display policies"},
+		{`DELETE FROM motion_policies WHERE family_id = $1`, "motion policies"},
+		{`DELETE FROM power_policies WHERE family_id = $1`, "power policies"},
+		{`DELETE FROM touch_configs WHERE family_id = $1`, "touch configs"},
+		{`DELETE FROM parent_policy_revisions WHERE family_id = $1`, "parent policy revisions"},
 		{`DELETE FROM parent_data_export_receipts WHERE parent_account_id = $1`, "export receipts"},
 		{`DELETE FROM parent_consent_events WHERE parent_account_id = $1`, "consent history"},
 		{`DELETE FROM platform_usage_daily WHERE parent_account_id = $1`, "platform usage"},
+		{`DELETE FROM phone_verification_codes WHERE phone = (
+			SELECT phone FROM parent_accounts WHERE id = $1
+		)`, "phone verification codes"},
 		{`DELETE FROM ai_accounts WHERE parent_account_id = $1`, "AI account projection"},
 		{`DELETE FROM parent_policies WHERE family_id = $1`, "parent policies"},
 		{`DELETE FROM child_profiles WHERE family_id = $1`, "child profiles"},

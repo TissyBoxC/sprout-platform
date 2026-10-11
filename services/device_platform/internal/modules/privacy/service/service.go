@@ -547,7 +547,15 @@ func (s *Service) purgeLocalData(
 	if err != nil {
 		return err
 	}
+	// PurgeParentData reads the bindings it needs inside the same transaction
+	// that deletes them. Removing the bindings first would leave the device
+	// list empty and skip every device-scoped cleanup below.
+	if err := s.repository.PurgeParentData(ctx, parentAccountID); err != nil {
+		return err
+	}
 	for _, binding := range bindings {
+		// Revoke any session that was issued after the purge snapshot. The
+		// binding may already be gone, which is the expected steady state.
 		if err := s.devices.RevokeDeviceSessionsAndDeleteBinding(
 			ctx,
 			parentAccountID,
@@ -555,9 +563,6 @@ func (s *Service) purgeLocalData(
 		); err != nil && !errors.Is(err, bindingdomain.ErrDeviceNotFound) {
 			return err
 		}
-	}
-	if err := s.repository.PurgeParentData(ctx, parentAccountID); err != nil {
-		return err
 	}
 	return nil
 }
@@ -738,7 +743,7 @@ func consentStatus(
 		ConsentedAt:   &account.GuardianConsentedAt,
 		Status:        domain.ConsentStatusActive,
 		Active:        true,
-		ReconsentPath: "/settings/privacy",
+		ReconsentPath: "/me/privacy",
 	}
 	for _, event := range events {
 		if event.ConsentType != domain.ConsentTypeChildDataProcessing {

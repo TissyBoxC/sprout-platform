@@ -23,6 +23,7 @@ type memoryRepository struct {
 	receipts        []domain.ExportReceipt
 	deletions       []domain.DeletionRequest
 	audits          []domain.AuditEntry
+	purged          []string
 	nextDeletionSeq int
 }
 
@@ -185,8 +186,9 @@ func (r *memoryRepository) FailDeletion(
 
 func (r *memoryRepository) PurgeParentData(
 	_ context.Context,
-	_ string,
+	parentAccountID string,
 ) error {
+	r.purged = append(r.purged, parentAccountID)
 	return nil
 }
 
@@ -620,8 +622,48 @@ func TestExecuteDueDeletionsPurgesAndCompletes(t *testing.T) {
 	if len(devices.deleted) != 1 || devices.deleted[0] != testDeviceID {
 		t.Fatalf("device binding not purged: %+v", devices.deleted)
 	}
+	if len(repository.purged) != 1 || repository.purged[0] != testParentID {
+		t.Fatalf("guardian data was not purged: %+v", repository.purged)
+	}
 	if repository.deletions[0].Status != domain.DeletionStatusCompleted {
 		t.Fatalf("expected completed, got %q", repository.deletions[0].Status)
+	}
+}
+
+func TestExecuteDueDeletionsPurgesDataBeforeDeletingBindings(t *testing.T) {
+	now := testNow()
+	repository := &memoryRepository{
+		deletions: []domain.DeletionRequest{
+			{
+				ID:              "deletion-order",
+				ParentAccountID: testParentID,
+				Status:          domain.DeletionStatusPending,
+				RequestedAt:     now.Add(-8 * 24 * time.Hour),
+				ExecuteAfter:    now.Add(-time.Hour),
+				UpdatedAt:       now.Add(-8 * 24 * time.Hour),
+			},
+		},
+	}
+	devices := &fakeDevices{bindings: []bindingdomain.Binding{
+		{
+			ID:              "binding-1",
+			ParentAccountID: testParentID,
+			DeviceID:        testDeviceID,
+		},
+	}}
+	service := newTestService(
+		t,
+		repository,
+		&fakeParentAccounts{},
+		devices,
+		&fakeAIDeletion{},
+	)
+
+	if err := service.ExecuteDueDeletions(context.Background(), 10); err != nil {
+		t.Fatalf("execute due deletions: %v", err)
+	}
+	if len(repository.purged) != 1 {
+		t.Fatalf("guardian purge calls = %d, want 1", len(repository.purged))
 	}
 }
 

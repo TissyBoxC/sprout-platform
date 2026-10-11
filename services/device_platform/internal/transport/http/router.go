@@ -32,6 +32,7 @@ import (
 	playbackservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/playback/service"
 	privacyhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/handler"
 	privacyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/service"
+	recommendationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/recommendation/service"
 	releasestoreservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
 	serviceversionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
 	usagereportservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
@@ -57,6 +58,7 @@ type RouterOptions struct {
 	ContentService        *contentservice.Service
 	EnglishService        *englishservice.Service
 	PlaybackService       *playbackservice.Service
+	RecommendationService *recommendationservice.Service
 	UsageReportService    *usagereportservice.Service
 	VoiceTokenIssuer      bindingservice.VoiceTokenIssuer
 	VoiceWebSocketURL     string
@@ -289,6 +291,15 @@ func NewRouter(options RouterOptions) http.Handler {
 					devicePlaybackHandler.complete,
 				)
 			}
+		}
+		if options.RecommendationService != nil {
+			recommendationHandler := recommendationHandler{
+				service: options.RecommendationService,
+			}
+			mux.HandleFunc(
+				"GET /api/v1/content/recommendations",
+				authHandler.requireAuthentication(recommendationHandler.list),
+			)
 		}
 		if options.BindingService != nil {
 			bindingHandler := deviceBindingHandler{

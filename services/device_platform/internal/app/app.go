@@ -50,6 +50,7 @@ import (
 	playbackService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/playback/service"
 	privacyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/repository"
 	privacyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/service"
+	recommendationService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/recommendation/service"
 	releaseStoreService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
 	serviceVersionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/repository"
 	serviceVersionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
@@ -435,6 +436,19 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create playback request service: %w", err)
 	}
+	contentRecommendations := recommendationService.New(
+		recommendationService.Options{
+			Catalog: recommendationService.ContentCatalogReader{
+				Repository: contentRepository.NewPostgresRepository(databaseStore.Pool()),
+			},
+			Signals: recommendationService.ContentSignalReader{
+				Repository: contentRepository.NewPostgresRepository(databaseStore.Pool()),
+				Devices: recommendationService.BindingDeviceReader{
+					Service: deviceBindingService,
+				},
+			},
+		},
+	)
 	usageReports, err := usageReportService.New(usageReportService.Options{
 		Repository:    usagePersistence,
 		PolicyService: parentPolicyService,
@@ -485,6 +499,7 @@ func Run() error {
 			ContentService:        contentLibraryService,
 			EnglishService:        englishLearningService,
 			PlaybackService:       playbackRequests,
+			RecommendationService: contentRecommendations,
 			UsageReportService:    usageReports,
 			VoiceTokenIssuer:      voiceTokenIssuer,
 			VoiceWebSocketURL:     cfg.VoiceGateway.WebSocketURL,

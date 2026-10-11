@@ -76,6 +76,8 @@ class ProfilePage extends ConsumerWidget {
                     onCompanionship: () => context.push('/me/companionship'),
                     onAlarmReminders: () => context.push('/me/alarm-reminders'),
                     onBluetoothAudio: () => context.push('/me/bluetooth-audio'),
+                    onLearningVisualization: () =>
+                        context.push('/me/learning-visualization'),
                     onEnglish: () => context.push('/me/english'),
                     onPlayback: () => context.push('/me/playback'),
                     onLocalCommands: () => context.push('/me/local-commands'),
@@ -424,6 +426,7 @@ class _SettingsCard extends StatelessWidget {
     required this.onCompanionship,
     required this.onAlarmReminders,
     required this.onBluetoothAudio,
+    required this.onLearningVisualization,
     required this.onEnglish,
     required this.onPlayback,
     required this.onLocalCommands,
@@ -451,6 +454,7 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onCompanionship;
   final VoidCallback onAlarmReminders;
   final VoidCallback onBluetoothAudio;
+  final VoidCallback onLearningVisualization;
   final VoidCallback onEnglish;
   final VoidCallback onPlayback;
   final VoidCallback onLocalCommands;
@@ -509,6 +513,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('设置设备作为蓝牙音箱的模式和配对'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onBluetoothAudio,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.auto_awesome_rounded),
+            title: const Text('学习可视化'),
+            subtitle: const Text('设置触屏学习时的动画和反馈效果'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onLearningVisualization,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

@@ -1095,7 +1095,7 @@ func NewRouter(options RouterOptions) http.Handler {
 					authHandler.requireAuthentication(videoHandler.startCall),
 				)
 				mux.HandleFunc(
-					"PATCH /api/v1/video-companion/calls/{call_id}",
+					"PUT /api/v1/video-companion/calls/{call_id}",
 					authHandler.requireAuthentication(videoHandler.updateCall),
 				)
 				mux.HandleFunc(

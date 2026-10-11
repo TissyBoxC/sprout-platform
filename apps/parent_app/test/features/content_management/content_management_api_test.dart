@@ -196,6 +196,69 @@ void main() {
     expect(packs.single.packageIds, <String>['story_001', 'story_002']);
     expect(packs.single.catalogRevision, 7);
   });
+
+  test('parses the recommendation envelope and forwards the age tier',
+      () async {
+    final client = _FakeApiClient(
+      response: <String, Object?>{
+        'data': <String, Object?>{
+          'recommendations': <Object?>[
+            <String, Object?>{
+              'package_id': 'story_777',
+              'title': '会飞的房子',
+              'category': 'story',
+              'age_tiers': <Object?>['age_3_4'],
+              'score': 6,
+              'reason': 'same_category',
+            },
+          ],
+        },
+      },
+    );
+    final api = HttpContentManagementApi(client);
+
+    final result = await api.fetchRecommendations(
+      ageTier: ContentAgeTier.age3to4,
+      limit: 8,
+    );
+
+    expect(result, hasLength(1));
+    expect(result.single.packageId, 'story_777');
+    expect(result.single.category, ContentCategory.story);
+    expect(result.single.reason, ContentRecommendationReason.sameCategory);
+    expect(result.single.score, 6);
+    expect(client.lastQueryParameters, <String, String>{
+      'age_tier': 'age_3_4',
+      'limit': '8',
+    });
+  });
+
+  test('drops recommendations the caller already excluded', () async {
+    final api = HttpContentManagementApi(
+      _FakeApiClient(
+        response: <String, Object?>{
+          'data': <String, Object?>{
+            'recommendations': <Object?>[
+              <String, Object?>{
+                'package_id': 'story_777',
+                'title': '会飞的房子',
+                'category': 'story',
+                'age_tiers': <Object?>['age_3_4'],
+                'score': 6,
+                'reason': 'same_category',
+              },
+            ],
+          },
+        },
+      ),
+    );
+
+    final result = await api.fetchRecommendations(
+      excludePackageIds: const <String>['story_777'],
+    );
+
+    expect(result, isEmpty);
+  });
 }
 
 class _FakeApiClient implements ApiClient {

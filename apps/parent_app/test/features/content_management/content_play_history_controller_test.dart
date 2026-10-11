@@ -152,4 +152,11 @@ class _FakeContentManagementApi implements ContentManagementApi {
   @override
   Future<List<ContentThemePack>> fetchThemePacks() async =>
       const <ContentThemePack>[];
+
+  @override
+  Future<List<ContentRecommendation>> fetchRecommendations({
+    ContentAgeTier? ageTier,
+    int limit = 8,
+    List<String> excludePackageIds = const <String>[],
+  }) async => const <ContentRecommendation>[];
 }

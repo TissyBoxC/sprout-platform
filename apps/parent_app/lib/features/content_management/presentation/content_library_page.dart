@@ -8,6 +8,7 @@ import '../../../shared/widgets/app_state_switcher.dart';
 import '../application/content_favorites_controller.dart';
 import '../application/content_library_controller.dart';
 import '../application/content_play_history_controller.dart';
+import '../application/content_recommendation_controller.dart';
 import '../application/content_theme_pack_controller.dart';
 import '../domain/content_package.dart';
 
@@ -137,6 +138,7 @@ class _ContentList extends ConsumerWidget {
                   .applyFilter(filter),
             ),
           ),
+          const _RecommendationSection(),
           const SizedBox(height: 16),
           if (state.isEmpty)
             const AppReveal(
@@ -153,6 +155,204 @@ class _ContentList extends ConsumerWidget {
                 ),
               ),
         ],
+      ),
+    );
+  }
+}
+
+/// Platform-ranked suggestions shown above the catalog list.
+///
+/// The section hides itself while loading or when there is nothing to
+/// suggest, so the catalog never loses space to an empty placeholder.
+class _RecommendationSection extends ConsumerWidget {
+  const _RecommendationSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final recommendations = ref.watch(contentRecommendationControllerProvider);
+    return AppStateSwitcher(
+      stateKey: recommendations.when(
+        data: (value) => value.isEmpty ? 'recommendation-empty' : 'recommendation-list',
+        error: (_, _) => 'recommendation-error',
+        loading: () => 'recommendation-loading',
+      ),
+      child: recommendations.when(
+        loading: () => const SizedBox.shrink(
+          key: ValueKey<String>('recommendation-loading'),
+        ),
+        error: (error, _) => Padding(
+          key: const ValueKey<String>('recommendation-error'),
+          padding: const EdgeInsets.only(top: 12),
+          child: _RecommendationError(
+            message: ContentRecommendationController.messageFor(error),
+            onRetry: () => ref
+                .read(contentRecommendationControllerProvider.notifier)
+                .refresh(),
+          ),
+        ),
+        data: (value) => value.isEmpty
+            ? const SizedBox.shrink(
+                key: ValueKey<String>('recommendation-empty'),
+              )
+            : Padding(
+                key: const ValueKey<String>('recommendation-list'),
+                padding: const EdgeInsets.only(top: 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.auto_awesome_rounded,
+                          size: 20,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '为你推荐',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    const Text('根据宝贝的收藏和常听内容挑选，点一下即可下载。'),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 172,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: value.length,
+                        separatorBuilder: (_, _) => const SizedBox(width: 12),
+                        itemBuilder: (context, index) =>
+                            _RecommendationCard(recommendation: value[index]),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+      ),
+    );
+  }
+}
+
+class _RecommendationCard extends ConsumerWidget {
+  const _RecommendationCard({required this.recommendation});
+
+  final ContentRecommendation recommendation;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final library = ref.watch(contentLibraryControllerProvider).value;
+    final entry = library?.entries
+        .where(
+          (item) => item.package.packageId == recommendation.packageId,
+        )
+        .firstOrNull;
+    final isDownloading = entry?.status == ContentDownloadStatus.downloading;
+    final isDownloaded = entry?.status == ContentDownloadStatus.downloaded;
+    final canDownload = entry?.canDownload ?? false;
+    return SizedBox(
+      width: 220,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 16,
+                    backgroundColor: Theme.of(
+                      context,
+                    ).colorScheme.primaryContainer,
+                    child: Icon(
+                      _categoryIcon(recommendation.category),
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      recommendation.category.label,
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                recommendation.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 6),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: Text(
+                    recommendation.reason.label,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ),
+              if (isDownloaded)
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.check_circle_rounded,
+                      size: 18,
+                      color: Color(0xFF2E7D55),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '已下载',
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                  ],
+                )
+              else
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.tonalIcon(
+                    onPressed: isDownloading || !canDownload
+                        ? null
+                        : () => ref
+                              .read(contentLibraryControllerProvider.notifier)
+                              .download(recommendation.packageId),
+                    icon: isDownloading
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.download_rounded, size: 18),
+                    label: Text(isDownloading ? '下载中' : '下载'),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RecommendationError extends StatelessWidget {
+  const _RecommendationError({required this.message, required this.onRetry});
+
+  final String message;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.auto_awesome_outlined),
+        title: const Text('推荐暂时没有加载出来'),
+        subtitle: Text(message),
+        trailing: TextButton(onPressed: onRetry, child: const Text('重试')),
       ),
     );
   }

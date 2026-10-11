@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:parent_app/features/content_management/application/content_favorites_controller.dart';
 import 'package:parent_app/features/content_management/application/content_library_controller.dart';
 import 'package:parent_app/features/content_management/application/content_play_history_controller.dart';
+import 'package:parent_app/features/content_management/application/content_recommendation_controller.dart';
 import 'package:parent_app/features/content_management/application/content_theme_pack_controller.dart';
 import 'package:parent_app/features/content_management/domain/content_package.dart';
 import 'package:parent_app/features/content_management/presentation/content_library_page.dart';
@@ -22,6 +23,11 @@ void main() {
           ),
           contentThemePackControllerProvider.overrideWith(
             () => _FakeContentThemePackController(const <ContentThemePack>[]),
+          ),
+          contentRecommendationControllerProvider.overrideWith(
+            () => _FakeContentRecommendationController(
+              const <ContentRecommendation>[],
+            ),
           ),
           contentLibraryControllerProvider.overrideWith(
             () => _FakeContentLibraryController(
@@ -68,6 +74,11 @@ void main() {
           ),
           contentThemePackControllerProvider.overrideWith(
             () => _FakeContentThemePackController(const <ContentThemePack>[]),
+          ),
+          contentRecommendationControllerProvider.overrideWith(
+            () => _FakeContentRecommendationController(
+              const <ContentRecommendation>[],
+            ),
           ),
           contentLibraryControllerProvider.overrideWith(
             () => _FakeContentLibraryController(
@@ -124,6 +135,11 @@ void main() {
           ),
           contentThemePackControllerProvider.overrideWith(
             () => _FakeContentThemePackController(const <ContentThemePack>[]),
+          ),
+          contentRecommendationControllerProvider.overrideWith(
+            () => _FakeContentRecommendationController(
+              const <ContentRecommendation>[],
+            ),
           ),
           contentLibraryControllerProvider.overrideWith(
             () => _FakeContentLibraryController(
@@ -184,6 +200,11 @@ void main() {
           ),
           contentThemePackControllerProvider.overrideWith(
             () => _FakeContentThemePackController(const <ContentThemePack>[]),
+          ),
+          contentRecommendationControllerProvider.overrideWith(
+            () => _FakeContentRecommendationController(
+              const <ContentRecommendation>[],
+            ),
           ),
           contentLibraryControllerProvider.overrideWith(
             () => _FakeContentLibraryController(
@@ -246,6 +267,11 @@ void main() {
           contentThemePackControllerProvider.overrideWith(
             () => _FakeContentThemePackController(const <ContentThemePack>[]),
           ),
+          contentRecommendationControllerProvider.overrideWith(
+            () => _FakeContentRecommendationController(
+              const <ContentRecommendation>[],
+            ),
+          ),
           contentLibraryControllerProvider.overrideWith(
             () => _FakeContentLibraryController(
               const ContentLibraryState.initial(),
@@ -286,6 +312,11 @@ void main() {
               ),
             ]),
           ),
+          contentRecommendationControllerProvider.overrideWith(
+            () => _FakeContentRecommendationController(
+              const <ContentRecommendation>[],
+            ),
+          ),
           contentPlayHistoryControllerProvider.overrideWith(
             () => _FakeContentPlayHistoryController(
               const ContentPlayHistoryState.initial(),
@@ -313,6 +344,91 @@ void main() {
     expect(find.text('海洋主题'), findsOneWidget);
     expect(find.text('一起探索海底世界'), findsOneWidget);
     expect(find.text('2 个内容'), findsOneWidget);
+  });
+
+  testWidgets('renders the recommendation section above the catalog', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          contentPlayHistoryControllerProvider.overrideWith(
+            () => _FakeContentPlayHistoryController(
+              const ContentPlayHistoryState.initial(),
+            ),
+          ),
+          contentThemePackControllerProvider.overrideWith(
+            () => _FakeContentThemePackController(const <ContentThemePack>[]),
+          ),
+          contentRecommendationControllerProvider.overrideWith(
+            () => _FakeContentRecommendationController(const [
+              ContentRecommendation(
+                packageId: 'story_777',
+                title: '会飞的房子',
+                category: ContentCategory.story,
+                ageTiers: [ContentAgeTier.age3to4],
+                score: 6,
+                reason: ContentRecommendationReason.sameCategory,
+              ),
+            ]),
+          ),
+          contentLibraryControllerProvider.overrideWith(
+            () => _FakeContentLibraryController(
+              const ContentLibraryState.initial(),
+            ),
+          ),
+          contentFavoritesControllerProvider.overrideWith(
+            () => _FakeContentFavoritesController(
+              const ContentFavoritesState.initial(),
+            ),
+          ),
+        ],
+        child: const MaterialApp(home: ContentLibraryPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('为你推荐'), findsOneWidget);
+    expect(find.text('会飞的房子'), findsOneWidget);
+    expect(find.text('和你收藏/常听的内容相似'), findsOneWidget);
+  });
+
+  testWidgets('hides the recommendation section when the platform returns none', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          contentPlayHistoryControllerProvider.overrideWith(
+            () => _FakeContentPlayHistoryController(
+              const ContentPlayHistoryState.initial(),
+            ),
+          ),
+          contentThemePackControllerProvider.overrideWith(
+            () => _FakeContentThemePackController(const <ContentThemePack>[]),
+          ),
+          contentRecommendationControllerProvider.overrideWith(
+            () => _FakeContentRecommendationController(
+              const <ContentRecommendation>[],
+            ),
+          ),
+          contentLibraryControllerProvider.overrideWith(
+            () => _FakeContentLibraryController(
+              const ContentLibraryState.initial(),
+            ),
+          ),
+          contentFavoritesControllerProvider.overrideWith(
+            () => _FakeContentFavoritesController(
+              const ContentFavoritesState.initial(),
+            ),
+          ),
+        ],
+        child: const MaterialApp(home: ContentLibraryPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('为你推荐'), findsNothing);
   });
 }
 
@@ -350,4 +466,14 @@ class _FakeContentThemePackController extends ContentThemePackController {
 
   @override
   Future<List<ContentThemePack>> build() async => value;
+}
+
+class _FakeContentRecommendationController
+    extends ContentRecommendationController {
+  _FakeContentRecommendationController(this.value);
+
+  final List<ContentRecommendation> value;
+
+  @override
+  Future<List<ContentRecommendation>> build() async => value;
 }

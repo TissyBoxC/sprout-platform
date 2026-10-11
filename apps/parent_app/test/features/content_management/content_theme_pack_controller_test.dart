@@ -61,6 +61,13 @@ class _FakeContentManagementApi implements ContentManagementApi {
       List<ContentThemePack>.unmodifiable(themePacks);
 
   @override
+  Future<List<ContentRecommendation>> fetchRecommendations({
+    ContentAgeTier? ageTier,
+    int limit = 8,
+    List<String> excludePackageIds = const <String>[],
+  }) async => const <ContentRecommendation>[];
+
+  @override
   Future<List<ContentFavorite>> fetchFavorites() async =>
       const <ContentFavorite>[];
 

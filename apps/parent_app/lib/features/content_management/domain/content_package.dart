@@ -316,6 +316,77 @@ class ContentThemePack {
   }
 }
 
+/// Why the recommender surfaced one package, so the card can explain the
+/// suggestion instead of showing an opaque score.
+enum ContentRecommendationReason {
+  sameCategory('same_category', '和你收藏/常听的内容相似'),
+  sameAgeTier('same_age_tier', '适合宝贝的年龄'),
+  fresh('fresh', '新上架');
+
+  const ContentRecommendationReason(this.apiValue, this.label);
+
+  final String apiValue;
+  final String label;
+
+  static ContentRecommendationReason? fromApiValue(String value) {
+    for (final reason in ContentRecommendationReason.values) {
+      if (reason.apiValue == value) {
+        return reason;
+      }
+    }
+    return null;
+  }
+}
+
+/// One platform-ranked content suggestion for the guardian's family.
+///
+/// The platform excludes what the family already favourited or played, so a
+/// recommendation is always a fresh candidate drawn from the published
+/// catalog.
+class ContentRecommendation {
+  const ContentRecommendation({
+    required this.packageId,
+    required this.title,
+    required this.category,
+    required this.ageTiers,
+    required this.score,
+    required this.reason,
+  });
+
+  final String packageId;
+  final String title;
+  final ContentCategory category;
+  final List<ContentAgeTier> ageTiers;
+  final int score;
+  final ContentRecommendationReason reason;
+
+  factory ContentRecommendation.fromJson(Map<String, Object?> json) {
+    final category = ContentCategory.fromApiValue(
+      _requiredString(json['category'], 'category'),
+    );
+    if (category == null) {
+      throw const FormatException('unknown content category');
+    }
+    final reason = ContentRecommendationReason.fromApiValue(
+      _requiredString(json['reason'], 'reason'),
+    );
+    if (reason == null) {
+      throw const FormatException('unknown recommendation reason');
+    }
+    return ContentRecommendation(
+      packageId: _requiredString(json['package_id'], 'package_id'),
+      title: _requiredString(json['title'], 'title'),
+      category: category,
+      ageTiers: _stringList(json['age_tiers'])
+          .map(ContentAgeTier.fromApiValue)
+          .whereType<ContentAgeTier>()
+          .toList(growable: false),
+      score: _asInt(json['score']),
+      reason: reason,
+    );
+  }
+}
+
 /// Local lifecycle of a package that has entered the guardian library.
 enum ContentDownloadStatus {
   notDownloaded,

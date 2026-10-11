@@ -14,3 +14,11 @@ bookmark star, and 我的收藏 renders the guardian's bookmarks from
 `/api/v1/content/favorites`. Bookmark toggles are optimistic so the star reacts
 immediately, then reconcile with the platform; a failed toggle rolls back and
 shows the reason.
+
+The 全部内容 tab opens with a 为你推荐 carousel backed by
+`/api/v1/content/recommendations`. The platform ranks published candidates by
+the family's favourite and recent categories, the selected age tier, and
+freshness, and never returns a package the family already favourited or
+played. The section follows the active age-tier filter, excludes the packages
+already on screen so nothing renders twice, and hides itself while loading or
+when there is nothing to suggest.

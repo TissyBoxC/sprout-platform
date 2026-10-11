@@ -27,6 +27,16 @@ abstract interface class ContentManagementApi {
 
   /// Lists the published theme packs the guardian can browse.
   Future<List<ContentThemePack>> fetchThemePacks();
+
+  /// Lists platform-ranked content suggestions for the guardian's family.
+  ///
+  /// Passing [ageTier] narrows candidates to one child's age band; the
+  /// platform already excludes what the family favourited or played.
+  Future<List<ContentRecommendation>> fetchRecommendations({
+    ContentAgeTier? ageTier,
+    int limit = 8,
+    List<String> excludePackageIds = const <String>[],
+  });
 }
 
 /// Production implementation backed by the authenticated API client.
@@ -143,6 +153,38 @@ class HttpContentManagementApi implements ContentManagementApi {
         .map(
           (item) => ContentThemePack.fromJson(Map<String, Object?>.from(item)),
         )
+        .toList(growable: false);
+  }
+
+  @override
+  Future<List<ContentRecommendation>> fetchRecommendations({
+    ContentAgeTier? ageTier,
+    int limit = 8,
+    List<String> excludePackageIds = const <String>[],
+  }) async {
+    final response = await _apiClient.get(
+      '/api/v1/content/recommendations',
+      queryParameters: <String, String>{
+        if (ageTier != null) 'age_tier': ageTier.apiValue,
+        'limit': limit.toString(),
+      },
+    );
+    final data = response['data'];
+    if (data is! Map) {
+      throw const FormatException('missing recommendation data');
+    }
+    final recommendations = data['recommendations'];
+    if (recommendations is! List) {
+      return const <ContentRecommendation>[];
+    }
+    final excluded = excludePackageIds.toSet();
+    return recommendations
+        .whereType<Map>()
+        .map(
+          (item) =>
+              ContentRecommendation.fromJson(Map<String, Object?>.from(item)),
+        )
+        .where((item) => !excluded.contains(item.packageId))
         .toList(growable: false);
   }
 }

@@ -89,7 +89,7 @@ order and never removes a capability.
 | P2-02 | Eye-care display | Brightness, color temperature, distance, duration policy | `[Implemented]` | Firmware eye-care policy component, platform policy and status APIs, parent app settings page, and admin statistics page are implemented. |
 | P2-03 | Touch | Tap, swipe, gestures, haptic feedback | `[Implemented]` | Firmware touch configuration and gesture recognition, platform input module, parent app touch settings page, and admin statistics page are implemented. |
 | P2-04 | Cellular | eSIM, data usage, remote wake, connectivity switching | `[Implemented]` | Firmware cellular and eSIM policy component, platform connectivity module, parent app cellular settings page, and admin statistics page are implemented. |
-| P2-05 | Battery | Charging, estimation, low power, deep sleep | `[Not implemented]` | Battery, charging, power policy, sleep, and wake sources are missing. |
+| P2-05 | Battery | Charging, estimation, low power, deep sleep | `[Implemented]` | Firmware battery and low-power policy component, platform power policy and status APIs, parent app battery settings page, and admin statistics page are implemented. |
 | P2-06 | Motion | Motors, servos, walking, dancing, tail actions | `[Not implemented]` | Drivers, action sequencing, stop protection, and timeout safety are missing. |
 | P2-07 | Form factors | Capability sets for multiple physical forms | `[Not implemented]` | Capability-based form profiles are missing. Technical names never bind to a character or appearance. |
 | P2-08 | Video companionship | Video calls, remote companionship | `[Not implemented]` | Media negotiation, codecs, poor-network handling, permission, and call history are missing. |

@@ -92,7 +92,7 @@ order and never removes a capability.
 | P2-05 | Battery | Charging, estimation, low power, deep sleep | `[Implemented]` | Firmware battery and low-power policy component, platform power policy and status APIs, parent app battery settings page, and admin statistics page are implemented. |
 | P2-06 | Motion | Motors, servos, walking, dancing, tail actions | `[Implemented]` | Firmware motion and motor safety component, platform motion policy and status APIs, parent app motion settings page, and admin statistics page are implemented. |
 | P2-07 | Form factors | Capability sets for multiple physical forms | `[Implemented]` | Firmware capability-composed form-factor profile, platform form-factor capability and status APIs, parent app viewer page, and admin statistics page are implemented. Technical names never bind to a character or appearance. |
-| P2-08 | Video companionship | Video calls, remote companionship | `[Not implemented]` | Media negotiation, codecs, poor-network handling, permission, and call history are missing. |
+| P2-08 | Video companionship | Video calls, remote companionship | `[Implemented]` | Firmware call-session component, platform video companionship (contacts, call state, device status, and statistics APIs), parent app page, and admin statistics page are implemented; media negotiation and codecs stay at the call gateway. |
 | P2-09 | Wearables and location | Location, calling, geofence, SOS | `[Not implemented]` | Location, contacts, geofence, SOS, offline reporting, and urgent notifications are missing. |
 | P2-10 | Multi-device | Family linkage, device mesh, content sync | `[Not implemented]` | Message routing, device groups, conflict handling, and eventual consistency are missing. |
 

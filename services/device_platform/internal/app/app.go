@@ -18,6 +18,8 @@ import (
 	aiProvider "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/provider"
 	aiRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/repository"
 	aiService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/service"
+	alarmReminderRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/alarm_reminder/repository"
+	alarmReminderService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/alarm_reminder/service"
 	auditRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/repository"
 	auditService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/service"
 	authRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/repository"
@@ -202,6 +204,12 @@ func Run() error {
 	})
 	if err != nil {
 		return fmt.Errorf("create companionship service: %w", err)
+	}
+	alarmReminder, err := alarmReminderService.New(alarmReminderService.Options{
+		Repository: alarmReminderRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
+	if err != nil {
+		return fmt.Errorf("create alarm reminder service: %w", err)
 	}
 	englishLearningService, err := englishService.New(englishService.Options{
 		Repository: englishPersistence,
@@ -626,6 +634,7 @@ func Run() error {
 			AuthService:                 parentAuthService,
 			ChildService:                childProfileService,
 			CompanionshipService:        companionshipCompanionService,
+			AlarmReminderService:        alarmReminder,
 			ParentPolicyService:         parentPolicyService,
 			AIService:                   aiAccountService,
 			OperationsService:           operations,

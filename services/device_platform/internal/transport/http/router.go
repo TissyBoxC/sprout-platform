@@ -14,6 +14,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/packages/go/observability"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/config"
 	gatewayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/service"
+	alarmreminderservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/alarm_reminder/service"
 	auditdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/domain"
 	audithandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/handler"
 	authdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
@@ -94,6 +95,7 @@ type RouterOptions struct {
 	FormFactorService           *formfactorservice.Service
 	VideoCompanionService       *videoservice.Service
 	VideoSessionService         *videosessionservice.Service
+	AlarmReminderService        *alarmreminderservice.Service
 	WearableService             *wearableservice.Service
 	DeviceMeshService           *devicemeshservice.Service
 	ScreenService               *screenservice.Service
@@ -271,6 +273,29 @@ func NewRouter(options RouterOptions) http.Handler {
 			mux.HandleFunc(
 				"DELETE /api/v1/companionship/habit-reminders/{reminder_id}",
 				authHandler.requireAuthentication(companionshipHandler.deleteHabitReminder),
+			)
+		}
+		if options.AlarmReminderService != nil {
+			alarmReminderHandler := alarmReminderHandler{service: options.AlarmReminderService}
+			mux.HandleFunc(
+				"GET /api/v1/alarm-reminders",
+				authHandler.requireAuthentication(alarmReminderHandler.listAlarms),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/alarm-reminders",
+				authHandler.requireAuthentication(alarmReminderHandler.createAlarm),
+			)
+			mux.HandleFunc(
+				"PUT /api/v1/alarm-reminders/{alarm_id}",
+				authHandler.requireAuthentication(alarmReminderHandler.updateAlarm),
+			)
+			mux.HandleFunc(
+				"DELETE /api/v1/alarm-reminders/{alarm_id}",
+				authHandler.requireAuthentication(alarmReminderHandler.deleteAlarm),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/alarm-reminders/events",
+				authHandler.requireAuthentication(alarmReminderHandler.listEvents),
 			)
 		}
 		if options.EnglishService != nil {
@@ -552,6 +577,24 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/video-session/status",
 					deviceVideoSessionHandler.reportStatus,
+				)
+			}
+		}
+		if options.AlarmReminderService != nil {
+			alarmReminderHandler := alarmReminderHandler{service: options.AlarmReminderService}
+			if options.BindingService != nil && options.RuntimeService != nil {
+				deviceAlarmReminderHandler := deviceAlarmReminderHandler{
+					handler:        &alarmReminderHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/alarm-reminders",
+					deviceAlarmReminderHandler.schedule,
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/alarm-reminders/{alarm_id}/events",
+					deviceAlarmReminderHandler.reportEvent,
 				)
 			}
 		}

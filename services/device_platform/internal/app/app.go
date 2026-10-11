@@ -43,6 +43,8 @@ import (
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/repository"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
+	formFactorRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/form_factor/repository"
+	formFactorService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/form_factor/service"
 	inputRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/repository"
 	inputService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/service"
 	localCommandRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/repository"
@@ -548,6 +550,12 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create motion service: %w", err)
 	}
+	deviceFormFactor, err := formFactorService.New(formFactorService.Options{
+		Repository: formFactorRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
+	if err != nil {
+		return fmt.Errorf("create form factor service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
@@ -584,6 +592,7 @@ func Run() error {
 			ConnectivityService:         connectivity,
 			PowerService:                devicePower,
 			MotionService:               deviceMotion,
+			FormFactorService:           deviceFormFactor,
 			AuditRecorder:               privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

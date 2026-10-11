@@ -27,6 +27,7 @@ import (
 	displayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/display/service"
 	englishservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/service"
 	featurecenterservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
+	formfactorservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/form_factor/service"
 	inputservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/service"
 	localcommandservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
 	motionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
@@ -81,6 +82,7 @@ type RouterOptions struct {
 	ConnectivityService         *connectivityservice.Service
 	PowerService                *powerservice.Service
 	MotionService               *motionservice.Service
+	FormFactorService           *formfactorservice.Service
 	AuditRecorder               auditRecorder
 }
 
@@ -455,6 +457,20 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/motion/status",
 					deviceMotionHandler.reportStatus,
+				)
+			}
+		}
+		if options.FormFactorService != nil {
+			formFactorHandler := formFactorHandler{service: options.FormFactorService}
+			if options.BindingService != nil && options.RuntimeService != nil {
+				deviceFormFactorHandler := deviceFormFactorHandler{
+					handler:        &formFactorHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/form-factor/report",
+					deviceFormFactorHandler.report,
 				)
 			}
 		}
@@ -1019,6 +1035,21 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/admin/motion/stats",
 					authHandler.requireAdmin(motionHandler.adminStats),
+				)
+			}
+			if options.FormFactorService != nil {
+				formFactorHandler := formFactorHandler{service: options.FormFactorService}
+				mux.HandleFunc(
+					"GET /api/v1/form-factor/devices",
+					authHandler.requireAuthentication(formFactorHandler.statuses),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/form-factor/capability",
+					authHandler.requireAuthentication(formFactorHandler.capability),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/form-factor/stats",
+					authHandler.requireAdmin(formFactorHandler.adminStats),
 				)
 			}
 			if options.NotificationService != nil {

@@ -3,21 +3,11 @@ import type { AxiosInstance } from 'axios'
 import { createHttpClient } from '@/api/httpClient'
 
 export type ContentCategory =
-  | 'story'
-  | 'nursery_rhyme'
-  | 'poetry'
-  | 'english'
-  | 'encyclopedia'
-  | 'bedtime'
+  'story' | 'nursery_rhyme' | 'poetry' | 'english' | 'encyclopedia' | 'bedtime'
 
 export type ContentAgeTier = 'age_3_4' | 'age_5_6' | 'age_7_8'
 
-export type ContentStatus =
-  | 'draft'
-  | 'in_review'
-  | 'published'
-  | 'withdrawn'
-  | 'archived'
+export type ContentStatus = 'draft' | 'in_review' | 'published' | 'withdrawn' | 'archived'
 
 export interface ContentReviewEntry {
   actor: string
@@ -216,25 +206,19 @@ export function createAdminContentClient(
       packageVersion: number,
       input: ContentDraftInput,
     ): Promise<ContentPackage | null> {
-      const response = await httpClient.put(
-        versionPath(packageId, packageVersion),
-        {
-          title: input.title.trim(),
-          category: input.category,
-          age_tiers: input.ageTiers,
-          asset_key: input.assetKey.trim(),
-          sha256: input.sha256.trim(),
-          size_bytes: input.sizeBytes,
-        },
-      )
+      const response = await httpClient.put(versionPath(packageId, packageVersion), {
+        title: input.title.trim(),
+        category: input.category,
+        age_tiers: input.ageTiers,
+        asset_key: input.assetKey.trim(),
+        sha256: input.sha256.trim(),
+        size_bytes: input.sizeBytes,
+      })
       const updated = optionalVersion(response.data?.data)
       return updated === null ? null : toPackageFromVersion(updated)
     },
 
-    async submitVersion(
-      packageId: string,
-      packageVersion: number,
-    ): Promise<ContentPackage | null> {
+    async submitVersion(packageId: string, packageVersion: number): Promise<ContentPackage | null> {
       return runVersionAction(httpClient, packageId, packageVersion, 'submit')
     },
 
@@ -304,9 +288,7 @@ export function createAdminContentClient(
     },
 
     async deleteThemePack(themeId: string): Promise<void> {
-      await httpClient.delete(
-        `/api/v1/admin/content/theme-packs/${encodeURIComponent(themeId)}`,
-      )
+      await httpClient.delete(`/api/v1/admin/content/theme-packs/${encodeURIComponent(themeId)}`)
     },
 
     async loadOfflinePolicy(): Promise<OfflinePolicy> {
@@ -349,26 +331,16 @@ function toOfflinePolicy(value: unknown): OfflinePolicy {
       record.max_cache_bytes ?? record.maxCacheBytes,
       512 * 1024 * 1024,
     ),
-    cacheTtlHours: nonNegativeInteger(
-      record.cache_ttl_hours ?? record.cacheTtlHours,
-      720,
-    ),
+    cacheTtlHours: nonNegativeInteger(record.cache_ttl_hours ?? record.cacheTtlHours, 720),
     downloadOverWifiOnly:
-      record.download_over_wifi_only !== false &&
-      record.downloadOverWifiOnly !== false,
+      record.download_over_wifi_only !== false && record.downloadOverWifiOnly !== false,
     revision: nonNegativeInteger(record.revision, 0),
   }
 }
 
-function toOfflinePolicyAcknowledgements(
-  value: unknown,
-): OfflinePolicyAcknowledgement[] {
+function toOfflinePolicyAcknowledgements(value: unknown): OfflinePolicyAcknowledgement[] {
   const record = recordValue(value)
-  const source = Array.isArray(record.devices)
-    ? record.devices
-    : Array.isArray(value)
-      ? value
-      : []
+  const source = Array.isArray(record.devices) ? record.devices : Array.isArray(value) ? value : []
   return source.flatMap((item: unknown) => {
     const entry = recordValue(item)
     const deviceId = stringValue(entry.device_id ?? entry.deviceId).trim()
@@ -432,10 +404,7 @@ function toNullableThemePack(value: unknown): ThemePack | null {
     ageTiers: contentAgeTiers(record.age_tiers ?? record.ageTiers),
     packageIds: stringArray(record.package_ids ?? record.packageIds),
     status: themePackStatus(record.status),
-    catalogRevision: nonNegativeInteger(
-      record.catalog_revision ?? record.catalogRevision,
-      0,
-    ),
+    catalogRevision: nonNegativeInteger(record.catalog_revision ?? record.catalogRevision, 0),
     publishedAt: stringValue(record.published_at ?? record.publishedAt),
     createdAt: stringValue(record.created_at ?? record.createdAt),
     updatedAt: stringValue(record.updated_at ?? record.updatedAt),
@@ -585,10 +554,7 @@ function toReviewHistory(value: unknown): ContentReviewEntry[] {
         actor: stringValue(record.actor_account_id ?? record.actor),
         action,
         reason: stringValue(record.reason),
-        packageVersion: nonNegativeInteger(
-          record.package_version ?? record.packageVersion,
-          0,
-        ),
+        packageVersion: nonNegativeInteger(record.package_version ?? record.packageVersion, 0),
         createdAt: stringValue(record.created_at ?? record.createdAt),
       },
     ]

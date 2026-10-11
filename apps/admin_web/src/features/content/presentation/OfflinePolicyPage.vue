@@ -195,13 +195,7 @@ function acknowledgementLabel(entry: OfflinePolicyAcknowledgement): string {
       <div class="field-grid">
         <label class="field">
           <span>可缓存内容包数量</span>
-          <input
-            v-model.number="form.maxCachedPackages"
-            type="number"
-            min="1"
-            max="200"
-            step="1"
-          />
+          <input v-model.number="form.maxCachedPackages" type="number" min="1" max="200" step="1" />
           <small class="field-hint">单台设备最多保留的内容包版本数。</small>
           <small v-if="formErrors.maxCachedPackages" class="field-error">
             {{ formErrors.maxCachedPackages }}
@@ -225,13 +219,7 @@ function acknowledgementLabel(entry: OfflinePolicyAcknowledgement): string {
 
         <label class="field">
           <span>缓存有效期（小时）</span>
-          <input
-            v-model.number="form.cacheTtlHours"
-            type="number"
-            min="1"
-            max="8760"
-            step="1"
-          />
+          <input v-model.number="form.cacheTtlHours" type="number" min="1" max="8760" step="1" />
           <small class="field-hint">超过有效期且未播放的缓存会被清理。</small>
           <small v-if="formErrors.cacheTtlHours" class="field-error">
             {{ formErrors.cacheTtlHours }}
@@ -298,17 +286,12 @@ function acknowledgementLabel(entry: OfflinePolicyAcknowledgement): string {
         {{ store.acknowledgementsError.message }}
       </p>
 
-      <div v-if="selectedFamilyId === ''" class="state-panel">
-        选择家庭以查看设备版本。
-      </div>
+      <div v-if="selectedFamilyId === ''" class="state-panel">选择家庭以查看设备版本。</div>
       <div v-else-if="store.isLoadingAcknowledgements" class="state-panel">
         <span class="state-spinner" aria-hidden="true"></span>
         正在查询设备…
       </div>
-      <div
-        v-else-if="store.acknowledgements.length === 0"
-        class="state-panel"
-      >
+      <div v-else-if="store.acknowledgements.length === 0" class="state-panel">
         该家庭暂无可上报离线策略的设备。
       </div>
       <div v-else class="table-shell">
@@ -322,7 +305,9 @@ function acknowledgementLabel(entry: OfflinePolicyAcknowledgement): string {
           </thead>
           <tbody>
             <tr v-for="entry in store.acknowledgements" :key="entry.deviceId">
-              <td><span class="device-id">{{ entry.deviceId }}</span></td>
+              <td>
+                <span class="device-id">{{ entry.deviceId }}</span>
+              </td>
               <td>{{ entry.revision }}</td>
               <td>
                 <span :class="['status', entry.upToDate ? 'status-ok' : 'status-behind']">

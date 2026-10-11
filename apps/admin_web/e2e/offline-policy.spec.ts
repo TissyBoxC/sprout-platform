@@ -31,7 +31,10 @@ async function useAdminSession(page: Page): Promise<void> {
   })
 }
 
-function jsonResponse(data: unknown, status = 200): {
+function jsonResponse(
+  data: unknown,
+  status = 200,
+): {
   status: number
   contentType: string
   body: string

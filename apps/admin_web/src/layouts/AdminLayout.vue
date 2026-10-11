@@ -67,6 +67,10 @@ async function logout(): Promise<void> {
           <span class="nav-dot" aria-hidden="true"></span>
           屏幕与护眼
         </RouterLink>
+        <RouterLink to="/screen">
+          <span class="nav-dot" aria-hidden="true"></span>
+          屏幕能力
+        </RouterLink>
         <RouterLink to="/touch">
           <span class="nav-dot" aria-hidden="true"></span>
           触摸交互

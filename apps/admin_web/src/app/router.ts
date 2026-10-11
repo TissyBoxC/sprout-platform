@@ -29,6 +29,7 @@ import FormFactorStatsPage from '@/features/form_factor/presentation/FormFactorS
 import VideoStatsPage from '@/features/video_companion/presentation/VideoStatsPage.vue'
 import WearableStatsPage from '@/features/wearable/presentation/WearableStatsPage.vue'
 import MultiDeviceStatsPage from '@/features/multi_device/presentation/MultiDeviceStatsPage.vue'
+import ScreenStatsPage from '@/features/screen/presentation/ScreenStatsPage.vue'
 import { useAuthStore } from '@/features/auth/application/authStore'
 
 /// Feature routes are registered here so removing a feature only changes its
@@ -176,6 +177,11 @@ export function createAdminRouter() {
         path: '/multi-device',
         name: 'multi-device',
         component: MultiDeviceStatsPage,
+      },
+      {
+        path: '/screen',
+        name: 'screen',
+        component: ScreenStatsPage,
       },
       {
         path: '/audit',

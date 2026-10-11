@@ -79,6 +79,7 @@ class ProfilePage extends ConsumerWidget {
                     onLocalCommands: () => context.push('/me/local-commands'),
                     onOfflinePolicy: () => context.push('/me/offline-policy'),
                     onDisplay: () => context.push('/me/display'),
+                    onScreen: () => context.push('/me/screen'),
                     onTouch: () => context.push('/me/touch'),
                     onCellular: () => context.push('/me/cellular'),
                     onBattery: () => context.push('/me/battery'),
@@ -424,6 +425,7 @@ class _SettingsCard extends StatelessWidget {
     required this.onLocalCommands,
     required this.onOfflinePolicy,
     required this.onDisplay,
+    required this.onScreen,
     required this.onTouch,
     required this.onCellular,
     required this.onBattery,
@@ -448,6 +450,7 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onLocalCommands;
   final VoidCallback onOfflinePolicy;
   final VoidCallback onDisplay;
+  final VoidCallback onScreen;
   final VoidCallback onTouch;
   final VoidCallback onCellular;
   final VoidCallback onBattery;
@@ -524,6 +527,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('设置亮度、色温、观看距离和时长提醒'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onDisplay,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.smart_display_outlined),
+            title: const Text('屏幕'),
+            subtitle: const Text('设置表情、动画、点读词条和视频播放'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onScreen,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

@@ -24,6 +24,7 @@ import '../../features/parent_policy/presentation/parent_policy_page.dart';
 import '../../features/playback/presentation/playback_page.dart';
 import '../../features/profile/presentation/profile_page.dart';
 import '../../features/settings/presentation/privacy_page.dart';
+import '../../features/screen/presentation/screen_page.dart';
 import '../../features/usage_report/presentation/usage_report_page.dart';
 import '../../features/vision/presentation/vision_page.dart';
 import '../../features/form_factor/presentation/form_factor_page.dart';
@@ -117,6 +118,10 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/display',
         builder: (context, state) => const DisplaySettingsPage(),
+      ),
+      GoRoute(
+        path: '/me/screen',
+        builder: (context, state) => const ScreenPage(),
       ),
       GoRoute(
         path: '/me/touch',

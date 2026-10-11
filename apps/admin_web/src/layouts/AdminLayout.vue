@@ -83,6 +83,10 @@ async function logout(): Promise<void> {
           <span class="nav-dot" aria-hidden="true"></span>
           动作与电机
         </RouterLink>
+        <RouterLink to="/form-factor">
+          <span class="nav-dot" aria-hidden="true"></span>
+          形态能力
+        </RouterLink>
         <RouterLink to="/audit">
           <span class="nav-dot" aria-hidden="true"></span>
           操作审计

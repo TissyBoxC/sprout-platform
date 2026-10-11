@@ -16,11 +16,17 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('家长授权'), findsOneWidget);
-    expect(find.text('授权有效'), findsOneWidget);
+    expect(find.text('已授权'), findsNWidgets(4));
+    expect(find.text('AI 语音陪伴'), findsOneWidget);
+    expect(find.text('邮件联系'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('获取数据副本'), 200);
+    await tester.pumpAndSettle();
     expect(find.text('获取数据副本'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('数据保留说明'), 200);
+    await tester.pumpAndSettle();
     expect(find.text('数据保留说明'), findsOneWidget);
     expect(find.text('保留 30 天'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('申请注销账号'), 300);
+    await tester.scrollUntilVisible(find.text('申请注销账号'), 200);
     await tester.pumpAndSettle();
     expect(find.text('申请注销账号'), findsOneWidget);
   });
@@ -37,8 +43,7 @@ void main() {
     await tester.pumpWidget(_privacyAppWithController(controller));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('生成数据副本'));
-    await tester.pumpAndSettle();
+    await _tapExport(tester, '生成数据副本');
 
     expect(controller.exportCount, 1);
     expect(find.text('最近导出的副本'), findsOneWidget);
@@ -59,10 +64,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('生成数据副本'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('打开副本'));
-    await tester.pumpAndSettle();
+    await _tapExport(tester, '生成数据副本');
+    await _tapExport(tester, '打开副本');
 
     expect(launcher.openCount, 1);
   });
@@ -82,10 +85,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('生成数据副本'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('保存或分享'));
-    await tester.pumpAndSettle();
+    await _tapExport(tester, '生成数据副本');
+    await _tapExport(tester, '保存或分享');
 
     expect(launcher.shareCount, 1);
     expect(find.text('数据副本已交给所选应用'), findsOneWidget);
@@ -108,10 +109,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('生成数据副本'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('保存或分享'));
-    await tester.pumpAndSettle();
+    await _tapExport(tester, '生成数据副本');
+    await _tapExport(tester, '保存或分享');
 
     expect(launcher.shareCount, 1);
     expect(find.text('数据副本已交给所选应用'), findsNothing);
@@ -137,10 +136,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('生成数据副本'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('保存或分享'));
-    await tester.pumpAndSettle();
+    await _tapExport(tester, '生成数据副本');
+    await _tapExport(tester, '保存或分享');
 
     expect(find.text('暂时无法分享，文件已经保存在本机，可以稍后重试'), findsOneWidget);
     expect(find.text('保存或分享'), findsOneWidget);
@@ -189,7 +186,7 @@ void main() {
     expect(find.text('注销申请已取消'), findsOneWidget);
   });
 
-  testWidgets('withdrawing consent clears the session and returns to login', (
+  testWidgets('withdrawing child data processing clears the session', (
     tester,
   ) async {
     final controller = _FakePrivacyController(const AsyncData(_activeStatus));
@@ -202,16 +199,45 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('撤回授权并结束会话'));
-    await tester.pumpAndSettle();
+    await _tapWithdraw(tester, GuardianConsentKind.childDataProcessing);
     await tester.enterText(find.byType(TextField).last, '撤回');
     await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, '撤回授权'));
     await tester.pumpAndSettle();
 
     expect(controller.withdrawCount, 1);
+    expect(controller.withdrawnTypes, [
+      GuardianConsentKind.childDataProcessing,
+    ]);
     expect(sessionClosed, isTrue);
     expect(find.text('登录占位'), findsOneWidget);
+  });
+
+  testWidgets('withdraws and restores one consent type independently', (
+    tester,
+  ) async {
+    final controller = _FakePrivacyController(const AsyncData(_activeStatus));
+    await tester.pumpWidget(_privacyAppWithController(controller));
+    await tester.pumpAndSettle();
+
+    // Withdraw the AI interaction authorization from its own row.
+    await _tapWithdraw(tester, GuardianConsentKind.aiInteraction);
+    await tester.enterText(find.byType(TextField).last, '撤回');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, '撤回授权'));
+    await tester.pumpAndSettle();
+
+    expect(controller.withdrawnTypes, [GuardianConsentKind.aiInteraction]);
+    // Other types stay granted, so exactly one badge is "已撤回".
+    expect(find.text('已撤回'), findsOneWidget);
+    expect(find.text('已授权'), findsNWidgets(3));
+    expect(find.text('已撤回“AI 语音陪伴”授权'), findsOneWidget);
+
+    await _tapRestore(tester, GuardianConsentKind.aiInteraction);
+
+    expect(controller.grantedTypes, [GuardianConsentKind.aiInteraction]);
+    expect(find.text('已授权'), findsNWidgets(4));
+    expect(find.text('已恢复“AI 语音陪伴”授权'), findsOneWidget);
   });
 
   testWidgets('restores consent through the platform and refreshes status', (
@@ -221,21 +247,14 @@ void main() {
       AsyncData(_withdrawnStatus),
       restoredStatus: _activeStatus,
     );
-    await tester.pumpWidget(
-      _privacyAppWithController(
-        controller,
-        routes: [
-        ],
-      ),
-    );
+    await tester.pumpWidget(_privacyAppWithController(controller));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('重新确认授权'));
-    await tester.pumpAndSettle();
+    await _tapRestore(tester, GuardianConsentKind.childDataProcessing);
 
     expect(controller.grantCount, 1);
-    expect(find.text('授权有效'), findsOneWidget);
-    expect(find.text('家长授权已恢复'), findsOneWidget);
+    expect(find.text('已授权'), findsNWidgets(4));
+    expect(find.text('已恢复“儿童资料处理”授权'), findsOneWidget);
   });
 
   testWidgets('does not invent a reconsent route when the platform omits it', (
@@ -247,6 +266,7 @@ void main() {
     await tester.pumpWidget(_privacyAppWithController(controller));
     await tester.pumpAndSettle();
 
+    // The summary fallback carries the route-less single-consent layout.
     final button = find.widgetWithText(FilledButton, '重新确认授权');
     expect(button, findsOneWidget);
     expect(tester.widget<FilledButton>(button).onPressed, isNull);
@@ -267,8 +287,7 @@ void main() {
     await tester.pumpWidget(_privacyAppWithController(controller));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('生成数据副本'));
-    await tester.pumpAndSettle();
+    await _tapExport(tester, '生成数据副本');
 
     await tester.scrollUntilVisible(find.text('网络连接不稳定，请检查后重试'), 300);
     await tester.pumpAndSettle();
@@ -295,10 +314,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('生成数据副本'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('打开副本'));
-    await tester.pumpAndSettle();
+    await _tapExport(tester, '生成数据副本');
+    await _tapExport(tester, '打开副本');
 
     expect(find.textContaining('请使用“保存或分享”'), findsOneWidget);
   });
@@ -339,7 +356,61 @@ const _activeStatus = PrivacyStatus(
     imageRetentionDays: 0,
     conversationRetentionDays: 30,
   ),
+  consents: [
+    GuardianConsentType(
+      type: GuardianConsentKind.guardianTerms,
+      version: '2026-01',
+      consentedAt: null,
+      withdrawnAt: null,
+      status: GuardianConsentStatus.active,
+    ),
+    GuardianConsentType(
+      type: GuardianConsentKind.childDataProcessing,
+      version: '2026-01',
+      consentedAt: null,
+      withdrawnAt: null,
+      status: GuardianConsentStatus.active,
+    ),
+    GuardianConsentType(
+      type: GuardianConsentKind.aiInteraction,
+      version: '2026-01',
+      consentedAt: null,
+      withdrawnAt: null,
+      status: GuardianConsentStatus.active,
+    ),
+    GuardianConsentType(
+      type: GuardianConsentKind.emailContact,
+      version: '2026-01',
+      consentedAt: null,
+      withdrawnAt: null,
+      status: GuardianConsentStatus.active,
+    ),
+  ],
 );
+
+/// Returns an active status with one type withdrawn, matching what the
+/// platform projection would return after a per-type withdrawal.
+PrivacyStatus _withdrawnConsentStatus(GuardianConsentKind withdrawn) {
+  return PrivacyStatus(
+    consent: _activeStatus.consent,
+    deletion: const PrivacyDeletion.none(),
+    exportAvailable: true,
+    policy: _activeStatus.policy,
+    consents: [
+      for (final entry in _activeStatus.consents)
+        if (entry.type == withdrawn)
+          GuardianConsentType(
+            type: entry.type,
+            version: entry.version,
+            consentedAt: null,
+            withdrawnAt: DateTime(2026, 10, 8),
+            status: GuardianConsentStatus.withdrawn,
+          )
+        else
+          entry,
+    ],
+  );
+}
 
 final _pendingDeletionStatus = PrivacyStatus(
   consent: _activeStatus.consent,
@@ -365,6 +436,19 @@ final _withdrawnStatus = PrivacyStatus(
   deletion: const PrivacyDeletion.none(),
   exportAvailable: true,
   policy: _activeStatus.policy,
+  consents: [
+    for (final entry in _activeStatus.consents)
+      if (entry.type == GuardianConsentKind.childDataProcessing)
+        GuardianConsentType(
+          type: entry.type,
+          version: entry.version,
+          consentedAt: null,
+          withdrawnAt: DateTime(2026, 10, 8),
+          status: GuardianConsentStatus.withdrawn,
+        )
+      else
+        entry,
+  ],
 );
 
 const _withdrawnWithoutRouteStatus = PrivacyStatus(
@@ -391,6 +475,42 @@ final _exportFile = PrivacyExportFile(
 
 Widget _privacyApp(AsyncValue<PrivacyStatus> state) {
   return _privacyAppWithController(_FakePrivacyController(state));
+}
+
+/// Scrolls the export action into view and taps it.
+///
+/// The consent card is tall enough to push the export controls off the test
+/// viewport, so every export interaction must scroll first.
+Future<void> _tapExport(WidgetTester tester, String label) async {
+  await tester.scrollUntilVisible(find.text(label), 200);
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(label));
+  await tester.pumpAndSettle();
+}
+
+/// Taps the withdraw button for a consent type, scrolling it into view first.
+Future<void> _tapWithdraw(
+  WidgetTester tester,
+  GuardianConsentKind kind,
+) async {
+  final finder = find.byKey(
+    ValueKey<String>('consent-withdraw-${kind.wireValue}'),
+  );
+  await tester.scrollUntilVisible(finder, 200);
+  await tester.pumpAndSettle();
+  await tester.tap(finder);
+  await tester.pumpAndSettle();
+}
+
+/// Taps the restore button for a consent type, scrolling it into view first.
+Future<void> _tapRestore(WidgetTester tester, GuardianConsentKind kind) async {
+  final finder = find.byKey(
+    ValueKey<String>('consent-restore-${kind.wireValue}'),
+  );
+  await tester.scrollUntilVisible(finder, 200);
+  await tester.pumpAndSettle();
+  await tester.tap(finder);
+  await tester.pumpAndSettle();
 }
 
 Widget _privacyAppWithController(
@@ -446,6 +566,8 @@ class _FakePrivacyController extends PrivacyController {
   int cancelDeletionCount = 0;
   int withdrawCount = 0;
   int grantCount = 0;
+  final List<GuardianConsentKind> withdrawnTypes = [];
+  final List<GuardianConsentKind> grantedTypes = [];
 
   @override
   Future<void> refresh() async {
@@ -495,21 +617,26 @@ class _FakePrivacyController extends PrivacyController {
   }
 
   @override
-  Future<GuardianConsent> withdrawConsent() async {
+  Future<PrivacyStatus> withdrawConsent({
+    GuardianConsentKind consentType =
+        GuardianConsentKind.childDataProcessing,
+  }) async {
     withdrawCount += 1;
-    return const GuardianConsent(
-      version: '2026-01',
-      consentedAt: null,
-      withdrawnAt: null,
-      status: GuardianConsentStatus.withdrawn,
-    );
+    withdrawnTypes.add(consentType);
+    final next = _withdrawnConsentStatus(consentType);
+    state = AsyncData(next);
+    return next;
   }
 
   @override
-  Future<GuardianConsent> grantConsent() async {
+  Future<PrivacyStatus> grantConsent({
+    GuardianConsentKind consentType =
+        GuardianConsentKind.childDataProcessing,
+  }) async {
     grantCount += 1;
+    grantedTypes.add(consentType);
     state = AsyncData(_activeStatus);
-    return _activeStatus.consent;
+    return _activeStatus;
   }
 }
 

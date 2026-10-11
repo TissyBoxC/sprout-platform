@@ -19,6 +19,7 @@ import '../../features/notification/presentation/family_message_page.dart';
 import '../../features/notification/presentation/notification_inbox_page.dart';
 import '../../features/ota/presentation/app_update_page.dart';
 import '../../features/parent_policy/presentation/parent_policy_page.dart';
+import '../../features/playback/presentation/playback_page.dart';
 import '../../features/profile/presentation/profile_page.dart';
 import '../../features/settings/presentation/privacy_page.dart';
 import '../../features/usage_report/presentation/usage_report_page.dart';
@@ -88,6 +89,10 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/english',
         builder: (context, state) => const EnglishPage(),
+      ),
+      GoRoute(
+        path: '/me/playback',
+        builder: (context, state) => const PlaybackPage(),
       ),
       GoRoute(
         path: '/me/notifications',

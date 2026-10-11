@@ -75,6 +75,7 @@ class ProfilePage extends ConsumerWidget {
                     onChildren: () => context.push('/me/children'),
                     onCompanionship: () => context.push('/me/companionship'),
                     onEnglish: () => context.push('/me/english'),
+                    onPlayback: () => context.push('/me/playback'),
                     onUsageReports: () => context.push('/me/usage-reports'),
                     onNotifications: () => context.push('/me/notifications'),
                     onContent: () => context.push('/me/content'),
@@ -409,6 +410,7 @@ class _SettingsCard extends StatelessWidget {
     required this.onChildren,
     required this.onCompanionship,
     required this.onEnglish,
+    required this.onPlayback,
     required this.onUsageReports,
     required this.onNotifications,
     required this.onContent,
@@ -422,6 +424,7 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onChildren;
   final VoidCallback onCompanionship;
   final VoidCallback onEnglish;
+  final VoidCallback onPlayback;
   final VoidCallback onUsageReports;
   final VoidCallback onNotifications;
   final VoidCallback onContent;
@@ -459,6 +462,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('按年龄看课程，跟读单词和句型'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onEnglish,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.playlist_play_rounded),
+            title: const Text('点播'),
+            subtitle: const Text('把内容推送到设备，随时看播放结果'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onPlayback,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

@@ -454,19 +454,6 @@ func (handler authHandler) authorizeAdmin(
 	return accountID, true
 }
 
-// requireAdminAction wraps an administrator handler with a fixed audit action
-// label and records it only after the handler reports success. Sensitive
-// mutations that need a precise label (settings, content review, OTA publish,
-// service upgrades, feature-center writes) use this instead of the bare
-// requireAdmin, so the audit console shows the real operation rather than a
-// generic "其他操作".
-func (handler authHandler) requireAdminAction(
-	action string,
-	next http.HandlerFunc,
-) http.HandlerFunc {
-	return handler.requireAdmin(handler.auditAfterSuccess(action, next))
-}
-
 // auditAfterSuccess records one fixed action label after a handler responds
 // successfully. It keeps the audit behaviour identical across the role-only,
 // permission, and route-group middleware.
@@ -494,32 +481,6 @@ func (handler authHandler) auditAfterSuccess(
 				"route": request.Method + " " + request.URL.Path,
 			},
 		)
-	}
-}
-
-// requireAdminAudited returns an administrator middleware that records one
-// audit event for every successful write, labelling it from the request path.
-// It exists for route groups (OTA, feature center) that register their own
-// handlers and would otherwise need a bespoke wrapper per route.
-func (handler authHandler) requireAdminAudited(
-	labeler func(*http.Request) string,
-) func(http.HandlerFunc) http.HandlerFunc {
-	return func(next http.HandlerFunc) http.HandlerFunc {
-		return handler.requireAdmin(func(
-			response http.ResponseWriter,
-			request *http.Request,
-		) {
-			if handler.audit == nil || !isAdminMutation(request.Method) {
-				next(response, request)
-				return
-			}
-			action := labeler(request)
-			if action == "" {
-				next(response, request)
-				return
-			}
-			handler.auditAfterSuccess(action, next)(response, request)
-		})
 	}
 }
 

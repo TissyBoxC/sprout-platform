@@ -26,6 +26,7 @@ import CellularStatsPage from '@/features/cellular/presentation/CellularStatsPag
 import PowerStatsPage from '@/features/power/presentation/PowerStatsPage.vue'
 import MotionStatsPage from '@/features/motion/presentation/MotionStatsPage.vue'
 import FormFactorStatsPage from '@/features/form_factor/presentation/FormFactorStatsPage.vue'
+import VideoStatsPage from '@/features/video_companion/presentation/VideoStatsPage.vue'
 import { useAuthStore } from '@/features/auth/application/authStore'
 
 /// Feature routes are registered here so removing a feature only changes its
@@ -158,6 +159,11 @@ export function createAdminRouter() {
         path: '/form-factor',
         name: 'form-factor',
         component: FormFactorStatsPage,
+      },
+      {
+        path: '/video-companion',
+        name: 'video-companion',
+        component: VideoStatsPage,
       },
       {
         path: '/audit',

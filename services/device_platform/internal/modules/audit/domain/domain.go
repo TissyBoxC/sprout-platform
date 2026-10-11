@@ -24,6 +24,33 @@ const (
 	EventTypeBoot      = "boot"
 	EventTypeFailure   = "module_failure"
 	EventTypeRecovered = "module_recovered"
+	EventTypeCrash     = "crash"
+)
+
+// Crash fault causes. These are symbolic categories derived on-device from the
+// reset reason and panic type. They are stable contract strings shared with the
+// firmware crash reporter and the admin console. A raw memory dump is never
+// part of the contract: only a bounded, redacted signature is transmitted.
+const (
+	CrashCausePanic             = "panic"
+	CrashCauseWatchdog          = "watchdog"
+	CrashCauseTaskWatchdog      = "task_watchdog"
+	CrashCauseInterruptWatchdog = "interrupt_watchdog"
+	CrashCauseBrownout          = "brownout"
+	CrashCauseStackOverflow     = "stack_overflow"
+	CrashCauseHeapCorruption    = "heap_corruption"
+	CrashCauseAssert            = "assert"
+	CrashCauseUnknown           = "unknown"
+)
+
+// CrashFaultKind values classify the faulting context narrowly so operators
+// can triage without any child data.
+const (
+	CrashFaultKindException = "exception"
+	CrashFaultKindWatchdog  = "watchdog"
+	CrashFaultKindPowerLoss = "power_loss"
+	CrashFaultKindMemory    = "memory"
+	CrashFaultKindSoftware  = "software"
 )
 
 // Interaction event types. These mirror the values that the wake word,
@@ -88,6 +115,7 @@ const (
 	RetentionRecovery     = 100
 	RetentionInteraction  = 300
 	RetentionProvisioning = 300
+	RetentionCrashes      = 50
 )
 
 // BootEvent is one startup record reported by a device.
@@ -140,6 +168,24 @@ type InteractionEvent struct {
 	ReportedAt      time.Time `json:"reported_at"`
 }
 
+// CrashEvent is one redacted, bounded crash record. It deliberately carries
+// only a symbolic cause, faulting task name, program counter, and frame count.
+// It never carries raw memory, registers, backtrace addresses, audio, images,
+// credentials, or child content, so the record stays safe to display.
+type CrashEvent struct {
+	EventType       string    `json:"event_type"`
+	EventID         string    `json:"event_id"`
+	Sequence        uint64    `json:"sequence"`
+	Cause           string    `json:"cause"`
+	FaultKind       string    `json:"fault_kind"`
+	TaskName        string    `json:"task_name"`
+	ProgramCounter  uint32    `json:"program_counter"`
+	FrameCount      uint32    `json:"frame_count"`
+	CoreID          uint32    `json:"core_id"`
+	FirmwareVersion string    `json:"firmware_version"`
+	ReportedAt      time.Time `json:"reported_at"`
+}
+
 // ProvisioningEvent is one bounded network bring-up step reported by a device.
 type ProvisioningEvent struct {
 	EventType       string    `json:"event_type"`
@@ -188,6 +234,7 @@ type Diagnostics struct {
 	LatestFailure     *ModuleFailure     `json:"latest_failure"`
 	RecoveryEvents    []RecoveryEvent    `json:"recovery_events"`
 	InteractionEvents []InteractionEvent `json:"interaction_events"`
+	CrashEvents       []CrashEvent       `json:"crash_events"`
 }
 
 // Snapshot is the administrator-facing diagnostic history for one device.
@@ -197,13 +244,17 @@ type Snapshot struct {
 	Failures             []ModuleFailure    `json:"failures"`
 	RecoveryEvents       []RecoveryEvent    `json:"recovery_events"`
 	InteractionEvents    []InteractionEvent `json:"interaction_events"`
+	CrashEvents          []CrashEvent       `json:"crash_events"`
 	LatestFailure        *ModuleFailure     `json:"latest_failure"`
+	LatestCrash          *CrashEvent        `json:"latest_crash"`
 	ErrorCount           uint64             `json:"error_count"`
 	RecoveryCount        uint64             `json:"recovery_count"`
+	CrashCount           uint64             `json:"crash_count"`
 	UpdatedAt            time.Time          `json:"updated_at"`
 	HealthState          string             `json:"health_state"`
 	RetentionBoot        int                `json:"retention_boot_events"`
 	RetentionFailures    int                `json:"retention_failures"`
 	RetentionRecovery    int                `json:"retention_recovery_events"`
 	RetentionInteraction int                `json:"retention_interaction_events"`
+	RetentionCrash       int                `json:"retention_crash_events"`
 }

@@ -176,6 +176,34 @@ func (r *PostgresRepository) SaveDiagnostics(
 		}
 	}
 
+	for index := range diagnostics.CrashEvents {
+		event := diagnostics.CrashEvents[index]
+		if _, err := transaction.Exec(ctx, `
+			INSERT INTO device_crash_events (
+				id, device_id, event_id, sequence, cause, fault_kind, task_name,
+				program_counter, frame_count, core_id, firmware_version,
+				reported_at, received_at
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+			ON CONFLICT (device_id, event_id) DO NOTHING
+		`,
+			uuid.NewString(),
+			deviceID,
+			event.EventID,
+			event.Sequence,
+			event.Cause,
+			event.FaultKind,
+			event.TaskName,
+			event.ProgramCounter,
+			event.FrameCount,
+			event.CoreID,
+			event.FirmwareVersion,
+			reportedAt,
+		); err != nil {
+			return fmt.Errorf("insert device crash event: %w", err)
+		}
+	}
+
 	if err := pruneDiagnostics(ctx, transaction, deviceID); err != nil {
 		return err
 	}
@@ -201,6 +229,7 @@ func pruneDiagnostics(
 		{name: "recovery", table: "device_recovery_events", limit: domain.RetentionRecovery},
 		{name: "interaction", table: "device_interaction_events", limit: domain.RetentionInteraction},
 		{name: "provisioning", table: "device_provisioning_events", limit: domain.RetentionProvisioning},
+		{name: "crash", table: "device_crash_events", limit: domain.RetentionCrashes},
 	}
 	for _, statement := range statements {
 		sql := fmt.Sprintf(`
@@ -240,11 +269,13 @@ func (r *PostgresRepository) GetDiagnostics(
 		Failures:             make([]domain.ModuleFailure, 0),
 		RecoveryEvents:       make([]domain.RecoveryEvent, 0),
 		InteractionEvents:    make([]domain.InteractionEvent, 0),
+		CrashEvents:          make([]domain.CrashEvent, 0),
 		HealthState:          domain.HealthUnknown,
 		RetentionBoot:        domain.RetentionBootEvents,
 		RetentionFailures:    domain.RetentionFailures,
 		RetentionRecovery:    domain.RetentionRecovery,
 		RetentionInteraction: domain.RetentionInteraction,
+		RetentionCrash:       domain.RetentionCrashes,
 	}
 
 	bootRows, err := r.pool.Query(ctx, `
@@ -376,6 +407,45 @@ func (r *PostgresRepository) GetDiagnostics(
 		return nil, fmt.Errorf("iterate device interaction events: %w", err)
 	}
 
+	crashRows, err := r.pool.Query(ctx, `
+		SELECT event_id, sequence, cause, fault_kind, task_name,
+		       program_counter, frame_count, core_id, firmware_version, reported_at
+		FROM device_crash_events
+		WHERE device_id = $1
+		ORDER BY sequence DESC, received_at DESC, id DESC
+		LIMIT $2
+	`, deviceID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query device crash events: %w", err)
+	}
+	defer crashRows.Close()
+	for crashRows.Next() {
+		event := domain.CrashEvent{EventType: domain.EventTypeCrash}
+		if err := crashRows.Scan(
+			&event.EventID,
+			&event.Sequence,
+			&event.Cause,
+			&event.FaultKind,
+			&event.TaskName,
+			&event.ProgramCounter,
+			&event.FrameCount,
+			&event.CoreID,
+			&event.FirmwareVersion,
+			&event.ReportedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan device crash event: %w", err)
+		}
+		snapshot.CrashEvents = append(snapshot.CrashEvents, event)
+		snapshot.UpdatedAt = laterTime(snapshot.UpdatedAt, event.ReportedAt)
+	}
+	if err := crashRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate device crash events: %w", err)
+	}
+	if len(snapshot.CrashEvents) > 0 {
+		latest := snapshot.CrashEvents[0]
+		snapshot.LatestCrash = &latest
+	}
+
 	if err := r.populateCounters(ctx, snapshot, deviceID); err != nil {
 		return nil, err
 	}
@@ -405,10 +475,28 @@ func (r *PostgresRepository) populateCounters(
 	`, deviceID).Scan(&snapshot.RecoveryCount); err != nil {
 		return fmt.Errorf("count device recovery events: %w", err)
 	}
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM device_crash_events
+		WHERE device_id = $1
+	`, deviceID).Scan(&snapshot.CrashCount); err != nil {
+		return fmt.Errorf("count device crash events: %w", err)
+	}
 	return nil
 }
 
 func deriveHealthState(snapshot *domain.Snapshot) string {
+	// A crash is the strongest fault signal: a device that has crashed since
+	// its last recovery is faulted even when no module failure was reported.
+	if snapshot.LatestCrash != nil &&
+		(snapshot.LatestFailure == nil ||
+			snapshot.LatestCrash.Sequence >= snapshot.LatestFailure.Sequence) {
+		if len(snapshot.RecoveryEvents) > 0 &&
+			snapshot.RecoveryEvents[0].Sequence > snapshot.LatestCrash.Sequence {
+			return domain.HealthDegraded
+		}
+		return domain.HealthFaulted
+	}
 	if snapshot.LatestFailure == nil {
 		return domain.HealthHealthy
 	}

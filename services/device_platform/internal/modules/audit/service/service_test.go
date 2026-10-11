@@ -218,6 +218,153 @@ func TestValidateRejectsOversizedInteractionDuration(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsCanonicalCrashEvent(t *testing.T) {
+	service := &Service{}
+	diagnostics := &domain.Diagnostics{
+		SchemaVersion:  "1.0.0",
+		NewestSequence: 5,
+		CrashEvents: []domain.CrashEvent{
+			{
+				EventType:       domain.EventTypeCrash,
+				EventID:         "crash_00000005",
+				Sequence:        5,
+				Cause:           domain.CrashCauseTaskWatchdog,
+				FaultKind:       domain.CrashFaultKindWatchdog,
+				TaskName:        "network_manager",
+				ProgramCounter:  0x400d1234,
+				FrameCount:      12,
+				CoreID:          0,
+				FirmwareVersion: "0.4.0",
+			},
+		},
+	}
+
+	normalized, err := service.Validate("sprout_device_001", diagnostics)
+	if err != nil {
+		t.Fatalf("expected validation to succeed, got %v", err)
+	}
+	if normalized == nil || len(normalized.CrashEvents) != 1 {
+		t.Fatalf("unexpected normalized diagnostics: %+v", normalized)
+	}
+	if normalized.CrashEvents[0].EventType != domain.EventTypeCrash {
+		t.Fatalf("expected the canonical crash event type, got %q", normalized.CrashEvents[0].EventType)
+	}
+}
+
+func TestValidateAcceptsOmittedCrashEventType(t *testing.T) {
+	service := &Service{}
+	normalized, err := service.Validate("sprout_device_001", &domain.Diagnostics{
+		SchemaVersion:  "1.0.0",
+		NewestSequence: 1,
+		CrashEvents: []domain.CrashEvent{
+			{
+				EventID:         "crash_00000001",
+				Sequence:        1,
+				Cause:           domain.CrashCausePanic,
+				FaultKind:       domain.CrashFaultKindException,
+				TaskName:        "main",
+				ProgramCounter:  0,
+				FrameCount:      0,
+				CoreID:          0,
+				FirmwareVersion: "0.4.0",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected omitted crash event type to be accepted, got %v", err)
+	}
+	if normalized.CrashEvents[0].EventType != domain.EventTypeCrash {
+		t.Fatalf("expected the canonical event type, got %q", normalized.CrashEvents[0].EventType)
+	}
+}
+
+func TestValidateRejectsUnknownCrashCause(t *testing.T) {
+	service := &Service{}
+	_, err := service.Validate("sprout_device_001", &domain.Diagnostics{
+		SchemaVersion:  "1.0.0",
+		NewestSequence: 1,
+		CrashEvents: []domain.CrashEvent{
+			{
+				EventID:         "crash_00000001",
+				Sequence:        1,
+				Cause:           "kernel_segfault",
+				FaultKind:       domain.CrashFaultKindSoftware,
+				TaskName:        "main",
+				FirmwareVersion: "0.4.0",
+			},
+		},
+	})
+	if err != domain.ErrInvalidDiagnostics {
+		t.Fatalf("expected invalid diagnostics for an unknown cause, got %v", err)
+	}
+}
+
+func TestValidateRejectsUnknownCrashFaultKind(t *testing.T) {
+	service := &Service{}
+	_, err := service.Validate("sprout_device_001", &domain.Diagnostics{
+		SchemaVersion:  "1.0.0",
+		NewestSequence: 1,
+		CrashEvents: []domain.CrashEvent{
+			{
+				EventID:         "crash_00000001",
+				Sequence:        1,
+				Cause:           domain.CrashCausePanic,
+				FaultKind:       "cosmic_ray",
+				TaskName:        "main",
+				FirmwareVersion: "0.4.0",
+			},
+		},
+	})
+	if err != domain.ErrInvalidDiagnostics {
+		t.Fatalf("expected invalid diagnostics for an unknown fault kind, got %v", err)
+	}
+}
+
+func TestValidateRejectsOversizedCrashFrameCount(t *testing.T) {
+	service := &Service{}
+	_, err := service.Validate("sprout_device_001", &domain.Diagnostics{
+		SchemaVersion:  "1.0.0",
+		NewestSequence: 1,
+		CrashEvents: []domain.CrashEvent{
+			{
+				EventID:         "crash_00000001",
+				Sequence:        1,
+				Cause:           domain.CrashCauseStackOverflow,
+				FaultKind:       domain.CrashFaultKindMemory,
+				TaskName:        "main",
+				FrameCount:      65,
+				FirmwareVersion: "0.4.0",
+			},
+		},
+	})
+	if err != domain.ErrInvalidDiagnostics {
+		t.Fatalf("expected invalid diagnostics for an oversized frame count, got %v", err)
+	}
+}
+
+func TestValidateRejectsExcessiveCrashEvents(t *testing.T) {
+	service := &Service{}
+	events := make([]domain.CrashEvent, 0, 9)
+	for index := 0; index < 9; index++ {
+		events = append(events, domain.CrashEvent{
+			EventID:         "crash_0000000" + string(rune('1'+index)),
+			Sequence:        uint64(index + 1),
+			Cause:           domain.CrashCausePanic,
+			FaultKind:       domain.CrashFaultKindException,
+			TaskName:        "main",
+			FirmwareVersion: "0.4.0",
+		})
+	}
+	_, err := service.Validate("sprout_device_001", &domain.Diagnostics{
+		SchemaVersion:  "1.0.0",
+		NewestSequence: 9,
+		CrashEvents:    events,
+	})
+	if err != domain.ErrInvalidDiagnostics {
+		t.Fatalf("expected invalid diagnostics for too many crash events, got %v", err)
+	}
+}
+
 func TestRecordDelegatesNormalizedDiagnostics(t *testing.T) {
 	repositoryStub := &stubRepository{}
 	service := &Service{repository: repositoryStub}

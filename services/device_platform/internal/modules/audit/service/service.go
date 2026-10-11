@@ -77,6 +77,7 @@ func (s *Service) Validate(
 		len(diagnostics.BootEvents) > 8 ||
 		len(diagnostics.RecoveryEvents) > 16 ||
 		len(diagnostics.InteractionEvents) > 16 ||
+		len(diagnostics.CrashEvents) > 8 ||
 		diagnostics.DroppedBootEvents > 1_000_000 {
 		return nil, domain.ErrInvalidDiagnostics
 	}
@@ -88,6 +89,7 @@ func (s *Service) Validate(
 		BootEvents:        make([]domain.BootEvent, 0, len(diagnostics.BootEvents)),
 		RecoveryEvents:    make([]domain.RecoveryEvent, 0, len(diagnostics.RecoveryEvents)),
 		InteractionEvents: make([]domain.InteractionEvent, 0, len(diagnostics.InteractionEvents)),
+		CrashEvents:       make([]domain.CrashEvent, 0, len(diagnostics.CrashEvents)),
 	}
 
 	for index := range diagnostics.BootEvents {
@@ -142,6 +144,27 @@ func (s *Service) Validate(
 		normalized.InteractionEvents = append(normalized.InteractionEvents, event)
 	}
 
+	for index := range diagnostics.CrashEvents {
+		event := diagnostics.CrashEvents[index]
+		if !validEvent(
+			event.EventID,
+			event.Sequence,
+			diagnostics.NewestSequence,
+		) || (event.EventType != "" && event.EventType != domain.EventTypeCrash) ||
+			!crashCauseIsValid(event.Cause) ||
+			!crashFaultKindIsValid(event.FaultKind) ||
+			!symbolicTextPattern.MatchString(event.TaskName) ||
+			event.FrameCount > 64 ||
+			event.CoreID > 3 ||
+			!firmwareVersionPattern.MatchString(event.FirmwareVersion) {
+			return nil, domain.ErrInvalidDiagnostics
+		}
+		event.EventType = domain.EventTypeCrash
+		event.TaskName = strings.TrimSpace(event.TaskName)
+		event.FirmwareVersion = strings.TrimSpace(event.FirmwareVersion)
+		normalized.CrashEvents = append(normalized.CrashEvents, event)
+	}
+
 	if diagnostics.LatestFailure != nil {
 		failure := *diagnostics.LatestFailure
 		if !validEvent(
@@ -166,6 +189,7 @@ func (s *Service) Validate(
 		len(normalized.BootEvents) == 0 &&
 		len(normalized.RecoveryEvents) == 0 &&
 		len(normalized.InteractionEvents) == 0 &&
+		len(normalized.CrashEvents) == 0 &&
 		normalized.LatestFailure == nil {
 		return nil, nil
 	}
@@ -319,6 +343,39 @@ func validEvent(eventID string, sequence uint64, newestSequence uint64) bool {
 	return eventIDPattern.MatchString(strings.TrimSpace(eventID)) &&
 		sequence > 0 &&
 		sequence <= newestSequence
+}
+
+// crashCauseIsValid and crashFaultKindIsValid keep the accepted set identical
+// to the values the firmware crash reporter derives from the reset reason. A
+// crafted payload cannot widen the stored categories.
+func crashCauseIsValid(cause string) bool {
+	switch cause {
+	case domain.CrashCausePanic,
+		domain.CrashCauseWatchdog,
+		domain.CrashCauseTaskWatchdog,
+		domain.CrashCauseInterruptWatchdog,
+		domain.CrashCauseBrownout,
+		domain.CrashCauseStackOverflow,
+		domain.CrashCauseHeapCorruption,
+		domain.CrashCauseAssert,
+		domain.CrashCauseUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+func crashFaultKindIsValid(faultKind string) bool {
+	switch faultKind {
+	case domain.CrashFaultKindException,
+		domain.CrashFaultKindWatchdog,
+		domain.CrashFaultKindPowerLoss,
+		domain.CrashFaultKindMemory,
+		domain.CrashFaultKindSoftware:
+		return true
+	default:
+		return false
+	}
 }
 
 // interactionEventTypeIsValid keeps the accepted set identical to the values

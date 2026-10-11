@@ -24,8 +24,8 @@ class _PrivacyPageState extends ConsumerState<PrivacyPage> {
   bool _isOpeningExport = false;
   bool _isSharingExport = false;
   bool _isUpdatingDeletion = false;
-  bool _isWithdrawing = false;
-  bool _isReauthorizing = false;
+  GuardianConsentKind? _busyConsent;
+  bool _busyConsentIsRestore = false;
   String? _operationMessage;
 
   Future<void> _refresh() async {
@@ -206,13 +206,12 @@ class _PrivacyPageState extends ConsumerState<PrivacyPage> {
     }
   }
 
-  Future<void> _withdrawConsent() async {
+  Future<void> _withdrawConsent(GuardianConsentKind consentType) async {
+    final spec = consentTypeSpec(consentType);
     final confirmed = await _showTypedConfirmation(
       context,
-      title: '撤回授权并结束会话',
-      description:
-          '撤回后 AI 陪伴服务会停止，当前登录也会结束。'
-          '重新登录并授权后可以继续使用。',
+      title: '撤回“${spec.label}”授权',
+      description: spec.withdrawDescription,
       confirmationLabel: '请输入“撤回”继续',
       expectedText: '撤回',
       actionLabel: '撤回授权',
@@ -222,38 +221,54 @@ class _PrivacyPageState extends ConsumerState<PrivacyPage> {
       return;
     }
     setState(() {
-      _isWithdrawing = true;
+      _busyConsent = consentType;
+      _busyConsentIsRestore = false;
       _operationMessage = null;
     });
     try {
-      await ref.read(privacyControllerProvider.notifier).withdrawConsent();
+      await ref
+          .read(privacyControllerProvider.notifier)
+          .withdrawConsent(consentType: consentType);
       if (!mounted) {
         return;
       }
-      await _finishSession();
+      // Withdrawing child data processing also ends the guardian session on
+      // the platform; other types only need a refreshed local projection.
+      if (consentType == GuardianConsentKind.childDataProcessing) {
+        await _finishSession();
+      } else {
+        _showMessage('已撤回“${spec.label}”授权');
+      }
     } on Object catch (error) {
       if (mounted) {
         setState(() => _operationMessage = privacyErrorMessage(error));
       }
     } finally {
       if (mounted) {
-        setState(() => _isWithdrawing = false);
+        setState(() {
+          _busyConsent = null;
+          _busyConsentIsRestore = false;
+        });
       }
     }
   }
 
-  Future<void> _reauthorizeConsent() async {
-    if (_isReauthorizing) {
+  Future<void> _reauthorizeConsent(GuardianConsentKind consentType) async {
+    if (_busyConsent != null) {
       return;
     }
+    final spec = consentTypeSpec(consentType);
     setState(() {
-      _isReauthorizing = true;
+      _busyConsent = consentType;
+      _busyConsentIsRestore = true;
       _operationMessage = null;
     });
     try {
-      await ref.read(privacyControllerProvider.notifier).grantConsent();
+      await ref
+          .read(privacyControllerProvider.notifier)
+          .grantConsent(consentType: consentType);
       if (mounted) {
-        _showMessage('家长授权已恢复');
+        _showMessage('已恢复“${spec.label}”授权');
       }
     } on Object catch (error) {
       if (mounted) {
@@ -261,7 +276,10 @@ class _PrivacyPageState extends ConsumerState<PrivacyPage> {
       }
     } finally {
       if (mounted) {
-        setState(() => _isReauthorizing = false);
+        setState(() {
+          _busyConsent = null;
+          _busyConsentIsRestore = false;
+        });
       }
     }
   }
@@ -329,8 +347,8 @@ class _PrivacyPageState extends ConsumerState<PrivacyPage> {
               isOpeningExport: _isOpeningExport,
               isSharingExport: _isSharingExport,
               isUpdatingDeletion: _isUpdatingDeletion,
-              isWithdrawing: _isWithdrawing,
-              isReauthorizing: _isReauthorizing,
+              busyConsent: _busyConsent,
+              busyConsentIsRestore: _busyConsentIsRestore,
               operationMessage: _operationMessage,
               onExport: _exportData,
               onOpenExport: _openExportFile,
@@ -364,8 +382,8 @@ class _PrivacyContent extends StatelessWidget {
     required this.isOpeningExport,
     required this.isSharingExport,
     required this.isUpdatingDeletion,
-    required this.isWithdrawing,
-    required this.isReauthorizing,
+    required this.busyConsent,
+    required this.busyConsentIsRestore,
     required this.operationMessage,
     required this.onExport,
     required this.onOpenExport,
@@ -384,16 +402,16 @@ class _PrivacyContent extends StatelessWidget {
   final bool isOpeningExport;
   final bool isSharingExport;
   final bool isUpdatingDeletion;
-  final bool isWithdrawing;
-  final bool isReauthorizing;
+  final GuardianConsentKind? busyConsent;
+  final bool busyConsentIsRestore;
   final String? operationMessage;
   final Future<void> Function() onExport;
   final Future<void> Function() onOpenExport;
   final Future<void> Function() onShareExport;
   final Future<void> Function() onRequestDeletion;
   final Future<void> Function() onCancelDeletion;
-  final Future<void> Function() onWithdrawConsent;
-  final Future<void> Function() onReauthorizeConsent;
+  final Future<void> Function(GuardianConsentKind) onWithdrawConsent;
+  final Future<void> Function(GuardianConsentKind) onReauthorizeConsent;
   final Future<void> Function() onRefresh;
 
   @override
@@ -406,8 +424,9 @@ class _PrivacyContent extends StatelessWidget {
           AppReveal(
             child: _ConsentCard(
               consent: status.consent,
-              isWithdrawing: isWithdrawing,
-              isReauthorizing: isReauthorizing,
+              consents: status.consents,
+              busyConsent: busyConsent,
+              busyConsentIsRestore: busyConsentIsRestore,
               onWithdraw: onWithdrawConsent,
               onReauthorize: onReauthorizeConsent,
             ),
@@ -474,20 +493,69 @@ class _PrivacyContent extends StatelessWidget {
   }
 }
 
+/// User-facing label, icon, and consequence copy for one consent type.
+///
+/// Kept out of the widget tree so the withdraw dialog and the card share one
+/// source of truth for what each authorization actually controls.
+class ConsentTypeSpec {
+  const ConsentTypeSpec({
+    required this.label,
+    required this.summary,
+    required this.withdrawDescription,
+    required this.icon,
+  });
+
+  final String label;
+  final String summary;
+  final String withdrawDescription;
+  final IconData icon;
+}
+
+ConsentTypeSpec consentTypeSpec(GuardianConsentKind kind) {
+  return switch (kind) {
+    GuardianConsentKind.guardianTerms => const ConsentTypeSpec(
+      label: '监护人条款',
+      summary: '同意平台服务条款和监护人约定，是使用全部功能的前提。',
+      withdrawDescription: '撤回后平台会停止提供需要监护人确认的服务，当前登录也会结束。重新登录并授权后可以继续使用。',
+      icon: Icons.article_outlined,
+    ),
+    GuardianConsentKind.childDataProcessing => const ConsentTypeSpec(
+      label: '儿童资料处理',
+      summary: '允许平台保存和处理儿童昵称、年龄等资料，用于个性化陪伴。',
+      withdrawDescription: '撤回后平台会停止处理儿童资料，AI 陪伴服务也会停止，当前登录也会结束。重新登录并授权后可以继续使用。',
+      icon: Icons.child_care_outlined,
+    ),
+    GuardianConsentKind.aiInteraction => const ConsentTypeSpec(
+      label: 'AI 语音陪伴',
+      summary: '允许设备使用 AI 语音陪伴。撤回后设备会停止 AI 语音陪伴。',
+      withdrawDescription: '撤回后设备会停止 AI 语音陪伴，当前登录也会结束。重新登录并授权后可以继续使用。',
+      icon: Icons.record_voice_over_outlined,
+    ),
+    GuardianConsentKind.emailContact => const ConsentTypeSpec(
+      label: '邮件联系',
+      summary: '同意平台通过邮件发送服务通知和重要提醒。',
+      withdrawDescription: '撤回后平台不再通过邮件联系你，其他功能不受影响。',
+      icon: Icons.mail_outline_rounded,
+    ),
+  };
+}
+
 class _ConsentCard extends StatelessWidget {
   const _ConsentCard({
     required this.consent,
-    required this.isWithdrawing,
-    required this.isReauthorizing,
+    required this.consents,
+    required this.busyConsent,
+    required this.busyConsentIsRestore,
     required this.onWithdraw,
     required this.onReauthorize,
   });
 
   final GuardianConsent consent;
-  final bool isWithdrawing;
-  final bool isReauthorizing;
-  final Future<void> Function() onWithdraw;
-  final Future<void> Function() onReauthorize;
+  final List<GuardianConsentType> consents;
+  final GuardianConsentKind? busyConsent;
+  final bool busyConsentIsRestore;
+  final Future<void> Function(GuardianConsentKind) onWithdraw;
+  final Future<void> Function(GuardianConsentKind) onReauthorize;
 
   @override
   Widget build(BuildContext context) {
@@ -501,10 +569,8 @@ class _ConsentCard extends StatelessWidget {
             Row(
               children: [
                 _SectionIcon(
-                  icon: consent.isActive
-                      ? Icons.verified_user_outlined
-                      : Icons.gpp_bad_outlined,
-                  isWarning: !consent.isActive,
+                  icon: Icons.verified_user_outlined,
+                  isWarning: false,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -516,83 +582,261 @@ class _ConsentCard extends StatelessWidget {
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 3),
-                      Text(
-                        consent.isActive ? '授权有效' : '授权已撤回',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: consent.isActive
-                              ? colorScheme.primary
-                              : colorScheme.error,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                      const Text('每一项授权可以单独撤回或恢复。'),
                     ],
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            _InfoLine(
-              label: '授权版本',
-              value: consent.version.isEmpty ? '未记录' : consent.version,
-            ),
-            _InfoLine(
-              label: '授权时间',
-              value: _dateTimeLabel(consent.consentedAt),
-            ),
-            if (consent.withdrawnAt != null)
-              _InfoLine(
-                label: '撤回时间',
-                value: _dateTimeLabel(consent.withdrawnAt),
-              ),
-            const SizedBox(height: 14),
-            if (consent.isActive)
-              OutlinedButton.icon(
-                onPressed: isWithdrawing ? null : onWithdraw,
-                icon: isWithdrawing
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.logout_rounded),
-                label: Text(isWithdrawing ? '正在撤回…' : '撤回授权并结束会话'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: colorScheme.error,
-                  side: BorderSide(color: colorScheme.error),
-                ),
+            const SizedBox(height: 8),
+            if (consents.isEmpty)
+              _ConsentSummary(
+                consent: consent,
+                busyConsent: busyConsent,
+                busyConsentIsRestore: busyConsentIsRestore,
+                onWithdraw: onWithdraw,
+                onReauthorize: onReauthorize,
               )
             else
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: colorScheme.errorContainer,
-                  borderRadius: BorderRadius.circular(16),
+              for (final entry in consents)
+                _ConsentTypeRow(
+                  spec: consentTypeSpec(entry.type!),
+                  kind: entry.type!,
+                  consent: entry,
+                  isBusy: busyConsent == entry.type,
+                  isRestoring:
+                      busyConsent == entry.type && busyConsentIsRestore,
+                  isAnyBusy: busyConsent != null,
+                  onWithdraw: onWithdraw,
+                  onReauthorize: onReauthorize,
                 ),
-                child: Text(
-                  consent.canReauthorize
-                      ? '当前授权已经撤回。重新确认家长授权后，才能继续使用 AI 陪伴服务。'
-                      : '当前授权已经撤回。请退出登录后重新进入授权流程。',
-                  style: TextStyle(color: colorScheme.onErrorContainer),
-                ),
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                '授权版本：${consent.version.isEmpty ? '未记录' : consent.version}',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colorScheme.outline),
               ),
-            if (!consent.isActive) ...[
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: isReauthorizing || !consent.canReauthorize
-                    ? null
-                    : onReauthorize,
-                icon: isReauthorizing
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.verified_user_outlined),
-                label: Text(isReauthorizing ? '正在打开…' : '重新确认授权'),
-              ),
-            ],
+            ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Fallback rendering for platforms that only return the single summary.
+class _ConsentSummary extends StatelessWidget {
+  const _ConsentSummary({
+    required this.consent,
+    required this.busyConsent,
+    required this.busyConsentIsRestore,
+    required this.onWithdraw,
+    required this.onReauthorize,
+  });
+
+  final GuardianConsent consent;
+  final GuardianConsentKind? busyConsent;
+  final bool busyConsentIsRestore;
+  final Future<void> Function(GuardianConsentKind) onWithdraw;
+  final Future<void> Function(GuardianConsentKind) onReauthorize;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isBusy = busyConsent != null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _InfoLine(
+          label: '授权时间',
+          value: _dateTimeLabel(consent.consentedAt),
+        ),
+        if (consent.withdrawnAt != null)
+          _InfoLine(
+            label: '撤回时间',
+            value: _dateTimeLabel(consent.withdrawnAt),
+          ),
+        const SizedBox(height: 10),
+        if (consent.isActive)
+          OutlinedButton.icon(
+            onPressed: isBusy
+                ? null
+                : () => onWithdraw(GuardianConsentKind.childDataProcessing),
+            icon: isBusy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.logout_rounded),
+            label: Text(isBusy ? '正在撤回…' : '撤回授权并结束会话'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: colorScheme.error,
+              side: BorderSide(color: colorScheme.error),
+            ),
+          )
+        else ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: colorScheme.errorContainer,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Text(
+              consent.canReauthorize
+                  ? '当前授权已经撤回。重新确认家长授权后，才能继续使用 AI 陪伴服务。'
+                  : '当前授权已经撤回。请退出登录后重新进入授权流程。',
+              style: TextStyle(color: colorScheme.onErrorContainer),
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: isBusy || !consent.canReauthorize
+                ? null
+                : () => onReauthorize(GuardianConsentKind.childDataProcessing),
+            icon: busyConsentIsRestore
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.verified_user_outlined),
+            label: Text(busyConsentIsRestore ? '正在恢复…' : '重新确认授权'),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// One row for a single consent type with its own withdraw/restore action.
+class _ConsentTypeRow extends StatelessWidget {
+  const _ConsentTypeRow({
+    required this.spec,
+    required this.kind,
+    required this.consent,
+    required this.isBusy,
+    required this.isRestoring,
+    required this.isAnyBusy,
+    required this.onWithdraw,
+    required this.onReauthorize,
+  });
+
+  final ConsentTypeSpec spec;
+  final GuardianConsentKind kind;
+  final GuardianConsentType consent;
+  final bool isBusy;
+  final bool isRestoring;
+  final bool isAnyBusy;
+  final Future<void> Function(GuardianConsentKind) onWithdraw;
+  final Future<void> Function(GuardianConsentKind) onReauthorize;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isGranted = consent.isGranted;
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isGranted
+              ? colorScheme.primary.withValues(alpha: 0.3)
+              : colorScheme.error.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(spec.icon, size: 21, color: colorScheme.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  spec.label,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+              _ConsentBadge(isGranted: isGranted),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(spec.summary, style: Theme.of(context).textTheme.bodySmall),
+          if (!isGranted) ...[
+            const SizedBox(height: 6),
+            Text(
+              '已撤回，可以在这里重新授权。',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colorScheme.error),
+            ),
+          ],
+          const SizedBox(height: 10),
+          if (isGranted)
+            OutlinedButton.icon(
+              key: ValueKey<String>('consent-withdraw-${kind.wireValue}'),
+              onPressed: isAnyBusy ? null : () => onWithdraw(kind),
+              icon: isBusy && !isRestoring
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.logout_rounded),
+              label: Text(isBusy && !isRestoring ? '正在撤回…' : '撤回授权'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: colorScheme.error,
+                side: BorderSide(color: colorScheme.error),
+              ),
+            )
+          else
+            FilledButton.icon(
+              key: ValueKey<String>('consent-restore-${kind.wireValue}'),
+              onPressed: isAnyBusy ? null : () => onReauthorize(kind),
+              icon: isBusy && isRestoring
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.verified_user_outlined),
+              label: Text(isBusy && isRestoring ? '正在恢复…' : '恢复授权'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ConsentBadge extends StatelessWidget {
+  const _ConsentBadge({required this.isGranted});
+
+  final bool isGranted;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: isGranted
+            ? colorScheme.primaryContainer
+            : colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        isGranted ? '已授权' : '已撤回',
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: isGranted
+              ? colorScheme.onPrimaryContainer
+              : colorScheme.onErrorContainer,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );

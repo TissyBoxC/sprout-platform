@@ -95,6 +95,10 @@ async function logout(): Promise<void> {
           <span class="nav-dot" aria-hidden="true"></span>
           穿戴与定位
         </RouterLink>
+        <RouterLink to="/multi-device">
+          <span class="nav-dot" aria-hidden="true"></span>
+          多设备
+        </RouterLink>
         <RouterLink to="/audit">
           <span class="nav-dot" aria-hidden="true"></span>
           操作审计

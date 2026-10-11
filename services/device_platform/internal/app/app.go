@@ -26,6 +26,8 @@ import (
 	childService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
 	companionshipRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/companionship/repository"
 	companionshipService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/companionship/service"
+	connectivityRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/connectivity/repository"
+	connectivityServicePkg "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/connectivity/service"
 	contentRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/repository"
 	contentService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/service"
 	contentOfflinePolicyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content_offline_policy/repository"
@@ -524,6 +526,12 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create input service: %w", err)
 	}
+	connectivity, err := connectivityServicePkg.New(connectivityServicePkg.Options{
+		Repository: connectivityRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
+	if err != nil {
+		return fmt.Errorf("create connectivity service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
@@ -557,6 +565,7 @@ func Run() error {
 			VisionService:               vision,
 			DisplayService:              display,
 			InputService:                input,
+			ConnectivityService:         connectivity,
 			AuditRecorder:               privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

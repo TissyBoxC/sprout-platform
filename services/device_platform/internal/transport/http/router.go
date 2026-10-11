@@ -19,6 +19,7 @@ import (
 	authservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
 	childservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
 	companionshipservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/companionship/service"
+	connectivityservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/connectivity/service"
 	contentservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/service"
 	contentofflinepolicyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content_offline_policy/service"
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
@@ -75,6 +76,7 @@ type RouterOptions struct {
 	VisionService               *visionservice.Service
 	DisplayService              *displayservice.Service
 	InputService                *inputservice.Service
+	ConnectivityService         *connectivityservice.Service
 	AuditRecorder               auditRecorder
 }
 
@@ -407,6 +409,20 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/touch/status",
 					deviceInputHandler.reportStatus,
+				)
+			}
+		}
+		if options.ConnectivityService != nil {
+			connectivityHandler := connectivityHandler{service: options.ConnectivityService}
+			if options.BindingService != nil && options.RuntimeService != nil {
+				deviceConnectivityHandler := deviceConnectivityHandler{
+					handler:        &connectivityHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/connectivity/status",
+					deviceConnectivityHandler.reportStatus,
 				)
 			}
 		}
@@ -902,6 +918,29 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/admin/touch/stats",
 					authHandler.requireAdmin(inputHandler.adminStats),
+				)
+			}
+			if options.ConnectivityService != nil {
+				connectivityHandler := connectivityHandler{service: options.ConnectivityService}
+				mux.HandleFunc(
+					"GET /api/v1/connectivity/policy",
+					authHandler.requireAuthentication(connectivityHandler.current),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/connectivity/policy",
+					authHandler.requireAuthentication(connectivityHandler.publish),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/connectivity/devices",
+					authHandler.requireAuthentication(connectivityHandler.statuses),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/connectivity/capability",
+					authHandler.requireAuthentication(connectivityHandler.capability),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/connectivity/stats",
+					authHandler.requireAdmin(connectivityHandler.adminStats),
 				)
 			}
 			if options.NotificationService != nil {

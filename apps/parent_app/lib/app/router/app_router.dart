@@ -7,6 +7,7 @@ import '../../features/auth/presentation/bind_email_page.dart';
 import '../../features/auth/presentation/login_page.dart';
 import '../../features/auth/presentation/register_page.dart';
 import '../../features/child_profile/presentation/child_profile_page.dart';
+import '../../features/companionship/presentation/companionship_page.dart';
 import '../../features/content_management/presentation/content_library_page.dart';
 import '../../features/device/presentation/device_list_page.dart';
 import '../../features/device/domain/device_payload.dart';
@@ -78,6 +79,10 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/usage-reports',
         builder: (context, state) => const UsageReportPage(),
+      ),
+      GoRoute(
+        path: '/me/companionship',
+        builder: (context, state) => const CompanionshipPage(),
       ),
       GoRoute(
         path: '/me/notifications',

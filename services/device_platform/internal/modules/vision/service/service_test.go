@@ -390,3 +390,36 @@ func TestGetResultDeniesUnownedDevice(t *testing.T) {
 		t.Fatalf("expected ownership denial, got %v", err)
 	}
 }
+
+func TestListPendingTasksForDeviceReturnsOnlyPending(t *testing.T) {
+	repository := newMemoryRepository()
+	service, err := New(Options{
+		Repository:    repository,
+		ConsentReader: stubConsent{granted: true},
+		DeviceReader:  stubDeviceReader{owned: true},
+	})
+	if err != nil {
+		t.Fatalf("new vision service: %v", err)
+	}
+	repository.tasks["task-pending"] = domain.Task{
+		ID:       "task-pending",
+		DeviceID: "sprout_device_001",
+		Status:   domain.TaskStatusPending,
+	}
+	repository.tasks["task-completed"] = domain.Task{
+		ID:       "task-completed",
+		DeviceID: "sprout_device_001",
+		Status:   domain.TaskStatusCompleted,
+	}
+	tasks, err := service.ListPendingTasksForDevice(
+		context.Background(),
+		"sprout_device_001",
+		20,
+	)
+	if err != nil {
+		t.Fatalf("list pending tasks: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "task-pending" {
+		t.Fatalf("expected only the pending task, got %+v", tasks)
+	}
+}

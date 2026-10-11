@@ -448,6 +448,29 @@ func NewRouter(options RouterOptions) http.Handler {
 				"GET /api/v1/devices/{device_id}/runtime/parent-policy",
 				runtimeHandler.getParentPolicy,
 			)
+			if options.VisionService != nil {
+				deviceVisionHandler := deviceVisionHandler{
+					service:        options.VisionService,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/vision/tasks/pending",
+					deviceVisionHandler.listPendingTasks,
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/vision/tasks/{task_id}/acknowledge",
+					deviceVisionHandler.acknowledgeTask,
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/vision/tasks/{task_id}/status",
+					deviceVisionHandler.reportStatus,
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/vision/results",
+					deviceVisionHandler.reportResult,
+				)
+			}
 			if options.UsageReportService != nil {
 				usageHandler := usageReportHandler{
 					service:        options.UsageReportService,

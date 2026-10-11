@@ -324,6 +324,31 @@ func (s *Service) GetResult(
 	return s.repository.GetResult(ctx, taskID)
 }
 
+// ListPendingTasksForDevice returns open tasks for a device that has already
+// authenticated over its device session. Ownership is enforced by the device
+// session verification in transport, so this path is not parent-scoped.
+func (s *Service) ListPendingTasksForDevice(
+	ctx context.Context,
+	deviceID string,
+	limit int,
+) ([]domain.Task, error) {
+	deviceID = strings.TrimSpace(deviceID)
+	if !deviceIDPattern.MatchString(deviceID) {
+		return nil, domain.ErrInvalidTask
+	}
+	tasks, err := s.repository.ListTasksByDevice(ctx, deviceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	pending := make([]domain.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if task.Status == domain.TaskStatusPending {
+			pending = append(pending, task)
+		}
+	}
+	return pending, nil
+}
+
 // PruneExpired prunes stale tasks and expired results. It is safe to call from
 // a periodic maintenance job.
 func (s *Service) PruneExpired(ctx context.Context) (int64, int64, error) {

@@ -15,6 +15,7 @@ import (
 
 type authHandler struct {
 	service *authservice.Service
+	audit   auditRecorder
 }
 
 type registerRequest struct {
@@ -321,11 +322,13 @@ func (handler authHandler) requireAuthentication(
 	return func(response http.ResponseWriter, request *http.Request) {
 		token, ok := bearerToken(request)
 		if !ok {
+			handler.recordAuthDenied(request, "", "auth.denied", "missing_token")
 			writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 			return
 		}
 		accountID, err := handler.service.VerifyAccessToken(token)
 		if err != nil {
+			handler.recordAuthDenied(request, "", "auth.denied", "invalid_token")
 			writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 			return
 		}
@@ -340,14 +343,130 @@ func (handler authHandler) requireAdmin(next http.HandlerFunc) http.HandlerFunc 
 		response http.ResponseWriter,
 		request *http.Request,
 	) {
-		accountID, _ := authenticatedAccountID(request)
+		accountID, ok := authenticatedAccountID(request)
+		if !ok {
+			handler.recordAuthDenied(request, "", "admin.permission.denied", "unauthenticated")
+			writeError(response, request, http.StatusForbidden, "insufficient_permission", "你没有权限访问此页面")
+			return
+		}
 		account, err := handler.service.GetIdentity(request.Context(), accountID)
 		if err != nil || account.Role != authdomain.RoleAdmin {
+			handler.recordAuthDenied(request, accountID, "admin.permission.denied", "insufficient_role")
 			writeError(response, request, http.StatusForbidden, "insufficient_permission", "你没有权限访问此页面")
 			return
 		}
 		next(response, request)
 	})
+}
+
+// requireAdminAction wraps an administrator handler with a fixed audit action
+// label and records it only after the handler reports success. Sensitive
+// mutations that need a precise label (settings, content review, OTA publish,
+// service upgrades, feature-center writes) use this instead of the bare
+// requireAdmin, so the audit console shows the real operation rather than a
+// generic "其他操作".
+func (handler authHandler) requireAdminAction(
+	action string,
+	next http.HandlerFunc,
+) http.HandlerFunc {
+	return handler.requireAdmin(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		if handler.audit == nil {
+			next(response, request)
+			return
+		}
+		recorder := &statusRecorder{ResponseWriter: response, status: http.StatusOK}
+		next(recorder, request)
+		if recorder.status < http.StatusOK || recorder.status >= http.StatusMultipleChoices {
+			return
+		}
+		actorAccountID, _ := authenticatedAccountID(request)
+		_ = handler.audit.RecordAudit(
+			request.Context(),
+			actorAccountID,
+			"",
+			action,
+			map[string]any{
+				"route": request.Method + " " + request.URL.Path,
+			},
+		)
+	})
+}
+
+// requireAdminAudited returns an administrator middleware that records one
+// audit event for every successful write, labelling it from the request path.
+// It exists for route groups (OTA, feature center) that register their own
+// handlers and would otherwise need a bespoke wrapper per route.
+func (handler authHandler) requireAdminAudited(
+	labeler func(*http.Request) string,
+) func(http.HandlerFunc) http.HandlerFunc {
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return handler.requireAdmin(func(
+			response http.ResponseWriter,
+			request *http.Request,
+		) {
+			if handler.audit == nil || !isAdminMutation(request.Method) {
+				next(response, request)
+				return
+			}
+			recorder := &statusRecorder{ResponseWriter: response, status: http.StatusOK}
+			next(recorder, request)
+			if recorder.status < http.StatusOK || recorder.status >= http.StatusMultipleChoices {
+				return
+			}
+			actorAccountID, _ := authenticatedAccountID(request)
+			action := labeler(request)
+			if action == "" {
+				return
+			}
+			_ = handler.audit.RecordAudit(
+				request.Context(),
+				actorAccountID,
+				"",
+				action,
+				map[string]any{
+					"route": request.Method + " " + request.URL.Path,
+				},
+			)
+		})
+	}
+}
+
+// isAdminMutation reports whether the HTTP method changes state and therefore
+// warrants a success audit. Read routes never write an audit entry.
+func isAdminMutation(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+// recordAuthDenied writes a narrow denial audit event. It records only the
+// route and a stable reason code, never the token, credential, or request body,
+// so a security investigation keeps a trail without leaking secrets.
+func (handler authHandler) recordAuthDenied(
+	request *http.Request,
+	actorAccountID string,
+	action string,
+	reason string,
+) {
+	if handler.audit == nil || request == nil {
+		return
+	}
+	_ = handler.audit.RecordAudit(
+		request.Context(),
+		actorAccountID,
+		"",
+		action,
+		map[string]any{
+			"route":  request.Method + " " + request.URL.Path,
+			"reason": reason,
+		},
+	)
 }
 
 type authenticatedAccountKey struct{}

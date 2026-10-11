@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"mime/multipart"
@@ -14,6 +15,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/packages/go/httpapi"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/config"
 	gatewayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/service"
+	authservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 	releasestoreservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
 )
@@ -307,4 +309,57 @@ func decodeEnvelope(t *testing.T, recorder *httptest.ResponseRecorder) testEnvel
 
 func newTestRouterOptions() RouterOptions {
 	return RouterOptions{Logger: newTestLogger()}
+}
+
+// recordingAudit captures the audit events a handler writes so tests can
+// assert the denial and success audit paths without a database.
+type recordingAudit struct {
+	events []auditEvent
+}
+
+type auditEvent struct {
+	actorAccountID  string
+	targetAccountID string
+	action          string
+	detail          map[string]any
+}
+
+func (audit *recordingAudit) RecordAudit(
+	_ context.Context,
+	actorAccountID string,
+	targetAccountID string,
+	action string,
+	detail map[string]any,
+) error {
+	audit.events = append(audit.events, auditEvent{
+		actorAccountID:  actorAccountID,
+		targetAccountID: targetAccountID,
+		action:          action,
+		detail:          detail,
+	})
+	return nil
+}
+
+func TestRequireAuthenticationAuditsDeniedRequest(t *testing.T) {
+	audit := &recordingAudit{}
+	options := newTestRouterOptions()
+	options.AuthService = &authservice.Service{}
+	options.AuditRecorder = audit
+
+	request := httptest.NewRequest(stdhttp.MethodGet, "/api/v1/auth/me", nil)
+	recorder := httptest.NewRecorder()
+	NewRouter(options).ServeHTTP(recorder, request)
+
+	if recorder.Code != stdhttp.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, stdhttp.StatusUnauthorized)
+	}
+	if len(audit.events) != 1 {
+		t.Fatalf("audit events = %d, want 1", len(audit.events))
+	}
+	if audit.events[0].action != "auth.denied" {
+		t.Fatalf("audit action = %q, want auth.denied", audit.events[0].action)
+	}
+	if _, leaked := audit.events[0].detail["token"]; leaked {
+		t.Fatalf("denial audit must not record the token")
+	}
 }

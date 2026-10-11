@@ -157,7 +157,10 @@ func NewRouter(options RouterOptions) http.Handler {
 	mux.HandleFunc("GET /readyz", readyHandler)
 
 	if options.AuthService != nil {
-		authHandler := authHandler{service: options.AuthService}
+		authHandler := authHandler{
+			service: options.AuthService,
+			audit:   options.AuditRecorder,
+		}
 		mux.HandleFunc("POST /api/v1/auth/register", authHandler.register)
 		mux.HandleFunc("POST /api/v1/auth/login", authHandler.login)
 		mux.HandleFunc(
@@ -752,7 +755,7 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/admin/settings",
-					authHandler.requireAdmin(adminHandler.updateSettings),
+					authHandler.requireAdminAction("admin.settings.updated", adminHandler.updateSettings),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/releases",
@@ -760,15 +763,15 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"POST /api/v1/admin/releases",
-					authHandler.requireAdmin(adminHandler.createRelease),
+					authHandler.requireAdminAction("admin.release.created", adminHandler.createRelease),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/admin/releases/{version}/publish",
-					authHandler.requireAdmin(adminHandler.publishRelease),
+					authHandler.requireAdminAction("admin.release.published", adminHandler.publishRelease),
 				)
 				mux.HandleFunc(
 					"DELETE /api/v1/admin/releases/{version}",
-					authHandler.requireAdmin(adminHandler.deleteRelease),
+					authHandler.requireAdminAction("admin.release.deleted", adminHandler.deleteRelease),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/release-artifacts/{version}",
@@ -828,11 +831,11 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"POST /api/v1/admin/service-versions/upgrade",
-					authHandler.requireAdmin(adminHandler.upgradeAllServices),
+					authHandler.requireAdminAction("admin.service.upgrade.started", adminHandler.upgradeAllServices),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/admin/service-versions/{service}/upgrade",
-					authHandler.requireAdmin(adminHandler.upgradeService),
+					authHandler.requireAdminAction("admin.service.upgrade.started", adminHandler.upgradeService),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/service-versions/{service}/releases",
@@ -851,7 +854,7 @@ func NewRouter(options RouterOptions) http.Handler {
 				featureCenterHandler := NewFeatureCenterHandler(options.FeatureCenterService)
 				featureCenterHandler.RegisterAdminRoutes(
 					mux,
-					authHandler.requireAdmin,
+					authHandler.requireAdminAudited(featureCenterAuditAction),
 				)
 			}
 			// parentScoped resolves the authenticated guardian id and is shared
@@ -1345,7 +1348,7 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"POST /api/v1/admin/notifications",
-					authHandler.requireAdmin(adminScoped(adminNotificationHandler.AdminCreate)),
+					authHandler.requireAdminAction("admin.notification.created", adminScoped(adminNotificationHandler.AdminCreate)),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/notifications/stats",
@@ -1357,7 +1360,7 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"DELETE /api/v1/admin/notifications/{notification_id}",
-					authHandler.requireAdmin(adminScoped(adminNotificationHandler.AdminDelete)),
+					authHandler.requireAdminAction("admin.notification.deleted", adminScoped(adminNotificationHandler.AdminDelete)),
 				)
 			}
 		}
@@ -1389,19 +1392,19 @@ func NewRouter(options RouterOptions) http.Handler {
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/approve",
-				authHandler.requireAdmin(contentHandler.approvePackage),
+				authHandler.requireAdminAction("admin.content.reviewed", contentHandler.approvePackage),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/reject",
-				authHandler.requireAdmin(contentHandler.rejectPackage),
+				authHandler.requireAdminAction("admin.content.reviewed", contentHandler.rejectPackage),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/publish",
-				authHandler.requireAdmin(contentHandler.publishPackage),
+				authHandler.requireAdminAction("admin.content.published", contentHandler.publishPackage),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/withdraw",
-				authHandler.requireAdmin(contentHandler.withdrawPackage),
+				authHandler.requireAdminAction("admin.content.withdrawn", contentHandler.withdrawPackage),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/archive",
@@ -1413,7 +1416,7 @@ func NewRouter(options RouterOptions) http.Handler {
 			)
 			mux.HandleFunc(
 				"PUT /api/v1/admin/content/theme-packs/{theme_id}",
-				authHandler.requireAdmin(contentHandler.upsertThemePack),
+				authHandler.requireAdminAction("admin.content.theme_pack.updated", contentHandler.upsertThemePack),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/content/theme-packs/{theme_id}",
@@ -1421,15 +1424,15 @@ func NewRouter(options RouterOptions) http.Handler {
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/theme-packs/{theme_id}/publish",
-				authHandler.requireAdmin(contentHandler.publishThemePack),
+				authHandler.requireAdminAction("admin.content.theme_pack.published", contentHandler.publishThemePack),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/theme-packs/{theme_id}/withdraw",
-				authHandler.requireAdmin(contentHandler.withdrawThemePack),
+				authHandler.requireAdminAction("admin.content.theme_pack.withdrawn", contentHandler.withdrawThemePack),
 			)
 			mux.HandleFunc(
 				"DELETE /api/v1/admin/content/theme-packs/{theme_id}",
-				authHandler.requireAdmin(contentHandler.deleteThemePack),
+				authHandler.requireAdminAction("admin.content.theme_pack.deleted", contentHandler.deleteThemePack),
 			)
 		}
 		if options.ContentOfflinePolicyService != nil {
@@ -1442,7 +1445,7 @@ func NewRouter(options RouterOptions) http.Handler {
 			)
 			mux.HandleFunc(
 				"PUT /api/v1/admin/content/offline-policy",
-				authHandler.requireAdmin(adminOfflinePolicyHandler.adminPublish),
+				authHandler.requireAdminAction("admin.content.offline_policy.published", adminOfflinePolicyHandler.adminPublish),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/content/offline-policy/acknowledgements",
@@ -1633,9 +1636,12 @@ func NewRouter(options RouterOptions) http.Handler {
 		var requireAuthentication func(http.HandlerFunc) http.HandlerFunc
 		var requireAdmin func(http.HandlerFunc) http.HandlerFunc
 		if options.AuthService != nil {
-			authHandler := authHandler{service: options.AuthService}
+			authHandler := authHandler{
+				service: options.AuthService,
+				audit:   options.AuditRecorder,
+			}
 			requireAuthentication = authHandler.requireAuthentication
-			requireAdmin = authHandler.requireAdmin
+			requireAdmin = authHandler.requireAdminAudited(otaAuditAction)
 		}
 		ota.registerRoutes(mux, requireAuthentication, requireAdmin)
 	}
@@ -1774,4 +1780,77 @@ func writeJSON(response http.ResponseWriter, status int, payload any) {
 	response.Header().Set("Content-Type", "application/json; charset=utf-8")
 	response.WriteHeader(status)
 	_ = json.NewEncoder(response).Encode(payload)
+}
+
+// featureCenterAuditAction maps a feature-center write route to a stable audit
+// action so the audit console distinguishes a config change from a manual
+// health check instead of collapsing both into one label.
+func featureCenterAuditAction(request *http.Request) string {
+	path := request.URL.Path
+	switch {
+	case strings.HasSuffix(path, "/health-check"):
+		return "admin.feature_center.health.checked"
+	case strings.HasSuffix(path, "/config"):
+		return "admin.feature_center.config.updated"
+	default:
+		return "admin.feature_center.updated"
+	}
+}
+
+// otaAuditAction maps an OTA write route to a stable audit action covering the
+// release lifecycle (create, update, publish, pause, withdraw, rollback) and
+// deployment retries.
+func otaAuditAction(request *http.Request) string {
+	path := request.URL.Path
+	switch {
+	case strings.HasSuffix(path, "/publish"):
+		return "admin.ota.release.published"
+	case strings.HasSuffix(path, "/pause"):
+		return "admin.ota.release.paused"
+	case strings.HasSuffix(path, "/withdraw"):
+		return "admin.ota.release.withdrawn"
+	case strings.HasSuffix(path, "/rollback"):
+		return "admin.ota.release.rolled_back"
+	case strings.HasSuffix(path, "/retry"):
+		return "admin.ota.deployment.retried"
+	case strings.Contains(path, "/ota/releases"):
+		if request.Method == http.MethodPost {
+			return "admin.ota.release.created"
+		}
+		return "admin.ota.release.updated"
+	default:
+		return "admin.ota.updated"
+	}
+}
+
+// statusRecorder captures the response status so an audit wrapper can record
+// only successful administrator mutations. It forwards Flush so streaming
+// handlers such as release-file downloads keep working behind the wrapper.
+type statusRecorder struct {
+	http.ResponseWriter
+	status  int
+	written bool
+}
+
+func (recorder *statusRecorder) WriteHeader(status int) {
+	if recorder.written {
+		return
+	}
+	recorder.status = status
+	recorder.written = true
+	recorder.ResponseWriter.WriteHeader(status)
+}
+
+func (recorder *statusRecorder) Write(payload []byte) (int, error) {
+	if !recorder.written {
+		recorder.status = http.StatusOK
+		recorder.written = true
+	}
+	return recorder.ResponseWriter.Write(payload)
+}
+
+func (recorder *statusRecorder) Flush() {
+	if flusher, ok := recorder.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }

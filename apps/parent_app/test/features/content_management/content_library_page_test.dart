@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parent_app/features/content_management/application/content_favorites_controller.dart';
 import 'package:parent_app/features/content_management/application/content_library_controller.dart';
+import 'package:parent_app/features/content_management/application/content_play_history_controller.dart';
 import 'package:parent_app/features/content_management/domain/content_package.dart';
 import 'package:parent_app/features/content_management/presentation/content_library_page.dart';
 
@@ -13,6 +14,11 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          contentPlayHistoryControllerProvider.overrideWith(
+            () => _FakeContentPlayHistoryController(
+              const ContentPlayHistoryState.initial(),
+            ),
+          ),
           contentLibraryControllerProvider.overrideWith(
             () => _FakeContentLibraryController(
               const ContentLibraryState.initial(),
@@ -51,6 +57,11 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          contentPlayHistoryControllerProvider.overrideWith(
+            () => _FakeContentPlayHistoryController(
+              const ContentPlayHistoryState.initial(),
+            ),
+          ),
           contentLibraryControllerProvider.overrideWith(
             () => _FakeContentLibraryController(
               ContentLibraryState(
@@ -99,6 +110,11 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          contentPlayHistoryControllerProvider.overrideWith(
+            () => _FakeContentPlayHistoryController(
+              const ContentPlayHistoryState.initial(),
+            ),
+          ),
           contentLibraryControllerProvider.overrideWith(
             () => _FakeContentLibraryController(
               ContentLibraryState(
@@ -151,6 +167,11 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          contentPlayHistoryControllerProvider.overrideWith(
+            () => _FakeContentPlayHistoryController(
+              const ContentPlayHistoryState.initial(),
+            ),
+          ),
           contentLibraryControllerProvider.overrideWith(
             () => _FakeContentLibraryController(
               const ContentLibraryState.initial(),
@@ -187,6 +208,51 @@ void main() {
     expect(find.text('静夜思'), findsOneWidget);
     expect(find.text('古诗 · 5～6 岁'), findsOneWidget);
   });
+
+  testWidgets('renders the playback history tab with records', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          contentPlayHistoryControllerProvider.overrideWith(
+            () => _FakeContentPlayHistoryController(
+              ContentPlayHistoryState(
+                records: [
+                  ContentPlayRecord(
+                    id: 'play-1',
+                    deviceId: 'sprout_device_001',
+                    packageId: 'story_001',
+                    packageVersion: 1,
+                    outcome: PlayOutcome.completed,
+                    playedSeconds: 305,
+                    playedAt: DateTime.utc(2026, 10, 9, 12),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          contentLibraryControllerProvider.overrideWith(
+            () => _FakeContentLibraryController(
+              const ContentLibraryState.initial(),
+            ),
+          ),
+          contentFavoritesControllerProvider.overrideWith(
+            () => _FakeContentFavoritesController(
+              const ContentFavoritesState.initial(),
+            ),
+          ),
+        ],
+        child: const MaterialApp(home: ContentLibraryPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('播放记录'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('story_001'), findsOneWidget);
+    expect(find.text('已听完'), findsOneWidget);
+    expect(find.textContaining('5 分 5 秒'), findsOneWidget);
+  });
 }
 
 class _FakeContentLibraryController extends ContentLibraryController {
@@ -205,4 +271,13 @@ class _FakeContentFavoritesController extends ContentFavoritesController {
 
   @override
   Future<ContentFavoritesState> build() async => value;
+}
+
+class _FakeContentPlayHistoryController extends ContentPlayHistoryController {
+  _FakeContentPlayHistoryController(this.value);
+
+  final ContentPlayHistoryState value;
+
+  @override
+  Future<ContentPlayHistoryState> build() async => value;
 }

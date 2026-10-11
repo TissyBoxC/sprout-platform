@@ -19,6 +19,11 @@ abstract interface class ContentManagementApi {
 
   /// Removes one bookmark. A missing bookmark is treated as success.
   Future<void> removeFavorite(String packageId);
+
+  /// Lists playback history across the guardian's devices, newest first.
+  ///
+  /// Passing [deviceId] narrows the result to one owned device.
+  Future<List<ContentPlayRecord>> fetchPlayHistory({String? deviceId});
 }
 
 /// Production implementation backed by the authenticated API client.
@@ -93,5 +98,29 @@ class HttpContentManagementApi implements ContentManagementApi {
   @override
   Future<void> removeFavorite(String packageId) async {
     await _apiClient.delete('/api/v1/content/favorites/$packageId');
+  }
+
+  @override
+  Future<List<ContentPlayRecord>> fetchPlayHistory({String? deviceId}) async {
+    final response = await _apiClient.get(
+      '/api/v1/content/play-history',
+      queryParameters: <String, String>{
+        if (deviceId != null && deviceId.isNotEmpty) 'device_id': deviceId,
+      },
+    );
+    final data = response['data'];
+    if (data is! Map) {
+      throw const FormatException('missing play history data');
+    }
+    final history = data['history'];
+    if (history is! List) {
+      return const <ContentPlayRecord>[];
+    }
+    return history
+        .whereType<Map>()
+        .map(
+          (item) => ContentPlayRecord.fromJson(Map<String, Object?>.from(item)),
+        )
+        .toList(growable: false);
   }
 }

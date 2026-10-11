@@ -7,10 +7,11 @@ import '../../../shared/widgets/app_reveal.dart';
 import '../../../shared/widgets/app_state_switcher.dart';
 import '../application/content_favorites_controller.dart';
 import '../application/content_library_controller.dart';
+import '../application/content_play_history_controller.dart';
 import '../domain/content_package.dart';
 
 /// Which slice of the library the page is showing.
-enum _LibraryTab { catalog, favorites }
+enum _LibraryTab { catalog, favorites, history }
 
 /// Guardian-facing content library with filters and download controls.
 class ContentLibraryPage extends ConsumerStatefulWidget {
@@ -58,6 +59,11 @@ class _ContentLibraryPageState extends ConsumerState<ContentLibraryPage> {
                     label: Text('我的收藏'),
                     icon: Icon(Icons.star_rounded),
                   ),
+                  ButtonSegment<_LibraryTab>(
+                    value: _LibraryTab.history,
+                    label: Text('播放记录'),
+                    icon: Icon(Icons.history_rounded),
+                  ),
                 ],
                 selected: <_LibraryTab>{_tab},
                 onSelectionChanged: (selection) =>
@@ -65,34 +71,36 @@ class _ContentLibraryPageState extends ConsumerState<ContentLibraryPage> {
               ),
             ),
             Expanded(
-              child: _tab == _LibraryTab.catalog
-                  ? AppStateSwitcher(
-                      stateKey: library.when(
-                        data: (value) => value.isEmpty
-                            ? 'content-empty'
-                            : 'content-list-${value.catalogRevision}',
-                        error: (_, _) => 'content-error',
-                        loading: () => 'content-loading',
-                      ),
-                      child: library.when(
-                        loading: () => const Center(
-                          key: ValueKey<String>('content-loading'),
-                          child: CircularProgressIndicator(),
-                        ),
-                        error: (error, _) => _ErrorState(
-                          key: const ValueKey<String>('content-error'),
-                          message: _messageFor(error),
-                          onRetry: () => ref
-                              .read(contentLibraryControllerProvider.notifier)
-                              .refresh(),
-                        ),
-                        data: (state) => _ContentList(
-                          key: const ValueKey<String>('content-content'),
-                          state: state,
-                        ),
-                      ),
-                    )
-                  : const _FavoritesList(),
+              child: switch (_tab) {
+                _LibraryTab.catalog => AppStateSwitcher(
+                  stateKey: library.when(
+                    data: (value) => value.isEmpty
+                        ? 'content-empty'
+                        : 'content-list-${value.catalogRevision}',
+                    error: (_, _) => 'content-error',
+                    loading: () => 'content-loading',
+                  ),
+                  child: library.when(
+                    loading: () => const Center(
+                      key: ValueKey<String>('content-loading'),
+                      child: CircularProgressIndicator(),
+                    ),
+                    error: (error, _) => _ErrorState(
+                      key: const ValueKey<String>('content-error'),
+                      message: _messageFor(error),
+                      onRetry: () => ref
+                          .read(contentLibraryControllerProvider.notifier)
+                          .refresh(),
+                    ),
+                    data: (state) => _ContentList(
+                      key: const ValueKey<String>('content-content'),
+                      state: state,
+                    ),
+                  ),
+                ),
+                _LibraryTab.favorites => const _FavoritesList(),
+                _LibraryTab.history => const _HistoryList(),
+              },
             ),
           ],
         ),
@@ -279,6 +287,175 @@ class _FavoritesEmptyCard extends StatelessWidget {
             Text('还没有收藏的内容', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 6),
             const Text('在全部内容里点一下星星，收藏就会出现在这里。', textAlign: TextAlign.center),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HistoryList extends ConsumerWidget {
+  const _HistoryList();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final history = ref.watch(contentPlayHistoryControllerProvider);
+    return AppStateSwitcher(
+      stateKey: history.when(
+        data: (value) => value.isEmpty ? 'history-empty' : 'history-list',
+        error: (_, _) => 'history-error',
+        loading: () => 'history-loading',
+      ),
+      child: history.when(
+        loading: () => const Center(
+          key: ValueKey<String>('history-loading'),
+          child: CircularProgressIndicator(),
+        ),
+        error: (error, _) => _ErrorState(
+          key: const ValueKey<String>('history-error'),
+          message: ContentPlayHistoryController.messageFor(error),
+          onRetry: () =>
+              ref.read(contentPlayHistoryControllerProvider.notifier).refresh(),
+        ),
+        data: (state) => RefreshIndicator(
+          key: const ValueKey<String>('history-content'),
+          onRefresh: () =>
+              ref.read(contentPlayHistoryControllerProvider.notifier).refresh(),
+          child: state.isEmpty
+              ? const _HistoryEmptyList()
+              : ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                  children: [
+                    AppReveal(
+                      child: _DeviceFilterBar(
+                        deviceIds: state.deviceIds,
+                        selected: state.deviceFilter,
+                        onSelected: (deviceId) => ref
+                            .read(
+                              contentPlayHistoryControllerProvider.notifier,
+                            )
+                            .filterByDevice(deviceId),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    for (var index = 0; index < state.records.length; index++)
+                      AppReveal(
+                        delay: Duration(milliseconds: 45 * index.clamp(0, 6)),
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _HistoryCard(record: state.records[index]),
+                        ),
+                      ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DeviceFilterBar extends StatelessWidget {
+  const _DeviceFilterBar({
+    required this.deviceIds,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final List<String> deviceIds;
+  final String? selected;
+  final ValueChanged<String?> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    // A single device needs no filter row: switching would be a no-op.
+    if (deviceIds.length < 2) {
+      return const SizedBox.shrink();
+    }
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          _FilterChip(
+            label: '全部设备',
+            selected: selected == null,
+            onSelected: () => onSelected(null),
+          ),
+          for (final deviceId in deviceIds)
+            _FilterChip(
+              label: _deviceLabel(deviceId),
+              selected: selected == deviceId,
+              onSelected: () => onSelected(deviceId),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HistoryCard extends StatelessWidget {
+  const _HistoryCard({required this.record});
+
+  final ContentPlayRecord record;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        contentPadding: const EdgeInsets.fromLTRB(18, 8, 16, 8),
+        leading: CircleAvatar(
+          backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+          child: Icon(_outcomeIcon(record.outcome)),
+        ),
+        title: Text(record.packageId),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(_historySubtitle(record)),
+        ),
+        trailing: Text(
+          record.outcome.label,
+          style: TextStyle(
+            color: _outcomeColor(context, record.outcome),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HistoryEmptyList extends StatelessWidget {
+  const _HistoryEmptyList();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+      children: const [
+        AppReveal(child: _HistoryEmptyCard()),
+      ],
+    );
+  }
+}
+
+class _HistoryEmptyCard extends StatelessWidget {
+  const _HistoryEmptyCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          children: [
+            Icon(
+              Icons.history_rounded,
+              size: 48,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(height: 12),
+            Text('还没有播放记录', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 6),
+            const Text('设备播放内容后，记录会出现在这里。', textAlign: TextAlign.center),
           ],
         ),
       ),
@@ -698,6 +875,61 @@ String _favoriteSubtitle(ContentFavorite favorite) {
     if (!favorite.available) '已下架',
   ];
   return parts.join(' · ');
+}
+
+IconData _outcomeIcon(PlayOutcome outcome) {
+  return switch (outcome) {
+    PlayOutcome.completed => Icons.check_circle_rounded,
+    PlayOutcome.skipped => Icons.skip_next_rounded,
+    PlayOutcome.interrupted => Icons.pause_circle_rounded,
+    PlayOutcome.failed => Icons.error_rounded,
+  };
+}
+
+Color _outcomeColor(BuildContext context, PlayOutcome outcome) {
+  return switch (outcome) {
+    PlayOutcome.completed => const Color(0xFF2E7D55),
+    PlayOutcome.skipped => Theme.of(context).colorScheme.onSurfaceVariant,
+    PlayOutcome.interrupted => const Color(0xFF8A6D00),
+    PlayOutcome.failed => Theme.of(context).colorScheme.error,
+  };
+}
+
+String _historySubtitle(ContentPlayRecord record) {
+  final parts = <String>[
+    _deviceLabel(record.deviceId),
+    '第 ${record.packageVersion} 版',
+    '${_formatDuration(record.playedSeconds)} · ${_formatDateTime(record.playedAt)}',
+  ];
+  return parts.join(' · ');
+}
+
+String _deviceLabel(String deviceId) {
+  // Device ids are opaque; show a stable short suffix so a guardian can tell
+  // two devices apart without exposing the full identifier.
+  if (deviceId.length <= 6) {
+    return deviceId;
+  }
+  return '设备 ${deviceId.substring(deviceId.length - 6)}';
+}
+
+String _formatDuration(int seconds) {
+  if (seconds < 60) {
+    return '$seconds 秒';
+  }
+  final minutes = seconds ~/ 60;
+  final remainder = seconds % 60;
+  if (remainder == 0) {
+    return '$minutes 分钟';
+  }
+  return '$minutes 分 $remainder 秒';
+}
+
+String _formatDateTime(DateTime value) {
+  final local = value.toLocal();
+  final hour = local.hour.toString().padLeft(2, '0');
+  final minute = local.minute.toString().padLeft(2, '0');
+  return '${local.month}月${local.day}日 $hour:$minute';
 }
 
 String _formatDate(DateTime value) {

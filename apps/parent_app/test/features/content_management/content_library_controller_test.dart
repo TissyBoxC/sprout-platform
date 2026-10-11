@@ -97,4 +97,8 @@ class _FakeContentManagementApi implements ContentManagementApi {
 
   @override
   Future<void> removeFavorite(String packageId) async {}
+
+  @override
+  Future<List<ContentPlayRecord>> fetchPlayHistory({String? deviceId}) async =>
+      const <ContentPlayRecord>[];
 }

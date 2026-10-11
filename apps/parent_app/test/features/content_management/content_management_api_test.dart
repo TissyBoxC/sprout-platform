@@ -120,6 +120,52 @@ void main() {
       '/api/v1/content/favorites/story_001',
     ]);
   });
+
+  test('parses the play-history envelope and forwards the device filter',
+      () async {
+    final client = _FakeApiClient(
+      response: <String, Object?>{
+        'data': <String, Object?>{
+          'history': <Object?>[
+            <String, Object?>{
+              'id': 'play-1',
+              'device_id': 'sprout_device_001',
+              'package_id': 'story_001',
+              'package_version': 2,
+              'outcome': 'completed',
+              'played_seconds': 305,
+              'played_at': '2026-10-09T12:00:00Z',
+            },
+          ],
+        },
+      },
+    );
+    final api = HttpContentManagementApi(client);
+
+    final history = await api.fetchPlayHistory(deviceId: 'sprout_device_001');
+
+    expect(history, hasLength(1));
+    expect(history.single.deviceId, 'sprout_device_001');
+    expect(history.single.outcome, PlayOutcome.completed);
+    expect(history.single.playedSeconds, 305);
+    expect(client.lastQueryParameters, <String, String>{
+      'device_id': 'sprout_device_001',
+    });
+  });
+
+  test('omits the device filter when listing all devices', () async {
+    final client = _FakeApiClient(
+      response: <String, Object?>{
+        'data': <String, Object?>{'history': <Object?>[]},
+      },
+    );
+    final api = HttpContentManagementApi(client);
+
+    final history = await api.fetchPlayHistory();
+
+    expect(history, isEmpty);
+    expect(client.lastQueryParameters, isEmpty);
+  });
 }
 
 class _FakeApiClient implements ApiClient {

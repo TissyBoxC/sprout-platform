@@ -142,4 +142,8 @@ class _FakeContentManagementApi implements ContentManagementApi {
   Future<ContentDownloadSpec> fetchDownloadSpec(String packageId) {
     throw UnimplementedError();
   }
+
+  @override
+  Future<List<ContentPlayRecord>> fetchPlayHistory({String? deviceId}) async =>
+      const <ContentPlayRecord>[];
 }

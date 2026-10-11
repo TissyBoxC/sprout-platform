@@ -11,6 +11,7 @@ const ACTION_LABELS: Record<string, string> = {
   'privacy.deletion.cancelled': '撤销注销申请',
   'privacy.deletion.completed': '完成账号注销',
   'privacy.consent.withdrawn': '撤回监护人授权',
+  'privacy.consent.granted': '恢复监护人授权',
   'privacy.export.requested': '导出个人数据',
   'admin.family.created': '创建家长账号',
   'admin.family.profile.updated': '修改家长资料',

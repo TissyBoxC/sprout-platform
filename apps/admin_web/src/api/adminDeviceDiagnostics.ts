@@ -92,9 +92,28 @@ export interface DeviceDiagnosticsSnapshot {
   retentionCrashEvents: number
 }
 
+export interface DeviceDiagnosticsCrashCause {
+  cause: string
+  count: number
+}
+
+export interface DeviceDiagnosticsSummary {
+  deviceId: string
+  windowDays: number
+  bootCount: number
+  failureCount: number
+  recoveryCount: number
+  crashCount: number
+  crashCauses: DeviceDiagnosticsCrashCause[]
+  healthState: DeviceHealthState
+  lastReportedAt: string | null
+  generatedAt: string
+}
+
 export interface AdminDeviceDiagnosticsClient {
   loadDevices(): Promise<AdminDiagnosticDevice[]>
   loadDiagnostics(deviceId: string): Promise<DeviceDiagnosticsSnapshot>
+  loadSummary(deviceId: string, windowDays?: number): Promise<DeviceDiagnosticsSummary>
 }
 
 /// Loads the administrator-visible device inventory and one device's bounded
@@ -120,6 +139,15 @@ export function createAdminDeviceDiagnosticsClient(
         `/api/v1/admin/devices/${encodeURIComponent(normalizedDeviceId)}/diagnostics`,
       )
       return toDiagnostics(response.data?.data)
+    },
+
+    async loadSummary(deviceId: string, windowDays = 7): Promise<DeviceDiagnosticsSummary> {
+      const normalizedDeviceId = deviceId.trim()
+      const response = await httpClient.get(
+        `/api/v1/admin/devices/${encodeURIComponent(normalizedDeviceId)}/diagnostics/summary`,
+        { params: { window_days: windowDays } },
+      )
+      return toSummary(response.data?.data)
     },
   }
 }
@@ -325,6 +353,35 @@ function toNullableCrashEvent(value: unknown): DeviceCrashEvent | null {
     coreId: numberValue(record.core_id ?? record.coreId),
     firmwareVersion: stringValue(record.firmware_version ?? record.firmwareVersion),
     reportedAt: stringValue(record.reported_at ?? record.reportedAt),
+  }
+}
+
+function toSummary(value: unknown): DeviceDiagnosticsSummary {
+  const record = recordValue(value)
+  const deviceId = stringValue(record.device_id ?? record.deviceId).trim()
+  if (!deviceId) {
+    throw new Error('diagnostics summary response is missing a device identifier')
+  }
+  const lastReportedValue = record.last_reported_at ?? record.lastReportedAt
+  return {
+    deviceId,
+    windowDays: numberValue(record.window_days ?? record.windowDays),
+    bootCount: numberValue(record.boot_count ?? record.bootCount),
+    failureCount: numberValue(record.failure_count ?? record.failureCount),
+    recoveryCount: numberValue(record.recovery_count ?? record.recoveryCount),
+    crashCount: numberValue(record.crash_count ?? record.crashCount),
+    crashCauses: arrayValue(record.crash_causes ?? record.crashCauses).flatMap((item) => {
+      const cause = recordValue(item)
+      const name = stringValue(cause.cause).trim()
+      if (!name) {
+        return []
+      }
+      return [{ cause: name, count: numberValue(cause.count) }]
+    }),
+    healthState: healthState(record.health_state ?? record.healthState),
+    lastReportedAt:
+      typeof lastReportedValue === 'string' && lastReportedValue ? lastReportedValue : null,
+    generatedAt: stringValue(record.generated_at ?? record.generatedAt),
   }
 }
 

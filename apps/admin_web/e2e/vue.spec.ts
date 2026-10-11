@@ -1051,6 +1051,36 @@ test('shows complete device diagnostics with bounded history and refresh', async
   }
   const requestedDeviceIds: string[] = []
 
+  const summariesByDevice: Record<string, unknown> = {
+    'device-1': {
+      device_id: 'device-1',
+      window_days: 7,
+      boot_count: 5,
+      failure_count: 10,
+      recovery_count: 10,
+      crash_count: 3,
+      crash_causes: [
+        { cause: 'task_watchdog', count: 2 },
+        { cause: 'brownout', count: 1 },
+      ],
+      health_state: 'faulted',
+      last_reported_at: '2026-10-04T00:00:00Z',
+      generated_at: '2026-10-04T00:00:00Z',
+    },
+    'device-2': {
+      device_id: 'device-2',
+      window_days: 7,
+      boot_count: 0,
+      failure_count: 0,
+      recovery_count: 0,
+      crash_count: 0,
+      crash_causes: [],
+      health_state: 'healthy',
+      last_reported_at: null,
+      generated_at: '2026-10-04T00:00:00Z',
+    },
+  }
+
   await page.route('**/api/v1/admin/devices', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -1063,6 +1093,13 @@ test('shows complete device diagnostics with bounded history and refresh', async
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ data: diagnosticsByDevice[deviceId] }),
+    })
+  })
+  await page.route('**/api/v1/admin/devices/*/diagnostics/summary', async (route) => {
+    const deviceId = new URL(route.request().url()).pathname.split('/').at(-3) ?? ''
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: summariesByDevice[deviceId] }),
     })
   })
 
@@ -1087,12 +1124,15 @@ test('shows complete device diagnostics with bounded history and refresh', async
   await expect(page.getByText(/启动记录 5 条/)).toBeVisible()
   await expect(page.getByText(/故障记录 10 条/)).toBeVisible()
   await expect(page.getByText(/异常重启记录 50 条/)).toBeVisible()
+  await expect(page.getByRole('heading', { name: '近 7 天趋势' })).toBeVisible()
+  await expect(page.getByText('异常重启原因分布')).toBeVisible()
 
   await page.getByRole('button', { name: /初芽二号/ }).click()
   await expect(page.getByText('运行正常', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('最近没有故障记录，设备运行状态良好。')).toBeVisible()
   await expect(page.getByText('还没有恢复记录。设备恢复正常后会自动显示。')).toBeVisible()
   await expect(page.getByText('最近没有异常重启记录，设备启动都很平稳。')).toBeVisible()
+  await expect(page.getByText('窗口内没有异常重启，设备运行平稳。')).toBeVisible()
   expect(requestedDeviceIds.filter((deviceId) => deviceId === 'device-2')).toHaveLength(1)
 
   await page.getByRole('button', { name: '刷新诊断' }).click()

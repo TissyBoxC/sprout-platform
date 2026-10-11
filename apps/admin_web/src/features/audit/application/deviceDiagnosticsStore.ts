@@ -5,6 +5,7 @@ import {
   createAdminDeviceDiagnosticsClient,
   type AdminDiagnosticDevice,
   type DeviceDiagnosticsSnapshot,
+  type DeviceDiagnosticsSummary,
 } from '@/api/adminDeviceDiagnostics'
 import { mapApiError, type ApiError } from '@/api/apiError'
 
@@ -14,6 +15,7 @@ export const useDeviceDiagnosticsStore = defineStore('admin-device-diagnostics',
   const client = createAdminDeviceDiagnosticsClient()
   const devices = ref<AdminDiagnosticDevice[]>([])
   const snapshots = ref<Record<string, DeviceDiagnosticsSnapshot>>({})
+  const summaries = ref<Record<string, DeviceDiagnosticsSummary>>({})
   const selectedDeviceId = ref('')
   const isLoadingDevices = ref(false)
   const isLoadingDiagnostics = ref(false)
@@ -25,6 +27,7 @@ export const useDeviceDiagnosticsStore = defineStore('admin-device-diagnostics',
     () => devices.value.find((device) => device.deviceId === selectedDeviceId.value) ?? null,
   )
   const snapshot = computed(() => snapshots.value[selectedDeviceId.value] ?? null)
+  const summary = computed(() => summaries.value[selectedDeviceId.value] ?? null)
   const onlineDeviceCount = computed(() => devices.value.filter((device) => device.isOnline).length)
 
   async function loadDevices(): Promise<void> {
@@ -51,7 +54,7 @@ export const useDeviceDiagnosticsStore = defineStore('admin-device-diagnostics',
     if (!deviceId) {
       return
     }
-    await loadDiagnostics(deviceId)
+    await Promise.all([loadDiagnostics(deviceId), loadSummary(deviceId)])
   }
 
   async function loadDiagnostics(deviceId = selectedDeviceId.value): Promise<void> {
@@ -72,10 +75,27 @@ export const useDeviceDiagnosticsStore = defineStore('admin-device-diagnostics',
     }
   }
 
+  async function loadSummary(deviceId = selectedDeviceId.value): Promise<void> {
+    const normalizedDeviceId = deviceId.trim()
+    if (!normalizedDeviceId) {
+      return
+    }
+    try {
+      const loaded = await client.loadSummary(normalizedDeviceId)
+      summaries.value = { ...summaries.value, [normalizedDeviceId]: loaded }
+    } catch {
+      // The summary is a secondary view; a failure must not block the primary
+      // history snapshot, so the trend panel simply stays hidden.
+    }
+  }
+
   async function refresh(): Promise<void> {
     await loadDevices()
     if (selectedDeviceId.value) {
-      await loadDiagnostics(selectedDeviceId.value)
+      await Promise.all([
+        loadDiagnostics(selectedDeviceId.value),
+        loadSummary(selectedDeviceId.value),
+      ])
     }
   }
 
@@ -88,6 +108,7 @@ export const useDeviceDiagnosticsStore = defineStore('admin-device-diagnostics',
     lastLoadedAt,
     loadDevices,
     loadDiagnostics,
+    loadSummary,
     onlineDeviceCount,
     refresh,
     selectDevice,
@@ -95,5 +116,7 @@ export const useDeviceDiagnosticsStore = defineStore('admin-device-diagnostics',
     selectedDeviceId,
     snapshot,
     snapshots,
+    summary,
+    summaries,
   }
 })

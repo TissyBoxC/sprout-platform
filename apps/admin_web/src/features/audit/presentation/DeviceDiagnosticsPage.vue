@@ -5,6 +5,8 @@ import type {
   AdminDiagnosticDevice,
   DeviceBootEvent,
   DeviceCrashEvent,
+  DeviceDiagnosticsCrashCause,
+  DeviceDiagnosticsSummary,
   DeviceDiagnosticsSnapshot,
   DeviceHealthState,
   DeviceInteractionEvent,
@@ -226,6 +228,14 @@ function crashDetail(event: DeviceCrashEvent): string {
     `版本 ${event.firmwareVersion || '待补充'}`,
   ].filter(Boolean)
   return parts.join(' · ')
+}
+
+function summaryCauses(summary: DeviceDiagnosticsSummary): DeviceDiagnosticsCrashCause[] {
+  return summary.crashCauses
+}
+
+function summaryCauseTotal(summary: DeviceDiagnosticsSummary): number {
+  return summary.crashCauses.reduce((total, item) => total + item.count, 0)
 }
 
 function interactionLabel(eventType: string): string {
@@ -454,6 +464,49 @@ function formatDuration(value: number): string {
                     }}
                   </p>
                 </article>
+              </section>
+
+              <section v-if="store.summary" class="trend-panel">
+                <header class="panel-heading">
+                  <div>
+                    <h2>近 {{ store.summary.windowDays }} 天趋势</h2>
+                    <p>按滚动窗口汇总设备的启动、故障、恢复和异常重启次数。</p>
+                  </div>
+                </header>
+                <dl class="trend-grid">
+                  <div>
+                    <dt>启动</dt>
+                    <dd>{{ store.summary.bootCount }}</dd>
+                  </div>
+                  <div>
+                    <dt>故障</dt>
+                    <dd>{{ store.summary.failureCount }}</dd>
+                  </div>
+                  <div>
+                    <dt>恢复</dt>
+                    <dd>{{ store.summary.recoveryCount }}</dd>
+                  </div>
+                  <div :class="{ concerning: store.summary.crashCount > 0 }">
+                    <dt>异常重启</dt>
+                    <dd>{{ store.summary.crashCount }}</dd>
+                  </div>
+                  <div>
+                    <dt>窗口状态</dt>
+                    <dd>{{ healthLabel(store.summary.healthState) }}</dd>
+                  </div>
+                </dl>
+                <div v-if="summaryCauses(store.summary).length > 0" class="trend-causes">
+                  <p class="trend-causes-title">异常重启原因分布</p>
+                  <ul>
+                    <li v-for="item in summaryCauses(store.summary)" :key="item.cause">
+                      <span>{{ crashCauseLabel(item.cause) }}</span>
+                      <strong>{{ item.count }}</strong>
+                    </li>
+                  </ul>
+                </div>
+                <p v-else-if="summaryCauseTotal(store.summary) === 0" class="trend-empty">
+                  窗口内没有异常重启，设备运行平稳。
+                </p>
               </section>
 
               <section class="detail-grid">
@@ -715,6 +768,7 @@ h1 {
 .metric-card,
 .detail-panel,
 .retention-panel,
+.trend-panel,
 .state-panel {
   border: 1px solid var(--sprout-outline);
   border-radius: var(--sprout-radius-card);
@@ -1061,6 +1115,82 @@ h1 {
   color: #a12b4a;
 }
 
+.trend-panel {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.trend-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 16px 20px 4px;
+}
+
+.trend-grid div {
+  padding: 13px;
+  border-radius: 15px;
+  background: #fff8fa;
+}
+
+.trend-grid div.concerning {
+  background: #fff0f2;
+}
+
+.trend-grid dt {
+  color: var(--sprout-text-muted);
+  font-size: 12px;
+}
+
+.trend-grid dd {
+  margin: 5px 0 0;
+  color: var(--sprout-text);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.trend-causes {
+  padding: 12px 20px 20px;
+}
+
+.trend-causes-title {
+  margin: 0 0 8px;
+  color: var(--sprout-text-muted);
+  font-size: 12px;
+}
+
+.trend-causes ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trend-causes li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #fff2f5;
+  color: #b23a68;
+  font-size: 12px;
+}
+
+.trend-causes li strong {
+  color: #7d2148;
+}
+
+.trend-empty {
+  margin: 0;
+  padding: 4px 20px 20px;
+  color: var(--sprout-text-muted);
+  font-size: 13px;
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1287,6 +1417,10 @@ h1 {
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .trend-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 900px) {
@@ -1335,10 +1469,18 @@ h1 {
   .retention-grid {
     grid-template-columns: 1fr;
   }
+
+  .trend-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 520px) {
   .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .trend-grid {
     grid-template-columns: 1fr;
   }
 

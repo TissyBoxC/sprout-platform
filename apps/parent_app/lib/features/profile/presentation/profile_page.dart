@@ -78,6 +78,7 @@ class ProfilePage extends ConsumerWidget {
                     onPlayback: () => context.push('/me/playback'),
                     onLocalCommands: () => context.push('/me/local-commands'),
                     onOfflinePolicy: () => context.push('/me/offline-policy'),
+                    onDisplay: () => context.push('/me/display'),
                     onUsageReports: () => context.push('/me/usage-reports'),
                     onNotifications: () => context.push('/me/notifications'),
                     onContent: () => context.push('/me/content'),
@@ -415,6 +416,7 @@ class _SettingsCard extends StatelessWidget {
     required this.onPlayback,
     required this.onLocalCommands,
     required this.onOfflinePolicy,
+    required this.onDisplay,
     required this.onUsageReports,
     required this.onNotifications,
     required this.onContent,
@@ -431,6 +433,7 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onPlayback;
   final VoidCallback onLocalCommands;
   final VoidCallback onOfflinePolicy;
+  final VoidCallback onDisplay;
   final VoidCallback onUsageReports;
   final VoidCallback onNotifications;
   final VoidCallback onContent;
@@ -492,6 +495,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('设置断网可播放的内容缓存上限和有效期'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onOfflinePolicy,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.visibility_outlined),
+            title: const Text('护眼屏幕'),
+            subtitle: const Text('设置亮度、色温、观看距离和时长提醒'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onDisplay,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

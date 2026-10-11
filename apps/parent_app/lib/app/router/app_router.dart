@@ -26,6 +26,7 @@ import '../../features/profile/presentation/profile_page.dart';
 import '../../features/settings/presentation/privacy_page.dart';
 import '../../features/usage_report/presentation/usage_report_page.dart';
 import '../../features/vision/presentation/vision_page.dart';
+import '../../features/display/presentation/display_settings_page.dart';
 import '../../shared/widgets/parent_shell.dart';
 
 /// Creates the application router with authentication-aware redirects.
@@ -104,6 +105,10 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/offline-policy',
         builder: (context, state) => const OfflinePolicyPage(),
+      ),
+      GoRoute(
+        path: '/me/display',
+        builder: (context, state) => const DisplaySettingsPage(),
       ),
       GoRoute(
         path: '/me/notifications',

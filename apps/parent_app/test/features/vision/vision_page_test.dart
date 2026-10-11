@@ -18,7 +18,7 @@ void main() {
               capability: const VisionCapability(
                 supported: true,
                 consentGranted: false,
-                reconsentPath: '/settings/privacy',
+                reconsentPath: '/me/privacy',
                 retentionHours: 24,
               ),
             ),
@@ -49,7 +49,7 @@ void main() {
               capability: const VisionCapability(
                 supported: true,
                 consentGranted: true,
-                reconsentPath: '/settings/privacy',
+                reconsentPath: '/me/privacy',
                 retentionHours: 24,
               ),
               tasks: const [

@@ -58,6 +58,8 @@ import (
 	policyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
 	playbackRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/playback/repository"
 	playbackService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/playback/service"
+	powerRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/power/repository"
+	powerRuntimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/power/service"
 	privacyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/repository"
 	privacyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/service"
 	recommendationService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/recommendation/service"
@@ -532,6 +534,12 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create connectivity service: %w", err)
 	}
+	devicePower, err := powerRuntimeService.New(powerRuntimeService.Options{
+		Repository: powerRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
+	if err != nil {
+		return fmt.Errorf("create power service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
@@ -566,6 +574,7 @@ func Run() error {
 			DisplayService:              display,
 			InputService:                input,
 			ConnectivityService:         connectivity,
+			PowerService:                devicePower,
 			AuditRecorder:               privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

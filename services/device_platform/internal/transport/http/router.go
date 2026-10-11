@@ -35,6 +35,7 @@ import (
 	otaservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/service"
 	policeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
 	playbackservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/playback/service"
+	powerservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/power/service"
 	privacyhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/handler"
 	privacyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/service"
 	recommendationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/recommendation/service"
@@ -77,6 +78,7 @@ type RouterOptions struct {
 	DisplayService              *displayservice.Service
 	InputService                *inputservice.Service
 	ConnectivityService         *connectivityservice.Service
+	PowerService                *powerservice.Service
 	AuditRecorder               auditRecorder
 }
 
@@ -423,6 +425,20 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/connectivity/status",
 					deviceConnectivityHandler.reportStatus,
+				)
+			}
+		}
+		if options.PowerService != nil {
+			powerHandler := powerHandler{service: options.PowerService}
+			if options.BindingService != nil && options.RuntimeService != nil {
+				devicePowerHandler := devicePowerHandler{
+					handler:        &powerHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/power/status",
+					devicePowerHandler.reportStatus,
 				)
 			}
 		}
@@ -941,6 +957,29 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/admin/connectivity/stats",
 					authHandler.requireAdmin(connectivityHandler.adminStats),
+				)
+			}
+			if options.PowerService != nil {
+				powerHandler := powerHandler{service: options.PowerService}
+				mux.HandleFunc(
+					"GET /api/v1/power/policy",
+					authHandler.requireAuthentication(powerHandler.current),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/power/policy",
+					authHandler.requireAuthentication(powerHandler.publish),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/power/devices",
+					authHandler.requireAuthentication(powerHandler.statuses),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/power/capability",
+					authHandler.requireAuthentication(powerHandler.capability),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/power/stats",
+					authHandler.requireAdmin(powerHandler.adminStats),
 				)
 			}
 			if options.NotificationService != nil {

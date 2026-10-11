@@ -348,3 +348,45 @@ func TestCapabilityReportsConsent(t *testing.T) {
 		t.Fatalf("unexpected retention hours: %d", state.RetentionHours)
 	}
 }
+
+func TestListTasksDeniesUnownedDevice(t *testing.T) {
+	repository := newMemoryRepository()
+	service, err := New(Options{
+		Repository:    repository,
+		ConsentReader: stubConsent{granted: true},
+		DeviceReader:  stubDeviceReader{owned: false},
+	})
+	if err != nil {
+		t.Fatalf("new vision service: %v", err)
+	}
+	_, err = service.ListTasks(
+		context.Background(),
+		"parent-001",
+		"sprout_device_001",
+		20,
+	)
+	if err != domain.ErrInvalidTask {
+		t.Fatalf("expected ownership denial, got %v", err)
+	}
+}
+
+func TestGetResultDeniesUnownedDevice(t *testing.T) {
+	repository := newMemoryRepository()
+	service, err := New(Options{
+		Repository:    repository,
+		ConsentReader: stubConsent{granted: true},
+		DeviceReader:  stubDeviceReader{owned: false},
+	})
+	if err != nil {
+		t.Fatalf("new vision service: %v", err)
+	}
+	repository.tasks["task-1"] = domain.Task{
+		ID:       "task-1",
+		DeviceID: "sprout_device_001",
+		Status:   domain.TaskStatusCompleted,
+	}
+	_, err = service.GetResult(context.Background(), "parent-001", "task-1")
+	if err != domain.ErrInvalidTask {
+		t.Fatalf("expected ownership denial, got %v", err)
+	}
+}

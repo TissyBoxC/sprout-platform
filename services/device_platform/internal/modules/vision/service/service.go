@@ -273,9 +273,10 @@ func (s *Service) CancelTask(
 	return s.repository.GetTask(ctx, taskID)
 }
 
-// ListTasks returns recent tasks for one device.
+// ListTasks returns recent tasks for one device owned by the caller.
 func (s *Service) ListTasks(
 	ctx context.Context,
+	parentAccountID string,
 	deviceID string,
 	limit int,
 ) ([]domain.Task, error) {
@@ -283,12 +284,16 @@ func (s *Service) ListTasks(
 	if !deviceIDPattern.MatchString(deviceID) {
 		return nil, domain.ErrInvalidTask
 	}
+	if err := s.requireOwnership(ctx, parentAccountID, deviceID); err != nil {
+		return nil, err
+	}
 	return s.repository.ListTasksByDevice(ctx, deviceID, limit)
 }
 
-// ListResults returns short-lived results for one device.
+// ListResults returns short-lived results for one device owned by the caller.
 func (s *Service) ListResults(
 	ctx context.Context,
+	parentAccountID string,
 	deviceID string,
 	limit int,
 ) ([]domain.Result, error) {
@@ -296,15 +301,27 @@ func (s *Service) ListResults(
 	if !deviceIDPattern.MatchString(deviceID) {
 		return nil, domain.ErrInvalidTask
 	}
+	if err := s.requireOwnership(ctx, parentAccountID, deviceID); err != nil {
+		return nil, err
+	}
 	return s.repository.ListResultsByDevice(ctx, deviceID, limit)
 }
 
-// GetResult returns one result by task id.
+// GetResult returns one result, only when the caller owns the device.
 func (s *Service) GetResult(
 	ctx context.Context,
+	parentAccountID string,
 	taskID string,
 ) (*domain.Result, error) {
-	return s.repository.GetResult(ctx, strings.TrimSpace(taskID))
+	taskID = strings.TrimSpace(taskID)
+	task, err := s.repository.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireOwnership(ctx, parentAccountID, task.DeviceID); err != nil {
+		return nil, err
+	}
+	return s.repository.GetResult(ctx, taskID)
 }
 
 // PruneExpired prunes stale tasks and expired results. It is safe to call from
@@ -331,6 +348,30 @@ func (s *Service) imageConsentGranted(ctx context.Context, deviceID string) bool
 		return false
 	}
 	return granted
+}
+
+// requireOwnership denies access to a device that the caller does not own. When
+// no device reader is configured the check fails closed.
+func (s *Service) requireOwnership(
+	ctx context.Context,
+	parentAccountID string,
+	deviceID string,
+) error {
+	if s.deviceReader == nil {
+		return domain.ErrInvalidTask
+	}
+	owned, err := s.deviceReader.OwnsDevice(
+		ctx,
+		strings.TrimSpace(parentAccountID),
+		deviceID,
+	)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return domain.ErrInvalidTask
+	}
+	return nil
 }
 
 func frameIsValid(width, height, byteSize int) bool {

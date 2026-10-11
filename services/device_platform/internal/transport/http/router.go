@@ -770,7 +770,9 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/vision/tasks",
-					authHandler.requireAuthentication(visionHandler.ListTasks),
+					authHandler.requireAuthentication(
+						parentScoped(visionHandler.ListTasks),
+					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/vision/tasks/{task_id}/cancel",
@@ -786,11 +788,15 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/vision/results",
-					authHandler.requireAuthentication(visionHandler.ListResults),
+					authHandler.requireAuthentication(
+						parentScoped(visionHandler.ListResults),
+					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/vision/results/{task_id}",
-					authHandler.requireAuthentication(visionHandler.GetResult),
+					authHandler.requireAuthentication(
+						parentScoped(visionHandler.GetResult),
+					),
 				)
 			}
 			if options.NotificationService != nil {

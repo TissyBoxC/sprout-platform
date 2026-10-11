@@ -28,15 +28,21 @@ type Service interface {
 	) (*domain.Task, error)
 	ListTasks(
 		ctx context.Context,
+		parentAccountID string,
 		deviceID string,
 		limit int,
 	) ([]domain.Task, error)
 	ListResults(
 		ctx context.Context,
+		parentAccountID string,
 		deviceID string,
 		limit int,
 	) ([]domain.Result, error)
-	GetResult(ctx context.Context, taskID string) (*domain.Result, error)
+	GetResult(
+		ctx context.Context,
+		parentAccountID string,
+		taskID string,
+	) (*domain.Result, error)
 	CancelTask(ctx context.Context, taskID string) (*domain.Task, error)
 }
 
@@ -104,10 +110,16 @@ func (handler *Handler) CreateTask(
 func (handler *Handler) ListTasks(
 	response http.ResponseWriter,
 	request *http.Request,
+	accountID string,
 ) {
 	deviceID := strings.TrimSpace(request.PathValue("device_id"))
 	limit := parseVisionLimit(request.URL.Query().Get("limit"))
-	tasks, err := handler.service.ListTasks(request.Context(), deviceID, limit)
+	tasks, err := handler.service.ListTasks(
+		request.Context(),
+		accountID,
+		deviceID,
+		limit,
+	)
 	if err != nil {
 		writeVisionError(response, request, err)
 		return
@@ -137,10 +149,16 @@ func (handler *Handler) CancelTask(
 func (handler *Handler) ListResults(
 	response http.ResponseWriter,
 	request *http.Request,
+	accountID string,
 ) {
 	deviceID := strings.TrimSpace(request.PathValue("device_id"))
 	limit := parseVisionLimit(request.URL.Query().Get("limit"))
-	results, err := handler.service.ListResults(request.Context(), deviceID, limit)
+	results, err := handler.service.ListResults(
+		request.Context(),
+		accountID,
+		deviceID,
+		limit,
+	)
 	if err != nil {
 		writeVisionError(response, request, err)
 		return
@@ -157,9 +175,10 @@ func (handler *Handler) ListResults(
 func (handler *Handler) GetResult(
 	response http.ResponseWriter,
 	request *http.Request,
+	accountID string,
 ) {
 	taskID := strings.TrimSpace(request.PathValue("task_id"))
-	result, err := handler.service.GetResult(request.Context(), taskID)
+	result, err := handler.service.GetResult(request.Context(), accountID, taskID)
 	if err != nil {
 		writeVisionError(response, request, err)
 		return

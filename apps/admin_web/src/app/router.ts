@@ -24,6 +24,7 @@ import DisplayStatsPage from '@/features/display/presentation/DisplayStatsPage.v
 import TouchStatsPage from '@/features/touch/presentation/TouchStatsPage.vue'
 import CellularStatsPage from '@/features/cellular/presentation/CellularStatsPage.vue'
 import PowerStatsPage from '@/features/power/presentation/PowerStatsPage.vue'
+import MotionStatsPage from '@/features/motion/presentation/MotionStatsPage.vue'
 import { useAuthStore } from '@/features/auth/application/authStore'
 
 /// Feature routes are registered here so removing a feature only changes its
@@ -146,6 +147,11 @@ export function createAdminRouter() {
         path: '/power',
         name: 'power',
         component: PowerStatsPage,
+      },
+      {
+        path: '/motion',
+        name: 'motion',
+        component: MotionStatsPage,
       },
       {
         path: '/audit',

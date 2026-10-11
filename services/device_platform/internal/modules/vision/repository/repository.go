@@ -45,6 +45,10 @@ type Repository interface {
 		limit int,
 	) ([]domain.Result, error)
 	DeleteExpiredResults(ctx context.Context, now time.Time) (int64, error)
+	GetAdminStats(
+		ctx context.Context,
+		since time.Time,
+	) (*domain.AdminStats, error)
 }
 
 // PostgresRepository stores vision metadata in the platform database.
@@ -382,6 +386,72 @@ func (r *PostgresRepository) DeleteExpiredResults(
 		return 0, fmt.Errorf("delete expired vision results: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// GetAdminStats aggregates bounded, fleet-wide vision counts for operators.
+// Only counts and symbolic task types are returned; labels and summaries are
+// deliberately excluded so the console cannot surface child content.
+func (r *PostgresRepository) GetAdminStats(
+	ctx context.Context,
+	since time.Time,
+) (*domain.AdminStats, error) {
+	stats := &domain.AdminStats{
+		TaskTypes:   make([]domain.TaskTypeCount, 0),
+		GeneratedAt: time.Now().UTC(),
+	}
+	if !since.IsZero() {
+		stats.WindowDays = int(stats.GeneratedAt.Sub(since).Hours() / 24)
+		if stats.WindowDays < 0 {
+			stats.WindowDays = 0
+		}
+	}
+	if err := r.pool.QueryRow(ctx, `
+		SELECT
+			COUNT(*),
+			COUNT(*) FILTER (WHERE status = 'completed'),
+			COUNT(*) FILTER (WHERE status = 'failed'),
+			COUNT(*) FILTER (WHERE status = 'expired'),
+			COUNT(DISTINCT device_id)
+		FROM vision_tasks
+		WHERE created_at >= $1
+	`, since).Scan(
+		&stats.TaskCount,
+		&stats.CompletedCount,
+		&stats.FailedCount,
+		&stats.ExpiredCount,
+		&stats.ActiveDeviceCount,
+	); err != nil {
+		return nil, fmt.Errorf("summarize vision tasks: %w", err)
+	}
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM vision_results
+		WHERE created_at >= $1
+	`, since).Scan(&stats.ResultCount); err != nil {
+		return nil, fmt.Errorf("summarize vision results: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT task_type, COUNT(*) AS occurrences
+		FROM vision_tasks
+		WHERE created_at >= $1
+		GROUP BY task_type
+		ORDER BY occurrences DESC, task_type ASC
+	`, since)
+	if err != nil {
+		return nil, fmt.Errorf("summarize vision task types: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		count := domain.TaskTypeCount{}
+		if err := rows.Scan(&count.TaskType, &count.Count); err != nil {
+			return nil, fmt.Errorf("scan vision task type: %w", err)
+		}
+		stats.TaskTypes = append(stats.TaskTypes, count)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate vision task types: %w", err)
+	}
+	return stats, nil
 }
 
 var _ Repository = (*PostgresRepository)(nil)

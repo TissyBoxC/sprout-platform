@@ -129,6 +129,18 @@ func (repository *memoryRepository) DeleteExpiredResults(
 	return 0, nil
 }
 
+func (repository *memoryRepository) GetAdminStats(
+	_ context.Context,
+	_ time.Time,
+) (*domain.AdminStats, error) {
+	stats := &domain.AdminStats{
+		TaskCount:   uint64(len(repository.tasks)),
+		ResultCount: uint64(len(repository.results)),
+		TaskTypes:   make([]domain.TaskTypeCount, 0),
+	}
+	return stats, nil
+}
+
 type stubConsent struct {
 	granted bool
 	err     error

@@ -44,6 +44,10 @@ type Service interface {
 		taskID string,
 	) (*domain.Result, error)
 	CancelTask(ctx context.Context, taskID string) (*domain.Task, error)
+	AdminStats(
+		ctx context.Context,
+		windowDays int,
+	) (*domain.AdminStats, error)
 }
 
 // Handler exposes guardian camera/vision endpoints.
@@ -190,6 +194,47 @@ func decodeRequestJSON(request *http.Request, destination any) error {
 	decoder := json.NewDecoder(request.Body)
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(destination)
+}
+
+// GetAdminStats handles GET /api/v1/admin/vision/stats. The route is mounted
+// behind requireAdmin.
+func (handler *Handler) GetAdminStats(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	windowDays := parseSummaryWindowDays(
+		request.URL.Query().Get("window_days"),
+	)
+	stats, err := handler.service.AdminStats(request.Context(), windowDays)
+	if err != nil {
+		writeVisionError(response, request, err)
+		return
+	}
+	httpapi.WriteSuccess(response, request, http.StatusOK, stats)
+}
+
+func parseSummaryWindowDays(raw string) int {
+	const (
+		defaultWindowDays = 7
+		maxWindowDays     = 90
+	)
+	if raw == "" {
+		return defaultWindowDays
+	}
+	value := 0
+	for _, character := range raw {
+		if character < '0' || character > '9' {
+			return defaultWindowDays
+		}
+		value = value*10 + int(character-'0')
+		if value > maxWindowDays {
+			return maxWindowDays
+		}
+	}
+	if value <= 0 {
+		return defaultWindowDays
+	}
+	return value
 }
 
 func taskResponse(task *domain.Task) map[string]any {

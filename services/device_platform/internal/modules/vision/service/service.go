@@ -349,6 +349,25 @@ func (s *Service) ListPendingTasksForDevice(
 	return pending, nil
 }
 
+// AdminStats returns a bounded, windowed fleet summary for the admin console.
+// A non-positive or oversized window falls back to the default so an operator
+// cannot request an unbounded scan.
+func (s *Service) AdminStats(
+	ctx context.Context,
+	windowDays int,
+) (*domain.AdminStats, error) {
+	if windowDays <= 0 || windowDays > 90 {
+		windowDays = 7
+	}
+	since := s.timeSource.Now().UTC().AddDate(0, 0, -windowDays)
+	stats, err := s.repository.GetAdminStats(ctx, since)
+	if err != nil {
+		return nil, err
+	}
+	stats.WindowDays = windowDays
+	return stats, nil
+}
+
 // PruneExpired prunes stale tasks and expired results. It is safe to call from
 // a periodic maintenance job.
 func (s *Service) PruneExpired(ctx context.Context) (int64, int64, error) {

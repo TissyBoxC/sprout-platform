@@ -115,6 +115,26 @@ type CapabilityState struct {
 	RetentionHours int    `json:"retention_hours"`
 }
 
+// TaskTypeCount is one row of the administrator task-type breakdown.
+type TaskTypeCount struct {
+	TaskType TaskType `json:"task_type"`
+	Count    uint64   `json:"count"`
+}
+
+// AdminStats is the bounded fleet-wide vision summary for the admin console.
+// It carries counts and status breakdowns only, never labels or summaries.
+type AdminStats struct {
+	WindowDays        int             `json:"window_days"`
+	TaskCount         uint64          `json:"task_count"`
+	CompletedCount    uint64          `json:"completed_count"`
+	FailedCount       uint64          `json:"failed_count"`
+	ExpiredCount      uint64          `json:"expired_count"`
+	ResultCount       uint64          `json:"result_count"`
+	ActiveDeviceCount uint64          `json:"active_device_count"`
+	TaskTypes         []TaskTypeCount `json:"task_types"`
+	GeneratedAt       time.Time       `json:"generated_at"`
+}
+
 // TaskTypeIsValid reports whether a task type is part of the contract.
 func TaskTypeIsValid(taskType TaskType) bool {
 	switch taskType {

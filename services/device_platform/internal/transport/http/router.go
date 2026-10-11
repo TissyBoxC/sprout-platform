@@ -821,6 +821,10 @@ func NewRouter(options RouterOptions) http.Handler {
 						parentScoped(visionHandler.GetResult),
 					),
 				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/vision/stats",
+					authHandler.requireAdmin(visionHandler.GetAdminStats),
+				)
 			}
 			if options.NotificationService != nil {
 				notificationHandler := notificationhandler.New(options.NotificationService)

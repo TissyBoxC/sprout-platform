@@ -7,36 +7,36 @@ import (
 )
 
 var (
-	ErrEmailExists           = errors.New("email already exists")
-	ErrPhoneExists           = errors.New("phone already exists")
-	ErrAccountNotFound       = errors.New("parent account not found")
-	ErrInvalidCredentials    = errors.New("invalid credentials")
-	ErrAccountDisabled       = errors.New("parent account is disabled")
-	ErrSessionNotFound       = errors.New("session not found")
-	ErrSessionExpired        = errors.New("session expired")
-	ErrMFARequired           = errors.New("administrator MFA is required")
-	ErrMFAChallengeNotFound  = errors.New("MFA challenge not found")
-	ErrMFAChallengeExpired   = errors.New("MFA challenge expired")
-	ErrMFAChallengeConsumed  = errors.New("MFA challenge already used")
-	ErrInvalidMFACode        = errors.New("invalid MFA code")
-	ErrMFANotConfigured      = errors.New("administrator MFA is not configured")
-	ErrTOTPAlreadyConfigured = errors.New("administrator TOTP is already configured")
-	ErrGuardianConsent       = errors.New("guardian consent is required")
-	ErrInvalidEmail          = errors.New("invalid email")
-	ErrInvalidPhone          = errors.New("invalid phone")
-	ErrPhoneNotBound         = errors.New("phone is not bound")
-	ErrPhoneVerification     = errors.New("phone verification is unavailable")
-	ErrInvalidVerification   = errors.New("verification code is invalid")
-	ErrWeakPassword          = errors.New("password does not meet requirements")
-	ErrInvalidDisplayName    = errors.New("display name is required")
-	ErrInvalidGuardianName   = errors.New("guardian family name is invalid")
-	ErrInvalidChildNickname  = errors.New("child nickname is invalid")
-	ErrInvalidChildBirthday  = errors.New("child birthday is invalid")
-	ErrAIAccountUnavailable  = errors.New("AI account is unavailable")
-	ErrInsufficientPrivilege = errors.New("insufficient privilege")
+	ErrEmailExists            = errors.New("email already exists")
+	ErrPhoneExists            = errors.New("phone already exists")
+	ErrAccountNotFound        = errors.New("parent account not found")
+	ErrInvalidCredentials     = errors.New("invalid credentials")
+	ErrAccountDisabled        = errors.New("parent account is disabled")
+	ErrSessionNotFound        = errors.New("session not found")
+	ErrSessionExpired         = errors.New("session expired")
+	ErrMFARequired            = errors.New("administrator MFA is required")
+	ErrMFAChallengeNotFound   = errors.New("MFA challenge not found")
+	ErrMFAChallengeExpired    = errors.New("MFA challenge expired")
+	ErrMFAChallengeConsumed   = errors.New("MFA challenge already used")
+	ErrInvalidMFACode         = errors.New("invalid MFA code")
+	ErrMFANotConfigured       = errors.New("administrator MFA is not configured")
+	ErrTOTPAlreadyConfigured  = errors.New("administrator TOTP is already configured")
+	ErrGuardianConsent        = errors.New("guardian consent is required")
+	ErrInvalidEmail           = errors.New("invalid email")
+	ErrInvalidPhone           = errors.New("invalid phone")
+	ErrPhoneNotBound          = errors.New("phone is not bound")
+	ErrPhoneVerification      = errors.New("phone verification is unavailable")
+	ErrInvalidVerification    = errors.New("verification code is invalid")
+	ErrWeakPassword           = errors.New("password does not meet requirements")
+	ErrInvalidDisplayName     = errors.New("display name is required")
+	ErrInvalidGuardianName    = errors.New("guardian family name is invalid")
+	ErrInvalidChildNickname   = errors.New("child nickname is invalid")
+	ErrInvalidChildBirthday   = errors.New("child birthday is invalid")
+	ErrAIAccountUnavailable   = errors.New("AI account is unavailable")
+	ErrInsufficientPrivilege  = errors.New("insufficient privilege")
 	ErrUnknownAdminPermission = errors.New("unknown administrator permission")
-	ErrRegistrationDisabled  = errors.New("registration is disabled")
-	ErrEmailLoginDisabled    = errors.New("email login is disabled")
+	ErrRegistrationDisabled   = errors.New("registration is disabled")
+	ErrEmailLoginDisabled     = errors.New("email login is disabled")
 )
 
 const (
@@ -63,10 +63,10 @@ type ParentAccount struct {
 	// AdminPermissions is the operation-level grant for an administrator. It is
 	// empty for guardians and for an administrator whose capabilities were
 	// revoked. See AdminPermissionCatalog for the assignable values.
-	AdminPermissions       []string
-	LastLoginAt            *time.Time
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	AdminPermissions []string
+	LastLoginAt      *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // Session is one renewable parent login session.

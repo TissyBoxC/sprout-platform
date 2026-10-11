@@ -143,8 +143,8 @@ func (s *Service) BootstrapAdmin(
 		// receives the wildcard. Later grants are narrowed through the
 		// permission-management screen.
 		AdminPermissions: []string{domain.AdminPermissionWildcard},
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 	if err := s.repository.CreateParentAccount(ctx, account); err != nil {
 		return "", err

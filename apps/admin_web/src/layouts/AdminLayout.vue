@@ -99,6 +99,10 @@ async function logout(): Promise<void> {
           <span class="nav-dot" aria-hidden="true"></span>
           视频会话
         </RouterLink>
+        <RouterLink to="/bluetooth-audio">
+          <span class="nav-dot" aria-hidden="true"></span>
+          蓝牙音箱
+        </RouterLink>
         <RouterLink to="/wearable">
           <span class="nav-dot" aria-hidden="true"></span>
           穿戴与定位

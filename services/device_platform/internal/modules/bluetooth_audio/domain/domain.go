@@ -37,13 +37,13 @@ const (
 // pairing default to off so a device never advertises or accepts a pairing
 // without an explicit guardian decision.
 const (
-	DefaultEnabled             = false
-	DefaultSpeakerModeAllowed  = true
-	DefaultPairingAllowed      = false
-	DefaultAutoReconnect       = true
-	DefaultPreferredCodec      = CodecAuto
-	DefaultMaxVolumePercent    = 70
-	DefaultDisplayName         = ""
+	DefaultEnabled            = false
+	DefaultSpeakerModeAllowed = true
+	DefaultPairingAllowed     = false
+	DefaultAutoReconnect      = true
+	DefaultPreferredCodec     = CodecAuto
+	DefaultMaxVolumePercent   = 70
+	DefaultDisplayName        = ""
 )
 
 // The bounded preferred codec catalog shared with the firmware.
@@ -116,16 +116,16 @@ var DisconnectReasons = []string{
 
 // Policy is one validated Bluetooth audio policy for a family.
 type Policy struct {
-	SchemaVersion       int
-	Enabled             bool
-	SpeakerModeAllowed  bool
-	PairingAllowed      bool
-	AutoReconnect       bool
-	PreferredCodec      string
-	MaxVolumePercent    int
-	DisplayName         string
-	Revision            int
-	UpdatedAt           time.Time
+	SchemaVersion      int
+	Enabled            bool
+	SpeakerModeAllowed bool
+	PairingAllowed     bool
+	AutoReconnect      bool
+	PreferredCodec     string
+	MaxVolumePercent   int
+	DisplayName        string
+	Revision           int
+	UpdatedAt          time.Time
 }
 
 // Input is the editable policy payload accepted from a guardian.
@@ -303,15 +303,15 @@ func ValidateStatus(input StatusInput) (StatusInput, error) {
 // Capability summarizes whether a device supports Bluetooth audio and whether
 // it has applied the current family policy revision.
 type Capability struct {
-	Supported        bool   `json:"supported"`
-	SpeakerMode      bool   `json:"speaker_mode"`
-	AdapterState     string `json:"adapter_state"`
-	ActiveCodec      string `json:"active_codec"`
-	VolumePercent    int    `json:"volume_percent"`
-	SchemaVersion    int    `json:"schema_version"`
-	PolicyRevision   int    `json:"policy_revision"`
-	AppliedRevision  int    `json:"applied_revision"`
-	UpToDate         bool   `json:"up_to_date"`
+	Supported       bool   `json:"supported"`
+	SpeakerMode     bool   `json:"speaker_mode"`
+	AdapterState    string `json:"adapter_state"`
+	ActiveCodec     string `json:"active_codec"`
+	VolumePercent   int    `json:"volume_percent"`
+	SchemaVersion   int    `json:"schema_version"`
+	PolicyRevision  int    `json:"policy_revision"`
+	AppliedRevision int    `json:"applied_revision"`
+	UpToDate        bool   `json:"up_to_date"`
 }
 
 // DeviceStatus is one device row in the guardian and admin Bluetooth overview.
@@ -332,16 +332,16 @@ type DeviceStatus struct {
 
 // AdminStats is the fleet-wide Bluetooth audio summary for the admin console.
 type AdminStats struct {
-	WindowDays          int       `json:"window_days"`
-	DeviceCount         uint64    `json:"device_count"`
-	SupportedCount      uint64    `json:"supported_count"`
-	SpeakerModeCount    uint64    `json:"speaker_mode_count"`
-	ConnectedCount      uint64    `json:"connected_count"`
-	PairedDeviceTotal   uint64    `json:"paired_device_total"`
-	OutdatedCount       uint64    `json:"outdated_count"`
-	StateBuckets        []Count   `json:"state_buckets"`
-	CodecBuckets        []Count   `json:"codec_buckets"`
-	GeneratedAt         time.Time `json:"generated_at"`
+	WindowDays        int       `json:"window_days"`
+	DeviceCount       uint64    `json:"device_count"`
+	SupportedCount    uint64    `json:"supported_count"`
+	SpeakerModeCount  uint64    `json:"speaker_mode_count"`
+	ConnectedCount    uint64    `json:"connected_count"`
+	PairedDeviceTotal uint64    `json:"paired_device_total"`
+	OutdatedCount     uint64    `json:"outdated_count"`
+	StateBuckets      []Count   `json:"state_buckets"`
+	CodecBuckets      []Count   `json:"codec_buckets"`
+	GeneratedAt       time.Time `json:"generated_at"`
 }
 
 // Count is one histogram row for a labelled bucket.

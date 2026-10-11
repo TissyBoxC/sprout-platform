@@ -596,6 +596,155 @@ type recordPlaybackRequest struct {
 	PlayedSeconds  int    `json:"played_seconds"`
 }
 
+type themePackRequest struct {
+	ThemeID    string   `json:"theme_id"`
+	Title      string   `json:"title"`
+	Summary    string   `json:"summary"`
+	AgeTiers   []string `json:"age_tiers"`
+	PackageIDs []string `json:"package_ids"`
+}
+
+// listThemePacks returns the admin theme pack list.
+func (handler contentHandler) listThemePacks(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	packs, err := handler.service.ListThemePacks(
+		request.Context(),
+		contentdomain.ThemePackQuery{
+			Status:  strings.TrimSpace(request.URL.Query().Get("status")),
+			Keyword: strings.TrimSpace(request.URL.Query().Get("keyword")),
+		},
+	)
+	if err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"theme_packs": packs,
+	})
+}
+
+// getThemePack returns one admin theme pack.
+func (handler contentHandler) getThemePack(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	pack, err := handler.service.GetThemePack(
+		request.Context(),
+		request.PathValue("theme_id"),
+	)
+	if err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"theme_pack": pack,
+	})
+}
+
+// upsertThemePack creates or replaces one draft theme pack.
+func (handler contentHandler) upsertThemePack(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	var payload themePackRequest
+	if err := decodeJSON(request, &payload); err != nil {
+		writeError(response, request, http.StatusBadRequest, "invalid_request", "请检查主题包信息")
+		return
+	}
+	pack, err := handler.service.UpsertThemePack(
+		request.Context(),
+		contentdomain.ThemePackInput{
+			ThemeID:    payload.ThemeID,
+			Title:      payload.Title,
+			Summary:    payload.Summary,
+			AgeTiers:   contentAgeTiers(payload.AgeTiers),
+			PackageIDs: payload.PackageIDs,
+		},
+	)
+	if err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"theme_pack": pack,
+	})
+}
+
+// publishThemePack moves a draft pack to published.
+func (handler contentHandler) publishThemePack(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	pack, err := handler.service.PublishThemePack(
+		request.Context(),
+		request.PathValue("theme_id"),
+	)
+	if err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"theme_pack": pack,
+	})
+}
+
+// withdrawThemePack moves a published pack back out of delivery.
+func (handler contentHandler) withdrawThemePack(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	pack, err := handler.service.WithdrawThemePack(
+		request.Context(),
+		request.PathValue("theme_id"),
+	)
+	if err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"theme_pack": pack,
+	})
+}
+
+// deleteThemePack removes a non-published pack.
+func (handler contentHandler) deleteThemePack(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	themeID := request.PathValue("theme_id")
+	if err := handler.service.DeleteThemePack(
+		request.Context(),
+		themeID,
+	); err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"theme_id": themeID,
+	})
+}
+
+// listPublishedThemePacks returns the published theme packs for the guardian
+// console. It reuses the admin handler shape with a forced published filter.
+func (handler contentHandler) listPublishedThemePacks(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	packs, err := handler.service.ListThemePacks(
+		request.Context(),
+		contentdomain.ThemePackQuery{Status: string(contentdomain.ThemePackPublished)},
+	)
+	if err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"theme_packs": packs,
+	})
+}
+
 // listPlayHistoryForGuardian returns the merged playback history of every
 // device owned by the authenticated guardian. The parent app holds a guardian
 // credential rather than a device session, so it uses this route instead of
@@ -744,6 +893,12 @@ func writeContentError(
 		writeError(response, request, http.StatusNotFound, "asset_not_found", "没有找到内容文件")
 	case errors.Is(err, contentdomain.ErrAssetChecksumMismatch):
 		writeError(response, request, http.StatusConflict, "asset_changed", "内容文件已经变化，请重新审核")
+	case errors.Is(err, contentdomain.ErrThemePackNotFound):
+		writeError(response, request, http.StatusNotFound, "theme_pack_not_found", "没有找到这个主题包")
+	case errors.Is(err, contentdomain.ErrThemeMembersInvalid):
+		writeError(response, request, http.StatusUnprocessableEntity, "theme_members_invalid", "请检查主题包的内容")
+	case errors.Is(err, contentdomain.ErrThemeTransitionInvalid):
+		writeError(response, request, http.StatusConflict, "invalid_theme_state", "当前状态不能执行这个操作")
 	default:
 		writeError(response, request, http.StatusInternalServerError, "service_error", "操作没有完成，请稍后重试")
 	}

@@ -79,4 +79,28 @@ type Repository interface {
 		ctx context.Context,
 		query domain.PlayHistoryQuery,
 	) ([]domain.PlayRecord, error)
+	ListThemePacks(
+		ctx context.Context,
+		query domain.ThemePackQuery,
+	) ([]domain.ThemePack, error)
+	GetThemePack(ctx context.Context, themeID string) (*domain.ThemePack, error)
+	// UpsertThemePack creates or replaces a draft theme pack. The service
+	// validates members before calling, so a non-draft pack is never replaced.
+	UpsertThemePack(
+		ctx context.Context,
+		input domain.ThemePackInput,
+		now time.Time,
+	) (*domain.ThemePack, error)
+	// TransitionThemePack publishes or withdraws a pack and stamps the current
+	// catalog revision on publish. It returns ErrThemePackNotFound when the id
+	// is unknown and the transition error when the move is illegal.
+	TransitionThemePack(
+		ctx context.Context,
+		themeID string,
+		action domain.Action,
+		now time.Time,
+	) (*domain.ThemePack, error)
+	// DeleteThemePack removes a draft pack. A published pack must be withdrawn
+	// first, so an operator cannot silently drop a deliverable theme.
+	DeleteThemePack(ctx context.Context, themeID string) error
 }

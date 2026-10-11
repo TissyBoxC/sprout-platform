@@ -936,3 +936,224 @@ func (r *PostgresRepository) ListPlayHistory(
 	}
 	return records, nil
 }
+
+const themePackColumns = `
+	theme_id,
+	title,
+	summary,
+	age_tiers,
+	package_ids,
+	status,
+	catalog_revision,
+	published_at,
+	created_at,
+	updated_at
+`
+
+// ListThemePacks returns the filtered theme packs, newest change first.
+func (r *PostgresRepository) ListThemePacks(
+	ctx context.Context,
+	query domain.ThemePackQuery,
+) ([]domain.ThemePack, error) {
+	conditions := []string{"1 = 1"}
+	args := make([]any, 0, 3)
+	if query.Status != "" {
+		args = append(args, query.Status)
+		conditions = append(conditions, fmt.Sprintf("status = $%d", len(args)))
+	}
+	if query.Keyword != "" {
+		pattern := "%" + query.Keyword + "%"
+		args = append(args, pattern, pattern)
+		conditions = append(conditions, fmt.Sprintf(
+			"(theme_id ILIKE $%d OR title ILIKE $%d)",
+			len(args)-1,
+			len(args),
+		))
+	}
+	rows, err := r.pool.Query(
+		ctx,
+		`SELECT `+themePackColumns+`
+		 FROM content_theme_packs
+		 WHERE `+strings.Join(conditions, " AND ")+`
+		 ORDER BY updated_at DESC, theme_id ASC`,
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list content theme packs: %w", err)
+	}
+	defer rows.Close()
+	packs := make([]domain.ThemePack, 0)
+	for rows.Next() {
+		pack, scanErr := scanThemePack(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		packs = append(packs, *pack)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate content theme packs: %w", err)
+	}
+	return packs, nil
+}
+
+// GetThemePack loads one theme pack or reports ErrThemePackNotFound.
+func (r *PostgresRepository) GetThemePack(
+	ctx context.Context,
+	themeID string,
+) (*domain.ThemePack, error) {
+	row := r.pool.QueryRow(
+		ctx,
+		`SELECT `+themePackColumns+`
+		 FROM content_theme_packs
+		 WHERE theme_id = $1`,
+		themeID,
+	)
+	pack, err := scanThemePack(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrThemePackNotFound
+	}
+	return pack, err
+}
+
+// UpsertThemePack creates or replaces a draft theme pack. The insert is
+// rejected when the id is already published or withdrawn so a live pack cannot
+// be silently overwritten; the service surfaces the conflict.
+func (r *PostgresRepository) UpsertThemePack(
+	ctx context.Context,
+	input domain.ThemePackInput,
+	now time.Time,
+) (*domain.ThemePack, error) {
+	row := r.pool.QueryRow(
+		ctx,
+		`INSERT INTO content_theme_packs (
+		     theme_id, title, summary, age_tiers, package_ids, status,
+		     created_at, updated_at
+		 )
+		 VALUES ($1, $2, $3, $4, $5, 'draft', $6, $6)
+		 ON CONFLICT (theme_id) DO UPDATE
+		     SET title = EXCLUDED.title,
+		         summary = EXCLUDED.summary,
+		         age_tiers = EXCLUDED.age_tiers,
+		         package_ids = EXCLUDED.package_ids,
+		         updated_at = EXCLUDED.updated_at
+		     WHERE content_theme_packs.status = 'draft'
+		 RETURNING `+themePackColumns,
+		input.ThemeID,
+		input.Title,
+		input.Summary,
+		ageTierValues(input.AgeTiers),
+		input.PackageIDs,
+		now,
+	)
+	pack, err := scanThemePack(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The id exists but is not a draft: the conflict guard matched nothing.
+		return nil, domain.ErrThemeTransitionInvalid
+	}
+	if err != nil {
+		return nil, fmt.Errorf("upsert content theme pack: %w", err)
+	}
+	return pack, nil
+}
+
+// TransitionThemePack publishes or withdraws a pack. Publishing stamps the
+// current catalog revision; withdrawing clears the stamp so a client cannot
+// treat a withdrawn pack as current.
+func (r *PostgresRepository) TransitionThemePack(
+	ctx context.Context,
+	themeID string,
+	action domain.Action,
+	now time.Time,
+) (*domain.ThemePack, error) {
+	var target domain.ThemePackStatus
+	switch action {
+	case domain.ActionPublish:
+		target = domain.ThemePackPublished
+	case domain.ActionWithdraw:
+		target = domain.ThemePackWithdrawn
+	default:
+		return nil, domain.ErrThemeTransitionInvalid
+	}
+	row := r.pool.QueryRow(
+		ctx,
+		`UPDATE content_theme_packs
+		 SET status = $2,
+		     catalog_revision = CASE WHEN $2 = 'published'
+		         THEN COALESCE(
+		             (SELECT revision FROM content_catalog_revision WHERE singleton),
+		             0)
+		         ELSE 0 END,
+		     published_at = CASE WHEN $2 = 'published' THEN $3 ELSE published_at END,
+		     updated_at = $3
+		 WHERE theme_id = $1
+		 RETURNING `+themePackColumns,
+		themeID,
+		string(target),
+		now,
+	)
+	pack, err := scanThemePack(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrThemePackNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("transition content theme pack: %w", err)
+	}
+	if pack.Status != target {
+		return nil, domain.ErrThemeTransitionInvalid
+	}
+	return pack, nil
+}
+
+// DeleteThemePack removes one pack. A published pack is never deleted so an
+// operator must withdraw it first; the caller surfaces the conflict.
+func (r *PostgresRepository) DeleteThemePack(
+	ctx context.Context,
+	themeID string,
+) error {
+	tag, err := r.pool.Exec(
+		ctx,
+		`DELETE FROM content_theme_packs
+		 WHERE theme_id = $1 AND status <> 'published'`,
+		themeID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete content theme pack: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrThemePackNotFound
+	}
+	return nil
+}
+
+func scanThemePack(row rowScanner) (*domain.ThemePack, error) {
+	var pack domain.ThemePack
+	var ageTiers []string
+	if err := row.Scan(
+		&pack.ThemeID,
+		&pack.Title,
+		&pack.Summary,
+		&ageTiers,
+		&pack.PackageIDs,
+		&pack.Status,
+		&pack.CatalogRevision,
+		&pack.PublishedAt,
+		&pack.CreatedAt,
+		&pack.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	pack.AgeTiers = make([]domain.AgeTier, 0, len(ageTiers))
+	for _, tier := range ageTiers {
+		pack.AgeTiers = append(pack.AgeTiers, domain.AgeTier(tier))
+	}
+	if pack.PackageIDs == nil {
+		pack.PackageIDs = []string{}
+	}
+	pack.CreatedAt = pack.CreatedAt.UTC()
+	pack.UpdatedAt = pack.UpdatedAt.UTC()
+	if pack.PublishedAt != nil {
+		publishedAt := pack.PublishedAt.UTC()
+		pack.PublishedAt = &publishedAt
+	}
+	return &pack, nil
+}

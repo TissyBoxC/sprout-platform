@@ -20,16 +20,19 @@ import (
 )
 
 type contentTestRepository struct {
-	mu        sync.Mutex
-	versions  map[string]*contentdomain.PackageVersion
-	favorites map[string]contentdomain.Favorite
-	history   []contentdomain.PlayRecord
+	mu         sync.Mutex
+	versions   map[string]*contentdomain.PackageVersion
+	favorites  map[string]contentdomain.Favorite
+	history    []contentdomain.PlayRecord
+	themePacks map[string]contentdomain.ThemePack
+	revision   int64
 }
 
 func newContentTestRepository() *contentTestRepository {
 	return &contentTestRepository{
-		versions:  make(map[string]*contentdomain.PackageVersion),
-		favorites: make(map[string]contentdomain.Favorite),
+		versions:   make(map[string]*contentdomain.PackageVersion),
+		favorites:  make(map[string]contentdomain.Favorite),
+		themePacks: make(map[string]contentdomain.ThemePack),
 	}
 }
 
@@ -830,6 +833,105 @@ func TestGuardianPlayHistoryRequiresAuthentication(t *testing.T) {
 	}
 }
 
+func TestThemePackAdminLifecycleEndpoints(t *testing.T) {
+	repository := newContentTestRepository()
+	repository.versions[contentTestKey("content_story_001", 1)] = &contentdomain.PackageVersion{
+		PackageID:      "content_story_001",
+		PackageVersion: 1,
+		Title:          "月亮晚安故事",
+		Category:       contentdomain.CategoryStory,
+		AgeTiers:       []contentdomain.AgeTier{contentdomain.AgeTier3To4},
+		Status:         contentdomain.StatusPublished,
+	}
+	service, err := contentservice.New(contentservice.Options{
+		Repository:  repository,
+		AssetReader: contentTestAssetReader{},
+	})
+	if err != nil {
+		t.Fatalf("create content service: %v", err)
+	}
+	handler := contentHandler{service: service}
+
+	upsert := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/admin/content/theme-packs/theme_ocean",
+		strings.NewReader(
+			`{"theme_id":"theme_ocean","title":"海洋主题",`+
+				`"summary":"海底世界","age_tiers":["age_3_4"],`+
+				`"package_ids":["content_story_001"]}`,
+		),
+	)
+	recorder := httptest.NewRecorder()
+	handler.upsertThemePack(recorder, upsert)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("upsert theme status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	publish := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/admin/content/theme-packs/theme_ocean/publish",
+		nil,
+	)
+	publish.SetPathValue("theme_id", "theme_ocean")
+	recorder = httptest.NewRecorder()
+	handler.publishThemePack(recorder, publish)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("publish theme status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var publishEnvelope struct {
+		Data struct {
+			ThemePack struct {
+				Status string `json:"status"`
+			} `json:"theme_pack"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &publishEnvelope); err != nil {
+		t.Fatalf("decode publish response: %v", err)
+	}
+	if publishEnvelope.Data.ThemePack.Status != "published" {
+		t.Fatalf("published theme status = %q", publishEnvelope.Data.ThemePack.Status)
+	}
+
+	// The guardian surface lists only published packs.
+	guardianRequest := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/content/theme-packs",
+		nil,
+	)
+	recorder = httptest.NewRecorder()
+	handler.listPublishedThemePacks(recorder, guardianRequest)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("guardian list status = %d", recorder.Code)
+	}
+	var listEnvelope struct {
+		Data struct {
+			ThemePacks []struct {
+				ThemeID string `json:"theme_id"`
+			} `json:"theme_packs"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &listEnvelope); err != nil {
+		t.Fatalf("decode guardian list: %v", err)
+	}
+	if len(listEnvelope.Data.ThemePacks) != 1 ||
+		listEnvelope.Data.ThemePacks[0].ThemeID != "theme_ocean" {
+		t.Fatalf("guardian theme list = %s", recorder.Body.String())
+	}
+
+	// A published pack cannot be deleted, so withdraw it first.
+	deleteRequest := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/v1/admin/content/theme-packs/theme_ocean",
+		nil,
+	)
+	deleteRequest.SetPathValue("theme_id", "theme_ocean")
+	recorder = httptest.NewRecorder()
+	handler.deleteThemePack(recorder, deleteRequest)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("delete published theme status = %d, want 404", recorder.Code)
+	}
+}
+
 func contentFavoriteKey(parentAccountID string, packageID string) string {
 	return parentAccountID + "\x00" + packageID
 }
@@ -959,6 +1061,128 @@ func (repository *contentTestRepository) ListPlayHistory(
 		}
 	}
 	return records, nil
+}
+
+func (repository *contentTestRepository) ListThemePacks(
+	_ context.Context,
+	query contentdomain.ThemePackQuery,
+) ([]contentdomain.ThemePack, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	packs := make([]contentdomain.ThemePack, 0, len(repository.themePacks))
+	for _, pack := range repository.themePacks {
+		if query.Status != "" && string(pack.Status) != query.Status {
+			continue
+		}
+		packs = append(packs, cloneContentTestThemePack(pack))
+	}
+	return packs, nil
+}
+
+func (repository *contentTestRepository) GetThemePack(
+	_ context.Context,
+	themeID string,
+) (*contentdomain.ThemePack, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	pack, exists := repository.themePacks[themeID]
+	if !exists {
+		return nil, contentdomain.ErrThemePackNotFound
+	}
+	cloned := cloneContentTestThemePack(pack)
+	return &cloned, nil
+}
+
+func (repository *contentTestRepository) UpsertThemePack(
+	_ context.Context,
+	input contentdomain.ThemePackInput,
+	now time.Time,
+) (*contentdomain.ThemePack, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	existing, exists := repository.themePacks[input.ThemeID]
+	if exists && existing.Status != contentdomain.ThemePackDraft {
+		return nil, contentdomain.ErrThemeTransitionInvalid
+	}
+	pack := contentdomain.ThemePack{
+		ThemeID:    input.ThemeID,
+		Title:      input.Title,
+		Summary:    input.Summary,
+		AgeTiers:   append([]contentdomain.AgeTier(nil), input.AgeTiers...),
+		PackageIDs: append([]string(nil), input.PackageIDs...),
+		Status:     contentdomain.ThemePackDraft,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if exists {
+		pack.CreatedAt = existing.CreatedAt
+	}
+	repository.themePacks[input.ThemeID] = pack
+	cloned := cloneContentTestThemePack(pack)
+	return &cloned, nil
+}
+
+func (repository *contentTestRepository) TransitionThemePack(
+	_ context.Context,
+	themeID string,
+	action contentdomain.Action,
+	now time.Time,
+) (*contentdomain.ThemePack, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	pack, exists := repository.themePacks[themeID]
+	if !exists {
+		return nil, contentdomain.ErrThemePackNotFound
+	}
+	switch action {
+	case contentdomain.ActionPublish:
+		if pack.Status != contentdomain.ThemePackDraft {
+			return nil, contentdomain.ErrThemeTransitionInvalid
+		}
+		publishedAt := now
+		pack.Status = contentdomain.ThemePackPublished
+		pack.CatalogRevision = repository.revision
+		pack.PublishedAt = &publishedAt
+	case contentdomain.ActionWithdraw:
+		if pack.Status != contentdomain.ThemePackPublished {
+			return nil, contentdomain.ErrThemeTransitionInvalid
+		}
+		pack.Status = contentdomain.ThemePackWithdrawn
+		pack.CatalogRevision = 0
+	default:
+		return nil, contentdomain.ErrThemeTransitionInvalid
+	}
+	pack.UpdatedAt = now
+	repository.themePacks[themeID] = pack
+	cloned := cloneContentTestThemePack(pack)
+	return &cloned, nil
+}
+
+func (repository *contentTestRepository) DeleteThemePack(
+	_ context.Context,
+	themeID string,
+) error {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	pack, exists := repository.themePacks[themeID]
+	if !exists || pack.Status == contentdomain.ThemePackPublished {
+		return contentdomain.ErrThemePackNotFound
+	}
+	delete(repository.themePacks, themeID)
+	return nil
+}
+
+func cloneContentTestThemePack(
+	pack contentdomain.ThemePack,
+) contentdomain.ThemePack {
+	cloned := pack
+	cloned.AgeTiers = append([]contentdomain.AgeTier(nil), pack.AgeTiers...)
+	cloned.PackageIDs = append([]string(nil), pack.PackageIDs...)
+	if pack.PublishedAt != nil {
+		publishedAt := *pack.PublishedAt
+		cloned.PublishedAt = &publishedAt
+	}
+	return cloned
 }
 
 func cloneContentTestVersion(

@@ -576,6 +576,131 @@ func (s *Service) ListPlayHistory(
 // playHistoryRetentionLimit is the number of history rows kept per device.
 const playHistoryRetentionLimit = 50
 
+// ListThemePacks returns theme packs for the admin console and, filtered to
+// published, for the guardian and device surfaces.
+func (s *Service) ListThemePacks(
+	ctx context.Context,
+	query domain.ThemePackQuery,
+) ([]domain.ThemePack, error) {
+	query.Status = strings.TrimSpace(query.Status)
+	query.Keyword = strings.TrimSpace(query.Keyword)
+	packs, err := s.repository.ListThemePacks(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	for index := range packs {
+		normalizeThemePack(&packs[index])
+	}
+	return packs, nil
+}
+
+// GetThemePack returns one theme pack with normalized slices.
+func (s *Service) GetThemePack(
+	ctx context.Context,
+	themeID string,
+) (*domain.ThemePack, error) {
+	themeID = strings.TrimSpace(themeID)
+	if themeID == "" {
+		return nil, domain.ErrInvalidMetadata
+	}
+	pack, err := s.repository.GetThemePack(ctx, themeID)
+	if err != nil {
+		return nil, err
+	}
+	normalizeThemePack(pack)
+	return pack, nil
+}
+
+// UpsertThemePack validates and saves a draft theme pack.
+//
+// Every member package must exist in some version so an operator cannot curate
+// a theme around an unknown package id. The check is presence-only: a theme
+// may reference a package whose current version is withdrawn, because the pack
+// is editorial intent rather than a published manifest.
+func (s *Service) UpsertThemePack(
+	ctx context.Context,
+	input domain.ThemePackInput,
+) (*domain.ThemePack, error) {
+	normalized, err := domain.ValidateThemePack(input)
+	if err != nil {
+		return nil, err
+	}
+	for _, packageID := range normalized.PackageIDs {
+		if _, err := s.repository.GetDetail(ctx, packageID); err != nil {
+			return nil, err
+		}
+	}
+	pack, err := s.repository.UpsertThemePack(
+		ctx,
+		normalized,
+		s.clock.Now(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	normalizeThemePack(pack)
+	return pack, nil
+}
+
+// PublishThemePack moves a draft pack to published.
+func (s *Service) PublishThemePack(
+	ctx context.Context,
+	themeID string,
+) (*domain.ThemePack, error) {
+	return s.transitionThemePack(ctx, themeID, domain.ActionPublish)
+}
+
+// WithdrawThemePack moves a published pack back out of delivery.
+func (s *Service) WithdrawThemePack(
+	ctx context.Context,
+	themeID string,
+) (*domain.ThemePack, error) {
+	return s.transitionThemePack(ctx, themeID, domain.ActionWithdraw)
+}
+
+// DeleteThemePack removes a non-published pack.
+func (s *Service) DeleteThemePack(
+	ctx context.Context,
+	themeID string,
+) error {
+	themeID = strings.TrimSpace(themeID)
+	if themeID == "" {
+		return domain.ErrInvalidMetadata
+	}
+	return s.repository.DeleteThemePack(ctx, themeID)
+}
+
+func (s *Service) transitionThemePack(
+	ctx context.Context,
+	themeID string,
+	action domain.Action,
+) (*domain.ThemePack, error) {
+	themeID = strings.TrimSpace(themeID)
+	if themeID == "" {
+		return nil, domain.ErrInvalidMetadata
+	}
+	pack, err := s.repository.TransitionThemePack(
+		ctx,
+		themeID,
+		action,
+		s.clock.Now(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	normalizeThemePack(pack)
+	return pack, nil
+}
+
+func normalizeThemePack(pack *domain.ThemePack) {
+	if pack.AgeTiers == nil {
+		pack.AgeTiers = []domain.AgeTier{}
+	}
+	if pack.PackageIDs == nil {
+		pack.PackageIDs = []string{}
+	}
+}
+
 // ListPlayHistoryForParent merges the playback history of the guardian's
 // devices into a single newest-first list.
 //

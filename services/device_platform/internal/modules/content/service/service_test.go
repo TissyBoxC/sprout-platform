@@ -30,6 +30,7 @@ type memoryRepository struct {
 	revisionLock chan struct{}
 	favorites    map[string]domain.Favorite
 	history      []domain.PlayRecord
+	themePacks   map[string]domain.ThemePack
 }
 
 func newMemoryRepository() *memoryRepository {
@@ -37,6 +38,7 @@ func newMemoryRepository() *memoryRepository {
 		versions:     make(map[string]*domain.PackageVersion),
 		revisionLock: make(chan struct{}, 1),
 		favorites:    make(map[string]domain.Favorite),
+		themePacks:   make(map[string]domain.ThemePack),
 	}
 }
 
@@ -486,6 +488,13 @@ func validAssetReader() fakeAssetReader {
 			DownloadURL: "https://download.example.test/content/story/moon-night-v1.bin",
 		},
 	}
+}
+
+func validMetadataWithID(packageID string) domain.MetadataInput {
+	input := validMetadata()
+	input.PackageID = packageID
+	input.AssetKey = "content/story/" + packageID + ".bin"
+	return input
 }
 
 // publishPackage drives one package through the full review lifecycle up to
@@ -1303,6 +1312,131 @@ func (repository *memoryRepository) ListPlayHistory(
 	return records, nil
 }
 
+func (repository *memoryRepository) ListThemePacks(
+	_ context.Context,
+	query domain.ThemePackQuery,
+) ([]domain.ThemePack, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	packs := make([]domain.ThemePack, 0, len(repository.themePacks))
+	for _, pack := range repository.themePacks {
+		if query.Status != "" && string(pack.Status) != query.Status {
+			continue
+		}
+		packs = append(packs, cloneThemePack(pack))
+	}
+	return packs, nil
+}
+
+func (repository *memoryRepository) GetThemePack(
+	_ context.Context,
+	themeID string,
+) (*domain.ThemePack, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	pack, exists := repository.themePacks[themeID]
+	if !exists {
+		return nil, domain.ErrThemePackNotFound
+	}
+	cloned := cloneThemePack(pack)
+	return &cloned, nil
+}
+
+func (repository *memoryRepository) UpsertThemePack(
+	_ context.Context,
+	input domain.ThemePackInput,
+	now time.Time,
+) (*domain.ThemePack, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	existing, exists := repository.themePacks[input.ThemeID]
+	if exists && existing.Status != domain.ThemePackDraft {
+		return nil, domain.ErrThemeTransitionInvalid
+	}
+	pack := domain.ThemePack{
+		ThemeID:    input.ThemeID,
+		Title:      input.Title,
+		Summary:    input.Summary,
+		AgeTiers:   append([]domain.AgeTier(nil), input.AgeTiers...),
+		PackageIDs: append([]string(nil), input.PackageIDs...),
+		Status:     domain.ThemePackDraft,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if exists {
+		pack.CreatedAt = existing.CreatedAt
+		pack.CatalogRevision = existing.CatalogRevision
+		pack.PublishedAt = existing.PublishedAt
+	}
+	repository.themePacks[input.ThemeID] = pack
+	cloned := cloneThemePack(pack)
+	return &cloned, nil
+}
+
+func (repository *memoryRepository) TransitionThemePack(
+	_ context.Context,
+	themeID string,
+	action domain.Action,
+	now time.Time,
+) (*domain.ThemePack, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	pack, exists := repository.themePacks[themeID]
+	if !exists {
+		return nil, domain.ErrThemePackNotFound
+	}
+	switch action {
+	case domain.ActionPublish:
+		if pack.Status != domain.ThemePackDraft {
+			return nil, domain.ErrThemeTransitionInvalid
+		}
+		publishedAt := now
+		pack.Status = domain.ThemePackPublished
+		pack.CatalogRevision = repository.revision
+		pack.PublishedAt = &publishedAt
+	case domain.ActionWithdraw:
+		if pack.Status != domain.ThemePackPublished {
+			return nil, domain.ErrThemeTransitionInvalid
+		}
+		pack.Status = domain.ThemePackWithdrawn
+		pack.CatalogRevision = 0
+	default:
+		return nil, domain.ErrThemeTransitionInvalid
+	}
+	pack.UpdatedAt = now
+	repository.themePacks[themeID] = pack
+	cloned := cloneThemePack(pack)
+	return &cloned, nil
+}
+
+func (repository *memoryRepository) DeleteThemePack(
+	_ context.Context,
+	themeID string,
+) error {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	pack, exists := repository.themePacks[themeID]
+	if !exists {
+		return domain.ErrThemePackNotFound
+	}
+	if pack.Status == domain.ThemePackPublished {
+		return domain.ErrThemePackNotFound
+	}
+	delete(repository.themePacks, themeID)
+	return nil
+}
+
+func cloneThemePack(pack domain.ThemePack) domain.ThemePack {
+	cloned := pack
+	cloned.AgeTiers = append([]domain.AgeTier(nil), pack.AgeTiers...)
+	cloned.PackageIDs = append([]string(nil), pack.PackageIDs...)
+	if pack.PublishedAt != nil {
+		publishedAt := *pack.PublishedAt
+		cloned.PublishedAt = &publishedAt
+	}
+	return cloned
+}
+
 func TestFavoritesAddListRemove(t *testing.T) {
 	repository := newMemoryRepository()
 	service := newContentService(t, repository, validAssetReader())
@@ -1545,5 +1679,89 @@ func TestListPlayHistoryForParentMergesOwnedDevices(t *testing.T) {
 	}
 	if empty == nil || len(empty) != 0 {
 		t.Fatalf("empty history = %v, want empty slice", empty)
+	}
+}
+
+func TestThemePackLifecycle(t *testing.T) {
+	repository := newMemoryRepository()
+	service := newContentService(t, repository, validAssetReader())
+	first := publishPackage(t, service, validMetadata())
+	second := publishPackage(t, service, validMetadataWithID("content_story_002"))
+
+	created, err := service.UpsertThemePack(context.Background(), domain.ThemePackInput{
+		ThemeID:    "theme_ocean",
+		Title:      "海洋主题",
+		Summary:    "一起探索海底世界",
+		AgeTiers:   []domain.AgeTier{domain.AgeTier3To4},
+		PackageIDs: []string{first.PackageID, second.PackageID},
+	})
+	if err != nil {
+		t.Fatalf("upsert theme pack: %v", err)
+	}
+	if created.Status != domain.ThemePackDraft {
+		t.Fatalf("new theme status = %q, want draft", created.Status)
+	}
+	if len(created.PackageIDs) != 2 {
+		t.Fatalf("theme members = %d, want 2", len(created.PackageIDs))
+	}
+
+	// An unknown member is rejected so a theme cannot reference a ghost package.
+	if _, err := service.UpsertThemePack(context.Background(), domain.ThemePackInput{
+		ThemeID:    "theme_ghost",
+		Title:      "幽灵主题",
+		AgeTiers:   []domain.AgeTier{domain.AgeTier3To4},
+		PackageIDs: []string{"content_missing_001"},
+	}); !errors.Is(err, domain.ErrPackageNotFound) {
+		t.Fatalf("unknown member error = %v, want ErrPackageNotFound", err)
+	}
+
+	published, err := service.PublishThemePack(context.Background(), "theme_ocean")
+	if err != nil {
+		t.Fatalf("publish theme pack: %v", err)
+	}
+	if published.Status != domain.ThemePackPublished || published.PublishedAt == nil {
+		t.Fatalf("published theme = %+v, want published stamp", published)
+	}
+
+	// Publishing twice is an illegal move.
+	if _, err := service.PublishThemePack(context.Background(), "theme_ocean"); !errors.Is(err, domain.ErrThemeTransitionInvalid) {
+		t.Fatalf("republish error = %v, want ErrThemeTransitionInvalid", err)
+	}
+
+	// A published pack is not editable.
+	if _, err := service.UpsertThemePack(context.Background(), domain.ThemePackInput{
+		ThemeID:    "theme_ocean",
+		Title:      "海洋主题 v2",
+		AgeTiers:   []domain.AgeTier{domain.AgeTier3To4},
+		PackageIDs: []string{first.PackageID},
+	}); !errors.Is(err, domain.ErrThemeTransitionInvalid) {
+		t.Fatalf("edit published theme error = %v, want ErrThemeTransitionInvalid", err)
+	}
+
+	// The guardian-facing list shows only the published pack.
+	listed, err := service.ListThemePacks(context.Background(), domain.ThemePackQuery{
+		Status: string(domain.ThemePackPublished),
+	})
+	if err != nil {
+		t.Fatalf("list theme packs: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ThemeID != "theme_ocean" {
+		t.Fatalf("published theme list = %+v, want theme_ocean", listed)
+	}
+
+	withdrawn, err := service.WithdrawThemePack(context.Background(), "theme_ocean")
+	if err != nil {
+		t.Fatalf("withdraw theme pack: %v", err)
+	}
+	if withdrawn.Status != domain.ThemePackWithdrawn {
+		t.Fatalf("withdrawn theme status = %q", withdrawn.Status)
+	}
+
+	// A withdrawn pack can be deleted.
+	if err := service.DeleteThemePack(context.Background(), "theme_ocean"); err != nil {
+		t.Fatalf("delete withdrawn theme: %v", err)
+	}
+	if _, err := service.GetThemePack(context.Background(), "theme_ocean"); !errors.Is(err, domain.ErrThemePackNotFound) {
+		t.Fatalf("get deleted theme error = %v, want ErrThemePackNotFound", err)
 	}
 }

@@ -146,6 +146,112 @@ type PlayHistoryQuery struct {
 	Limit    int
 }
 
+// ThemePackStatus is the review and delivery lifecycle of one theme pack.
+// A theme pack is a curated, ordered collection of published content packages
+// that the guardian console and firmware can browse and bulk-download as one
+// unit ("海洋主题", "睡前一周").
+type ThemePackStatus string
+
+const (
+	ThemePackDraft     ThemePackStatus = "draft"
+	ThemePackPublished ThemePackStatus = "published"
+	ThemePackWithdrawn ThemePackStatus = "withdrawn"
+)
+
+var (
+	// ErrThemePackNotFound reports an unknown theme pack id.
+	ErrThemePackNotFound = errors.New("content theme pack not found")
+	// ErrThemeMembersInvalid reports a theme whose members are missing or empty.
+	ErrThemeMembersInvalid = errors.New("content theme pack members invalid")
+	// ErrThemeTransitionInvalid reports an illegal theme publish/withdraw move.
+	ErrThemeTransitionInvalid = errors.New("content theme pack transition invalid")
+)
+
+// ThemePack is one curated collection of content packages.
+type ThemePack struct {
+	ThemeID    string          `json:"theme_id"`
+	Title      string          `json:"title"`
+	Summary    string          `json:"summary"`
+	AgeTiers   []AgeTier       `json:"age_tiers"`
+	PackageIDs []string        `json:"package_ids"`
+	Status     ThemePackStatus `json:"status"`
+	// CatalogRevision is stamped when the pack is published so a client can
+	// tell whether its cached theme list is current.
+	CatalogRevision int64      `json:"catalog_revision"`
+	PublishedAt     *time.Time `json:"published_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+// ThemePackInput is the validated payload for creating or updating a theme pack.
+type ThemePackInput struct {
+	ThemeID    string
+	Title      string
+	Summary    string
+	AgeTiers   []AgeTier
+	PackageIDs []string
+}
+
+// ThemePackQuery filters the admin theme pack list.
+type ThemePackQuery struct {
+	Status  string
+	Keyword string
+}
+
+// ValidateThemePack normalizes and validates one theme pack payload.
+//
+// A theme pack must reference at least one existing package id. The service
+// checks existence against the repository; this function enforces the shape
+// and bounds so a bad payload cannot create an unbounded or duplicate row.
+func ValidateThemePack(input ThemePackInput) (ThemePackInput, error) {
+	input.ThemeID = strings.TrimSpace(input.ThemeID)
+	input.Title = strings.TrimSpace(input.Title)
+	input.Summary = strings.TrimSpace(input.Summary)
+	if !packageIDPattern.MatchString(input.ThemeID) {
+		return ThemePackInput{}, ErrInvalidMetadata
+	}
+	if input.Title == "" || len([]rune(input.Title)) > 64 {
+		return ThemePackInput{}, ErrInvalidMetadata
+	}
+	if len([]rune(input.Summary)) > 200 {
+		return ThemePackInput{}, ErrInvalidMetadata
+	}
+	if len(input.AgeTiers) == 0 || len(input.AgeTiers) > 3 {
+		return ThemePackInput{}, ErrInvalidMetadata
+	}
+	seenTiers := make(map[AgeTier]struct{}, len(input.AgeTiers))
+	normalizedTiers := make([]AgeTier, 0, len(input.AgeTiers))
+	for _, ageTier := range input.AgeTiers {
+		if !isAgeTier(ageTier) {
+			return ThemePackInput{}, ErrInvalidMetadata
+		}
+		if _, exists := seenTiers[ageTier]; exists {
+			return ThemePackInput{}, ErrInvalidMetadata
+		}
+		seenTiers[ageTier] = struct{}{}
+		normalizedTiers = append(normalizedTiers, ageTier)
+	}
+	if len(input.PackageIDs) == 0 || len(input.PackageIDs) > 50 {
+		return ThemePackInput{}, ErrInvalidMetadata
+	}
+	seenPackages := make(map[string]struct{}, len(input.PackageIDs))
+	normalizedPackages := make([]string, 0, len(input.PackageIDs))
+	for _, packageID := range input.PackageIDs {
+		trimmed := strings.TrimSpace(packageID)
+		if !packageIDPattern.MatchString(trimmed) {
+			return ThemePackInput{}, ErrInvalidMetadata
+		}
+		if _, exists := seenPackages[trimmed]; exists {
+			return ThemePackInput{}, ErrInvalidMetadata
+		}
+		seenPackages[trimmed] = struct{}{}
+		normalizedPackages = append(normalizedPackages, trimmed)
+	}
+	input.AgeTiers = normalizedTiers
+	input.PackageIDs = normalizedPackages
+	return input, nil
+}
+
 // ValidatePlayRecord normalizes and validates one playback event.
 //
 // The package id and device id follow the same shape used elsewhere so a bad

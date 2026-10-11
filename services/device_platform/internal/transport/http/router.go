@@ -654,6 +654,30 @@ func NewRouter(options RouterOptions) http.Handler {
 				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/archive",
 				authHandler.requireAdmin(contentHandler.archivePackage),
 			)
+			mux.HandleFunc(
+				"GET /api/v1/admin/content/theme-packs",
+				authHandler.requireAdmin(contentHandler.listThemePacks),
+			)
+			mux.HandleFunc(
+				"PUT /api/v1/admin/content/theme-packs/{theme_id}",
+				authHandler.requireAdmin(contentHandler.upsertThemePack),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/admin/content/theme-packs/{theme_id}",
+				authHandler.requireAdmin(contentHandler.getThemePack),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/content/theme-packs/{theme_id}/publish",
+				authHandler.requireAdmin(contentHandler.publishThemePack),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/content/theme-packs/{theme_id}/withdraw",
+				authHandler.requireAdmin(contentHandler.withdrawThemePack),
+			)
+			mux.HandleFunc(
+				"DELETE /api/v1/admin/content/theme-packs/{theme_id}",
+				authHandler.requireAdmin(contentHandler.deleteThemePack),
+			)
 		}
 	}
 
@@ -697,6 +721,10 @@ func NewRouter(options RouterOptions) http.Handler {
 			mux.HandleFunc(
 				"GET /api/v1/content/play-history",
 				authHandler.requireAuthentication(contentHandler.listPlayHistoryForGuardian),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/content/theme-packs",
+				authHandler.requireAuthentication(contentHandler.listPublishedThemePacks),
 			)
 		}
 		// Firmware devices never receive a guardian credential, so the same

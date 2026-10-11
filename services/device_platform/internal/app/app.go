@@ -47,6 +47,8 @@ import (
 	inputService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/service"
 	localCommandRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/repository"
 	localCommandService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
+	motionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/repository"
+	motionRuntimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
 	notificationRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/repository"
 	notificationService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
 	operationsRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/repository"
@@ -540,6 +542,12 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create power service: %w", err)
 	}
+	deviceMotion, err := motionRuntimeService.New(motionRuntimeService.Options{
+		Repository: motionRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
+	if err != nil {
+		return fmt.Errorf("create motion service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
@@ -575,6 +583,7 @@ func Run() error {
 			InputService:                input,
 			ConnectivityService:         connectivity,
 			PowerService:                devicePower,
+			MotionService:               deviceMotion,
 			AuditRecorder:               privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

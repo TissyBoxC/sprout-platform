@@ -29,6 +29,7 @@ import (
 	featurecenterservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	inputservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/service"
 	localcommandservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
+	motionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
 	notificationhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/handler"
 	notificationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
 	operationsservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
@@ -79,6 +80,7 @@ type RouterOptions struct {
 	InputService                *inputservice.Service
 	ConnectivityService         *connectivityservice.Service
 	PowerService                *powerservice.Service
+	MotionService               *motionservice.Service
 	AuditRecorder               auditRecorder
 }
 
@@ -439,6 +441,20 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/power/status",
 					devicePowerHandler.reportStatus,
+				)
+			}
+		}
+		if options.MotionService != nil {
+			motionHandler := motionHandler{service: options.MotionService}
+			if options.BindingService != nil && options.RuntimeService != nil {
+				deviceMotionHandler := deviceMotionHandler{
+					handler:        &motionHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/motion/status",
+					deviceMotionHandler.reportStatus,
 				)
 			}
 		}
@@ -980,6 +996,29 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/admin/power/stats",
 					authHandler.requireAdmin(powerHandler.adminStats),
+				)
+			}
+			if options.MotionService != nil {
+				motionHandler := motionHandler{service: options.MotionService}
+				mux.HandleFunc(
+					"GET /api/v1/motion/policy",
+					authHandler.requireAuthentication(motionHandler.current),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/motion/policy",
+					authHandler.requireAuthentication(motionHandler.publish),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/motion/devices",
+					authHandler.requireAuthentication(motionHandler.statuses),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/motion/capability",
+					authHandler.requireAuthentication(motionHandler.capability),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/motion/stats",
+					authHandler.requireAdmin(motionHandler.adminStats),
 				)
 			}
 			if options.NotificationService != nil {

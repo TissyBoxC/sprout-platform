@@ -98,6 +98,9 @@ func Run() error {
 				APIKey:  cfg.Sub2API.APIKey,
 				Model:   cfg.Vision.Model,
 			}),
+			// Vision reuses the device authorizer so a caller-supplied device
+			// identifier is checked against the guardian's live consent.
+			Authorizer: deviceAuthorizer,
 		})
 		if err != nil {
 			return fmt.Errorf("build vision pipeline: %w", err)

@@ -287,6 +287,87 @@ func TestInternalVisionResultNotFound(t *testing.T) {
 	}
 }
 
+func TestInternalVisionResultPassesDeviceScope(t *testing.T) {
+	options := newTestRouterOptions()
+	options.InternalAPIConfig = config.InternalAPIConfig{
+		Enabled:   true,
+		AuthToken: strings.Repeat("t", 32),
+	}
+	service := &recordingVisionService{}
+	options.VisionService = service
+
+	request := httptest.NewRequest(
+		stdhttp.MethodGet,
+		"/internal/v1/vision/results/task-123456?device_id=device-1234567",
+		nil,
+	)
+	request.Header.Set("Authorization", "Bearer "+strings.Repeat("t", 32))
+	recorder := httptest.NewRecorder()
+	NewRouter(options).ServeHTTP(recorder, request)
+
+	if recorder.Code != stdhttp.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", stdhttp.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	if service.taskID != "task-123456" || service.deviceID != "device-1234567" {
+		t.Fatalf("unexpected scoped lookup: task=%q device=%q", service.taskID, service.deviceID)
+	}
+}
+
+func TestInternalVisionAnalyzeRejectsUnauthorizedDevice(t *testing.T) {
+	options := newTestRouterOptions()
+	options.InternalAPIConfig = config.InternalAPIConfig{
+		Enabled:   true,
+		AuthToken: strings.Repeat("t", 32),
+	}
+	options.VisionService = &staticVisionService{err: vision.ErrDeviceNotAuthorized}
+
+	request := httptest.NewRequest(
+		stdhttp.MethodPost,
+		"/internal/v1/vision/tasks",
+		strings.NewReader(`{
+			"task_id": "task-123456",
+			"device_id": "device-1234567",
+			"task_type": "object_recognition",
+			"frame_width": 640,
+			"frame_height": 480,
+			"frame_bytes": 131072
+		}`),
+	)
+	request.Header.Set("Authorization", "Bearer "+strings.Repeat("t", 32))
+	recorder := httptest.NewRecorder()
+	NewRouter(options).ServeHTTP(recorder, request)
+
+	if recorder.Code != stdhttp.StatusForbidden {
+		t.Fatalf("expected status %d, got %d: %s", stdhttp.StatusForbidden, recorder.Code, recorder.Body.String())
+	}
+	envelope := decodeEnvelope(t, recorder)
+	if envelope.Error == nil || envelope.Error.Code != "vision_not_authorized" {
+		t.Fatalf("unexpected error envelope: %+v", envelope)
+	}
+}
+
+type recordingVisionService struct {
+	taskID   string
+	deviceID string
+}
+
+func (s *recordingVisionService) Analyze(
+	_ context.Context,
+	_ vision.Request,
+) (vision.Result, error) {
+	return vision.Result{}, nil
+}
+
+func (s *recordingVisionService) GetResult(
+	_ context.Context,
+	taskID string,
+	deviceID string,
+) (vision.Result, error) {
+	s.taskID = taskID
+	s.deviceID = deviceID
+	return vision.Result{TaskID: taskID, DeviceID: deviceID}, nil
+}
+
 type staticVisionService struct {
 	result vision.Result
 	err    error
@@ -300,7 +381,11 @@ func (s *staticVisionService) Analyze(
 	return s.result, s.err
 }
 
-func (s *staticVisionService) GetResult(string) (vision.Result, error) {
+func (s *staticVisionService) GetResult(
+	_ context.Context,
+	_ string,
+	_ string,
+) (vision.Result, error) {
 	return s.result, s.getErr
 }
 

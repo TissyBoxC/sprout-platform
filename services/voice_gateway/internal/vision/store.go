@@ -20,6 +20,8 @@ var (
 // The gateway keeps results only for ResultRetention so a long-running process
 // cannot accumulate unbounded child-derived metadata. Image bytes are never
 // stored here; entries hold bounded labels, confidences, and a short summary.
+// Entries are keyed by device and task so one device can never read another
+// device's result even if it learns the task identifier.
 type Store struct {
 	mutex   sync.Mutex
 	entries map[string]storedResult
@@ -55,23 +57,27 @@ func (s *Store) Save(result Result) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.pruneLocked(now)
-	s.entries[result.TaskID] = storedResult{
+	s.entries[storeKey(result.DeviceID, result.TaskID)] = storedResult{
 		result:    cloneResult(result),
 		expiresAt: result.ExpiresAt,
 	}
 }
 
-// Get returns one non-expired result.
-func (s *Store) Get(taskID string) (Result, bool) {
+// Get returns one non-expired result scoped to the requesting device.
+//
+// The device identifier is part of the lookup key, so a caller holding a task
+// identifier issued to a different device receives no result.
+func (s *Store) Get(deviceID string, taskID string) (Result, bool) {
 	if s == nil {
 		return Result{}, false
 	}
+	deviceID = strings.TrimSpace(deviceID)
 	taskID = strings.TrimSpace(taskID)
 	now := s.clock.Now().UTC()
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.pruneLocked(now)
-	entry, ok := s.entries[taskID]
+	entry, ok := s.entries[storeKey(deviceID, taskID)]
 	if !ok || !entry.expiresAt.After(now) {
 		return Result{}, false
 	}
@@ -109,6 +115,13 @@ func (s *Store) pruneLocked(now time.Time) int {
 		}
 	}
 	return removed
+}
+
+// storeKey namespaces a task identifier by device so results from different
+// devices remain isolated. A zero-length separator cannot appear in either
+// component because both are validated against identifier patterns first.
+func storeKey(deviceID string, taskID string) string {
+	return deviceID + "\x00" + taskID
 }
 
 func cloneResult(result Result) Result {

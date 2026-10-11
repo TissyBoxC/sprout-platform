@@ -370,6 +370,12 @@ func Load() (Config, error) {
 	if cfg.Vision.Enabled && strings.TrimSpace(cfg.Vision.Model) == "" {
 		return Config{}, fmt.Errorf("VOICE_GATEWAY_VISION_MODEL must be set when vision is enabled")
 	}
+	if cfg.Vision.Enabled && strings.TrimSpace(cfg.Database.DSN) == "" {
+		// Vision authorizes each task against the guardian's live consent, so
+		// exposing the endpoints without the platform database would trust a
+		// caller-supplied device identifier.
+		return Config{}, fmt.Errorf("VOICE_GATEWAY_DATABASE_DSN must be set when vision is enabled")
+	}
 
 	return cfg, nil
 }

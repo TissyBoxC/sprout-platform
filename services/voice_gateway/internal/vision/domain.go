@@ -18,7 +18,10 @@ var (
 	ErrContentRejected  = errors.New("vision content rejected by policy")
 	ErrModelUnavailable = errors.New("vision model unavailable")
 	ErrResultNotFound   = errors.New("vision result not found")
-	ErrStorageClosed    = errors.New("vision store is closed")
+	// ErrDeviceNotAuthorized means the guardian has withdrawn the consent that
+	// permits camera/vision processing for the device's family.
+	ErrDeviceNotAuthorized = errors.New("device is not authorized for vision")
+	ErrStorageClosed       = errors.New("vision store is closed")
 )
 
 // TaskType mirrors the firmware and platform camera/vision contract.

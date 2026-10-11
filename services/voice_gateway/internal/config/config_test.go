@@ -69,6 +69,7 @@ func TestLoadKeepsVisionDisabledByDefault(t *testing.T) {
 func TestLoadReadsVisionSettings(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_VISION_ENABLED", "true")
 	t.Setenv("VOICE_GATEWAY_VISION_MODEL", "vision-model")
+	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
 
 	cfg, err := Load()
 	if err != nil {
@@ -84,6 +85,16 @@ func TestLoadRejectsEnabledVisionWithoutModel(t *testing.T) {
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected enabled vision without a model to fail")
+	}
+}
+
+func TestLoadRejectsEnabledVisionWithoutDatabase(t *testing.T) {
+	t.Setenv("VOICE_GATEWAY_VISION_ENABLED", "true")
+	t.Setenv("VOICE_GATEWAY_VISION_MODEL", "vision-model")
+	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected enabled vision without a database to fail")
 	}
 }
 

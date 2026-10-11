@@ -99,6 +99,14 @@ paths:
           schema:
             type: string
             pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+        - name: device_id
+          in: query
+          required: true
+          description: Owning device of the result. The lookup is scoped to this
+            device so one device cannot read another device's result.
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
       responses:
         "200":
           description: Bounded vision result

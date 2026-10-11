@@ -15,7 +15,7 @@ import (
 // VisionService is the narrow vision surface required by HTTP transport.
 type VisionService interface {
 	Analyze(ctx context.Context, request vision.Request) (vision.Result, error)
-	GetResult(taskID string) (vision.Result, error)
+	GetResult(ctx context.Context, taskID string, deviceID string) (vision.Result, error)
 }
 
 type visionAnalyzeRequest struct {
@@ -69,7 +69,9 @@ func (handler visionHandler) analyzeTask(
 	httpapi.WriteSuccess(response, request, http.StatusOK, result)
 }
 
-// getResult handles GET /internal/v1/vision/results/{task_id}.
+// getResult handles GET /internal/v1/vision/results/{task_id}?device_id=...
+// The device_id query parameter scopes the lookup so one device cannot read
+// another device's result.
 func (handler visionHandler) getResult(
 	response http.ResponseWriter,
 	request *http.Request,
@@ -86,7 +88,8 @@ func (handler visionHandler) getResult(
 		)
 		return
 	}
-	result, err := handler.service.GetResult(taskID)
+	deviceID := strings.TrimSpace(request.URL.Query().Get("device_id"))
+	result, err := handler.service.GetResult(request.Context(), taskID, deviceID)
 	if err != nil {
 		writeVisionError(response, request, err)
 		return
@@ -127,6 +130,15 @@ func writeVisionError(
 			"vision_unavailable",
 			"视觉服务暂时不可用，请稍后重试",
 			true,
+		)
+	case errors.Is(err, vision.ErrDeviceNotAuthorized):
+		httpapi.WriteError(
+			response,
+			request,
+			http.StatusForbidden,
+			"vision_not_authorized",
+			"该设备未获得视觉处理授权，请让家长重新确认",
+			false,
 		)
 	case errors.Is(err, vision.ErrResultNotFound):
 		httpapi.WriteError(

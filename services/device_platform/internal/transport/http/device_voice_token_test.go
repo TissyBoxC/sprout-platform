@@ -34,6 +34,7 @@ func TestDeviceVoiceTokenEndpoint(t *testing.T) {
 		sessionDeviceID string
 		sessionExpired  bool
 		bound           bool
+		consent         voiceConsentReader
 		issuer          voiceTokenIssuerFunc
 		wantStatus      int
 		wantCode        string
@@ -43,6 +44,7 @@ func TestDeviceVoiceTokenEndpoint(t *testing.T) {
 			authorization:   "Bearer " + deviceToken,
 			sessionDeviceID: deviceID,
 			bound:           true,
+			consent:         allowVoiceConsent{},
 			issuer: func(gotDeviceID string) (bindingservice.VoiceTokenIssue, error) {
 				if gotDeviceID != deviceID {
 					t.Fatalf("issuer device id = %q, want %q", gotDeviceID, deviceID)
@@ -53,6 +55,25 @@ func TestDeviceVoiceTokenEndpoint(t *testing.T) {
 				}, nil
 			},
 			wantStatus: http.StatusOK,
+		},
+		{
+			name:            "withdrawn voice consent rejected",
+			authorization:   "Bearer " + deviceToken,
+			sessionDeviceID: deviceID,
+			bound:           true,
+			consent:         denyVoiceConsent{},
+			issuer:          noVoiceTokenIssuer,
+			wantStatus:      http.StatusForbidden,
+			wantCode:        "consent_required",
+		},
+		{
+			name:            "missing consent reader fails closed",
+			authorization:   "Bearer " + deviceToken,
+			sessionDeviceID: deviceID,
+			bound:           true,
+			issuer:          noVoiceTokenIssuer,
+			wantStatus:      http.StatusServiceUnavailable,
+			wantCode:        "voice_unavailable",
 		},
 		{
 			name:       "missing session rejected",
@@ -126,6 +147,7 @@ func TestDeviceVoiceTokenEndpoint(t *testing.T) {
 			options.BindingService = service
 			options.VoiceTokenIssuer = test.issuer
 			options.VoiceWebSocketURL = websocketURL
+			options.VoiceConsentReader = test.consent
 
 			request := httptest.NewRequest(
 				http.MethodPost,
@@ -212,6 +234,7 @@ func TestDeviceVoiceTokenReturnsServiceUnavailableWithoutSigner(t *testing.T) {
 	options := newTestRouterOptions()
 	options.AuthService = newVoiceTokenAuthService()
 	options.BindingService = service
+	options.VoiceConsentReader = allowVoiceConsent{}
 	options.VoiceWebSocketURL = "wss://voice.example.test/v1/voice"
 
 	request := httptest.NewRequest(
@@ -239,6 +262,20 @@ func TestDeviceVoiceTokenReturnsServiceUnavailableWithoutSigner(t *testing.T) {
 
 func noVoiceTokenIssuer(string) (bindingservice.VoiceTokenIssue, error) {
 	return bindingservice.VoiceTokenIssue{}, nil
+}
+
+// allowVoiceConsent grants every lookup; tests that exercise the consent gate
+// override this with a deny variant.
+type allowVoiceConsent struct{}
+
+func (allowVoiceConsent) VoiceConsentForParent(context.Context, string) (bool, error) {
+	return true, nil
+}
+
+type denyVoiceConsent struct{}
+
+func (denyVoiceConsent) VoiceConsentForParent(context.Context, string) (bool, error) {
+	return false, nil
 }
 
 type voiceTokenIssuerFunc func(

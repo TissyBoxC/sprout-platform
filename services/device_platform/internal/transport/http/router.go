@@ -78,6 +78,7 @@ type RouterOptions struct {
 	UsageReportService          *usagereportservice.Service
 	VoiceTokenIssuer            bindingservice.VoiceTokenIssuer
 	VoiceWebSocketURL           string
+	VoiceConsentReader          voiceConsentReader
 	PrivacyService              *privacyservice.Service
 	NotificationService         *notificationservice.Service
 	VisionService               *visionservice.Service
@@ -533,6 +534,7 @@ func NewRouter(options RouterOptions) http.Handler {
 				service:           options.BindingService,
 				voiceTokenIssuer:  options.VoiceTokenIssuer,
 				voiceWebSocketURL: strings.TrimSpace(options.VoiceWebSocketURL),
+				voiceConsent:      options.VoiceConsentReader,
 			}
 			mux.HandleFunc(
 				"POST /api/v1/devices/register",

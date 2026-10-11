@@ -88,7 +88,7 @@ func (s *Service) Capability(
 	return &domain.CapabilityState{
 		Supported:      true,
 		ConsentGranted: granted,
-		ReconsentPath:  "/settings/privacy",
+		ReconsentPath:  "/me/privacy",
 		RetentionHours: int(domain.ResultRetention.Hours()),
 	}, nil
 }

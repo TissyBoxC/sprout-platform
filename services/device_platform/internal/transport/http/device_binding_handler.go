@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"net/http"
@@ -15,6 +16,15 @@ type deviceBindingHandler struct {
 	service           *bindingservice.Service
 	voiceTokenIssuer  bindingservice.VoiceTokenIssuer
 	voiceWebSocketURL string
+	voiceConsent      voiceConsentReader
+}
+
+// voiceConsentReader is the narrow guardian-consent surface the voice-token
+// endpoint needs before it issues a realtime credential. It is evaluated at
+// issuance time so a withdrawn ai_interaction consent is denied even when the
+// device session is still valid.
+type voiceConsentReader interface {
+	VoiceConsentForParent(ctx context.Context, parentAccountID string) (bool, error)
 }
 
 type createRegistrationTokenRequest struct {
@@ -281,8 +291,25 @@ func (handler deviceBindingHandler) createVoiceToken(
 		writeDeviceBindingError(response, request, bindingdomain.ErrInvalidDeviceProof)
 		return
 	}
-	if _, err := handler.service.GetByDeviceID(request.Context(), sessionDeviceID); err != nil {
+	binding, err := handler.service.GetByDeviceID(request.Context(), sessionDeviceID)
+	if err != nil {
 		writeDeviceBindingError(response, request, err)
+		return
+	}
+	// Consent is a platform-side gate: withdrawing ai_interaction must stop new
+	// voice credentials. A missing reader fails closed rather than issuing an
+	// unchecked credential.
+	if handler.voiceConsent == nil {
+		writeError(response, request, http.StatusServiceUnavailable, "voice_unavailable", "实时语音暂时不可用，请稍后重试")
+		return
+	}
+	consented, err := handler.voiceConsent.VoiceConsentForParent(request.Context(), binding.ParentAccountID)
+	if err != nil {
+		writeError(response, request, http.StatusServiceUnavailable, "voice_unavailable", "实时语音暂时不可用，请稍后重试")
+		return
+	}
+	if !consented {
+		writeError(response, request, http.StatusForbidden, "consent_required", "语音服务当前不可用，请让家长重新确认授权")
 		return
 	}
 	if handler.voiceTokenIssuer == nil || handler.voiceWebSocketURL == "" {

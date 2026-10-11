@@ -616,6 +616,7 @@ func Run() error {
 			UsageReportService:          usageReports,
 			VoiceTokenIssuer:            voiceTokenIssuer,
 			VoiceWebSocketURL:           cfg.VoiceGateway.WebSocketURL,
+			VoiceConsentReader:          privacy,
 			PrivacyService:              privacy,
 			NotificationService:         notifications,
 			VisionService:               vision,

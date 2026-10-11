@@ -708,6 +708,95 @@ func TestWithdrawConsentRevokesSessionsAndGrantRestores(t *testing.T) {
 	}
 }
 
+func TestConsentTypesAreEnforcedIndependently(t *testing.T) {
+	repository := &memoryRepository{}
+	service := newTestService(
+		t,
+		repository,
+		&fakeParentAccounts{},
+		&fakeDevices{},
+		&fakeAIDeletion{},
+	)
+
+	// Without any recorded decision the registration default still stands for
+	// every type.
+	voiceGranted, err := service.VoiceConsentForParent(context.Background(), testParentID)
+	if err != nil {
+		t.Fatalf("voice consent default: %v", err)
+	}
+	if !voiceGranted {
+		t.Fatalf("expected voice consent default to be granted")
+	}
+
+	// Withdrawing ai_interaction must deny voice while leaving image consent,
+	// which is governed by child_data_processing, untouched.
+	if _, err := service.WithdrawConsent(
+		context.Background(),
+		testParentID,
+		domain.ConsentTypeAIInteraction,
+		"2026-01",
+	); err != nil {
+		t.Fatalf("withdraw ai_interaction: %v", err)
+	}
+	voiceGranted, err = service.VoiceConsentForParent(context.Background(), testParentID)
+	if err != nil {
+		t.Fatalf("voice consent after withdrawal: %v", err)
+	}
+	if voiceGranted {
+		t.Fatalf("expected voice consent to be withdrawn")
+	}
+	imageGranted, err := service.ImageConsentForParent(context.Background(), testParentID)
+	if err != nil {
+		t.Fatalf("image consent after voice withdrawal: %v", err)
+	}
+	if !imageGranted {
+		t.Fatalf("expected image consent to remain granted")
+	}
+
+	// Withdrawing child_data_processing now denies image consent while the
+	// voice decision stays denied.
+	if _, err := service.WithdrawConsent(
+		context.Background(),
+		testParentID,
+		domain.ConsentTypeChildDataProcessing,
+		"2026-01",
+	); err != nil {
+		t.Fatalf("withdraw child_data_processing: %v", err)
+	}
+	imageGranted, err = service.ImageConsentForParent(context.Background(), testParentID)
+	if err != nil {
+		t.Fatalf("image consent after withdrawal: %v", err)
+	}
+	if imageGranted {
+		t.Fatalf("expected image consent to be withdrawn")
+	}
+
+	// Granting ai_interaction again must restore voice without silently
+	// restoring the still-withdrawn child_data_processing consent.
+	if _, err := service.GrantConsent(
+		context.Background(),
+		testParentID,
+		domain.ConsentTypeAIInteraction,
+		"2026-01",
+	); err != nil {
+		t.Fatalf("grant ai_interaction: %v", err)
+	}
+	voiceGranted, err = service.VoiceConsentForParent(context.Background(), testParentID)
+	if err != nil {
+		t.Fatalf("voice consent after regrant: %v", err)
+	}
+	if !voiceGranted {
+		t.Fatalf("expected voice consent to be restored")
+	}
+	imageGranted, err = service.ImageConsentForParent(context.Background(), testParentID)
+	if err != nil {
+		t.Fatalf("image consent after voice regrant: %v", err)
+	}
+	if imageGranted {
+		t.Fatalf("expected image consent to stay withdrawn")
+	}
+}
+
 func TestRecordAuditDropsSensitiveFields(t *testing.T) {
 	repository := &memoryRepository{}
 	service := newTestService(

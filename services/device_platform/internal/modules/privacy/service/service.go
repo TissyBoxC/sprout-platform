@@ -206,21 +206,60 @@ func (s *Service) Status(
 }
 
 // ImageConsentForParent reports whether a guardian currently allows image
-// upload for their child's device. It is the narrow consent surface used by
-// the camera/vision module, and it is deny-by-default.
+// upload for their child's device. Image upload is child-data processing, so
+// it is governed by the child_data_processing consent.
 func (s *Service) ImageConsentForParent(
 	ctx context.Context,
 	parentAccountID string,
 ) (bool, error) {
-	account, err := s.parentAccounts.GetParentAccountByID(ctx, parentAccountID)
-	if err != nil {
+	return s.consentGrantedForParent(
+		ctx,
+		parentAccountID,
+		domain.ConsentTypeChildDataProcessing,
+	)
+}
+
+// VoiceConsentForParent reports whether a guardian currently allows AI voice
+// interaction for their child's device. It is governed by the ai_interaction
+// consent, so withdrawing that consent silences the device even while the
+// guardian session is still valid.
+func (s *Service) VoiceConsentForParent(
+	ctx context.Context,
+	parentAccountID string,
+) (bool, error) {
+	return s.consentGrantedForParent(
+		ctx,
+		parentAccountID,
+		domain.ConsentTypeAIInteraction,
+	)
+}
+
+// consentGrantedForParent reports the newest decision for one consent type.
+// Registration records consent through the parent account, so the absence of
+// an event for a type means the registration default still stands; only an
+// explicit later withdrawal flips the type to denied. Each type is evaluated
+// independently, so withdrawing ai_interaction does not silently re-grant it
+// when child_data_processing is still active, and vice versa.
+func (s *Service) consentGrantedForParent(
+	ctx context.Context,
+	parentAccountID string,
+	consentType string,
+) (bool, error) {
+	if !validConsentType(consentType) {
+		return false, domain.ErrInvalidConsentVersion
+	}
+	if _, err := s.parentAccounts.GetParentAccountByID(ctx, parentAccountID); err != nil {
 		return false, err
 	}
 	events, err := s.repository.ListConsentEvents(ctx, parentAccountID)
 	if err != nil {
 		return false, err
 	}
-	return consentStatus(account, events).Active, nil
+	decision, decided := latestConsentDecision(events, consentType)
+	if !decided {
+		return true, nil
+	}
+	return decision.Granted, nil
 }
 
 // Export returns a redacted, guardian-owned data copy. Raw audio, images,
@@ -745,25 +784,38 @@ func consentStatus(
 		Active:        true,
 		ReconsentPath: "/me/privacy",
 	}
-	for _, event := range events {
-		if event.ConsentType != domain.ConsentTypeChildDataProcessing {
-			continue
-		}
-		if event.Granted {
-			status.Version = event.ConsentVersion
-			status.ConsentedAt = &event.CreatedAt
-			status.WithdrawnAt = nil
-			status.Status = domain.ConsentStatusActive
-			status.Active = true
-		} else {
-			status.Version = event.ConsentVersion
-			status.WithdrawnAt = &event.CreatedAt
-			status.Status = domain.ConsentStatusWithdrawn
-			status.Active = false
-		}
-		break
+	decision, decided := latestConsentDecision(events, domain.ConsentTypeChildDataProcessing)
+	if !decided {
+		return status
+	}
+	status.Version = decision.ConsentVersion
+	if decision.Granted {
+		status.ConsentedAt = &decision.CreatedAt
+		status.WithdrawnAt = nil
+		status.Status = domain.ConsentStatusActive
+		status.Active = true
+	} else {
+		status.WithdrawnAt = &decision.CreatedAt
+		status.Status = domain.ConsentStatusWithdrawn
+		status.Active = false
 	}
 	return status
+}
+
+// latestConsentDecision returns the newest decision for one consent type. The
+// caller-supplied events are expected newest-first; an empty or absent type
+// yields decided=false so callers can distinguish "never decided" from
+// "explicitly withdrawn".
+func latestConsentDecision(
+	events []domain.ConsentEvent,
+	consentType string,
+) (domain.ConsentEvent, bool) {
+	for _, event := range events {
+		if event.ConsentType == consentType {
+			return event, true
+		}
+	}
+	return domain.ConsentEvent{}, false
 }
 
 func validConsentType(value string) bool {

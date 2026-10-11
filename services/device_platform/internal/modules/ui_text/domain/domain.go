@@ -174,6 +174,28 @@ type PublicationInput struct {
 	Signature      string
 }
 
+// TransitionInput identifies one lifecycle move on one stored package version.
+type TransitionInput struct {
+	PackageID      string
+	Language       string
+	Platform       Platform
+	PackageVersion int
+	Action         Action
+	ActorID        string
+	SignatureKeyID string
+	Signature      string
+}
+
+// VersionFilter bounds one operator version-list query.
+type VersionFilter struct {
+	PackageID string
+	Language  string
+	Platform  Platform
+	Status    Status
+	Page      int
+	PageSize  int
+}
+
 // PackageVersion is one summary row in the operator version history.
 type PackageVersion struct {
 	Package      Package

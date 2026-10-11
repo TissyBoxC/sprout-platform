@@ -644,6 +644,9 @@ String _deviceSubtitle(BoundDevice device) {
     if (runtime != null) runtime.isOnline ? '在线' : '离线',
     if (runtime?.networkQuality.isNotEmpty == true)
       '网络${_networkQualityLabel(runtime!.networkQuality)}',
+    if (runtime != null && runtime.temperatureState.isNotEmpty &&
+        runtime.temperatureState != 'unknown')
+      _temperatureLabel(runtime.temperatureState),
     if (runtime?.receivedAt != null)
       '最近连接 ${_relativeTime(runtime!.receivedAt!)}',
     if (device.hardwareModel.isNotEmpty) device.hardwareModel,
@@ -719,6 +722,16 @@ String _networkQualityLabel(String quality) {
     'fair' => '一般',
     'poor' => '较差',
     _ => '未知',
+  };
+}
+
+String _temperatureLabel(String state) {
+  return switch (state) {
+    'normal' => '温度正常',
+    'warm' => '温度偏高',
+    'hot' => '温度过高',
+    'critical' => '温度危险',
+    _ => '温度未知',
   };
 }
 

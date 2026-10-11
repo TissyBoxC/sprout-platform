@@ -36,6 +36,8 @@ void main() {
                 rssiDbm: -58,
                 latencyMs: 42,
                 packetLossPercent: 1,
+                temperatureState: 'normal',
+                temperatureCelsiusTenths: 384,
                 timeSyncState: 'synchronized',
                 lastSyncedAt: null,
                 offlineState: 'online',
@@ -62,6 +64,7 @@ void main() {
     expect(find.text('已配网'), findsOneWidget);
     expect(find.text('连接正常'), findsOneWidget);
     expect(find.text('重新连接设备'), findsNothing);
+    expect(find.textContaining('温度正常'), findsOneWidget);
   });
 
   testWidgets('warns and offers reconnect when device session is revoked', (
@@ -89,6 +92,8 @@ void main() {
                 rssiDbm: 0,
                 latencyMs: 0,
                 packetLossPercent: 0,
+                temperatureState: 'unknown',
+                temperatureCelsiusTenths: null,
                 timeSyncState: 'unsynchronized',
                 lastSyncedAt: null,
                 offlineState: 'offline',
@@ -190,6 +195,8 @@ DeviceRuntimeStatus _onlineRuntime() {
     rssiDbm: -58,
     latencyMs: 42,
     packetLossPercent: 1,
+    temperatureState: 'normal',
+    temperatureCelsiusTenths: 384,
     timeSyncState: 'synchronized',
     lastSyncedAt: null,
     offlineState: 'online',

@@ -55,6 +55,8 @@ class DeviceRuntimeStatus {
     required this.rssiDbm,
     required this.latencyMs,
     required this.packetLossPercent,
+    required this.temperatureState,
+    required this.temperatureCelsiusTenths,
     required this.timeSyncState,
     required this.lastSyncedAt,
     required this.offlineState,
@@ -73,6 +75,10 @@ class DeviceRuntimeStatus {
   final int rssiDbm;
   final int latencyMs;
   final int packetLossPercent;
+  /// Normalized thermal band: unknown, normal, warm, hot, or critical.
+  final String temperatureState;
+  /// Reading in tenths of a degree Celsius, or null when none was reported.
+  final int? temperatureCelsiusTenths;
   final String timeSyncState;
   final DateTime? lastSyncedAt;
   final String offlineState;
@@ -86,6 +92,7 @@ class DeviceRuntimeStatus {
   factory DeviceRuntimeStatus.fromJson(Map<String, Object?> json) {
     final connection = _map(json['connection']);
     final quality = _map(json['network_quality']);
+    final temperature = _map(json['temperature']);
     final timeSync = _map(json['time_sync']);
     final offline = _map(json['offline']);
     final provisioning = json['provisioning'];
@@ -97,6 +104,8 @@ class DeviceRuntimeStatus {
       rssiDbm: _asInt(quality['rssi_dbm']),
       latencyMs: _asInt(quality['latency_ms']),
       packetLossPercent: _asInt(quality['packet_loss_percent']),
+      temperatureState: _asString(temperature['state']),
+      temperatureCelsiusTenths: _asNullableInt(temperature['celsius_tenths']),
       timeSyncState: _asString(timeSync['state']),
       lastSyncedAt: _asDateTime(timeSync['last_synced_at']),
       offlineState: _asString(offline['state']),
@@ -215,6 +224,10 @@ Map<String, Object?> _map(Object? value) {
 
 int _asInt(Object? value) {
   return value is num ? value.toInt() : 0;
+}
+
+int? _asNullableInt(Object? value) {
+  return value is num ? value.toInt() : null;
 }
 
 DateTime? _asDateTime(Object? value) {

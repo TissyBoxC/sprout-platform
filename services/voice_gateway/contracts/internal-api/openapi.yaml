@@ -52,6 +52,72 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResponseEnvelope"
+  /internal/v1/vision/tasks:
+    post:
+      summary: Run one bounded camera/vision task
+      description: Accepts symbolic task metadata only. Image bytes and raw pixels
+        are never accepted, stored, or logged; results carry bounded labels and a
+        short summary with a 24-hour retention window.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VisionTaskRequest"
+      responses:
+        "200":
+          description: Bounded vision result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          description: Service authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid or unsafe vision task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          description: Vision model temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+  /internal/v1/vision/results/{task_id}:
+    get:
+      summary: Read one short-lived vision result
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+      responses:
+        "200":
+          description: Bounded vision result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          description: Service authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "404":
+          description: Result not found or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
 components:
   securitySchemes:
     serviceToken:
@@ -59,6 +125,42 @@ components:
       scheme: bearer
       bearerFormat: service-token
   schemas:
+    VisionTaskRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - task_id
+        - device_id
+        - task_type
+      properties:
+        task_id:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+        device_id:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+        task_type:
+          type: string
+          enum:
+            - object_recognition
+            - picture_book_recognition
+            - photo_qa
+            - capture
+        prompt:
+          type: string
+          maxLength: 500
+        frame_width:
+          type: integer
+          minimum: 0
+          maximum: 4096
+        frame_height:
+          type: integer
+          minimum: 0
+          maximum: 4096
+        frame_bytes:
+          type: integer
+          minimum: 0
+          maximum: 8388608
     ResponseEnvelope:
       type: object
       additionalProperties: false

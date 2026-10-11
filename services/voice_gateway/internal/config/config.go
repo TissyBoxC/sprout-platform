@@ -17,6 +17,7 @@ type Config struct {
 	Redis     RedisConfig
 	Database  DatabaseConfig
 	Sub2API   Sub2APIConfig
+	Vision    VisionConfig
 	Security  SecurityConfig
 	WebSocket WebSocketConfig
 	Audio     AudioConfig
@@ -194,6 +195,17 @@ type Sub2APIConfig struct {
 	APIKey  string
 }
 
+// VisionConfig turns the internal camera/vision pipeline on or off.
+//
+// Vision reuses the sub2api connection for model calls. It stays disabled by
+// default so a deployment without camera hardware exposes no vision endpoint.
+type VisionConfig struct {
+	Enabled bool
+	// Model is the vision model identifier; empty keeps the endpoint off even
+	// when Enabled is true, because a model call without a model is useless.
+	Model string
+}
+
 // SecurityConfig contains content safety settings.
 type SecurityConfig struct {
 	ContentPolicyEnabled bool
@@ -230,6 +242,10 @@ func Load() (Config, error) {
 		Sub2API: Sub2APIConfig{
 			BaseURL: env("VOICE_GATEWAY_SUB2API_BASE_URL", "http://127.0.0.1:8080"),
 			APIKey:  env("VOICE_GATEWAY_SUB2API_API_KEY", ""),
+		},
+		Vision: VisionConfig{
+			Enabled: envBool("VOICE_GATEWAY_VISION_ENABLED", false),
+			Model:   env("VOICE_GATEWAY_VISION_MODEL", ""),
 		},
 		Security: SecurityConfig{
 			ContentPolicyEnabled: envBool("VOICE_GATEWAY_CONTENT_POLICY_ENABLED", true),
@@ -343,6 +359,9 @@ func Load() (Config, error) {
 	}
 	if cfg.Security.MaxInputRunes < 64 || cfg.Security.MaxInputRunes > 8000 {
 		return Config{}, fmt.Errorf("VOICE_GATEWAY_MAX_INPUT_RUNES must be between 64 and 8000")
+	}
+	if cfg.Vision.Enabled && strings.TrimSpace(cfg.Vision.Model) == "" {
+		return Config{}, fmt.Errorf("VOICE_GATEWAY_VISION_MODEL must be set when vision is enabled")
 	}
 
 	return cfg, nil

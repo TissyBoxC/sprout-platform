@@ -31,6 +31,10 @@ type RouterOptions struct {
 	SessionMetrics interface {
 		QualitySnapshots() []session.QualitySnapshot
 	}
+	// VisionService enables the internal camera/vision endpoints. It accepts
+	// bounded symbolic task metadata and returns short-lived labels; image
+	// bytes never pass through this transport.
+	VisionService VisionService
 }
 
 // NewRouter returns the HTTP router for the voice gateway.
@@ -83,6 +87,23 @@ func NewRouter(options RouterOptions) http.Handler {
 							map[string]any{"sessions": snapshots},
 						)
 					}),
+				),
+			)
+		}
+		if options.VisionService != nil {
+			vision := visionHandler{service: options.VisionService}
+			mux.Handle(
+				"POST /internal/v1/vision/tasks",
+				requireServiceToken(
+					options.InternalAPIConfig.AuthToken,
+					http.HandlerFunc(vision.analyzeTask),
+				),
+			)
+			mux.Handle(
+				"GET /internal/v1/vision/results/{task_id}",
+				requireServiceToken(
+					options.InternalAPIConfig.AuthToken,
+					http.HandlerFunc(vision.getResult),
 				),
 			)
 		}

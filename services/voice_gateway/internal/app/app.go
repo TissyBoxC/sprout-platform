@@ -13,6 +13,7 @@ import (
 	"time"
 
 	sharedobservability "github.com/TissyBoxC/sprout-platform/packages/go/observability"
+	visionsub2api "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/vision/sub2api"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/frame"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/preprocess"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/reference"
@@ -27,6 +28,7 @@ import (
 	gatewayhttp "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/transport/http"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/transport/websocket"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/usage"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/vision"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -84,6 +86,20 @@ func Run() error {
 		InternalAPIConfig: cfg.Internal,
 		UsageRecorder:     usageRecorder,
 		SessionMetrics:    realtimeManager,
+	}
+	if cfg.Vision.Enabled {
+		visionService, err := vision.New(vision.Options{
+			Client: visionsub2api.New(visionsub2api.Config{
+				BaseURL: cfg.Sub2API.BaseURL,
+				APIKey:  cfg.Sub2API.APIKey,
+				Model:   cfg.Vision.Model,
+			}),
+		})
+		if err != nil {
+			return fmt.Errorf("build vision pipeline: %w", err)
+		}
+		routerOptions.VisionService = visionService
+		logger.Info("camera vision pipeline enabled")
 	}
 	if realtimeHandler != nil {
 		routerOptions.RealtimeHandler = realtimeHandler

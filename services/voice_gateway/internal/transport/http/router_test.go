@@ -15,6 +15,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/config"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/session"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/usage"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/vision"
 )
 
 func TestHealthEndpoint(t *testing.T) {
@@ -195,6 +196,112 @@ func TestInternalUsageEndpointRecordsConversation(t *testing.T) {
 		usageRepository.record.SpentUSD != 0.0012 {
 		t.Fatalf("unexpected usage record: %+v", usageRepository.record)
 	}
+}
+
+func TestInternalVisionEndpointsRequireServiceToken(t *testing.T) {
+	options := newTestRouterOptions()
+	options.InternalAPIConfig = config.InternalAPIConfig{
+		Enabled:   true,
+		AuthToken: strings.Repeat("t", 32),
+	}
+	options.VisionService = &staticVisionService{}
+
+	request := httptest.NewRequest(
+		stdhttp.MethodPost,
+		"/internal/v1/vision/tasks",
+		strings.NewReader(`{"task_id":"task-123456"}`),
+	)
+	recorder := httptest.NewRecorder()
+	NewRouter(options).ServeHTTP(recorder, request)
+
+	if recorder.Code != stdhttp.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", stdhttp.StatusUnauthorized, recorder.Code)
+	}
+}
+
+func TestInternalVisionAnalyzeReturnsBoundedResult(t *testing.T) {
+	options := newTestRouterOptions()
+	options.InternalAPIConfig = config.InternalAPIConfig{
+		Enabled:   true,
+		AuthToken: strings.Repeat("t", 32),
+	}
+	options.VisionService = &staticVisionService{
+		result: vision.Result{
+			TaskID:   "task-123456",
+			DeviceID: "device-1234567",
+			TaskType: vision.TaskTypeObjectRecognition,
+			Labels:   []vision.Label{{Label: "apple", Confidence: 9000}},
+			Summary:  "这是一颗苹果",
+		},
+	}
+
+	request := httptest.NewRequest(
+		stdhttp.MethodPost,
+		"/internal/v1/vision/tasks",
+		strings.NewReader(`{
+			"task_id": "task-123456",
+			"device_id": "device-1234567",
+			"task_type": "object_recognition",
+			"prompt": "这是什么",
+			"frame_width": 640,
+			"frame_height": 480,
+			"frame_bytes": 131072
+		}`),
+	)
+	request.Header.Set("Authorization", "Bearer "+strings.Repeat("t", 32))
+	recorder := httptest.NewRecorder()
+	NewRouter(options).ServeHTTP(recorder, request)
+
+	if recorder.Code != stdhttp.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", stdhttp.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"label":"apple"`) || !strings.Contains(body, `"confidence":9000`) {
+		t.Fatalf("unexpected vision response: %s", body)
+	}
+}
+
+func TestInternalVisionResultNotFound(t *testing.T) {
+	options := newTestRouterOptions()
+	options.InternalAPIConfig = config.InternalAPIConfig{
+		Enabled:   true,
+		AuthToken: strings.Repeat("t", 32),
+	}
+	options.VisionService = &staticVisionService{getErr: vision.ErrResultNotFound}
+
+	request := httptest.NewRequest(
+		stdhttp.MethodGet,
+		"/internal/v1/vision/results/task-123456",
+		nil,
+	)
+	request.Header.Set("Authorization", "Bearer "+strings.Repeat("t", 32))
+	recorder := httptest.NewRecorder()
+	NewRouter(options).ServeHTTP(recorder, request)
+
+	if recorder.Code != stdhttp.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", stdhttp.StatusNotFound, recorder.Code)
+	}
+	envelope := decodeEnvelope(t, recorder)
+	if envelope.Error == nil || envelope.Error.Code != "vision_result_not_found" {
+		t.Fatalf("unexpected error envelope: %+v", envelope)
+	}
+}
+
+type staticVisionService struct {
+	result vision.Result
+	err    error
+	getErr error
+}
+
+func (s *staticVisionService) Analyze(
+	_ context.Context,
+	_ vision.Request,
+) (vision.Result, error) {
+	return s.result, s.err
+}
+
+func (s *staticVisionService) GetResult(string) (vision.Result, error) {
+	return s.result, s.getErr
 }
 
 type recordingUsageRepository struct {

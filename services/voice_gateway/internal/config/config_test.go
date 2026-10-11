@@ -56,6 +56,37 @@ func TestLoadReadsInternalAPISettings(t *testing.T) {
 	}
 }
 
+func TestLoadKeepsVisionDisabledByDefault(t *testing.T) {
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.Vision.Enabled {
+		t.Fatal("vision must be disabled by default")
+	}
+}
+
+func TestLoadReadsVisionSettings(t *testing.T) {
+	t.Setenv("VOICE_GATEWAY_VISION_ENABLED", "true")
+	t.Setenv("VOICE_GATEWAY_VISION_MODEL", "vision-model")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if !cfg.Vision.Enabled || cfg.Vision.Model != "vision-model" {
+		t.Fatalf("unexpected vision config: %+v", cfg.Vision)
+	}
+}
+
+func TestLoadRejectsEnabledVisionWithoutModel(t *testing.T) {
+	t.Setenv("VOICE_GATEWAY_VISION_ENABLED", "true")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected enabled vision without a model to fail")
+	}
+}
+
 func TestLoadRejectsEnabledInternalAPIWithoutStrongToken(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_INTERNAL_API_ENABLED", "true")
 	t.Setenv("VOICE_GATEWAY_INTERNAL_API_TOKEN", "short-token")

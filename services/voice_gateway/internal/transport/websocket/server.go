@@ -31,10 +31,14 @@ const (
 	// The device speaker owns the guardian volume cap and mute state, so the
 	// gateway passes reply PCM through unchanged. Applying an extra fixed gain
 	// here would attenuate every reply twice and quietly halve the output.
-	defaultVolumePercent       = 100
-	defaultMaxVolumePercent    = 100
-	defaultPongWait            = 60 * time.Second
-	defaultPingInterval        = 25 * time.Second
+	defaultVolumePercent    = 100
+	defaultMaxVolumePercent = 100
+	defaultPongWait         = 60 * time.Second
+	defaultPingInterval     = 25 * time.Second
+	// defaultAuthRecheckInterval matches the platform settings cache TTL so a
+	// guardian's withdrawal is observed within one short window on an open
+	// connection.
+	defaultAuthRecheckInterval = 30 * time.Second
 	defaultWriteTimeout        = 10 * time.Second
 	defaultHandshakeTimeout    = 10 * time.Second
 	defaultSessionTTL          = 15 * time.Minute
@@ -49,15 +53,19 @@ const (
 // Limiting both frames and bytes is intentional: a small number of maximum
 // sized frames must not consume the same budget as normal 20 ms Opus frames.
 type ServerConfig struct {
-	ReadLimitBytes     int64
-	WriteQueueDepth    int
-	SegmentQueueDepth  int
-	PongWait           time.Duration
-	PingInterval       time.Duration
-	WriteTimeout       time.Duration
-	MaxFramesPerSecond int
-	MaxBytesPerSecond  int
-	SessionTTL         time.Duration
+	ReadLimitBytes    int64
+	WriteQueueDepth   int
+	SegmentQueueDepth int
+	PongWait          time.Duration
+	PingInterval      time.Duration
+	// AuthRecheckInterval re-checks the guardian's live consent during a
+	// long-lived connection so a withdrawal mid-session ends the audio path.
+	// Zero uses defaultAuthRecheckInterval.
+	AuthRecheckInterval time.Duration
+	WriteTimeout        time.Duration
+	MaxFramesPerSecond  int
+	MaxBytesPerSecond   int
+	SessionTTL          time.Duration
 	// ContinuityWindow keeps a finished session recoverable for follow-up turns
 	// without a new wake word. The session is released when the window expires,
 	// the connection closes, or a new session replaces it.
@@ -486,15 +494,54 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 	heartbeatDone := make(chan struct{})
 	go s.sendHeartbeats(connectionContext, writer, heartbeatDone)
 
+	// A withdrawal of the guardian's consent must end an already-open
+	// connection, not only gate new upgrades. The watcher re-checks the
+	// authoritative platform state on an interval; on failure it sends a safe
+	// close reason and closes the socket, which unblocks the reader below.
+	var consentRevoked atomic.Bool
+	revokeForConsent := func() {
+		if consentRevoked.Swap(true) {
+			return
+		}
+		// WriteControl is safe to call concurrently with the writer goroutine,
+		// so the safe close reason is flushed synchronously and cannot race a
+		// queued error frame. Bumping the read deadline unblocks the reader.
+		_ = connection.WriteControl(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "consent_revoked"),
+			time.Now().Add(s.config.WriteTimeout),
+		)
+		_ = connection.SetReadDeadline(time.Now())
+	}
+	if s.config.Authorizer != nil {
+		go s.watchAuthorization(connectionContext, identity.DeviceID, revokeForConsent)
+	}
+	// Starting or resuming an utterance re-checks consent synchronously so a
+	// withdrawal that landed between interval ticks is observed before any new
+	// audio is accepted.
+	reauthorize := func() bool {
+		if s.config.Authorizer == nil {
+			return true
+		}
+		if err := authorizeDevice(connectionContext, s.config.Authorizer, identity.DeviceID); err != nil {
+			revokeForConsent()
+			return false
+		}
+		return true
+	}
+
 	limiter := newRateLimiter(s.config.MaxFramesPerSecond, s.config.MaxBytesPerSecond)
 	var disconnectReason string
 
 	for {
 		messageType, payload, err := connection.ReadMessage()
 		if err != nil {
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+			switch {
+			case consentRevoked.Load():
+				disconnectReason = "consent_revoked"
+			case websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway):
 				disconnectReason = "client_closed"
-			} else {
+			default:
 				disconnectReason = "transport_closed"
 			}
 			break
@@ -525,6 +572,10 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 
 			switch control.Type {
 			case controlTypeWakeDetected:
+				if !reauthorize() {
+					disconnectReason = "consent_revoked"
+					goto closed
+				}
 				stopContinuityTimer()
 				voiceSession := getSession()
 				if voiceSession == nil {
@@ -584,6 +635,10 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 				if getSession() != nil {
 					s.sendError(writer, getSession(), errorCodeInvalidControl, "当前已有进行中的监听", false)
 					continue
+				}
+				if !reauthorize() {
+					disconnectReason = "consent_revoked"
+					goto closed
 				}
 				stopContinuityTimer()
 				voiceSession, createErr := createSession(control)
@@ -859,6 +914,42 @@ func (s *Server) sendHeartbeats(
 			return
 		case <-ticker.C:
 			if err := writer.enqueueControl(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// watchAuthorization re-checks the guardian's live consent on an interval and
+// reports the first withdrawal so an open connection stops receiving audio.
+//
+// The check runs against the platform database, not cached token state, so a
+// consent revoked in the parent application ends the session without waiting
+// for the signed token to expire. A transient read failure also fails closed:
+// the connection closes and the device can reconnect once the guardian's state
+// is confirmed again.
+func (s *Server) watchAuthorization(
+	ctx context.Context,
+	deviceID string,
+	onRevoked func(),
+) {
+	interval := s.config.AuthRecheckInterval
+	if interval <= 0 {
+		interval = defaultAuthRecheckInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			checkCtx, cancel := context.WithTimeout(ctx, s.config.WriteTimeout)
+			err := authorizeDevice(checkCtx, s.config.Authorizer, deviceID)
+			cancel()
+			if err != nil {
+				s.logger.Info("device authorization revoked mid-session", "device_id", deviceID)
+				onRevoked()
 				return
 			}
 		}
@@ -1184,6 +1275,9 @@ func normalizeServerConfig(config ServerConfig) ServerConfig {
 	}
 	if config.PingInterval <= 0 || config.PingInterval >= config.PongWait {
 		config.PingInterval = defaultPingInterval
+	}
+	if config.AuthRecheckInterval <= 0 {
+		config.AuthRecheckInterval = defaultAuthRecheckInterval
 	}
 	if config.WriteTimeout <= 0 {
 		config.WriteTimeout = defaultWriteTimeout

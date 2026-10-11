@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -79,6 +80,82 @@ func TestHandlerRejectsDeviceWhenGuardianConsentIsWithdrawn(t *testing.T) {
 	if server.Stats().RejectedConnections == 0 {
 		t.Fatal("rejected connection counter was not incremented")
 	}
+}
+
+// A consent withdrawal after the upgrade must block the next session_start;
+// the upgrade-time check alone cannot see it.
+func TestSessionStartAfterConsentWithdrawnIsRejected(t *testing.T) {
+	manager := session.NewManager(session.ManagerConfig{MaxSessions: 8, MaxSessionsPerDevice: 2})
+	defer manager.CloseAll()
+	authorizer := &toggleAuthorizer{}
+	server, err := NewServer(ServerConfig{
+		Manager:    manager,
+		Verifier:   testTokenVerifier{},
+		Authorizer: authorizer,
+	}, nil)
+	if err != nil {
+		t.Fatalf("create websocket server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, "valid-token")
+	defer connection.Close()
+
+	// Consent is withdrawn while the socket is open.
+	authorizer.denied.Store(true)
+
+	writeControl(t, connection, sessionStartFrame("session_revoked", "device_alpha"))
+
+	// The server refuses to start the session and closes the socket with a
+	// safe, content-free reason.
+	_ = connection.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, _, readErr := connection.ReadMessage()
+	var closeErr *websocket.CloseError
+	if !errors.As(readErr, &closeErr) {
+		t.Fatalf("expected a websocket close, got %v", readErr)
+	}
+	if closeErr.Code != websocket.ClosePolicyViolation || closeErr.Text != "consent_revoked" {
+		t.Fatalf("unexpected close frame: code=%d text=%q", closeErr.Code, closeErr.Text)
+	}
+	if manager.Count() != 0 {
+		t.Fatalf("expected no session after withdrawn consent, got %d", manager.Count())
+	}
+}
+
+// A consent withdrawal mid-session must be observed by the interval watcher
+// so a long-lived connection cannot keep streaming audio.
+func TestConsentWithdrawalClosesOpenSession(t *testing.T) {
+	manager := session.NewManager(session.ManagerConfig{MaxSessions: 8, MaxSessionsPerDevice: 2})
+	defer manager.CloseAll()
+	authorizer := &toggleAuthorizer{}
+	server, err := NewServer(ServerConfig{
+		Manager:             manager,
+		Verifier:            testTokenVerifier{},
+		Authorizer:          authorizer,
+		AuthRecheckInterval: 20 * time.Millisecond,
+	}, nil)
+	if err != nil {
+		t.Fatalf("create websocket server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, "valid-token")
+	defer connection.Close()
+	writeControl(t, connection, sessionStartFrame("session_watch", "device_alpha"))
+	_ = readControl(t, connection) // session_started
+	_ = readControl(t, connection) // session_state listening
+
+	authorizer.denied.Store(true)
+
+	_ = connection.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for {
+		if _, _, readErr := connection.ReadMessage(); readErr != nil {
+			break
+		}
+	}
+	waitFor(t, time.Second, func() bool { return manager.Count() == 0 })
 }
 
 func TestSessionStartAudioFrameAndClose(t *testing.T) {
@@ -827,6 +904,19 @@ func (rejectingAuthorizer) AuthorizeDevice(
 	string,
 ) error {
 	return ErrDeviceNotAuthorized
+}
+
+// toggleAuthorizer lets a test withdraw consent after the connection is
+// already established, which is the case the upgrade-time check cannot cover.
+type toggleAuthorizer struct {
+	denied atomic.Bool
+}
+
+func (a *toggleAuthorizer) AuthorizeDevice(context.Context, string) error {
+	if a.denied.Load() {
+		return ErrDeviceNotAuthorized
+	}
+	return nil
 }
 
 type scriptedWebSocketDetector struct {

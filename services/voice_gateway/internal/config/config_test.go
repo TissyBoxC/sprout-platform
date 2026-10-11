@@ -240,3 +240,35 @@ func TestContinuityWindowDefaultsAndBounds(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthRecheckDefaultsAndBounds(t *testing.T) {
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.WebSocket.AuthRecheckSeconds != 30 {
+		t.Fatalf("auth recheck = %d, want 30", cfg.WebSocket.AuthRecheckSeconds)
+	}
+
+	testCases := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{name: "minimum", value: "5"},
+		{name: "maximum", value: "600"},
+		{name: "too short", value: "4", wantErr: true},
+		{name: "too long", value: "601", wantErr: true},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Setenv("VOICE_GATEWAY_WS_ENABLED", "true")
+			t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
+			t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
+			t.Setenv("VOICE_GATEWAY_WS_AUTH_RECHECK_SECONDS", testCase.value)
+			if _, err := Load(); testCase.wantErr && err == nil {
+				t.Fatalf("expected auth recheck %s to be rejected", testCase.value)
+			}
+		})
+	}
+}

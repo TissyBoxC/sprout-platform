@@ -62,6 +62,9 @@ type WebSocketConfig struct {
 	PongWaitSeconds int
 	// PingIntervalSeconds is how often the gateway sends a keepalive ping.
 	PingIntervalSeconds int
+	// AuthRecheckSeconds is how often an established connection re-checks the
+	// guardian's live consent so a withdrawal during a long session ends it.
+	AuthRecheckSeconds int
 	// WriteTimeoutSeconds bounds one outbound websocket write.
 	WriteTimeoutSeconds int
 	// IdleTimeoutSeconds ends a silent session on the gateway side.
@@ -270,6 +273,7 @@ func Load() (Config, error) {
 			ReadTimeoutSeconds:        envInt("VOICE_GATEWAY_WS_READ_TIMEOUT_SECONDS", 30),
 			PongWaitSeconds:           envInt("VOICE_GATEWAY_WS_PONG_WAIT_SECONDS", 60),
 			PingIntervalSeconds:       envInt("VOICE_GATEWAY_WS_PING_INTERVAL_SECONDS", 25),
+			AuthRecheckSeconds:        envInt("VOICE_GATEWAY_WS_AUTH_RECHECK_SECONDS", 30),
 			WriteTimeoutSeconds:       envInt("VOICE_GATEWAY_WS_WRITE_TIMEOUT_SECONDS", 10),
 			IdleTimeoutSeconds:        envInt("VOICE_GATEWAY_WS_IDLE_TIMEOUT_SECONDS", 60),
 			SessionMaxDurationSeconds: envInt("VOICE_GATEWAY_WS_SESSION_MAX_DURATION_SECONDS", 900),
@@ -358,6 +362,8 @@ func Load() (Config, error) {
 			cfg.WebSocket.PongWaitSeconds < 1 ||
 			cfg.WebSocket.PingIntervalSeconds < 1 ||
 			cfg.WebSocket.PongWaitSeconds <= cfg.WebSocket.PingIntervalSeconds ||
+			cfg.WebSocket.AuthRecheckSeconds < 5 ||
+			cfg.WebSocket.AuthRecheckSeconds > 600 ||
 			cfg.WebSocket.WriteTimeoutSeconds < 1 ||
 			cfg.WebSocket.IdleTimeoutSeconds < 1 ||
 			cfg.WebSocket.SessionMaxDurationSeconds < cfg.WebSocket.IdleTimeoutSeconds {

@@ -21,6 +21,7 @@ import UsageReportPage from '@/features/usage_report/presentation/UsageReportPag
 import NotificationCenterPage from '@/features/notifications/presentation/NotificationCenterPage.vue'
 import VisionStatsPage from '@/features/vision/presentation/VisionStatsPage.vue'
 import DisplayStatsPage from '@/features/display/presentation/DisplayStatsPage.vue'
+import TouchStatsPage from '@/features/touch/presentation/TouchStatsPage.vue'
 import { useAuthStore } from '@/features/auth/application/authStore'
 
 /// Feature routes are registered here so removing a feature only changes its
@@ -128,6 +129,11 @@ export function createAdminRouter() {
         path: '/display',
         name: 'display',
         component: DisplayStatsPage,
+      },
+      {
+        path: '/touch',
+        name: 'touch',
+        component: TouchStatsPage,
       },
       {
         path: '/audit',

@@ -90,6 +90,8 @@ func (r *PostgresRepository) SaveHeartbeat(
 			rssi_dbm,
 			latency_ms,
 			packet_loss_percent,
+			temperature_state,
+			temperature_celsius_tenths,
 			time_sync_state,
 			time_sync_source,
 			time_synced_at,
@@ -105,7 +107,8 @@ func (r *PostgresRepository) SaveHeartbeat(
 		)
 		VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-			$11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+			$11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+			$21, $22
 		)
 		ON CONFLICT (device_id) DO UPDATE
 		SET last_heartbeat_id = EXCLUDED.last_heartbeat_id,
@@ -115,6 +118,8 @@ func (r *PostgresRepository) SaveHeartbeat(
 		    rssi_dbm = EXCLUDED.rssi_dbm,
 		    latency_ms = EXCLUDED.latency_ms,
 		    packet_loss_percent = EXCLUDED.packet_loss_percent,
+		    temperature_state = EXCLUDED.temperature_state,
+		    temperature_celsius_tenths = EXCLUDED.temperature_celsius_tenths,
 		    time_sync_state = EXCLUDED.time_sync_state,
 		    time_sync_source = EXCLUDED.time_sync_source,
 		    time_synced_at = EXCLUDED.time_synced_at,
@@ -137,6 +142,8 @@ func (r *PostgresRepository) SaveHeartbeat(
 		heartbeat.RSSIDBM,
 		heartbeat.LatencyMS,
 		heartbeat.PacketLossPercent,
+		heartbeat.Temperature,
+		heartbeat.TemperatureTenths,
 		heartbeat.TimeSyncState,
 		heartbeat.TimeSyncSource,
 		heartbeat.TimeSyncedAt,
@@ -363,6 +370,8 @@ const runtimeStatusSelect = `
 		status.rssi_dbm,
 		status.latency_ms,
 		status.packet_loss_percent,
+		status.temperature_state,
+		status.temperature_celsius_tenths,
 		status.time_sync_state,
 		status.time_sync_source,
 		status.time_synced_at,
@@ -421,6 +430,8 @@ func scanRuntimeStatus(row runtimeScanner) (*domain.RuntimeStatus, error) {
 		&status.RSSIDBM,
 		&status.LatencyMS,
 		&status.PacketLossPercent,
+		&status.Temperature,
+		&status.TemperatureTenths,
 		&status.TimeSyncState,
 		&status.TimeSyncSource,
 		&status.TimeSyncedAt,

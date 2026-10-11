@@ -71,6 +71,10 @@ type recordHeartbeatRequest struct {
 		LatencyMS         int    `json:"latency_ms"`
 		PacketLossPercent int    `json:"packet_loss_percent"`
 	} `json:"network_quality"`
+	Temperature struct {
+		State         string `json:"state"`
+		CelsiusTenths *int   `json:"celsius_tenths"`
+	} `json:"temperature"`
 	TimeSync struct {
 		State        string  `json:"state"`
 		Source       string  `json:"source"`
@@ -173,6 +177,8 @@ func (handler deviceRuntimeHandler) recordHeartbeat(
 			RSSIDBM:           payload.NetworkQuality.RSSIDBM,
 			LatencyMS:         payload.NetworkQuality.LatencyMS,
 			PacketLossPercent: payload.NetworkQuality.PacketLossPercent,
+			Temperature:       normalizedTemperatureState(payload.Temperature.State),
+			TemperatureTenths: payload.Temperature.CelsiusTenths,
 			TimeSyncState:     domain.TimeSyncState(payload.TimeSync.State),
 			TimeSyncSource:    domain.TimeSyncSource(payload.TimeSync.Source),
 			TimeSyncedAt:      timeSyncedAt,
@@ -475,6 +481,21 @@ func effectivePolicyResponse(policy *policydomain.EffectivePolicy) map[string]an
 	}
 }
 
+// normalizedTemperatureState maps an omitted or unrecognized heartbeat
+// temperature band to 'unknown' so firmware that does not yet report thermal
+// telemetry keeps validating against the existing contract.
+func normalizedTemperatureState(value string) domain.TemperatureState {
+	switch domain.TemperatureState(strings.TrimSpace(value)) {
+	case domain.TemperatureStateNormal,
+		domain.TemperatureStateWarm,
+		domain.TemperatureStateHot,
+		domain.TemperatureStateCritical:
+		return domain.TemperatureState(strings.TrimSpace(value))
+	default:
+		return domain.TemperatureStateUnknown
+	}
+}
+
 func runtimeStatusResponse(status *domain.RuntimeStatus) map[string]any {
 	if status == nil {
 		return nil
@@ -495,6 +516,10 @@ func runtimeStatusResponse(status *domain.RuntimeStatus) map[string]any {
 			"rssi_dbm":            status.RSSIDBM,
 			"latency_ms":          status.LatencyMS,
 			"packet_loss_percent": status.PacketLossPercent,
+		},
+		"temperature": map[string]any{
+			"state":          status.Temperature,
+			"celsius_tenths": status.TemperatureTenths,
 		},
 		"time_sync": map[string]any{
 			"state":          status.TimeSyncState,

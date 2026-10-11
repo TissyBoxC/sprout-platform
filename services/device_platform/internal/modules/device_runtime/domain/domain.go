@@ -102,6 +102,18 @@ const (
 	SessionStateRevoked        SessionState = "revoked"
 )
 
+// TemperatureState is the normalized thermal band reported by the device.
+// 'unknown' means the device has no reading (no sensor or feature disabled).
+type TemperatureState string
+
+const (
+	TemperatureStateUnknown  TemperatureState = "unknown"
+	TemperatureStateNormal   TemperatureState = "normal"
+	TemperatureStateWarm     TemperatureState = "warm"
+	TemperatureStateHot      TemperatureState = "hot"
+	TemperatureStateCritical TemperatureState = "critical"
+)
+
 // Heartbeat contains one complete device runtime snapshot.
 type Heartbeat struct {
 	DeviceID          string
@@ -114,6 +126,10 @@ type Heartbeat struct {
 	RSSIDBM           int
 	LatencyMS         int
 	PacketLossPercent int
+	Temperature       TemperatureState
+	// TemperatureTenths is the reading in tenths of a degree Celsius, or nil
+	// when the device reported no measurement.
+	TemperatureTenths *int
 	TimeSyncState     TimeSyncState
 	TimeSyncSource    TimeSyncSource
 	TimeSyncedAt      *time.Time
@@ -208,6 +224,8 @@ type HeartbeatInput struct {
 	RSSIDBM           int
 	LatencyMS         int
 	PacketLossPercent int
+	Temperature       TemperatureState
+	TemperatureTenths *int
 	TimeSyncState     TimeSyncState
 	TimeSyncSource    TimeSyncSource
 	TimeSyncedAt      *time.Time

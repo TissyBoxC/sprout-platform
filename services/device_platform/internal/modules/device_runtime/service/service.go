@@ -100,6 +100,11 @@ func (s *Service) RecordHeartbeat(
 		input.FirmwareVersion == "" {
 		return nil, domain.ErrInvalidHeartbeat
 	}
+	// Firmware that predates thermal telemetry omits the temperature band.
+	// Treat that as 'unknown' rather than rejecting the heartbeat.
+	if input.Temperature == "" {
+		input.Temperature = domain.TemperatureStateUnknown
+	}
 	if err := validateHeartbeatMetrics(input); err != nil {
 		return nil, err
 	}
@@ -124,6 +129,8 @@ func (s *Service) RecordHeartbeat(
 		RSSIDBM:           input.RSSIDBM,
 		LatencyMS:         input.LatencyMS,
 		PacketLossPercent: input.PacketLossPercent,
+		Temperature:       input.Temperature,
+		TemperatureTenths: input.TemperatureTenths,
 		TimeSyncState:     input.TimeSyncState,
 		TimeSyncSource:    input.TimeSyncSource,
 		TimeSyncedAt:      input.TimeSyncedAt,
@@ -471,6 +478,20 @@ func validateHeartbeatMetrics(input domain.HeartbeatInput) error {
 		domain.OfflineReasonServiceUnavailable:
 	default:
 		return domain.ErrInvalidHeartbeat
+	}
+	switch input.Temperature {
+	case domain.TemperatureStateUnknown,
+		domain.TemperatureStateNormal,
+		domain.TemperatureStateWarm,
+		domain.TemperatureStateHot,
+		domain.TemperatureStateCritical:
+	default:
+		return domain.ErrInvalidHeartbeat
+	}
+	if input.TemperatureTenths != nil {
+		if *input.TemperatureTenths < -400 || *input.TemperatureTenths > 1250 {
+			return domain.ErrInvalidHeartbeat
+		}
 	}
 	return nil
 }

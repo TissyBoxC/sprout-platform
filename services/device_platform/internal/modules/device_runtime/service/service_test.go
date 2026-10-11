@@ -83,6 +83,59 @@ func TestRecordHeartbeatRejectsUnknownDeviceAndBadMetrics(t *testing.T) {
 	}
 }
 
+func TestRecordHeartbeatPersistsTemperatureBandAndRejectsOutOfRange(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
+	repository := newMemoryRepository()
+	service, err := New(Options{
+		Repository: repository,
+		BindingService: &memoryBindingReader{
+			deviceID: "device_test_001",
+			bindings: []bindingdomain.Binding{{DeviceID: "device_test_001"}},
+		},
+		Clock:            fixedClock{now: now},
+		OfflineThreshold: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+
+	tenths := 425
+	input := validHeartbeatInput(now)
+	input.Temperature = domain.TemperatureStateWarm
+	input.TemperatureTenths = &tenths
+	status, err := service.RecordHeartbeat(context.Background(), "session", input)
+	if err != nil {
+		t.Fatalf("record heartbeat with temperature: %v", err)
+	}
+	if status.Temperature != domain.TemperatureStateWarm {
+		t.Fatalf("expected warm band, got %q", status.Temperature)
+	}
+	if status.TemperatureTenths == nil || *status.TemperatureTenths != tenths {
+		t.Fatalf("expected the temperature reading to persist, got %v", status.TemperatureTenths)
+	}
+
+	outOfRange := validHeartbeatInput(now)
+	outOfRange.HeartbeatID = "heartbeat_test_002"
+	outOfRange.Temperature = domain.TemperatureStateCritical
+	tooHot := 2000
+	outOfRange.TemperatureTenths = &tooHot
+	if _, err := service.RecordHeartbeat(context.Background(), "session", outOfRange); err != domain.ErrInvalidHeartbeat {
+		t.Fatalf("expected invalid heartbeat for an out-of-range temperature, got %v", err)
+	}
+
+	omitted := validHeartbeatInput(now)
+	omitted.HeartbeatID = "heartbeat_test_003"
+	omitted.Temperature = ""
+	status, err = service.RecordHeartbeat(context.Background(), "session", omitted)
+	if err != nil {
+		t.Fatalf("record heartbeat without temperature: %v", err)
+	}
+	if status.Temperature != domain.TemperatureStateUnknown {
+		t.Fatalf("expected omitted temperature to normalize to unknown, got %q", status.Temperature)
+	}
+}
+
 func TestCommandLifecycleIsAcknowledgedOnce(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)

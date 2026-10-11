@@ -220,13 +220,22 @@ func (s *Service) ImageConsentForParent(
 }
 
 // VoiceConsentForParent reports whether a guardian currently allows AI voice
-// interaction for their child's device. It is governed by the ai_interaction
-// consent, so withdrawing that consent silences the device even while the
-// guardian session is still valid.
+// interaction for their child's device. Voice is both child-data processing
+// and AI interaction, so it requires both consent types to still be granted;
+// withdrawing either one silences the device even while the guardian session
+// is still valid.
 func (s *Service) VoiceConsentForParent(
 	ctx context.Context,
 	parentAccountID string,
 ) (bool, error) {
+	childDataGranted, err := s.consentGrantedForParent(
+		ctx,
+		parentAccountID,
+		domain.ConsentTypeChildDataProcessing,
+	)
+	if err != nil || !childDataGranted {
+		return false, err
+	}
 	return s.consentGrantedForParent(
 		ctx,
 		parentAccountID,

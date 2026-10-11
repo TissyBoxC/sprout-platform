@@ -771,8 +771,8 @@ func TestConsentTypesAreEnforcedIndependently(t *testing.T) {
 		t.Fatalf("expected image consent to be withdrawn")
 	}
 
-	// Granting ai_interaction again must restore voice without silently
-	// restoring the still-withdrawn child_data_processing consent.
+	// Granting ai_interaction again is not enough: voice also needs
+	// child_data_processing, which is still withdrawn.
 	if _, err := service.GrantConsent(
 		context.Background(),
 		testParentID,
@@ -785,8 +785,8 @@ func TestConsentTypesAreEnforcedIndependently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("voice consent after regrant: %v", err)
 	}
-	if !voiceGranted {
-		t.Fatalf("expected voice consent to be restored")
+	if voiceGranted {
+		t.Fatalf("expected voice consent to stay withdrawn while child_data_processing is withdrawn")
 	}
 	imageGranted, err = service.ImageConsentForParent(context.Background(), testParentID)
 	if err != nil {
@@ -794,6 +794,24 @@ func TestConsentTypesAreEnforcedIndependently(t *testing.T) {
 	}
 	if imageGranted {
 		t.Fatalf("expected image consent to stay withdrawn")
+	}
+
+	// Restoring child_data_processing then makes both image and voice available
+	// again, since ai_interaction was already re-granted above.
+	if _, err := service.GrantConsent(
+		context.Background(),
+		testParentID,
+		domain.ConsentTypeChildDataProcessing,
+		"2026-01",
+	); err != nil {
+		t.Fatalf("grant child_data_processing: %v", err)
+	}
+	voiceGranted, err = service.VoiceConsentForParent(context.Background(), testParentID)
+	if err != nil {
+		t.Fatalf("voice consent after full regrant: %v", err)
+	}
+	if !voiceGranted {
+		t.Fatalf("expected voice consent to be restored once both consents are granted")
 	}
 }
 

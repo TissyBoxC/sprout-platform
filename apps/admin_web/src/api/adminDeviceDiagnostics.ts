@@ -58,21 +58,38 @@ export interface DeviceInteractionEvent {
   reportedAt: string
 }
 
+export interface DeviceCrashEvent {
+  eventId: string
+  sequence: number
+  cause: string
+  faultKind: string
+  taskName: string
+  programCounter: number
+  frameCount: number
+  coreId: number
+  firmwareVersion: string
+  reportedAt: string
+}
+
 export interface DeviceDiagnosticsSnapshot {
   deviceId: string
   bootEvents: DeviceBootEvent[]
   failures: DeviceModuleFailure[]
   recoveryEvents: DeviceRecoveryEvent[]
   interactionEvents: DeviceInteractionEvent[]
+  crashEvents: DeviceCrashEvent[]
   latestFailure: DeviceModuleFailure | null
+  latestCrash: DeviceCrashEvent | null
   errorCount: number
   recoveryCount: number
+  crashCount: number
   updatedAt: string
   healthState: DeviceHealthState
   retentionBootEvents: number
   retentionFailures: number
   retentionRecoveryEvents: number
   retentionInteractionEvents: number
+  retentionCrashEvents: number
 }
 
 export interface AdminDeviceDiagnosticsClient {
@@ -167,6 +184,11 @@ function toDiagnostics(value: unknown): DeviceDiagnosticsSnapshot {
     latestFailureValue === null || latestFailureValue === undefined
       ? null
       : toNullableFailure(latestFailureValue)
+  const latestCrashValue = record.latest_crash ?? record.latestCrash
+  const latestCrash =
+    latestCrashValue === null || latestCrashValue === undefined
+      ? null
+      : toNullableCrashEvent(latestCrashValue)
 
   return {
     deviceId,
@@ -183,9 +205,15 @@ function toDiagnostics(value: unknown): DeviceDiagnosticsSnapshot {
       const event = toNullableInteractionEvent(item)
       return event === null ? [] : [event]
     }),
+    crashEvents: arrayValue(record.crash_events).flatMap((item) => {
+      const event = toNullableCrashEvent(item)
+      return event === null ? [] : [event]
+    }),
     latestFailure,
+    latestCrash,
     errorCount: numberValue(record.error_count ?? record.errorCount),
     recoveryCount: numberValue(record.recovery_count ?? record.recoveryCount),
+    crashCount: numberValue(record.crash_count ?? record.crashCount),
     updatedAt: stringValue(record.updated_at ?? record.updatedAt),
     healthState: healthState(record.health_state ?? record.healthState),
     retentionBootEvents: numberValue(record.retention_boot_events ?? record.retentionBootEvents),
@@ -196,6 +224,7 @@ function toDiagnostics(value: unknown): DeviceDiagnosticsSnapshot {
     retentionInteractionEvents: numberValue(
       record.retention_interaction_events ?? record.retentionInteractionEvents,
     ),
+    retentionCrashEvents: numberValue(record.retention_crash_events ?? record.retentionCrashEvents),
   }
 }
 
@@ -271,6 +300,29 @@ function toNullableInteractionEvent(value: unknown): DeviceInteractionEvent | nu
     eventType,
     detailCode: stringValue(record.detail_code ?? record.detailCode),
     durationMs: numberValue(record.duration_ms ?? record.durationMs),
+    firmwareVersion: stringValue(record.firmware_version ?? record.firmwareVersion),
+    reportedAt: stringValue(record.reported_at ?? record.reportedAt),
+  }
+}
+
+function toNullableCrashEvent(value: unknown): DeviceCrashEvent | null {
+  const record = recordValue(value)
+  const sequence = numberValue(record.sequence)
+  const eventId = stringValue(record.event_id ?? record.eventId).trim()
+  const cause = stringValue(record.cause).trim()
+  if (!eventId && !sequence && !cause) {
+    return null
+  }
+
+  return {
+    eventId: eventId || `crash-${sequence}`,
+    sequence,
+    cause: cause || 'unknown',
+    faultKind: stringValue(record.fault_kind ?? record.faultKind) || 'unknown',
+    taskName: stringValue(record.task_name ?? record.taskName),
+    programCounter: numberValue(record.program_counter ?? record.programCounter),
+    frameCount: numberValue(record.frame_count ?? record.frameCount),
+    coreId: numberValue(record.core_id ?? record.coreId),
     firmwareVersion: stringValue(record.firmware_version ?? record.firmwareVersion),
     reportedAt: stringValue(record.reported_at ?? record.reportedAt),
   }

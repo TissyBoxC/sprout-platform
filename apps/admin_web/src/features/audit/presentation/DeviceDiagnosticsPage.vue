@@ -4,6 +4,7 @@ import { computed, onMounted, ref } from 'vue'
 import type {
   AdminDiagnosticDevice,
   DeviceBootEvent,
+  DeviceCrashEvent,
   DeviceDiagnosticsSnapshot,
   DeviceHealthState,
   DeviceInteractionEvent,
@@ -171,6 +172,7 @@ function retentionSummary(snapshot: DeviceDiagnosticsSnapshot): string {
     snapshot.retentionInteractionEvents > 0
       ? `交互记录 ${snapshot.retentionInteractionEvents} 条`
       : '',
+    snapshot.retentionCrashEvents > 0 ? `异常重启记录 ${snapshot.retentionCrashEvents} 条` : '',
   ].filter(Boolean)
   return parts.length > 0
     ? `平台会保留最近的 ${parts.join('、')}，更早的记录会自动清理。`
@@ -195,6 +197,35 @@ function recoveryEvents(snapshot: DeviceDiagnosticsSnapshot): DeviceRecoveryEven
 
 function interactionEvents(snapshot: DeviceDiagnosticsSnapshot): DeviceInteractionEvent[] {
   return snapshot.interactionEvents
+}
+
+function crashEvents(snapshot: DeviceDiagnosticsSnapshot): DeviceCrashEvent[] {
+  return snapshot.crashEvents
+}
+
+function crashCauseLabel(value: string): string {
+  return (
+    {
+      panic: '系统异常中止',
+      watchdog: '系统守护超时',
+      task_watchdog: '任务守护超时',
+      interrupt_watchdog: '中断守护超时',
+      brownout: '供电电压不足',
+      stack_overflow: '运行内存溢出',
+      heap_corruption: '内存数据损坏',
+      assert: '内部校验失败',
+      unknown: '原因暂不确定',
+    }[value] ?? '原因暂不确定'
+  )
+}
+
+function crashDetail(event: DeviceCrashEvent): string {
+  const task = event.taskName.trim()
+  const parts = [
+    task !== '' ? `关联任务：${task}` : '',
+    `版本 ${event.firmwareVersion || '待补充'}`,
+  ].filter(Boolean)
+  return parts.join(' · ')
 }
 
 function interactionLabel(eventType: string): string {
@@ -404,6 +435,17 @@ function formatDuration(value: number): string {
                   </p>
                 </article>
                 <article class="metric-card">
+                  <p class="metric-label">异常重启</p>
+                  <p class="metric-value">{{ store.snapshot.crashCount }}</p>
+                  <p class="metric-detail">
+                    {{
+                      store.snapshot.crashCount > 0
+                        ? '设备出现过异常重启，建议检查'
+                        : '最近没有异常重启'
+                    }}
+                  </p>
+                </article>
+                <article class="metric-card">
                   <p class="metric-label">最近上报</p>
                   <p class="metric-value time-value">{{ formatTime(store.snapshot.updatedAt) }}</p>
                   <p class="metric-detail">
@@ -529,6 +571,31 @@ function formatDuration(value: number): string {
                   </ul>
                 </article>
 
+                <article class="detail-panel">
+                  <header class="panel-heading">
+                    <div>
+                      <h2>异常重启</h2>
+                      <p>记录设备异常重启的原因，方便定位偶发问题。</p>
+                    </div>
+                    <span class="panel-count">{{ crashEvents(store.snapshot).length }} 条</span>
+                  </header>
+                  <div v-if="crashEvents(store.snapshot).length === 0" class="list-empty">
+                    最近没有异常重启记录，设备启动都很平稳。
+                  </div>
+                  <ul v-else class="event-list">
+                    <li v-for="event in crashEvents(store.snapshot)" :key="eventKey(event)">
+                      <span class="event-icon failure" aria-hidden="true">!</span>
+                      <div class="event-body">
+                        <div class="event-title">
+                          <strong>{{ crashCauseLabel(event.cause) }}</strong>
+                          <time>{{ formatTime(event.reportedAt) }}</time>
+                        </div>
+                        <p>{{ crashDetail(event) }}</p>
+                      </div>
+                    </li>
+                  </ul>
+                </article>
+
                 <article class="retention-panel">
                   <header class="panel-heading">
                     <div>
@@ -553,6 +620,10 @@ function formatDuration(value: number): string {
                     <div>
                       <dt>交互记录</dt>
                       <dd>最多 {{ store.snapshot.retentionInteractionEvents || 0 }} 条</dd>
+                    </div>
+                    <div>
+                      <dt>异常重启</dt>
+                      <dd>最多 {{ store.snapshot.retentionCrashEvents || 0 }} 条</dd>
                     </div>
                   </dl>
                 </article>

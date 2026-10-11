@@ -1013,6 +1013,23 @@ test('shows complete device diagnostics with bounded history and refresh', async
       retention_boot_events: 5,
       retention_failures: 10,
       retention_recovery_events: 10,
+      crash_events: [
+        {
+          event_id: 'crash_00000006',
+          event_type: 'crash',
+          sequence: 6,
+          cause: 'task_watchdog',
+          fault_kind: 'watchdog',
+          task_name: 'network_manager',
+          program_counter: 1074590260,
+          frame_count: 12,
+          core_id: 0,
+          firmware_version: '0.12.3',
+          reported_at: '2026-10-04T00:00:00Z',
+        },
+      ],
+      crash_count: 1,
+      retention_crash_events: 50,
     },
     'device-2': {
       device_id: 'device-2',
@@ -1027,6 +1044,9 @@ test('shows complete device diagnostics with bounded history and refresh', async
       retention_boot_events: 5,
       retention_failures: 10,
       retention_recovery_events: 10,
+      crash_events: [],
+      crash_count: 0,
+      retention_crash_events: 50,
     },
   }
   const requestedDeviceIds: string[] = []
@@ -1061,14 +1081,18 @@ test('shows complete device diagnostics with bounded history and refresh', async
   await expect(page.getByText(/连接等待超时/)).toBeVisible()
   await expect(page.getByRole('heading', { name: '恢复事件' })).toBeVisible()
   await expect(page.getByText('网络连接已恢复')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '异常重启' })).toBeVisible()
+  await expect(page.getByText('任务守护超时')).toBeVisible()
   await expect(page.getByRole('heading', { name: '记录保留说明' })).toBeVisible()
   await expect(page.getByText(/启动记录 5 条/)).toBeVisible()
   await expect(page.getByText(/故障记录 10 条/)).toBeVisible()
+  await expect(page.getByText(/异常重启记录 50 条/)).toBeVisible()
 
   await page.getByRole('button', { name: /初芽二号/ }).click()
   await expect(page.getByText('运行正常', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('最近没有故障记录，设备运行状态良好。')).toBeVisible()
   await expect(page.getByText('还没有恢复记录。设备恢复正常后会自动显示。')).toBeVisible()
+  await expect(page.getByText('最近没有异常重启记录，设备启动都很平稳。')).toBeVisible()
   expect(requestedDeviceIds.filter((deviceId) => deviceId === 'device-2')).toHaveLength(1)
 
   await page.getByRole('button', { name: '刷新诊断' }).click()

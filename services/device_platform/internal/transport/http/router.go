@@ -24,6 +24,7 @@ import (
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
 	englishservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/service"
 	featurecenterservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
+	localcommandservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
 	notificationhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/handler"
 	notificationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
 	operationsservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
@@ -58,6 +59,7 @@ type RouterOptions struct {
 	ContentService        *contentservice.Service
 	EnglishService        *englishservice.Service
 	PlaybackService       *playbackservice.Service
+	LocalCommandService   *localcommandservice.Service
 	RecommendationService *recommendationservice.Service
 	UsageReportService    *usagereportservice.Service
 	VoiceTokenIssuer      bindingservice.VoiceTokenIssuer
@@ -300,6 +302,37 @@ func NewRouter(options RouterOptions) http.Handler {
 				"GET /api/v1/content/recommendations",
 				authHandler.requireAuthentication(recommendationHandler.list),
 			)
+		}
+		if options.LocalCommandService != nil {
+			localCommandHandler := localCommandHandler{
+				service: options.LocalCommandService,
+			}
+			mux.HandleFunc(
+				"GET /api/v1/local-commands",
+				authHandler.requireAuthentication(localCommandHandler.list),
+			)
+			mux.HandleFunc(
+				"PUT /api/v1/local-commands",
+				authHandler.requireAuthentication(localCommandHandler.replace),
+			)
+			mux.HandleFunc(
+				"DELETE /api/v1/local-commands/{command_id}",
+				authHandler.requireAuthentication(localCommandHandler.delete),
+			)
+			// Firmware devices read the family's command set with a device
+			// session token so common actions keep working with no guardian
+			// present.
+			if options.BindingService != nil {
+				deviceLocalCommandHandler := deviceLocalCommandHandler{
+					handler:        &localCommandHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/local-commands",
+					deviceLocalCommandHandler.listForDevice,
+				)
+			}
 		}
 		if options.BindingService != nil {
 			bindingHandler := deviceBindingHandler{

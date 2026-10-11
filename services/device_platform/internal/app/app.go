@@ -37,6 +37,8 @@ import (
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/repository"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
+	localCommandRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/repository"
+	localCommandService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
 	notificationRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/repository"
 	notificationService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
 	operationsRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/repository"
@@ -449,6 +451,9 @@ func Run() error {
 			},
 		},
 	)
+	localCommands := localCommandService.New(localCommandService.Options{
+		Repository: localCommandRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
 	usageReports, err := usageReportService.New(usageReportService.Options{
 		Repository:    usagePersistence,
 		PolicyService: parentPolicyService,
@@ -500,6 +505,7 @@ func Run() error {
 			EnglishService:        englishLearningService,
 			PlaybackService:       playbackRequests,
 			RecommendationService: contentRecommendations,
+			LocalCommandService:   localCommands,
 			UsageReportService:    usageReports,
 			VoiceTokenIssuer:      voiceTokenIssuer,
 			VoiceWebSocketURL:     cfg.VoiceGateway.WebSocketURL,

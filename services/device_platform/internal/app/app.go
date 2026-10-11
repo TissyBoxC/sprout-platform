@@ -74,6 +74,8 @@ import (
 	usageReportService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
 	videoCompanionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/repository"
 	videoCompanionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/service"
+	wearableRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/wearable/repository"
+	wearableService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/wearable/service"
 	visionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/repository"
 	visionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/service"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/cache"
@@ -564,6 +566,12 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create video companion service: %w", err)
 	}
+	wearable, err := wearableService.New(wearableService.Options{
+		Repository: wearableRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
+	if err != nil {
+		return fmt.Errorf("create wearable service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
@@ -602,6 +610,7 @@ func Run() error {
 			MotionService:               deviceMotion,
 			FormFactorService:           deviceFormFactor,
 			VideoCompanionService:       videoCompanion,
+			WearableService:             wearable,
 			AuditRecorder:               privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

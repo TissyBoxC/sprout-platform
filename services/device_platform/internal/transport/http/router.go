@@ -45,6 +45,7 @@ import (
 	serviceversionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
 	usagereportservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
 	videoservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/service"
+	wearableservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/wearable/service"
 	visionhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/handler"
 	visionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/service"
 )
@@ -85,6 +86,7 @@ type RouterOptions struct {
 	MotionService               *motionservice.Service
 	FormFactorService           *formfactorservice.Service
 	VideoCompanionService       *videoservice.Service
+	WearableService             *wearableservice.Service
 	AuditRecorder               auditRecorder
 }
 
@@ -487,6 +489,24 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/video-companion/status",
 					deviceVideoHandler.reportStatus,
+				)
+			}
+		}
+		if options.WearableService != nil {
+			wearableHandler := wearableHandler{service: options.WearableService}
+			if options.BindingService != nil && options.RuntimeService != nil {
+				deviceWearableHandler := deviceWearableHandler{
+					handler:        &wearableHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/wearable/location",
+					deviceWearableHandler.reportLocation,
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/wearable/sos",
+					deviceWearableHandler.reportSOS,
 				)
 			}
 		}
@@ -1109,6 +1129,65 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/admin/video-companion/stats",
 					authHandler.requireAdmin(videoHandler.adminStats),
+				)
+			}
+			if options.WearableService != nil {
+				wearableHandler := wearableHandler{service: options.WearableService}
+				mux.HandleFunc(
+					"GET /api/v1/wearable/policy",
+					authHandler.requireAuthentication(wearableHandler.policy),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/wearable/policy",
+					authHandler.requireAuthentication(wearableHandler.updatePolicy),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/wearable/contacts",
+					authHandler.requireAuthentication(wearableHandler.listContacts),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/wearable/contacts",
+					authHandler.requireAuthentication(wearableHandler.createContact),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/wearable/contacts/{contact_id}",
+					authHandler.requireAuthentication(wearableHandler.updateContact),
+				)
+				mux.HandleFunc(
+					"DELETE /api/v1/wearable/contacts/{contact_id}",
+					authHandler.requireAuthentication(wearableHandler.deleteContact),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/wearable/geofence",
+					authHandler.requireAuthentication(wearableHandler.geofence),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/wearable/geofence",
+					authHandler.requireAuthentication(wearableHandler.updateGeofence),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/wearable/devices",
+					authHandler.requireAuthentication(wearableHandler.statuses),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/wearable/capability",
+					authHandler.requireAuthentication(wearableHandler.capability),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/wearable/sos",
+					authHandler.requireAuthentication(wearableHandler.sosHistory),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/wearable/sos/active",
+					authHandler.requireAuthentication(wearableHandler.activeSOS),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/wearable/sos/{event_id}/cancel",
+					authHandler.requireAuthentication(wearableHandler.cancelSOS),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/wearable/stats",
+					authHandler.requireAdmin(wearableHandler.adminStats),
 				)
 			}
 			if options.NotificationService != nil {

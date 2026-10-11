@@ -45,6 +45,11 @@ type Repository interface {
 		deviceID string,
 		limit int,
 	) (*domain.ProvisioningSnapshot, error)
+	GetSummary(
+		ctx context.Context,
+		deviceID string,
+		since time.Time,
+	) (*domain.Summary, error)
 }
 
 type provisioningStatusScanner interface {
@@ -454,6 +459,132 @@ func (r *PostgresRepository) GetDiagnostics(
 		return nil, domain.ErrEventNotFound
 	}
 	return snapshot, nil
+}
+
+// crashCauseSummaryLimit caps the crash-cause breakdown so a device that can
+// report many distinct symbolic causes still returns a bounded aggregate.
+const crashCauseSummaryLimit = 12
+
+// GetSummary aggregates windowed diagnostic counts for one device. It only
+// reads bounded, symbolic columns (no raw memory or backtraces) and limits the
+// crash-cause breakdown so the response size stays predictable.
+func (r *PostgresRepository) GetSummary(
+	ctx context.Context,
+	deviceID string,
+	since time.Time,
+) (*domain.Summary, error) {
+	summary := &domain.Summary{
+		DeviceID:    deviceID,
+		CrashCauses: make([]domain.CrashCauseCount, 0),
+		HealthState: domain.HealthUnknown,
+		GeneratedAt: time.Now().UTC(),
+	}
+	if !since.IsZero() {
+		summary.WindowDays = int(summary.GeneratedAt.Sub(since).Hours() / 24)
+		if summary.WindowDays < 0 {
+			summary.WindowDays = 0
+		}
+	}
+
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*), MAX(reported_at)
+		FROM device_boot_events
+		WHERE device_id = $1 AND reported_at >= $2
+	`, deviceID, since).Scan(&summary.BootCount, &summary.LastReportedAt); err != nil {
+		return nil, fmt.Errorf("summarize device boot events: %w", err)
+	}
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*), MAX(reported_at)
+		FROM device_module_failures
+		WHERE device_id = $1 AND reported_at >= $2
+	`, deviceID, since).Scan(&summary.FailureCount, &summary.LastReportedAt); err != nil {
+		return nil, fmt.Errorf("summarize device module failures: %w", err)
+	}
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*), MAX(reported_at)
+		FROM device_recovery_events
+		WHERE device_id = $1 AND reported_at >= $2
+	`, deviceID, since).Scan(&summary.RecoveryCount, &summary.LastReportedAt); err != nil {
+		return nil, fmt.Errorf("summarize device recovery events: %w", err)
+	}
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*), MAX(reported_at)
+		FROM device_crash_events
+		WHERE device_id = $1 AND reported_at >= $2
+	`, deviceID, since).Scan(&summary.CrashCount, &summary.LastReportedAt); err != nil {
+		return nil, fmt.Errorf("summarize device crash events: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT cause, COUNT(*) AS occurrences
+		FROM device_crash_events
+		WHERE device_id = $1 AND reported_at >= $2
+		GROUP BY cause
+		ORDER BY occurrences DESC, cause ASC
+		LIMIT $3
+	`, deviceID, since, crashCauseSummaryLimit)
+	if err != nil {
+		return nil, fmt.Errorf("summarize device crash causes: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		count := domain.CrashCauseCount{}
+		if err := rows.Scan(&count.Cause, &count.Count); err != nil {
+			return nil, fmt.Errorf("scan device crash cause: %w", err)
+		}
+		summary.CrashCauses = append(summary.CrashCauses, count)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate device crash causes: %w", err)
+	}
+
+	health, err := r.summaryHealthState(ctx, deviceID, since)
+	if err != nil {
+		return nil, err
+	}
+	summary.HealthState = health
+	return summary, nil
+}
+
+// summaryHealthState derives a windowed health state from the newest failure
+// and crash inside the window so the trend view can show a coarse signal
+// without loading every record.
+func (r *PostgresRepository) summaryHealthState(
+	ctx context.Context,
+	deviceID string,
+	since time.Time,
+) (string, error) {
+	var latestFailure time.Time
+	if err := r.pool.QueryRow(ctx, `
+		SELECT received_at
+		FROM device_module_failures
+		WHERE device_id = $1 AND reported_at >= $2
+		ORDER BY received_at DESC, id DESC
+		LIMIT 1
+	`, deviceID, since).Scan(&latestFailure); err != nil &&
+		!errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("find latest device failure: %w", err)
+	}
+	var latestCrash time.Time
+	if err := r.pool.QueryRow(ctx, `
+		SELECT received_at
+		FROM device_crash_events
+		WHERE device_id = $1 AND reported_at >= $2
+		ORDER BY received_at DESC, id DESC
+		LIMIT 1
+	`, deviceID, since).Scan(&latestCrash); err != nil &&
+		!errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("find latest device crash: %w", err)
+	}
+	switch {
+	case !latestCrash.IsZero() &&
+		(latestFailure.IsZero() || !latestCrash.Before(latestFailure)):
+		return domain.HealthFaulted, nil
+	case !latestFailure.IsZero():
+		return domain.HealthDegraded, nil
+	default:
+		return domain.HealthHealthy, nil
+	}
 }
 
 func (r *PostgresRepository) populateCounters(

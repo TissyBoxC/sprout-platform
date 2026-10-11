@@ -16,10 +16,12 @@ import (
 type stubAuditService struct {
 	snapshot         *domain.Snapshot
 	provisioning     *domain.ProvisioningSnapshot
+	summary          *domain.Summary
 	err              error
 	lastLimit        int
 	lastDevice       string
 	lastProvisioning string
+	lastWindowDays   int
 }
 
 func (stub *stubAuditService) Get(
@@ -40,6 +42,16 @@ func (stub *stubAuditService) GetProvisioning(
 	stub.lastProvisioning = deviceID
 	stub.lastLimit = limit
 	return stub.provisioning, stub.err
+}
+
+func (stub *stubAuditService) GetSummary(
+	_ context.Context,
+	deviceID string,
+	windowDays int,
+) (*domain.Summary, error) {
+	stub.lastDevice = deviceID
+	stub.lastWindowDays = windowDays
+	return stub.summary, stub.err
 }
 
 func TestGetDiagnosticsReturnsEmptyStateForDeviceWithoutHistory(t *testing.T) {
@@ -133,6 +145,69 @@ func TestGetDiagnosticsDoesNotExposeRepositoryErrors(t *testing.T) {
 	}
 	if strings.Contains(recorder.Body.String(), "database offline") {
 		t.Fatalf("expected repository details to stay hidden: %s", recorder.Body.String())
+	}
+}
+
+func TestGetSummaryReturnsEmptyStateForDeviceWithoutHistory(t *testing.T) {
+	handler := New(&stubAuditService{err: domain.ErrEventNotFound})
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/admin/devices/sprout_device_001/diagnostics/summary",
+		nil,
+	)
+	request.SetPathValue("device_id", "sprout_device_001")
+	recorder := httptest.NewRecorder()
+
+	handler.GetSummary(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	var envelope struct {
+		Data struct {
+			DeviceID    string `json:"device_id"`
+			WindowDays  int    `json:"window_days"`
+			CrashCount  int    `json:"crash_count"`
+			CrashCauses []any  `json:"crash_causes"`
+			HealthState string `json:"health_state"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if envelope.Data.DeviceID != "sprout_device_001" ||
+		envelope.Data.WindowDays != defaultSummaryWindowDays ||
+		envelope.Data.CrashCount != 0 ||
+		envelope.Data.CrashCauses == nil ||
+		envelope.Data.HealthState != domain.HealthUnknown {
+		t.Fatalf("unexpected empty summary response: %s", recorder.Body.String())
+	}
+}
+
+func TestGetSummaryCapsRequestedWindow(t *testing.T) {
+	service := &stubAuditService{
+		summary: &domain.Summary{DeviceID: "sprout_device_001", WindowDays: 7},
+	}
+	handler := New(service)
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/admin/devices/sprout_device_001/diagnostics/summary?window_days=999",
+		nil,
+	)
+	request.SetPathValue("device_id", "sprout_device_001")
+	recorder := httptest.NewRecorder()
+
+	handler.GetSummary(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	if service.lastWindowDays != defaultSummaryWindowDays {
+		t.Fatalf(
+			"expected an out-of-range window to fall back to %d, got %d",
+			defaultSummaryWindowDays,
+			service.lastWindowDays,
+		)
 	}
 }
 

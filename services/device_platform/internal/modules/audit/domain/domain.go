@@ -258,3 +258,26 @@ type Snapshot struct {
 	RetentionInteraction int                `json:"retention_interaction_events"`
 	RetentionCrash       int                `json:"retention_crash_events"`
 }
+
+// CrashCauseCount is one row of the crash-cause breakdown in a summary.
+type CrashCauseCount struct {
+	Cause string `json:"cause"`
+	Count uint64 `json:"count"`
+}
+
+// Summary is the bounded, windowed diagnostic aggregate for one device. It
+// powers the operator-facing trend view without exposing individual records
+// or any child data. Counts are limited to the requested window and the
+// crash-cause breakdown is capped so a crafted payload cannot grow it.
+type Summary struct {
+	DeviceID       string            `json:"device_id"`
+	WindowDays     int               `json:"window_days"`
+	BootCount      uint64            `json:"boot_count"`
+	FailureCount   uint64            `json:"failure_count"`
+	RecoveryCount  uint64            `json:"recovery_count"`
+	CrashCount     uint64            `json:"crash_count"`
+	CrashCauses    []CrashCauseCount `json:"crash_causes"`
+	HealthState    string            `json:"health_state"`
+	LastReportedAt *time.Time        `json:"last_reported_at"`
+	GeneratedAt    time.Time         `json:"generated_at"`
+}

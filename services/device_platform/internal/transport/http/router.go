@@ -89,6 +89,11 @@ type auditRecorder interface {
 // small fake and avoids coupling HTTP to the database repository.
 type auditService interface {
 	Get(ctx context.Context, deviceID string, limit int) (*auditdomain.Snapshot, error)
+	GetSummary(
+		ctx context.Context,
+		deviceID string,
+		windowDays int,
+	) (*auditdomain.Summary, error)
 	Validate(
 		deviceID string,
 		diagnostics *auditdomain.Diagnostics,
@@ -471,6 +476,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/admin/devices/{device_id}/diagnostics",
 					authHandler.requireAdmin(diagnosticHandler.GetDiagnostics),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/devices/{device_id}/diagnostics/summary",
+					authHandler.requireAdmin(diagnosticHandler.GetSummary),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/devices/{device_id}/provisioning",

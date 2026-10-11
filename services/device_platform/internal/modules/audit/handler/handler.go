@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/TissyBoxC/sprout-platform/packages/go/httpapi"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/domain"
@@ -14,6 +15,11 @@ import (
 // Service is the narrow diagnostic surface required by the transport layer.
 type Service interface {
 	Get(ctx context.Context, deviceID string, limit int) (*domain.Snapshot, error)
+	GetSummary(
+		ctx context.Context,
+		deviceID string,
+		windowDays int,
+	) (*domain.Summary, error)
 	GetProvisioning(
 		ctx context.Context,
 		deviceID string,
@@ -80,6 +86,58 @@ func (h *Handler) GetDiagnostics(
 		return
 	}
 	httpapi.WriteSuccess(response, request, http.StatusOK, snapshot)
+}
+
+// GetSummary handles GET /api/v1/admin/devices/{device_id}/diagnostics/summary.
+//
+// The route is mounted behind requireAdmin. A device without any records in
+// the window is a normal empty aggregate, so the response reports zero counts
+// and a healthy state instead of an internal not-found error.
+func (h *Handler) GetSummary(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	deviceID := request.PathValue("device_id")
+	windowDays := parseSummaryWindow(request.URL.Query().Get("window_days"))
+	summary, err := h.service.GetSummary(request.Context(), deviceID, windowDays)
+	if err != nil {
+		if errors.Is(err, domain.ErrEventNotFound) {
+			httpapi.WriteSuccess(response, request, http.StatusOK, map[string]any{
+				"device_id":      deviceID,
+				"window_days":    defaultSummaryWindowDays,
+				"boot_count":     0,
+				"failure_count":  0,
+				"recovery_count": 0,
+				"crash_count":    0,
+				"crash_causes":   []domain.CrashCauseCount{},
+				"health_state":   domain.HealthUnknown,
+			})
+			return
+		}
+		httpapi.WriteError(
+			response,
+			request,
+			http.StatusInternalServerError,
+			"service_error",
+			"暂时无法读取设备诊断汇总",
+			false,
+		)
+		return
+	}
+	httpapi.WriteSuccess(response, request, http.StatusOK, summary)
+}
+
+const defaultSummaryWindowDays = 7
+
+func parseSummaryWindow(raw string) int {
+	if raw == "" {
+		return defaultSummaryWindowDays
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 || value > 90 {
+		return defaultSummaryWindowDays
+	}
+	return value
 }
 
 func parseDiagnosticLimit(raw string) int {

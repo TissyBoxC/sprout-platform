@@ -209,6 +209,33 @@ func (s *Service) Get(
 	return s.repository.GetDiagnostics(ctx, deviceID, limit)
 }
 
+// SummaryWindowDays is the default rolling window for the diagnostic summary.
+const SummaryWindowDays = 7
+
+// GetSummary returns a bounded, windowed diagnostic aggregate for one device.
+// A negative or zero window falls back to the default so an operator cannot
+// request an unbounded scan.
+func (s *Service) GetSummary(
+	ctx context.Context,
+	deviceID string,
+	windowDays int,
+) (*domain.Summary, error) {
+	deviceID = strings.TrimSpace(deviceID)
+	if !diagnosticDevicePattern.MatchString(deviceID) {
+		return nil, domain.ErrEventNotFound
+	}
+	if windowDays <= 0 || windowDays > 90 {
+		windowDays = SummaryWindowDays
+	}
+	since := time.Now().UTC().AddDate(0, 0, -windowDays)
+	summary, err := s.repository.GetSummary(ctx, deviceID, since)
+	if err != nil {
+		return nil, err
+	}
+	summary.WindowDays = windowDays
+	return summary, nil
+}
+
 // ValidateProvisioning normalizes one optional provisioning payload without
 // persisting it. Transport calls this before accepting the runtime heartbeat
 // so an invalid provisioning extension cannot leave a half-applied state.

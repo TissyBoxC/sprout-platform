@@ -14,6 +14,7 @@ type stubRepository struct {
 	get               *domain.Snapshot
 	savedProvisioning *domain.Provisioning
 	getProvisioning   *domain.ProvisioningSnapshot
+	summary           *domain.Summary
 	err               error
 }
 
@@ -51,6 +52,14 @@ func (stub *stubRepository) GetProvisioning(
 	_ int,
 ) (*domain.ProvisioningSnapshot, error) {
 	return stub.getProvisioning, stub.err
+}
+
+func (stub *stubRepository) GetSummary(
+	_ context.Context,
+	_ string,
+	_ time.Time,
+) (*domain.Summary, error) {
+	return stub.summary, stub.err
 }
 
 var _ repository.Repository = (*stubRepository)(nil)
@@ -362,6 +371,45 @@ func TestValidateRejectsExcessiveCrashEvents(t *testing.T) {
 	})
 	if err != domain.ErrInvalidDiagnostics {
 		t.Fatalf("expected invalid diagnostics for too many crash events, got %v", err)
+	}
+}
+
+func TestGetSummaryClampsWindow(t *testing.T) {
+	repositoryStub := &stubRepository{
+		summary: &domain.Summary{DeviceID: "sprout_device_001"},
+	}
+	service := &Service{repository: repositoryStub}
+
+	summary, err := service.GetSummary(
+		context.Background(),
+		"sprout_device_001",
+		-5,
+	)
+	if err != nil {
+		t.Fatalf("expected summary to succeed, got %v", err)
+	}
+	if summary == nil || summary.WindowDays != SummaryWindowDays {
+		t.Fatalf("expected window to clamp to %d, got %+v", SummaryWindowDays, summary)
+	}
+
+	summary, err = service.GetSummary(
+		context.Background(),
+		"sprout_device_001",
+		30,
+	)
+	if err != nil {
+		t.Fatalf("expected summary to succeed, got %v", err)
+	}
+	if summary.WindowDays != 30 {
+		t.Fatalf("expected window to be preserved, got %d", summary.WindowDays)
+	}
+}
+
+func TestGetSummaryRejectsInvalidDevice(t *testing.T) {
+	service := &Service{repository: &stubRepository{}}
+	_, err := service.GetSummary(context.Background(), "bad id", 7)
+	if err != domain.ErrEventNotFound {
+		t.Fatalf("expected invalid device to be rejected, got %v", err)
 	}
 }
 

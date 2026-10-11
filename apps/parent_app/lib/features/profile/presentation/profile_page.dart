@@ -81,6 +81,7 @@ class ProfilePage extends ConsumerWidget {
                     onDisplay: () => context.push('/me/display'),
                     onTouch: () => context.push('/me/touch'),
                     onCellular: () => context.push('/me/cellular'),
+                    onBattery: () => context.push('/me/battery'),
                     onUsageReports: () => context.push('/me/usage-reports'),
                     onNotifications: () => context.push('/me/notifications'),
                     onContent: () => context.push('/me/content'),
@@ -421,6 +422,7 @@ class _SettingsCard extends StatelessWidget {
     required this.onDisplay,
     required this.onTouch,
     required this.onCellular,
+    required this.onBattery,
     required this.onUsageReports,
     required this.onNotifications,
     required this.onContent,
@@ -440,6 +442,7 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onDisplay;
   final VoidCallback onTouch;
   final VoidCallback onCellular;
+  final VoidCallback onBattery;
   final VoidCallback onUsageReports;
   final VoidCallback onNotifications;
   final VoidCallback onContent;
@@ -525,6 +528,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('设置 4G、eSIM、流量上限和远程唤醒'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onCellular,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.battery_charging_full_rounded),
+            title: const Text('电池与省电'),
+            subtitle: const Text('设置低电量提醒、低功耗和休眠'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onBattery,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

@@ -19,6 +19,7 @@ import (
 	audithandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/handler"
 	authdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
 	authservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
+	bluetoothaudioservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/bluetooth_audio/service"
 	childservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
 	companionshipservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/companionship/service"
 	connectivityservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/connectivity/service"
@@ -96,6 +97,7 @@ type RouterOptions struct {
 	VideoCompanionService       *videoservice.Service
 	VideoSessionService         *videosessionservice.Service
 	AlarmReminderService        *alarmreminderservice.Service
+	BluetoothAudioService       *bluetoothaudioservice.Service
 	WearableService             *wearableservice.Service
 	DeviceMeshService           *devicemeshservice.Service
 	ScreenService               *screenservice.Service
@@ -595,6 +597,26 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/alarm-reminders/{alarm_id}/events",
 					deviceAlarmReminderHandler.reportEvent,
+				)
+			}
+		}
+		if options.BluetoothAudioService != nil {
+			bluetoothAudioHandler := bluetoothAudioHandler{
+				service: options.BluetoothAudioService,
+			}
+			if options.BindingService != nil && options.RuntimeService != nil {
+				deviceBluetoothAudioHandler := deviceBluetoothAudioHandler{
+					handler:        &bluetoothAudioHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/bluetooth-audio/policy",
+					deviceBluetoothAudioHandler.devicePolicy,
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/bluetooth-audio/status",
+					deviceBluetoothAudioHandler.reportStatus,
 				)
 			}
 		}
@@ -1307,6 +1329,34 @@ func NewRouter(options RouterOptions) http.Handler {
 					authHandler.requireAdminPermission(
 						authdomain.AdminPermissionStatsRead,
 						videoSessionHandler.adminStats,
+					),
+				)
+			}
+			if options.BluetoothAudioService != nil {
+				bluetoothAudioHandler := bluetoothAudioHandler{
+					service: options.BluetoothAudioService,
+				}
+				mux.HandleFunc(
+					"GET /api/v1/bluetooth-audio/policy",
+					authHandler.requireAuthentication(bluetoothAudioHandler.current),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/bluetooth-audio/policy",
+					authHandler.requireAuthentication(bluetoothAudioHandler.publish),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/bluetooth-audio/devices",
+					authHandler.requireAuthentication(bluetoothAudioHandler.statuses),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/bluetooth-audio/capability",
+					authHandler.requireAuthentication(bluetoothAudioHandler.capability),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/bluetooth-audio/stats",
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStatsRead,
+						bluetoothAudioHandler.adminStats,
 					),
 				)
 			}

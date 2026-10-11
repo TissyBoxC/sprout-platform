@@ -24,6 +24,8 @@ import (
 	auditService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/service"
 	authRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/repository"
 	authService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
+	bluetoothAudioRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/bluetooth_audio/repository"
+	bluetoothAudioService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/bluetooth_audio/service"
 	childRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/repository"
 	childService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
 	companionshipRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/companionship/repository"
@@ -625,6 +627,12 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create video session service: %w", err)
 	}
+	bluetoothAudio, err := bluetoothAudioService.New(bluetoothAudioService.Options{
+		Repository: bluetoothAudioRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
+	if err != nil {
+		return fmt.Errorf("create bluetooth audio service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
@@ -667,6 +675,7 @@ func Run() error {
 			FormFactorService:           deviceFormFactor,
 			VideoCompanionService:       videoCompanion,
 			VideoSessionService:         videoSession,
+			BluetoothAudioService:       bluetoothAudio,
 			WearableService:             wearable,
 			DeviceMeshService:           deviceMesh,
 			ScreenService:               screen,

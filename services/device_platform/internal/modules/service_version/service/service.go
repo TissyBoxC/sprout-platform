@@ -145,15 +145,26 @@ func (s *Service) SnapshotResult(ctx context.Context) (SnapshotResult, error) {
 	}, nil
 }
 
-// AllCurrent reports whether every service is at its newest version. Unknown
-// services count as not-current so the console never claims success blindly.
+// AllCurrent reports whether every *upgradeable* service is at its newest
+// version.
+//
+// Infrastructure images (Postgres, Redis, the download services, ...) are
+// reported with an Unknown status by design: the worker never auto-upgrades
+// them, so their version may not be a comparable semver. Counting them here
+// would make the console report "not up to date" forever. Managed services
+// still have to be Current, and at least one must exist.
 func (s *Service) AllCurrent(services []domain.Service) bool {
+	managed := 0
 	for _, service := range services {
+		if !service.UpgradeSupported {
+			continue
+		}
+		managed++
 		if service.Status != domain.ServiceStatusCurrent {
 			return false
 		}
 	}
-	return len(services) > 0
+	return managed > 0
 }
 
 // RequestCheck asks the worker to refresh its snapshot immediately.

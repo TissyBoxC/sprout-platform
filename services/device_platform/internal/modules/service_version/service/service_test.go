@@ -205,6 +205,49 @@ func TestInfrastructureNeverUpgradable(t *testing.T) {
 	}
 }
 
+// Infrastructure services are reported Unknown by design, so they must not
+// keep the console from reporting "everything is up to date" once every
+// managed service is Current.
+func TestAllCurrentIgnoresInfrastructureUnknown(t *testing.T) {
+	service, _ := newTestService(t, `{
+		"generated_at": "2026-10-03T00:00:00Z",
+		"services": [
+			{"id":"sub2api","current_version":"0.2.19","latest_version":"0.2.19","status":"current"},
+			{"id":"device_platform","current_version":"0.22.0","latest_version":"0.22.0","status":"current"},
+			{"id":"voice_gateway","current_version":"0.22.0","latest_version":"0.22.0","status":"current"},
+			{"id":"admin_web","current_version":"0.22.0","latest_version":"0.22.0","status":"current"},
+			{"id":"postgres","current_version":"16-alpine","latest_version":"","status":"unknown"},
+			{"id":"download_http","current_version":"1.27-alpine","latest_version":"","status":"unknown"}
+		]
+	}`)
+
+	services, _, err := service.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() returned unexpected error: %v", err)
+	}
+	if !service.AllCurrent(services) {
+		t.Fatal("expected all managed services to be reported as current")
+	}
+}
+
+func TestAllCurrentFalseWhenManagedServiceOutdated(t *testing.T) {
+	service, _ := newTestService(t, `{
+		"generated_at": "2026-10-03T00:00:00Z",
+		"services": [
+			{"id":"device_platform","current_version":"0.21.0","latest_version":"0.22.0","status":"outdated"},
+			{"id":"postgres","current_version":"16-alpine","latest_version":"","status":"unknown"}
+		]
+	}`)
+
+	services, _, err := service.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() returned unexpected error: %v", err)
+	}
+	if service.AllCurrent(services) {
+		t.Fatal("expected an outdated managed service to keep the stack not current")
+	}
+}
+
 func TestSnapshotWithoutWorkerStateIsUnknown(t *testing.T) {
 	service, _ := newTestService(t, "")
 

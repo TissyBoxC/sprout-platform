@@ -51,4 +51,24 @@ if ! grep -Eq 'test -s .*status\.json' "$compose_file"; then
   exit 1
 fi
 
+# read_running_image_tag must strip an @sha256 digest before extracting the
+# tag; otherwise digest-pinned images surface the digest as the version.
+read_tag_block="$(
+  sed -n '/^read_running_image_tag()/,/^}/p' "$worker_script"
+)"
+if ! printf '%s\n' "$read_tag_block" | grep -Eq "awk -F@"; then
+  echo "read_running_image_tag 未剥离 @sha256 摘要，版本号会被误读。" >&2
+  exit 1
+fi
+
+resolved_tag="$(
+  printf '%s\n' 'nginx:1.27-alpine@sha256:00000000000000000000000000000000' |
+    awk -F@ '{ print $1 }' |
+    awk -F: 'NF > 1 { print $NF }'
+)"
+if [ "$resolved_tag" != "1.27-alpine" ]; then
+  echo "read_running_image_tag 摘要剥离结果不正确: $resolved_tag" >&2
+  exit 1
+fi
+
 echo "service-upgrade-worker shell contract passed."

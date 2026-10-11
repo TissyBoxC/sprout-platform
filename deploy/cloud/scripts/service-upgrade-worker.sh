@@ -326,8 +326,14 @@ read_running_image_tag() {
     return 0
   fi
 
+  # .Config.Image can be a digest-pinned reference such as
+  # `nginx:1.27-alpine@sha256:<digest>`. Dropping the digest first keeps the
+  # human-readable tag; splitting on ":" before that would surface the digest
+  # as the "version", which then fails validate_version and paints an
+  # otherwise healthy container as unknown.
   image_tag="$(
     docker inspect --format '{{.Config.Image}}' "$container_id" 2>/dev/null |
+      awk -F@ '{ print $1 }' |
       awk -F: 'NF > 1 { print $NF }' || true
   )"
   if [ -n "$image_tag" ]; then

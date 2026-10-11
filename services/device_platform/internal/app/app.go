@@ -28,6 +28,8 @@ import (
 	companionshipService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/companionship/service"
 	contentRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/repository"
 	contentService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/service"
+	contentOfflinePolicyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content_offline_policy/repository"
+	contentOfflinePolicyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content_offline_policy/service"
 	bindingRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/repository"
 	bindingService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 	runtimeRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/repository"
@@ -454,6 +456,13 @@ func Run() error {
 	localCommands := localCommandService.New(localCommandService.Options{
 		Repository: localCommandRepository.NewPostgresRepository(databaseStore.Pool()),
 	})
+	contentOfflinePolicy := contentOfflinePolicyService.New(
+		contentOfflinePolicyService.Options{
+			Repository: contentOfflinePolicyRepository.NewPostgresRepository(
+				databaseStore.Pool(),
+			),
+		},
+	)
 	usageReports, err := usageReportService.New(usageReportService.Options{
 		Repository:    usagePersistence,
 		PolicyService: parentPolicyService,
@@ -486,32 +495,33 @@ func Run() error {
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
 		Handler: platformhttp.NewRouter(platformhttp.RouterOptions{
-			Logger:                logger,
-			InternalAPIConfig:     cfg.Internal,
-			AuthService:           parentAuthService,
-			ChildService:          childProfileService,
-			CompanionshipService:  companionshipCompanionService,
-			ParentPolicyService:   parentPolicyService,
-			AIService:             aiAccountService,
-			OperationsService:     operations,
-			BindingService:        deviceBindingService,
-			RuntimeService:        deviceRuntimeService,
-			DiagnosticService:     diagnosticService,
-			ServiceVersionService: serviceVersions,
-			FeatureCenterService:  featureCenter,
-			ReleaseStoreService:   releaseStore,
-			OTAService:            ota,
-			ContentService:        contentLibraryService,
-			EnglishService:        englishLearningService,
-			PlaybackService:       playbackRequests,
-			RecommendationService: contentRecommendations,
-			LocalCommandService:   localCommands,
-			UsageReportService:    usageReports,
-			VoiceTokenIssuer:      voiceTokenIssuer,
-			VoiceWebSocketURL:     cfg.VoiceGateway.WebSocketURL,
-			PrivacyService:        privacy,
-			NotificationService:   notifications,
-			AuditRecorder:         privacy,
+			Logger:                      logger,
+			InternalAPIConfig:           cfg.Internal,
+			AuthService:                 parentAuthService,
+			ChildService:                childProfileService,
+			CompanionshipService:        companionshipCompanionService,
+			ParentPolicyService:         parentPolicyService,
+			AIService:                   aiAccountService,
+			OperationsService:           operations,
+			BindingService:              deviceBindingService,
+			RuntimeService:              deviceRuntimeService,
+			DiagnosticService:           diagnosticService,
+			ServiceVersionService:       serviceVersions,
+			FeatureCenterService:        featureCenter,
+			ReleaseStoreService:         releaseStore,
+			OTAService:                  ota,
+			ContentService:              contentLibraryService,
+			EnglishService:              englishLearningService,
+			PlaybackService:             playbackRequests,
+			RecommendationService:       contentRecommendations,
+			LocalCommandService:         localCommands,
+			ContentOfflinePolicyService: contentOfflinePolicy,
+			UsageReportService:          usageReports,
+			VoiceTokenIssuer:            voiceTokenIssuer,
+			VoiceWebSocketURL:           cfg.VoiceGateway.WebSocketURL,
+			PrivacyService:              privacy,
+			NotificationService:         notifications,
+			AuditRecorder:               privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

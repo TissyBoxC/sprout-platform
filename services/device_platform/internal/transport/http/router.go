@@ -20,6 +20,7 @@ import (
 	childservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
 	companionshipservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/companionship/service"
 	contentservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/service"
+	contentofflinepolicyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content_offline_policy/service"
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
 	englishservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/service"
@@ -41,32 +42,33 @@ import (
 
 // RouterOptions contains dependencies for the device platform HTTP transport.
 type RouterOptions struct {
-	Logger                *slog.Logger
-	InternalAPIConfig     config.InternalAPIConfig
-	AuthService           *authservice.Service
-	ChildService          *childservice.Service
-	CompanionshipService  *companionshipservice.Service
-	ParentPolicyService   *policeservice.Service
-	AIService             *gatewayservice.Service
-	OperationsService     *operationsservice.Service
-	BindingService        *bindingservice.Service
-	RuntimeService        *runtimeservice.Service
-	DiagnosticService     auditService
-	ServiceVersionService *serviceversionservice.Service
-	FeatureCenterService  *featurecenterservice.Service
-	ReleaseStoreService   *releasestoreservice.Service
-	OTAService            *otaservice.Service
-	ContentService        *contentservice.Service
-	EnglishService        *englishservice.Service
-	PlaybackService       *playbackservice.Service
-	LocalCommandService   *localcommandservice.Service
-	RecommendationService *recommendationservice.Service
-	UsageReportService    *usagereportservice.Service
-	VoiceTokenIssuer      bindingservice.VoiceTokenIssuer
-	VoiceWebSocketURL     string
-	PrivacyService        *privacyservice.Service
-	NotificationService   *notificationservice.Service
-	AuditRecorder         auditRecorder
+	Logger                      *slog.Logger
+	InternalAPIConfig           config.InternalAPIConfig
+	AuthService                 *authservice.Service
+	ChildService                *childservice.Service
+	CompanionshipService        *companionshipservice.Service
+	ParentPolicyService         *policeservice.Service
+	AIService                   *gatewayservice.Service
+	OperationsService           *operationsservice.Service
+	BindingService              *bindingservice.Service
+	RuntimeService              *runtimeservice.Service
+	DiagnosticService           auditService
+	ServiceVersionService       *serviceversionservice.Service
+	FeatureCenterService        *featurecenterservice.Service
+	ReleaseStoreService         *releasestoreservice.Service
+	OTAService                  *otaservice.Service
+	ContentService              *contentservice.Service
+	ContentOfflinePolicyService *contentofflinepolicyservice.Service
+	EnglishService              *englishservice.Service
+	PlaybackService             *playbackservice.Service
+	LocalCommandService         *localcommandservice.Service
+	RecommendationService       *recommendationservice.Service
+	UsageReportService          *usagereportservice.Service
+	VoiceTokenIssuer            bindingservice.VoiceTokenIssuer
+	VoiceWebSocketURL           string
+	PrivacyService              *privacyservice.Service
+	NotificationService         *notificationservice.Service
+	AuditRecorder               auditRecorder
 }
 
 // auditRecorder is the narrow operation-audit write surface used by existing
@@ -331,6 +333,32 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/local-commands",
 					deviceLocalCommandHandler.listForDevice,
+				)
+			}
+		}
+		if options.ContentOfflinePolicyService != nil {
+			offlinePolicyHandler := contentOfflinePolicyHandler{
+				service: options.ContentOfflinePolicyService,
+			}
+			mux.HandleFunc(
+				"GET /api/v1/content/offline-policy",
+				authHandler.requireAuthentication(offlinePolicyHandler.current),
+			)
+			mux.HandleFunc(
+				"PUT /api/v1/content/offline-policy",
+				authHandler.requireAuthentication(offlinePolicyHandler.publish),
+			)
+			// Firmware devices read the fleet policy with a device session
+			// token so the cache budget is enforced without a guardian present.
+			if options.BindingService != nil {
+				deviceOfflinePolicyHandler := deviceContentOfflinePolicyHandler{
+					handler:        &offlinePolicyHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/content/offline-policy",
+					deviceOfflinePolicyHandler.currentForDevice,
 				)
 			}
 		}

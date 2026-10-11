@@ -70,6 +70,8 @@ import (
 	privacyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/service"
 	recommendationService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/recommendation/service"
 	releaseStoreService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
+	screenRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/screen/repository"
+	screenService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/screen/service"
 	serviceVersionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/repository"
 	serviceVersionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
 	usageReportRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/repository"
@@ -580,6 +582,12 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create device mesh service: %w", err)
 	}
+	screen, err := screenService.New(screenService.Options{
+		Repository: screenRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
+	if err != nil {
+		return fmt.Errorf("create screen service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
@@ -620,6 +628,7 @@ func Run() error {
 			VideoCompanionService:       videoCompanion,
 			WearableService:             wearable,
 			DeviceMeshService:           deviceMesh,
+			ScreenService:               screen,
 			AuditRecorder:               privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

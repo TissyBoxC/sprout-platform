@@ -43,6 +43,7 @@ import (
 	privacyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/service"
 	recommendationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/recommendation/service"
 	releasestoreservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
+	screenservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/screen/service"
 	serviceversionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
 	usagereportservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
 	videoservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/service"
@@ -89,6 +90,7 @@ type RouterOptions struct {
 	VideoCompanionService       *videoservice.Service
 	WearableService             *wearableservice.Service
 	DeviceMeshService           *devicemeshservice.Service
+	ScreenService               *screenservice.Service
 	AuditRecorder               auditRecorder
 }
 
@@ -407,6 +409,20 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/display/status",
 					deviceDisplayHandler.reportStatus,
+				)
+			}
+		}
+		if options.ScreenService != nil {
+			screenHandler := screenHandler{service: options.ScreenService}
+			if options.BindingService != nil && options.RuntimeService != nil {
+				deviceScreenHandler := deviceScreenHandler{
+					handler:        &screenHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/screen/status",
+					deviceScreenHandler.reportStatus,
 				)
 			}
 		}
@@ -981,6 +997,49 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/admin/display/stats",
 					authHandler.requireAdmin(displayHandler.adminStats),
+				)
+			}
+			if options.ScreenService != nil {
+				screenHandler := screenHandler{service: options.ScreenService}
+				mux.HandleFunc(
+					"GET /api/v1/screen/policy",
+					authHandler.requireAuthentication(screenHandler.current),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/screen/policy",
+					authHandler.requireAuthentication(screenHandler.publish),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/screen/devices",
+					authHandler.requireAuthentication(screenHandler.statuses),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/screen/point-read",
+					authHandler.requireAuthentication(screenHandler.dictionary),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/screen/point-read",
+					authHandler.requireAuthentication(screenHandler.putDictionaryEntry),
+				)
+				mux.HandleFunc(
+					"DELETE /api/v1/screen/point-read/{entry_id}",
+					authHandler.requireAuthentication(screenHandler.deleteDictionaryEntry),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/screen/capability",
+					authHandler.requireAuthentication(screenHandler.capability),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/screen/playback",
+					authHandler.requireAuthentication(screenHandler.playback),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/devices/{device_id}/screen/playback",
+					authHandler.requireAuthentication(screenHandler.resolvePlayback),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/screen/stats",
+					authHandler.requireAdmin(screenHandler.adminStats),
 				)
 			}
 			if options.InputService != nil {

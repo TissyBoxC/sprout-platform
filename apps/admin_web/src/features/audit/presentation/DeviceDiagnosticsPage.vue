@@ -340,10 +340,7 @@ function formatDuration(value: number): string {
                 </p>
                 <p
                   v-if="store.selectedDevice.temperature.state !== 'unknown'"
-                  :class="[
-                    'overview-temperature',
-                    store.selectedDevice.temperature.state,
-                  ]"
+                  :class="['overview-temperature', store.selectedDevice.temperature.state]"
                 >
                   {{ temperatureDetail(store.selectedDevice) }}
                 </p>
@@ -506,16 +503,15 @@ function formatDuration(value: number): string {
                       <h2>交互事件</h2>
                       <p>记录唤醒、按键、指示灯和恢复出厂相关操作。</p>
                     </div>
-                    <span class="panel-count">{{ interactionEvents(store.snapshot).length }} 条</span>
+                    <span class="panel-count"
+                      >{{ interactionEvents(store.snapshot).length }} 条</span
+                    >
                   </header>
                   <div v-if="interactionEvents(store.snapshot).length === 0" class="list-empty">
                     最近没有交互记录。设备发生唤醒、按键或恢复出厂操作后会显示在这里。
                   </div>
                   <ul v-else class="event-list">
-                    <li
-                      v-for="event in interactionEvents(store.snapshot)"
-                      :key="eventKey(event)"
-                    >
+                    <li v-for="event in interactionEvents(store.snapshot)" :key="eventKey(event)">
                       <span class="event-icon boot" aria-hidden="true">•</span>
                       <div class="event-body">
                         <div class="event-title">

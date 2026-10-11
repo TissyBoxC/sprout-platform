@@ -347,6 +347,38 @@ type fakeRetention struct {
 	settings *operationsdomain.Settings
 }
 
+// fakeConsentCommander records the device commands the privacy service
+// dispatches so tests can assert consent changes reach devices.
+type fakeConsentCommander struct {
+	commands []consentCommandRecord
+}
+
+// consentCommandRecord is a local record of one dispatched consent-sync
+// command, kept separate from the runtime domain so the test owns the shape it
+// asserts on.
+type consentCommandRecord struct {
+	deviceID    string
+	commandType runtimedomain.CommandType
+	requestedBy string
+	payload     map[string]any
+}
+
+func (c *fakeConsentCommander) CreateCommand(
+	_ context.Context,
+	deviceID string,
+	commandType runtimedomain.CommandType,
+	requestedBy string,
+	payload map[string]any,
+) (*runtimedomain.Command, error) {
+	c.commands = append(c.commands, consentCommandRecord{
+		deviceID:    deviceID,
+		commandType: commandType,
+		requestedBy: requestedBy,
+		payload:     payload,
+	})
+	return &runtimedomain.Command{DeviceID: deviceID, Type: commandType}, nil
+}
+
 func (f *fakeRetention) RuntimePolicy(
 	_ context.Context,
 ) (*operationsdomain.RuntimePolicy, error) {
@@ -911,6 +943,49 @@ func TestConsentTypesAreEnforcedIndependently(t *testing.T) {
 	}
 	if !voiceGranted {
 		t.Fatalf("expected voice consent to be restored once both consents are granted")
+	}
+}
+
+func TestWithdrawConsentDispatchesSyncCommandToDevices(t *testing.T) {
+	repository := &memoryRepository{}
+	commander := &fakeConsentCommander{}
+	devices := &fakeDevices{bindings: []bindingdomain.Binding{
+		{ID: "binding-1", ParentAccountID: testParentID, DeviceID: testDeviceID},
+	}}
+	service := newTestService(
+		t,
+		repository,
+		&fakeParentAccounts{},
+		devices,
+		&fakeAIDeletion{},
+		func(options *Options) { options.Commander = commander },
+	)
+
+	if _, err := service.WithdrawConsent(
+		context.Background(),
+		testParentID,
+		domain.ConsentTypeAIInteraction,
+		"2026-01",
+	); err != nil {
+		t.Fatalf("withdraw ai_interaction: %v", err)
+	}
+	if len(commander.commands) != 1 {
+		t.Fatalf("dispatched commands = %d, want 1", len(commander.commands))
+	}
+	command := commander.commands[0]
+	if command.deviceID != testDeviceID {
+		t.Fatalf("command device id = %q, want %q", command.deviceID, testDeviceID)
+	}
+	if command.commandType != runtimedomain.CommandSyncPrivacyConsent {
+		t.Fatalf("command type = %q, want %q", command.commandType, runtimedomain.CommandSyncPrivacyConsent)
+	}
+	// Withdrawing ai_interaction must also deny the audio upload gate so the
+	// device stops uploading speech even before child_data_processing changes.
+	if granted, ok := command.payload["audio_upload"].(bool); !ok || granted {
+		t.Fatalf("audio_upload = %v, want false", command.payload["audio_upload"])
+	}
+	if granted, ok := command.payload["image_upload"].(bool); !ok || !granted {
+		t.Fatalf("image_upload = %v, want true", command.payload["image_upload"])
 	}
 }
 

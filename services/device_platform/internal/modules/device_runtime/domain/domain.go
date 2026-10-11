@@ -182,6 +182,11 @@ const (
 	// screen for a bounded duration. It carries only authored copy and never
 	// child conversation content.
 	CommandDisplayMessage CommandType = "display_message"
+	// CommandSyncPrivacyConsent pushes the guardian's current per-type consent
+	// decisions to the device so local privacy gates and cached child data stay
+	// in step with the platform. The payload carries only the four booleans and
+	// never any child content.
+	CommandSyncPrivacyConsent CommandType = "sync_privacy_consent"
 )
 
 // CommandTypeIsValid reports whether a command is part of the stable contract.
@@ -191,7 +196,8 @@ func CommandTypeIsValid(commandType CommandType) bool {
 		CommandReconnectNetwork,
 		CommandResyncTime,
 		CommandFactoryReset,
-		CommandDisplayMessage:
+		CommandDisplayMessage,
+		CommandSyncPrivacyConsent:
 		return true
 	default:
 		return false

@@ -502,6 +502,7 @@ func Run() error {
 		Usage:          usagePersistence,
 		AIAccounts:     aiAccountService,
 		Retention:      operations,
+		Commander:      deviceRuntimeService,
 	})
 	if err != nil {
 		return fmt.Errorf("create privacy service: %w", err)

@@ -87,6 +87,19 @@ type RetentionReader interface {
 	Settings(ctx context.Context) (*operationsdomain.Settings, int64, error)
 }
 
+// ConsentCommander pushes one device command that mirrors the guardian's
+// current consent decisions to the device. The privacy service owns the
+// decision; the device runtime owns delivery and acknowledgement.
+type ConsentCommander interface {
+	CreateCommand(
+		ctx context.Context,
+		deviceID string,
+		commandType runtimedomain.CommandType,
+		requestedBy string,
+		payload map[string]any,
+	) (*runtimedomain.Command, error)
+}
+
 // Options contains privacy service dependencies.
 type Options struct {
 	Repository      repository.Repository
@@ -97,6 +110,7 @@ type Options struct {
 	Usage           UsageReader
 	AIAccounts      AIDeletion
 	Retention       RetentionReader
+	Commander       ConsentCommander
 	Clock           clock.Clock
 	DeletionGrace   time.Duration
 	RetentionPolicy domain.RetentionPolicy
@@ -112,6 +126,7 @@ type Service struct {
 	usage           UsageReader
 	aiAccounts      AIDeletion
 	retention       RetentionReader
+	commander       ConsentCommander
 	clock           clock.Clock
 	deletionGrace   time.Duration
 	retentionPolicy domain.RetentionPolicy
@@ -165,6 +180,7 @@ func New(options Options) (*Service, error) {
 		usage:           options.Usage,
 		aiAccounts:      options.AIAccounts,
 		retention:       options.Retention,
+		commander:       options.Commander,
 		clock:           timeSource,
 		deletionGrace:   grace,
 		retentionPolicy: retentionPolicy,
@@ -432,7 +448,12 @@ func (s *Service) WithdrawConsent(
 	); err != nil {
 		return nil, err
 	}
-	return s.Status(ctx, parentAccountID)
+	status, err := s.Status(ctx, parentAccountID)
+	if err != nil {
+		return nil, err
+	}
+	s.syncDeviceConsent(ctx, parentAccountID, status)
+	return status, nil
 }
 
 // GrantConsent records a new guardian authorization after a withdrawal.
@@ -476,7 +497,12 @@ func (s *Service) GrantConsent(
 	); err != nil {
 		return nil, err
 	}
-	return s.Status(ctx, parentAccountID)
+	status, err := s.Status(ctx, parentAccountID)
+	if err != nil {
+		return nil, err
+	}
+	s.syncDeviceConsent(ctx, parentAccountID, status)
+	return status, nil
 }
 
 // RequestDeletion starts the seven-day grace period. The account remains
@@ -734,6 +760,67 @@ func (s *Service) recordAudit(
 		action,
 		detail,
 	)
+}
+
+// syncDeviceConsent pushes the guardian's current consent decisions to every
+// bound device so the device-side privacy gates and cached child data track the
+// platform immediately rather than at the next reconnect. Delivery failures are
+// intentionally non-fatal: the platform state is already recorded, and the
+// device re-syncs through the same command on the next consent change or poll.
+func (s *Service) syncDeviceConsent(
+	ctx context.Context,
+	parentAccountID string,
+	status *domain.Status,
+) {
+	if s.commander == nil || status == nil {
+		return
+	}
+	bindings, err := s.devices.ListByParentAccountID(ctx, parentAccountID)
+	if err != nil || len(bindings) == 0 {
+		return
+	}
+	payload := consentCommandPayload(status.Consents)
+	for _, binding := range bindings {
+		deviceID := strings.TrimSpace(binding.DeviceID)
+		if deviceID == "" {
+			continue
+		}
+		_, _ = s.commander.CreateCommand(
+			ctx,
+			deviceID,
+			runtimedomain.CommandSyncPrivacyConsent,
+			parentAccountID,
+			payload,
+		)
+	}
+}
+
+// consentCommandPayload maps consent type to the device gate key the firmware
+// understands. Only the acknowledged gate types are sent; guardian_terms and
+// email_contact have no device-local effect and are omitted.
+func consentCommandPayload(consents []domain.ConsentTypeStatus) map[string]any {
+	payload := map[string]any{
+		"audio_upload":         true,
+		"image_upload":         true,
+		"conversation_history": true,
+		"usage_analytics":      true,
+	}
+	for _, consent := range consents {
+		switch consent.ConsentType {
+		case domain.ConsentTypeChildDataProcessing:
+			payload["audio_upload"] = consent.Granted
+			payload["image_upload"] = consent.Granted
+			payload["conversation_history"] = consent.Granted
+			payload["usage_analytics"] = consent.Granted
+		case domain.ConsentTypeAIInteraction:
+			// Voice conversation upload also depends on AI interaction consent,
+			// so a withdrawal of either type denies the audio upload gate.
+			if !consent.Granted {
+				payload["audio_upload"] = false
+			}
+		}
+	}
+	return payload
 }
 
 func (s *Service) recordAuditWithActor(

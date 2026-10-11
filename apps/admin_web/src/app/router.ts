@@ -28,6 +28,7 @@ import PowerStatsPage from '@/features/power/presentation/PowerStatsPage.vue'
 import MotionStatsPage from '@/features/motion/presentation/MotionStatsPage.vue'
 import FormFactorStatsPage from '@/features/form_factor/presentation/FormFactorStatsPage.vue'
 import VideoStatsPage from '@/features/video_companion/presentation/VideoStatsPage.vue'
+import VideoSessionStatsPage from '@/features/video_session/presentation/VideoSessionStatsPage.vue'
 import WearableStatsPage from '@/features/wearable/presentation/WearableStatsPage.vue'
 import MultiDeviceStatsPage from '@/features/multi_device/presentation/MultiDeviceStatsPage.vue'
 import ScreenStatsPage from '@/features/screen/presentation/ScreenStatsPage.vue'
@@ -173,6 +174,11 @@ export function createAdminRouter() {
         path: '/video-companion',
         name: 'video-companion',
         component: VideoStatsPage,
+      },
+      {
+        path: '/video-session',
+        name: 'video-session',
+        component: VideoSessionStatsPage,
       },
       {
         path: '/wearable',

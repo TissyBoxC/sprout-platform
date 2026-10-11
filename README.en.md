@@ -94,7 +94,7 @@ order and never removes a capability.
 | P2-07 | Form factors | Capability sets for multiple physical forms | `[Implemented]` | Firmware capability-composed form-factor profile, platform form-factor capability and status APIs, parent app viewer page, and admin statistics page are implemented. Technical names never bind to a character or appearance. |
 | P2-08 | Video companionship | Video calls, remote companionship | `[Implemented]` | Firmware call-session component, platform video companionship (contacts, call state, device status, and statistics APIs), parent app page, and admin statistics page are implemented; media negotiation and codecs stay at the call gateway. |
 | P2-09 | Wearables and location | Location, calling, geofence, SOS | `[Implemented]` | Firmware wearable-location component (policy, geofence evaluation, SOS latch), platform wearable module (location permission, precision, geofence, emergency contacts, and SOS APIs), parent app settings page, and admin statistics page are implemented; revoking the permission stops sampling/upload and clears positions, and SOS syncs device, platform, parent app, and admin audit. |
-| P2-10 | Multi-device | Family linkage, device mesh, content sync | `[Not implemented]` | Message routing, device groups, conflict handling, and eventual consistency are missing. |
+| P2-10 | Multi-device | Family linkage, device mesh, content sync | `[Implemented]` | Firmware family-linkage component, platform device-mesh module (groups, membership, routed messages, content sync and conflict handling APIs), parent app multi-device page, and admin statistics page are implemented; same-version conflicts are surfaced instead of being silently overwritten. |
 
 ### Layer Coverage
 

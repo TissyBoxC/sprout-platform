@@ -67,6 +67,12 @@ class PrivacyController extends AsyncNotifier<PrivacyStatus> {
     return consent;
   }
 
+  Future<GuardianConsent> grantConsent() async {
+    final consent = await _api.grantConsent();
+    _updateConsent(consent);
+    return consent;
+  }
+
   void _updateConsent(GuardianConsent consent) {
     final current = state.value ?? _lastSuccessful;
     if (current == null) {

@@ -214,7 +214,7 @@ void main() {
     expect(find.text('登录占位'), findsOneWidget);
   });
 
-  testWidgets('reopens the platform reconsent route and refreshes status', (
+  testWidgets('restores consent through the platform and refreshes status', (
     tester,
   ) async {
     final controller = _FakePrivacyController(
@@ -225,11 +225,6 @@ void main() {
       _privacyAppWithController(
         controller,
         routes: [
-          GoRoute(
-            path: '/authorization/restore',
-            builder: (_, _) =>
-                const Scaffold(body: Center(child: Text('重新授权占位'))),
-          ),
         ],
       ),
     );
@@ -237,12 +232,8 @@ void main() {
 
     await tester.tap(find.text('重新确认授权'));
     await tester.pumpAndSettle();
-    expect(find.text('重新授权占位'), findsOneWidget);
 
-    Navigator.of(tester.element(find.text('重新授权占位'))).pop();
-    await tester.pumpAndSettle();
-
-    expect(controller.refreshCount, 1);
+    expect(controller.grantCount, 1);
     expect(find.text('授权有效'), findsOneWidget);
     expect(find.text('家长授权已恢复'), findsOneWidget);
   });
@@ -369,7 +360,7 @@ final _withdrawnStatus = PrivacyStatus(
     consentedAt: null,
     withdrawnAt: null,
     status: GuardianConsentStatus.withdrawn,
-    reconsentPath: '/authorization/restore',
+    reconsentPath: '/me/privacy',
   ),
   deletion: const PrivacyDeletion.none(),
   exportAvailable: true,
@@ -454,6 +445,7 @@ class _FakePrivacyController extends PrivacyController {
   int deletionRequestCount = 0;
   int cancelDeletionCount = 0;
   int withdrawCount = 0;
+  int grantCount = 0;
 
   @override
   Future<void> refresh() async {
@@ -511,6 +503,13 @@ class _FakePrivacyController extends PrivacyController {
       withdrawnAt: null,
       status: GuardianConsentStatus.withdrawn,
     );
+  }
+
+  @override
+  Future<GuardianConsent> grantConsent() async {
+    grantCount += 1;
+    state = AsyncData(_activeStatus);
+    return _activeStatus.consent;
   }
 }
 

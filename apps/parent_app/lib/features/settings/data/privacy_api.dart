@@ -44,6 +44,22 @@ class PrivacyApi {
     );
   }
 
+  Future<GuardianConsent> grantConsent({
+    String consentType = 'child_data_processing',
+  }) async {
+    final response = await _apiClient.post(
+      '/api/v1/privacy/consent/grant',
+      body: {'consent_type': consentType},
+    );
+    final payload = _payload(response);
+    final consent = payload['consent'];
+    return GuardianConsent.fromJson(
+      consent is Map
+          ? Map<String, Object?>.from(consent)
+          : _requiredMap(payload, 'consent'),
+    );
+  }
+
   PrivacyDeletion _deletionFrom(Map<String, Object?> response) {
     final payload = _payload(response);
     final deletion = payload['deletion'];

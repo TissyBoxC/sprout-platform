@@ -105,7 +105,18 @@ void main() {
               'guardian_consented_at': '2026-10-01T08:00:00Z',
               'withdrawn_at': '2026-10-07T09:00:00Z',
               'status': 'withdrawn',
-              'reconsent_path': '/authorization/restore',
+              'reconsent_path': '/me/privacy',
+            },
+          },
+        },
+        '/api/v1/privacy/consent/grant': {
+          'data': {
+            'consent': {
+              'guardian_consent_version': '2026-01',
+              'guardian_consented_at': '2026-10-08T08:00:00Z',
+              'withdrawn_at': null,
+              'status': 'active',
+              'reconsent_path': '/me/privacy',
             },
           },
         },
@@ -129,12 +140,16 @@ void main() {
     await api.requestDeletion();
     await api.cancelDeletion();
     await api.withdrawConsent();
+    await api.grantConsent();
 
     expect(client.postBodies['/api/v1/privacy/deletion'], {
       'confirmation': 'DELETE',
     });
     expect(client.postBodies['/api/v1/privacy/consent/withdraw'], {
       'confirmation': 'WITHDRAW',
+    });
+    expect(client.postBodies['/api/v1/privacy/consent/grant'], {
+      'consent_type': 'child_data_processing',
     });
     expect(client.deletedPaths, contains('/api/v1/privacy/deletion'));
   });
@@ -149,7 +164,7 @@ void main() {
               'account': {'phone': '13800138000', 'display_name': '林家长'},
               'children': <Object?>[],
               'devices': <Object?>[],
-              'usage_summary': {'conversation_count': 3},
+              'usage': {'conversation_count': 3},
               'consent_history': <Object?>[],
             },
           },
@@ -161,7 +176,7 @@ void main() {
       expect(payload.containsKey('account'), isTrue);
       expect(payload.containsKey('children'), isTrue);
       expect(payload.containsKey('devices'), isTrue);
-      expect(payload.containsKey('usage_summary'), isTrue);
+      expect(payload.containsKey('usage'), isTrue);
       expect(payload.containsKey('consent_history'), isTrue);
       expect(payload.toString(), isNot(contains('password')));
       expect(payload.toString(), isNot(contains('access_token')));

@@ -246,29 +246,14 @@ class _PrivacyPageState extends ConsumerState<PrivacyPage> {
     if (_isReauthorizing) {
       return;
     }
-    final route = ref
-        .read(privacyControllerProvider)
-        .value
-        ?.consent
-        .reconsentRoute;
-    if (route == null) {
-      _showMessage('暂时无法重新授权，请退出登录后再试');
-      return;
-    }
     setState(() {
       _isReauthorizing = true;
       _operationMessage = null;
     });
     try {
-      await context.push<void>(route);
-      if (!mounted) {
-        return;
-      }
-      await ref.read(privacyControllerProvider.notifier).refresh();
-      final isActive =
-          ref.read(privacyControllerProvider).value?.consent.isActive ?? false;
+      await ref.read(privacyControllerProvider.notifier).grantConsent();
       if (mounted) {
-        _showMessage(isActive ? '家长授权已恢复' : '请按页面提示完成重新授权');
+        _showMessage('家长授权已恢复');
       }
     } on Object catch (error) {
       if (mounted) {

@@ -107,6 +107,10 @@ async function logout(): Promise<void> {
           <span class="nav-dot" aria-hidden="true"></span>
           学习可视化
         </RouterLink>
+        <RouterLink to="/image-privacy">
+          <span class="nav-dot" aria-hidden="true"></span>
+          图片隐私
+        </RouterLink>
         <RouterLink to="/wearable">
           <span class="nav-dot" aria-hidden="true"></span>
           穿戴与定位

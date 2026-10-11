@@ -80,6 +80,7 @@ class ProfilePage extends ConsumerWidget {
                     onOfflinePolicy: () => context.push('/me/offline-policy'),
                     onDisplay: () => context.push('/me/display'),
                     onTouch: () => context.push('/me/touch'),
+                    onCellular: () => context.push('/me/cellular'),
                     onUsageReports: () => context.push('/me/usage-reports'),
                     onNotifications: () => context.push('/me/notifications'),
                     onContent: () => context.push('/me/content'),
@@ -419,6 +420,7 @@ class _SettingsCard extends StatelessWidget {
     required this.onOfflinePolicy,
     required this.onDisplay,
     required this.onTouch,
+    required this.onCellular,
     required this.onUsageReports,
     required this.onNotifications,
     required this.onContent,
@@ -437,6 +439,7 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onOfflinePolicy;
   final VoidCallback onDisplay;
   final VoidCallback onTouch;
+  final VoidCallback onCellular;
   final VoidCallback onUsageReports;
   final VoidCallback onNotifications;
   final VoidCallback onContent;
@@ -514,6 +517,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('设置点击、滑动、长按和触觉反馈'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onTouch,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.signal_cellular_alt_rounded),
+            title: const Text('蜂窝网络'),
+            subtitle: const Text('设置 4G、eSIM、流量上限和远程唤醒'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onCellular,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

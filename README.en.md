@@ -85,8 +85,8 @@ order and never removes a capability.
 
 | ID | Capability | Modules | Status | Current state |
 | --- | --- | --- | --- | --- |
-| P2-01 | Display | Expressions, animation, point-to-read, video playback | `[Not implemented]` | Display drivers, UI, assets, point-to-read, and video playback are missing. |
-| P2-02 | Eye-care display | Brightness, color temperature, distance, duration policy | `[Not implemented]` | Eye-care policy, parent configuration, reminders, and device enforcement are missing. |
+| P2-01 | Display | Expressions, animation, point-to-read, video playback | `[Partially implemented]` | Screen capability reporting, policy delivery, and device display status are implemented; display drivers, point-to-read, and video playback remain. |
+| P2-02 | Eye-care display | Brightness, color temperature, distance, duration policy | `[Implemented]` | Firmware eye-care policy component, platform policy and status APIs, parent app settings page, and admin statistics page are implemented. |
 | P2-03 | Touch | Tap, swipe, gestures, haptic feedback | `[Not implemented]` | Touch input, gesture recognition, and haptic feedback are missing. |
 | P2-04 | Cellular | eSIM, data usage, remote wake, connectivity switching | `[Not implemented]` | Cellular module, eSIM, data quota, remote wake, and network switching are missing. |
 | P2-05 | Battery | Charging, estimation, low power, deep sleep | `[Not implemented]` | Battery, charging, power policy, sleep, and wake sources are missing. |

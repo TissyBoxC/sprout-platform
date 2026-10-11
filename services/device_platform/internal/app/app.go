@@ -72,6 +72,8 @@ import (
 	serviceVersionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
 	usageReportRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/repository"
 	usageReportService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
+	videoCompanionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/repository"
+	videoCompanionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/service"
 	visionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/repository"
 	visionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/service"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/cache"
@@ -556,6 +558,12 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create form factor service: %w", err)
 	}
+	videoCompanion, err := videoCompanionService.New(videoCompanionService.Options{
+		Repository: videoCompanionRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
+	if err != nil {
+		return fmt.Errorf("create video companion service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
@@ -593,6 +601,7 @@ func Run() error {
 			PowerService:                devicePower,
 			MotionService:               deviceMotion,
 			FormFactorService:           deviceFormFactor,
+			VideoCompanionService:       videoCompanion,
 			AuditRecorder:               privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

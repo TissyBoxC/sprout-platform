@@ -44,6 +44,7 @@ import (
 	releasestoreservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
 	serviceversionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
 	usagereportservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
+	videoservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/service"
 	visionhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/handler"
 	visionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/service"
 )
@@ -83,6 +84,7 @@ type RouterOptions struct {
 	PowerService                *powerservice.Service
 	MotionService               *motionservice.Service
 	FormFactorService           *formfactorservice.Service
+	VideoCompanionService       *videoservice.Service
 	AuditRecorder               auditRecorder
 }
 
@@ -471,6 +473,20 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/form-factor/report",
 					deviceFormFactorHandler.report,
+				)
+			}
+		}
+		if options.VideoCompanionService != nil {
+			videoHandler := videoCompanionHandler{service: options.VideoCompanionService}
+			if options.BindingService != nil && options.RuntimeService != nil {
+				deviceVideoHandler := deviceVideoHandler{
+					handler:        &videoHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/video-companion/status",
+					deviceVideoHandler.reportStatus,
 				)
 			}
 		}
@@ -1050,6 +1066,49 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/admin/form-factor/stats",
 					authHandler.requireAdmin(formFactorHandler.adminStats),
+				)
+			}
+			if options.VideoCompanionService != nil {
+				videoHandler := videoCompanionHandler{service: options.VideoCompanionService}
+				mux.HandleFunc(
+					"GET /api/v1/video-companion/contacts",
+					authHandler.requireAuthentication(videoHandler.listContacts),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/video-companion/contacts",
+					authHandler.requireAuthentication(videoHandler.createContact),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/video-companion/contacts/{contact_id}",
+					authHandler.requireAuthentication(videoHandler.updateContact),
+				)
+				mux.HandleFunc(
+					"DELETE /api/v1/video-companion/contacts/{contact_id}",
+					authHandler.requireAuthentication(videoHandler.deleteContact),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/video-companion/calls",
+					authHandler.requireAuthentication(videoHandler.history),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/video-companion/calls",
+					authHandler.requireAuthentication(videoHandler.startCall),
+				)
+				mux.HandleFunc(
+					"PATCH /api/v1/video-companion/calls/{call_id}",
+					authHandler.requireAuthentication(videoHandler.updateCall),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/video-companion/devices",
+					authHandler.requireAuthentication(videoHandler.statuses),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/video-companion/capability",
+					authHandler.requireAuthentication(videoHandler.capability),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/video-companion/stats",
+					authHandler.requireAdmin(videoHandler.adminStats),
 				)
 			}
 			if options.NotificationService != nil {

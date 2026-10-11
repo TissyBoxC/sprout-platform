@@ -30,6 +30,7 @@ import FormFactorStatsPage from '@/features/form_factor/presentation/FormFactorS
 import VideoStatsPage from '@/features/video_companion/presentation/VideoStatsPage.vue'
 import VideoSessionStatsPage from '@/features/video_session/presentation/VideoSessionStatsPage.vue'
 import BluetoothAudioStatsPage from '@/features/bluetooth_audio/presentation/BluetoothAudioStatsPage.vue'
+import LearningVisualizationStatsPage from '@/features/learning_visualization/presentation/LearningVisualizationStatsPage.vue'
 import WearableStatsPage from '@/features/wearable/presentation/WearableStatsPage.vue'
 import MultiDeviceStatsPage from '@/features/multi_device/presentation/MultiDeviceStatsPage.vue'
 import ScreenStatsPage from '@/features/screen/presentation/ScreenStatsPage.vue'
@@ -185,6 +186,11 @@ export function createAdminRouter() {
         path: '/bluetooth-audio',
         name: 'bluetooth-audio',
         component: BluetoothAudioStatsPage,
+      },
+      {
+        path: '/learning-visualization',
+        name: 'learning-visualization',
+        component: LearningVisualizationStatsPage,
       },
       {
         path: '/wearable',

@@ -188,6 +188,24 @@ func NewRouter(options RouterOptions) http.Handler {
 			"GET /api/v1/auth/me",
 			authHandler.requireAuthentication(authHandler.me),
 		)
+		adminPermissionHandler := adminPermissionHandler{
+			service: options.AuthService,
+			audit:   options.AuditRecorder,
+		}
+		mux.HandleFunc(
+			"GET /api/v1/admin/permissions",
+			authHandler.requireAdminPermission(
+				authdomain.AdminPermissionAdminsRead,
+				adminPermissionHandler.list,
+			),
+		)
+		mux.HandleFunc(
+			"PUT /api/v1/admin/permissions/{account_id}",
+			authHandler.requireAdminPermission(
+				authdomain.AdminPermissionAdminsManage,
+				adminPermissionHandler.update,
+			),
+		)
 		if options.ChildService != nil && options.ParentPolicyService != nil {
 			childHandler := childHandler{
 				service:       options.ChildService,

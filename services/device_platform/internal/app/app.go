@@ -80,6 +80,8 @@ import (
 	usageReportService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
 	videoCompanionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/repository"
 	videoCompanionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/service"
+	videoSessionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_session/repository"
+	videoSessionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_session/service"
 	visionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/repository"
 	visionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/service"
 	wearableRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/wearable/repository"
@@ -609,6 +611,12 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create screen service: %w", err)
 	}
+	videoSession, err := videoSessionService.New(videoSessionService.Options{
+		Repository: videoSessionRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
+	if err != nil {
+		return fmt.Errorf("create video session service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
@@ -649,6 +657,7 @@ func Run() error {
 			MotionService:               deviceMotion,
 			FormFactorService:           deviceFormFactor,
 			VideoCompanionService:       videoCompanion,
+			VideoSessionService:         videoSession,
 			WearableService:             wearable,
 			DeviceMeshService:           deviceMesh,
 			ScreenService:               screen,

@@ -49,6 +49,7 @@ import (
 	ui_textservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ui_text/service"
 	usagereportservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
 	videoservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/service"
+	videosessionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_session/service"
 	visionhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/handler"
 	visionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/service"
 	wearableservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/wearable/service"
@@ -92,6 +93,7 @@ type RouterOptions struct {
 	MotionService               *motionservice.Service
 	FormFactorService           *formfactorservice.Service
 	VideoCompanionService       *videoservice.Service
+	VideoSessionService         *videosessionservice.Service
 	WearableService             *wearableservice.Service
 	DeviceMeshService           *devicemeshservice.Service
 	ScreenService               *screenservice.Service
@@ -532,6 +534,24 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/video-companion/status",
 					deviceVideoHandler.reportStatus,
+				)
+			}
+		}
+		if options.VideoSessionService != nil {
+			videoSessionHandler := videoSessionHandler{service: options.VideoSessionService}
+			if options.BindingService != nil && options.RuntimeService != nil {
+				deviceVideoSessionHandler := deviceVideoSessionHandler{
+					handler:        &videoSessionHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/video-session/policy",
+					deviceVideoSessionHandler.devicePolicy,
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/video-session/status",
+					deviceVideoSessionHandler.reportStatus,
 				)
 			}
 		}
@@ -1218,6 +1238,32 @@ func NewRouter(options RouterOptions) http.Handler {
 					authHandler.requireAdminPermission(
 						authdomain.AdminPermissionStatsRead,
 						screenHandler.adminStats,
+					),
+				)
+			}
+			if options.VideoSessionService != nil {
+				videoSessionHandler := videoSessionHandler{service: options.VideoSessionService}
+				mux.HandleFunc(
+					"GET /api/v1/video-session/policy",
+					authHandler.requireAuthentication(videoSessionHandler.current),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/video-session/policy",
+					authHandler.requireAuthentication(videoSessionHandler.publish),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/video-session/devices",
+					authHandler.requireAuthentication(videoSessionHandler.statuses),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/video-session/capability",
+					authHandler.requireAuthentication(videoSessionHandler.capability),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/video-session/stats",
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStatsRead,
+						videoSessionHandler.adminStats,
 					),
 				)
 			}

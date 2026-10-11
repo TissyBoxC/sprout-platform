@@ -388,6 +388,18 @@ class DeviceListPage extends ConsumerWidget {
                     },
                   ),
                 ],
+                const SizedBox(height: 16),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.category_outlined),
+                  title: const Text('形态能力'),
+                  subtitle: const Text('查看设备上报的硬件能力与可用动作'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    context.push('/devices/${device.deviceId}/form-factor');
+                  },
+                ),
                 const SizedBox(height: 24),
                 const Divider(),
                 const SizedBox(height: 12),

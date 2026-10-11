@@ -26,6 +26,7 @@ import '../../features/profile/presentation/profile_page.dart';
 import '../../features/settings/presentation/privacy_page.dart';
 import '../../features/usage_report/presentation/usage_report_page.dart';
 import '../../features/vision/presentation/vision_page.dart';
+import '../../features/form_factor/presentation/form_factor_page.dart';
 import '../../features/display/presentation/display_settings_page.dart';
 import '../../features/touch/presentation/touch_settings_page.dart';
 import '../../features/connectivity/presentation/cellular_settings_page.dart';
@@ -190,6 +191,16 @@ GoRouter createAppRouter(ProviderContainer container) {
             return const _RouteNotFoundPage();
           }
           return VisionPage(deviceId: deviceId);
+        },
+      ),
+      GoRoute(
+        path: '/devices/:deviceId/form-factor',
+        builder: (context, state) {
+          final deviceId = state.pathParameters['deviceId'];
+          if (deviceId == null || deviceId.isEmpty) {
+            return const _RouteNotFoundPage();
+          }
+          return FormFactorPage(deviceId: deviceId);
         },
       ),
       GoRoute(

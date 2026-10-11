@@ -34,6 +34,8 @@ import (
 	contentOfflinePolicyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content_offline_policy/service"
 	bindingRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/repository"
 	bindingService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
+	deviceMeshRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_mesh/repository"
+	deviceMeshService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_mesh/service"
 	runtimeRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/repository"
 	runtimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
 	displayRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/display/repository"
@@ -74,10 +76,10 @@ import (
 	usageReportService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
 	videoCompanionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/repository"
 	videoCompanionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/service"
-	wearableRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/wearable/repository"
-	wearableService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/wearable/service"
 	visionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/repository"
 	visionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/service"
+	wearableRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/wearable/repository"
+	wearableService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/wearable/service"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/cache"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/database"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/security"
@@ -572,6 +574,12 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create wearable service: %w", err)
 	}
+	deviceMesh, err := deviceMeshService.New(deviceMeshService.Options{
+		Repository: deviceMeshRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
+	if err != nil {
+		return fmt.Errorf("create device mesh service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
@@ -611,6 +619,7 @@ func Run() error {
 			FormFactorService:           deviceFormFactor,
 			VideoCompanionService:       videoCompanion,
 			WearableService:             wearable,
+			DeviceMeshService:           deviceMesh,
 			AuditRecorder:               privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

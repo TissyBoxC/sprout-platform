@@ -23,6 +23,7 @@ import (
 	contentservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/service"
 	contentofflinepolicyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content_offline_policy/service"
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
+	devicemeshservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_mesh/service"
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
 	displayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/display/service"
 	englishservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/service"
@@ -45,9 +46,9 @@ import (
 	serviceversionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
 	usagereportservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
 	videoservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/service"
-	wearableservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/wearable/service"
 	visionhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/handler"
 	visionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/service"
+	wearableservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/wearable/service"
 )
 
 // RouterOptions contains dependencies for the device platform HTTP transport.
@@ -87,6 +88,7 @@ type RouterOptions struct {
 	FormFactorService           *formfactorservice.Service
 	VideoCompanionService       *videoservice.Service
 	WearableService             *wearableservice.Service
+	DeviceMeshService           *devicemeshservice.Service
 	AuditRecorder               auditRecorder
 }
 
@@ -1188,6 +1190,53 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/admin/wearable/stats",
 					authHandler.requireAdmin(wearableHandler.adminStats),
+				)
+			}
+			if options.DeviceMeshService != nil {
+				meshHandler := deviceMeshHandler{service: options.DeviceMeshService}
+				mux.HandleFunc(
+					"GET /api/v1/device-mesh/groups",
+					authHandler.requireAuthentication(meshHandler.listGroups),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/device-mesh/groups",
+					authHandler.requireAuthentication(meshHandler.createGroup),
+				)
+				mux.HandleFunc(
+					"DELETE /api/v1/device-mesh/groups/{group_id}",
+					authHandler.requireAuthentication(meshHandler.deleteGroup),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/device-mesh/groups/{group_id}/members",
+					authHandler.requireAuthentication(meshHandler.listMembers),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/device-mesh/groups/{group_id}/members",
+					authHandler.requireAuthentication(meshHandler.addMember),
+				)
+				mux.HandleFunc(
+					"DELETE /api/v1/device-mesh/groups/{group_id}/members/{device_id}",
+					authHandler.requireAuthentication(meshHandler.removeMember),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/device-mesh/messages",
+					authHandler.requireAuthentication(meshHandler.listMessages),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/device-mesh/messages",
+					authHandler.requireAuthentication(meshHandler.routeMessage),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/device-mesh/content",
+					authHandler.requireAuthentication(meshHandler.listContentStates),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/device-mesh/content",
+					authHandler.requireAuthentication(meshHandler.reportSync),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/device-mesh/stats",
+					authHandler.requireAdmin(meshHandler.adminStats),
 				)
 			}
 			if options.NotificationService != nil {

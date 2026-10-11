@@ -27,6 +27,7 @@ import '../../features/settings/presentation/privacy_page.dart';
 import '../../features/usage_report/presentation/usage_report_page.dart';
 import '../../features/vision/presentation/vision_page.dart';
 import '../../features/display/presentation/display_settings_page.dart';
+import '../../features/touch/presentation/touch_settings_page.dart';
 import '../../shared/widgets/parent_shell.dart';
 
 /// Creates the application router with authentication-aware redirects.
@@ -109,6 +110,10 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/display',
         builder: (context, state) => const DisplaySettingsPage(),
+      ),
+      GoRoute(
+        path: '/me/touch',
+        builder: (context, state) => const TouchSettingsPage(),
       ),
       GoRoute(
         path: '/me/notifications',

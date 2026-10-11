@@ -74,6 +74,7 @@ class ProfilePage extends ConsumerWidget {
                     account: account,
                     onChildren: () => context.push('/me/children'),
                     onCompanionship: () => context.push('/me/companionship'),
+                    onEnglish: () => context.push('/me/english'),
                     onUsageReports: () => context.push('/me/usage-reports'),
                     onNotifications: () => context.push('/me/notifications'),
                     onContent: () => context.push('/me/content'),
@@ -407,6 +408,7 @@ class _SettingsCard extends StatelessWidget {
     required this.account,
     required this.onChildren,
     required this.onCompanionship,
+    required this.onEnglish,
     required this.onUsageReports,
     required this.onNotifications,
     required this.onContent,
@@ -419,6 +421,7 @@ class _SettingsCard extends StatelessWidget {
   final ParentAccount account;
   final VoidCallback onChildren;
   final VoidCallback onCompanionship;
+  final VoidCallback onEnglish;
   final VoidCallback onUsageReports;
   final VoidCallback onNotifications;
   final VoidCallback onContent;
@@ -448,6 +451,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('记录成长瞬间，设置习惯提醒'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onCompanionship,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.translate_rounded),
+            title: const Text('英语启蒙'),
+            subtitle: const Text('按年龄看课程，跟读单词和句型'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onEnglish,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

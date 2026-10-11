@@ -53,6 +53,8 @@ import (
 	formFactorService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/form_factor/service"
 	inputRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/repository"
 	inputService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/service"
+	learningVisualizationRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/learning_visualization/repository"
+	learningVisualizationService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/learning_visualization/service"
 	localCommandRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/repository"
 	localCommandService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
 	motionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/repository"
@@ -633,6 +635,14 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create bluetooth audio service: %w", err)
 	}
+	learningVisualization, err := learningVisualizationService.New(
+		learningVisualizationService.Options{
+			Repository: learningVisualizationRepository.NewPostgresRepository(databaseStore.Pool()),
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("create learning visualization service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
@@ -676,6 +686,7 @@ func Run() error {
 			VideoCompanionService:       videoCompanion,
 			VideoSessionService:         videoSession,
 			BluetoothAudioService:       bluetoothAudio,
+			LearningVisualizationService: learningVisualization,
 			WearableService:             wearable,
 			DeviceMeshService:           deviceMesh,
 			ScreenService:               screen,

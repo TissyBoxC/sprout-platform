@@ -33,6 +33,7 @@ import (
 	featurecenterservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	formfactorservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/form_factor/service"
 	inputservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/service"
+	learningvisualizationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/learning_visualization/service"
 	localcommandservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
 	motionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
 	notificationhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/handler"
@@ -98,6 +99,7 @@ type RouterOptions struct {
 	VideoSessionService         *videosessionservice.Service
 	AlarmReminderService        *alarmreminderservice.Service
 	BluetoothAudioService       *bluetoothaudioservice.Service
+	LearningVisualizationService *learningvisualizationservice.Service
 	WearableService             *wearableservice.Service
 	DeviceMeshService           *devicemeshservice.Service
 	ScreenService               *screenservice.Service
@@ -617,6 +619,26 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/bluetooth-audio/status",
 					deviceBluetoothAudioHandler.reportStatus,
+				)
+			}
+		}
+		if options.LearningVisualizationService != nil {
+			learningVisualizationHandler := learningVisualizationHandler{
+				service: options.LearningVisualizationService,
+			}
+			if options.BindingService != nil && options.RuntimeService != nil {
+				deviceLearningVisualizationHandler := deviceLearningVisualizationHandler{
+					handler:        &learningVisualizationHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/learning-visualization/policy",
+					deviceLearningVisualizationHandler.devicePolicy,
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/learning-visualization/status",
+					deviceLearningVisualizationHandler.reportStatus,
 				)
 			}
 		}
@@ -1357,6 +1379,34 @@ func NewRouter(options RouterOptions) http.Handler {
 					authHandler.requireAdminPermission(
 						authdomain.AdminPermissionStatsRead,
 						bluetoothAudioHandler.adminStats,
+					),
+				)
+			}
+			if options.LearningVisualizationService != nil {
+				learningVisualizationHandler := learningVisualizationHandler{
+					service: options.LearningVisualizationService,
+				}
+				mux.HandleFunc(
+					"GET /api/v1/learning-visualization/policy",
+					authHandler.requireAuthentication(learningVisualizationHandler.current),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/learning-visualization/policy",
+					authHandler.requireAuthentication(learningVisualizationHandler.publish),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/learning-visualization/devices",
+					authHandler.requireAuthentication(learningVisualizationHandler.statuses),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/learning-visualization/capability",
+					authHandler.requireAuthentication(learningVisualizationHandler.capability),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/learning-visualization/stats",
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStatsRead,
+						learningVisualizationHandler.adminStats,
 					),
 				)
 			}

@@ -26,6 +26,7 @@ import (
 	displayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/display/service"
 	englishservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/service"
 	featurecenterservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
+	inputservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/service"
 	localcommandservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
 	notificationhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/handler"
 	notificationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
@@ -73,6 +74,7 @@ type RouterOptions struct {
 	NotificationService         *notificationservice.Service
 	VisionService               *visionservice.Service
 	DisplayService              *displayservice.Service
+	InputService                *inputservice.Service
 	AuditRecorder               auditRecorder
 }
 
@@ -391,6 +393,20 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/display/status",
 					deviceDisplayHandler.reportStatus,
+				)
+			}
+		}
+		if options.InputService != nil {
+			inputHandler := inputHandler{service: options.InputService}
+			if options.BindingService != nil && options.RuntimeService != nil {
+				deviceInputHandler := deviceInputHandler{
+					handler:        &inputHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/touch/status",
+					deviceInputHandler.reportStatus,
 				)
 			}
 		}
@@ -863,6 +879,29 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/admin/display/stats",
 					authHandler.requireAdmin(displayHandler.adminStats),
+				)
+			}
+			if options.InputService != nil {
+				inputHandler := inputHandler{service: options.InputService}
+				mux.HandleFunc(
+					"GET /api/v1/touch/config",
+					authHandler.requireAuthentication(inputHandler.current),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/touch/config",
+					authHandler.requireAuthentication(inputHandler.publish),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/touch/devices",
+					authHandler.requireAuthentication(inputHandler.statuses),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/touch/capability",
+					authHandler.requireAuthentication(inputHandler.capability),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/touch/stats",
+					authHandler.requireAdmin(inputHandler.adminStats),
 				)
 			}
 			if options.NotificationService != nil {

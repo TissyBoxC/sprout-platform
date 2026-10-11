@@ -41,6 +41,8 @@ import (
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/repository"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
+	inputRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/repository"
+	inputService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/service"
 	localCommandRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/repository"
 	localCommandService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
 	notificationRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/repository"
@@ -516,6 +518,12 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create display service: %w", err)
 	}
+	input, err := inputService.New(inputService.Options{
+		Repository: inputRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
+	if err != nil {
+		return fmt.Errorf("create input service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
@@ -548,6 +556,7 @@ func Run() error {
 			NotificationService:         notifications,
 			VisionService:               vision,
 			DisplayService:              display,
+			InputService:                input,
 			AuditRecorder:               privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

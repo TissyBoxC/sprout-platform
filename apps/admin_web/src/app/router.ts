@@ -13,6 +13,7 @@ import VersionManagementPage from '@/features/version_management/presentation/Ve
 import FeatureCenterPage from '@/features/feature_center/presentation/FeatureCenterPage.vue'
 import DownloadFilesPage from '@/features/downloads/presentation/DownloadFilesPage.vue'
 import ContentLibraryPage from '@/features/content/presentation/ContentLibraryPage.vue'
+import ThemePackPage from '@/features/content/presentation/ThemePackPage.vue'
 import DeviceDiagnosticsPage from '@/features/audit/presentation/DeviceDiagnosticsPage.vue'
 import OperationAuditPage from '@/features/audit/presentation/OperationAuditPage.vue'
 import UsageReportPage from '@/features/usage_report/presentation/UsageReportPage.vue'
@@ -79,6 +80,11 @@ export function createAdminRouter() {
         path: '/content',
         name: 'content',
         component: ContentLibraryPage,
+      },
+      {
+        path: '/content/theme-packs',
+        name: 'content-theme-packs',
+        component: ThemePackPage,
       },
       {
         path: '/services',

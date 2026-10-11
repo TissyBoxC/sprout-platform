@@ -67,6 +67,32 @@ export interface ContentPackagePage {
   total: number
 }
 
+export type ThemePackStatus = 'draft' | 'published' | 'withdrawn'
+
+/// One curated, ordered collection of content packages. Members are package
+/// ids rather than embedded versions so a theme follows each package across
+/// new published versions.
+export interface ThemePack {
+  themeId: string
+  title: string
+  summary: string
+  ageTiers: ContentAgeTier[]
+  packageIds: string[]
+  status: ThemePackStatus
+  catalogRevision: number
+  publishedAt: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ThemePackInput {
+  themeId: string
+  title: string
+  summary: string
+  ageTiers: ContentAgeTier[]
+  packageIds: string[]
+}
+
 /// Fields shared by the create-draft and update-draft forms. A version is
 /// allocated by the backend for an existing package, so the create payload
 /// carries only package identity and one initial version's metadata.
@@ -102,6 +128,13 @@ export interface AdminContentClient {
   publishVersion(packageId: string, packageVersion: number): Promise<ContentPackage | null>
   withdrawVersion(packageId: string, packageVersion: number): Promise<ContentPackage | null>
   archiveVersion(packageId: string, packageVersion: number): Promise<ContentPackage | null>
+
+  /// Theme packs: curated collections of published content packages.
+  loadThemePacks(): Promise<ThemePack[]>
+  saveThemePack(input: ThemePackInput): Promise<ThemePack>
+  publishThemePack(themeId: string): Promise<ThemePack>
+  withdrawThemePack(themeId: string): Promise<ThemePack>
+  deleteThemePack(themeId: string): Promise<void>
 }
 
 /// Creates the client for the content library. Every mutation returns the
@@ -210,6 +243,106 @@ export function createAdminContentClient(
     ): Promise<ContentPackage | null> {
       return runVersionAction(httpClient, packageId, packageVersion, 'archive')
     },
+
+    async loadThemePacks(): Promise<ThemePack[]> {
+      const response = await httpClient.get('/api/v1/admin/content/theme-packs')
+      return toThemePacks(response.data?.data)
+    },
+
+    async saveThemePack(input: ThemePackInput): Promise<ThemePack> {
+      const response = await httpClient.put(
+        `/api/v1/admin/content/theme-packs/${encodeURIComponent(input.themeId.trim())}`,
+        {
+          theme_id: input.themeId.trim(),
+          title: input.title.trim(),
+          summary: input.summary.trim(),
+          age_tiers: input.ageTiers,
+          package_ids: input.packageIds,
+        },
+      )
+      return requiredThemePack(response.data?.data)
+    },
+
+    async publishThemePack(themeId: string): Promise<ThemePack> {
+      return runThemeAction(httpClient, themeId, 'publish')
+    },
+
+    async withdrawThemePack(themeId: string): Promise<ThemePack> {
+      return runThemeAction(httpClient, themeId, 'withdraw')
+    },
+
+    async deleteThemePack(themeId: string): Promise<void> {
+      await httpClient.delete(
+        `/api/v1/admin/content/theme-packs/${encodeURIComponent(themeId)}`,
+      )
+    },
+  }
+}
+
+async function runThemeAction(
+  httpClient: AxiosInstance,
+  themeId: string,
+  action: string,
+): Promise<ThemePack> {
+  const response = await httpClient.post(
+    `/api/v1/admin/content/theme-packs/${encodeURIComponent(themeId)}/${action}`,
+    {},
+  )
+  return requiredThemePack(response.data?.data)
+}
+
+function toThemePacks(value: unknown): ThemePack[] {
+  const record = recordValue(value)
+  const source = Array.isArray(record.theme_packs)
+    ? record.theme_packs
+    : Array.isArray(value)
+      ? value
+      : []
+  return source.flatMap((item: unknown) => {
+    const pack = toNullableThemePack(item)
+    return pack === null ? [] : [pack]
+  })
+}
+
+function requiredThemePack(value: unknown): ThemePack {
+  const record = recordValue(value)
+  const pack = toNullableThemePack(record.theme_pack ?? value)
+  if (pack === null) {
+    throw new Error('theme pack response is missing a theme identifier')
+  }
+  return pack
+}
+
+function toNullableThemePack(value: unknown): ThemePack | null {
+  const record = recordValue(value)
+  const themeId = stringValue(record.theme_id ?? record.themeId).trim()
+  if (!themeId) {
+    return null
+  }
+  return {
+    themeId,
+    title: stringValue(record.title),
+    summary: stringValue(record.summary),
+    ageTiers: contentAgeTiers(record.age_tiers ?? record.ageTiers),
+    packageIds: stringArray(record.package_ids ?? record.packageIds),
+    status: themePackStatus(record.status),
+    catalogRevision: nonNegativeInteger(
+      record.catalog_revision ?? record.catalogRevision,
+      0,
+    ),
+    publishedAt: stringValue(record.published_at ?? record.publishedAt),
+    createdAt: stringValue(record.created_at ?? record.createdAt),
+    updatedAt: stringValue(record.updated_at ?? record.updatedAt),
+  }
+}
+
+function themePackStatus(value: unknown): ThemePackStatus {
+  switch (value) {
+    case 'published':
+    case 'withdrawn':
+      return value
+    default:
+      return 'draft'
   }
 }
 
@@ -387,6 +520,15 @@ function contentAgeTiers(value: unknown): ContentAgeTier[] {
     return []
   }
   return value.flatMap((item: unknown) => (isAgeTier(item) ? [item] : []))
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.flatMap((item: unknown) =>
+    typeof item === 'string' && item.trim() !== '' ? [item.trim()] : [],
+  )
 }
 
 function isAgeTier(value: unknown): value is ContentAgeTier {

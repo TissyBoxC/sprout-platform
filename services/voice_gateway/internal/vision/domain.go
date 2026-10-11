@@ -44,6 +44,10 @@ const (
 	FailureUnsupported    = "unsupported"
 )
 
+// ReasonContentRejected is the stable audit reason recorded when the safety
+// gate refuses a vision prompt or model result.
+const ReasonContentRejected = "vision_content_rejected"
+
 const (
 	// DefaultTaskTTL bounds how long a task may wait for a model response.
 	DefaultTaskTTL = 2 * time.Minute

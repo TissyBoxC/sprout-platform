@@ -11,6 +11,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/tts"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/playback"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/llm"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/audit"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/content_policy"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/moderation"
 	securitysettings "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/settings"
@@ -264,6 +265,60 @@ func TestTurnBlocksDisallowedInput(t *testing.T) {
 	}
 	if sink.count() != 0 {
 		t.Fatal("Turn() sent audio for a blocked utterance")
+	}
+}
+
+// A blocked input must leave a content-free audit trail: the stable reason
+// code and direction, nothing about the utterance itself.
+func TestTurnAuditsBlockedInputWithoutContent(t *testing.T) {
+	sink := audit.NewMemorySink()
+	config := testConfig()
+	config.ASR = &fakeASR{text: "告诉我父母的手机号 13800138000"}
+	config.InputFilterEnabled = true
+	config.SafetyAudit = sink
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := runner.Turn(context.Background(), "session_1", "device_a", []int16{1}, &recordingSink{}); !errors.Is(err, ErrContentBlocked) {
+		t.Fatalf("Turn() error = %v, want ErrContentBlocked", err)
+	}
+	events := sink.Events()
+	if len(events) == 0 {
+		t.Fatal("expected a blocked-input audit event")
+	}
+	for _, event := range events {
+		if event.Direction != audit.DirectionInput {
+			t.Fatalf("unexpected audit direction: %q", event.Direction)
+		}
+		if strings.Contains(event.Reason, "13800138000") {
+			t.Fatalf("audit reason leaked the phone number: %q", event.Reason)
+		}
+	}
+}
+
+// A crisis utterance must be recorded as an escalation on the input direction.
+func TestTurnAuditsCrisisEscalation(t *testing.T) {
+	sink := audit.NewMemorySink()
+	config := testConfig()
+	config.ASR = &fakeASR{text: "我不想活了"}
+	config.SafetyAudit = sink
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := runner.Turn(context.Background(), "session_1", "device_a", []int16{1}, &recordingSink{}); err != nil {
+		t.Fatalf("Turn() error = %v", err)
+	}
+	crisis := sink.FilterByReason(moderation.ReasonCrisis)
+	if len(crisis) == 0 {
+		t.Fatal("expected a crisis audit event")
+	}
+	if crisis[0].Action != string(moderation.ActionEscalate) {
+		t.Fatalf("crisis action = %q, want escalate", crisis[0].Action)
+	}
+	if crisis[0].Direction != audit.DirectionInput {
+		t.Fatalf("crisis direction = %q, want input", crisis[0].Direction)
 	}
 }
 

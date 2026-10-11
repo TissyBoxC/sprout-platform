@@ -22,6 +22,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/conversation"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/pipeline"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/platform/cache"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/audit"
 	securityauth "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/authorization"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/content_policy"
 	securitysettings "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/settings"
@@ -101,6 +102,7 @@ func Run() error {
 			// Vision reuses the device authorizer so a caller-supplied device
 			// identifier is checked against the guardian's live consent.
 			Authorizer: deviceAuthorizer,
+			AuditSink:  audit.NewSlogSink(logger),
 		})
 		if err != nil {
 			return fmt.Errorf("build vision pipeline: %w", err)
@@ -200,6 +202,7 @@ func buildRealtimeTransport(
 		InputFilterEnabled:  cfg.Security.InputFilterEnabled,
 		OutputFilterEnabled: cfg.Security.OutputFilterEnabled,
 		SafetyPolicy:        safetyReader,
+		SafetyAudit:         audit.NewSlogSink(logger),
 		ReferencePublisher: func(deviceID string, pcm []int16) {
 			references.Publish(deviceID, pcm)
 		},

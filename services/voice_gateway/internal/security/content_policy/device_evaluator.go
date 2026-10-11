@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -71,14 +72,14 @@ func (e *DeviceEvaluator) CheckDeviceCategory(
 		return Decision{Allowed: false, Reason: ReasonPolicyUnavailable}
 	}
 	if len(profile.AllowedCategories) == 0 {
-		return Decision{Allowed: false, Reason: ReasonCategoryNotAllowed}
+		return Decision{Allowed: false, Reason: ReasonCategoryNotAllowed, PolicyVersion: policyVersion(profile)}
 	}
 	for _, allowed := range profile.AllowedCategories {
 		if allowed == category {
-			return Decision{Allowed: true, Reason: ReasonAllowed}
+			return Decision{Allowed: true, Reason: ReasonAllowed, PolicyVersion: policyVersion(profile)}
 		}
 	}
-	return Decision{Allowed: false, Reason: ReasonCategoryNotAllowed}
+	return Decision{Allowed: false, Reason: ReasonCategoryNotAllowed, PolicyVersion: policyVersion(profile)}
 }
 
 // ComposeSystemPrompt constrains a base prompt to the device's effective
@@ -105,7 +106,7 @@ func (e *DeviceEvaluator) ComposeSystemPrompt(
 		return basePrompt, Decision{Allowed: false, Reason: ReasonPolicyUnavailable}
 	}
 	if len(profile.AllowedCategories) == 0 {
-		return basePrompt, Decision{Allowed: false, Reason: ReasonCategoryNotAllowed}
+		return basePrompt, Decision{Allowed: false, Reason: ReasonCategoryNotAllowed, PolicyVersion: policyVersion(profile)}
 	}
 
 	prompt := strings.TrimSpace(basePrompt)
@@ -122,7 +123,12 @@ func (e *DeviceEvaluator) ComposeSystemPrompt(
 		categories,
 		ageInstruction,
 	)
-	return prompt, Decision{Allowed: true, Reason: ReasonAllowed}
+	return prompt, Decision{Allowed: true, Reason: ReasonAllowed, PolicyVersion: policyVersion(profile)}
+}
+
+// policyVersion renders the effective policy revision for audit records.
+func policyVersion(profile Profile) string {
+	return strconv.FormatInt(profile.PolicyVersion, 10)
 }
 
 // Profile returns the cached effective profile for diagnostics and tests.

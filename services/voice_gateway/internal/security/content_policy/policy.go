@@ -63,6 +63,11 @@ type Resolver interface {
 type Decision struct {
 	Allowed bool
 	Reason  string
+	// PolicyVersion is the effective family policy revision the decision was
+	// evaluated against, formatted as a decimal string. It is empty for checks
+	// that did not resolve a stored family policy. It is safe to audit because
+	// it is a monotonic revision number, not child data.
+	PolicyVersion string
 }
 
 // Policy checks input and output text.

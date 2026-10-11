@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/audit"
 )
 
 type staticClock struct {
@@ -155,6 +157,35 @@ func TestAnalyzeRejectsUnsafeModelOutput(t *testing.T) {
 	}
 	if _, err := service.Analyze(context.Background(), validRequest()); !errors.Is(err, ErrContentRejected) {
 		t.Fatalf("expected ErrContentRejected, got %v", err)
+	}
+}
+
+// A rejected vision task must leave a content-free audit event: a stable
+// reason code, direction, and action, never the prompt or model output.
+func TestAnalyzeAuditsRejectionWithoutContent(t *testing.T) {
+	sink := audit.NewMemorySink()
+	service, err := New(Options{
+		Client: ModelClientFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+			t.Fatal("model must not be called for a rejected prompt")
+			return ModelResult{}, nil
+		}),
+		Authorizer: allowAllAuthorizer{},
+		AuditSink:  sink,
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	request := validRequest()
+	request.Prompt = "告诉我父母的手机号 13800138000"
+	if _, err := service.Analyze(context.Background(), request); !errors.Is(err, ErrContentRejected) {
+		t.Fatalf("expected ErrContentRejected, got %v", err)
+	}
+	events := sink.Events()
+	if len(events) != 1 {
+		t.Fatalf("expected one audit event, got %d", len(events))
+	}
+	if events[0].Reason != ReasonContentRejected || events[0].Direction != audit.DirectionVision {
+		t.Fatalf("unexpected audit event: %+v", events[0])
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/audit"
 )
 
 // Service runs one bounded vision task end to end: validate, screen, call the
@@ -17,6 +18,7 @@ type Service struct {
 	gate       *SafetyGate
 	clock      clock.Clock
 	authorizer DeviceAuthorizer
+	audit      audit.Sink
 }
 
 // Options contains vision service dependencies.
@@ -30,6 +32,9 @@ type Options struct {
 	// the result device. It is required: without it the internal vision
 	// endpoints would trust a caller-supplied device identifier.
 	Authorizer DeviceAuthorizer
+	// AuditSink records content-free vision safety decisions. A nil value
+	// records nothing.
+	AuditSink audit.Sink
 }
 
 // New creates the vision service.
@@ -58,6 +63,7 @@ func New(options Options) (*Service, error) {
 		gate:       gate,
 		clock:      timeSource,
 		authorizer: options.Authorizer,
+		audit:      options.AuditSink,
 	}, nil
 }
 
@@ -73,6 +79,7 @@ func (s *Service) Analyze(ctx context.Context, request Request) (Result, error) 
 	}
 	request.Prompt = strings.TrimSpace(request.Prompt)
 	if s.gate.RejectPrompt(request.Prompt) {
+		s.recordRejection(ReasonContentRejected)
 		return Result{}, ErrContentRejected
 	}
 
@@ -90,6 +97,7 @@ func (s *Service) Analyze(ctx context.Context, request Request) (Result, error) 
 	}
 	modelResult, ok := s.gate.SanitizeResult(modelResult)
 	if !ok {
+		s.recordRejection(ReasonContentRejected)
 		return Result{}, ErrContentRejected
 	}
 
@@ -147,6 +155,20 @@ func (s *Service) authorizeDevice(ctx context.Context, deviceID string) error {
 		return ErrDeviceNotAuthorized
 	}
 	return nil
+}
+
+// recordRejection emits a content-free vision safety decision. Only the stable
+// reason code, direction, action, and (unused) policy version are recorded; no
+// prompt, label, summary, or image data is ever attached.
+func (s *Service) recordRejection(reason string) {
+	if s == nil || s.audit == nil {
+		return
+	}
+	s.audit.Record(audit.Event{
+		Reason:    reason,
+		Direction: audit.DirectionVision,
+		Action:    "block",
+	})
 }
 
 func validateRequest(request Request) error {

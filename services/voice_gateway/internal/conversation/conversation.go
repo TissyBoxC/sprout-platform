@@ -21,6 +21,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/playback"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/llm"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/platform/observability"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/audit"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/content_policy"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/moderation"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/prompt_guard"
@@ -97,7 +98,11 @@ type Config struct {
 	// declared content category is not explicitly allowed. A nil value keeps
 	// text-only callers and tests working; the production composition root
 	// requires it before exposing the realtime endpoint.
-	DevicePolicy  content_policy.DevicePolicy
+	DevicePolicy content_policy.DevicePolicy
+	// SafetyAudit records child-safety decisions as narrow, content-free events
+	// (reason code, direction, action, policy version). A nil value records
+	// nothing. It never receives recognized speech, prompts, or reply text.
+	SafetyAudit   audit.Sink
 	Model         string
 	Voice         string
 	Language      string
@@ -202,16 +207,33 @@ func (r *Runner) TurnWithCategory(
 	// Crisis detection is independent from the operator-facing moderation
 	// switch so a disabled ordinary filter cannot turn off child protection.
 	crisisInput := r.config.Moderator.CheckCrisis(text).Crisis
+	if crisisInput {
+		r.recordAudit(audit.Event{
+			Reason:    moderation.ReasonCrisis,
+			Direction: audit.DirectionInput,
+			Action:    string(moderation.ActionEscalate),
+		})
+	}
 	if r.config.InputFilterEnabled {
 		inputDecision := r.config.Moderator.CheckInput(text)
 		crisisInput = inputDecision.Crisis
 		safetyExempt = crisisInput || safetyExempt
 		if !inputDecision.Allowed && !inputDecision.Crisis {
+			r.recordAudit(audit.Event{
+				Reason:    inputDecision.Reason,
+				Direction: audit.DirectionInput,
+				Action:    string(inputDecision.Action),
+			})
 			return fmt.Errorf("%w: %s", ErrContentBlocked, inputDecision.Reason)
 		}
 	}
 	if !safetyExempt && r.config.Policy != nil {
 		if decision := r.config.Policy.CheckText(text); !decision.Allowed {
+			r.recordAudit(audit.Event{
+				Reason:    decision.Reason,
+				Direction: audit.DirectionInput,
+				Action:    string(moderation.ActionBlock),
+			})
 			return fmt.Errorf("%w: %s", ErrContentBlocked, decision.Reason)
 		}
 	}
@@ -233,6 +255,12 @@ func (r *Runner) TurnWithCategory(
 			r.config.SystemPrompt,
 		)
 		if !decision.Allowed {
+			r.recordAudit(audit.Event{
+				Reason:        decision.Reason,
+				Direction:     audit.DirectionPolicy,
+				Action:        string(moderation.ActionBlock),
+				PolicyVersion: decision.PolicyVersion,
+			})
 			return fmt.Errorf("%w: %s", ErrContentBlocked, decision.Reason)
 		}
 		if strings.TrimSpace(category) != "" {
@@ -242,6 +270,12 @@ func (r *Runner) TurnWithCategory(
 				category,
 			)
 			if !categoryDecision.Allowed {
+				r.recordAudit(audit.Event{
+					Reason:        categoryDecision.Reason,
+					Direction:     audit.DirectionPolicy,
+					Action:        string(moderation.ActionBlock),
+					PolicyVersion: categoryDecision.PolicyVersion,
+				})
 				return fmt.Errorf("%w: %s", ErrContentBlocked, categoryDecision.Reason)
 			}
 		}
@@ -250,6 +284,11 @@ func (r *Runner) TurnWithCategory(
 	if !safetyExempt {
 		guardResult := r.config.PromptGuard.ApplyDetailed(systemPrompt, text)
 		if !guardResult.Allowed {
+			r.recordAudit(audit.Event{
+				Reason:    guardResult.Reason,
+				Direction: audit.DirectionPrompt,
+				Action:    string(moderation.ActionBlock),
+			})
 			return fmt.Errorf("%w: %s", ErrContentBlocked, guardResult.Reason)
 		}
 		systemPrompt = guardResult.SystemPrompt
@@ -345,6 +384,11 @@ func (r *Runner) reply(
 	if r.outputFilterEnabled(ctx) {
 		decision = r.config.Moderator.CheckOutput(reply)
 		if !decision.Allowed {
+			r.recordAudit(audit.Event{
+				Reason:    decision.Reason,
+				Direction: audit.DirectionOutput,
+				Action:    string(decision.Action),
+			})
 			safeReply := r.safeReply(decision)
 			r.appendAssistantMessage(sessionID, safeReply)
 			return safeReply, decision, nil
@@ -353,6 +397,11 @@ func (r *Runner) reply(
 	// Even when the ordinary output filter is disabled, a model reply that
 	// itself contains a crisis phrase must never be spoken verbatim.
 	if crisisDecision := r.config.Moderator.CheckCrisis(reply); crisisDecision.Crisis {
+		r.recordAudit(audit.Event{
+			Reason:    moderation.ReasonCrisis,
+			Direction: audit.DirectionOutput,
+			Action:    string(moderation.ActionEscalate),
+		})
 		safeReply := moderation.CrisisReply
 		r.appendAssistantMessage(sessionID, safeReply)
 		return safeReply, crisisDecision, nil
@@ -443,6 +492,16 @@ func (r *Runner) safeReply(decision moderation.Decision) string {
 		return decision.Replacement
 	}
 	return moderation.SafeFallbackReply
+}
+
+// recordAudit emits one content-free child-safety decision. The sink is
+// optional so text-only callers and tests keep working; a nil sink drops the
+// event rather than failing the turn.
+func (r *Runner) recordAudit(event audit.Event) {
+	if r == nil || r.config.SafetyAudit == nil {
+		return
+	}
+	r.config.SafetyAudit.Record(event)
 }
 
 // referenceCallback returns a playback hook that publishes the played frame.

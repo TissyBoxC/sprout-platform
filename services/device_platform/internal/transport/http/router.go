@@ -16,6 +16,7 @@ import (
 	gatewayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/service"
 	auditdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/domain"
 	audithandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/handler"
+	authdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
 	authservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
 	childservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
 	companionshipservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/companionship/service"
@@ -642,34 +643,55 @@ func NewRouter(options RouterOptions) http.Handler {
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/devices",
-				authHandler.requireAdmin(runtimeHandler.listForAdmin),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionDevicesRead,
+					runtimeHandler.listForAdmin,
+				),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/devices/{device_id}/commands",
-				authHandler.requireAdmin(runtimeHandler.createCommand),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionDevicesManage,
+					runtimeHandler.createCommand,
+				),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/devices/{device_id}/commands",
-				authHandler.requireAdmin(runtimeHandler.listCommands),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionDevicesRead,
+					runtimeHandler.listCommands,
+				),
 			)
 			if options.DiagnosticService != nil {
 				diagnosticHandler := audithandler.New(options.DiagnosticService)
 				mux.HandleFunc(
 					"GET /api/v1/admin/devices/{device_id}/diagnostics",
-					authHandler.requireAdmin(diagnosticHandler.GetDiagnostics),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionDevicesRead,
+						diagnosticHandler.GetDiagnostics,
+					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/devices/{device_id}/diagnostics/summary",
-					authHandler.requireAdmin(diagnosticHandler.GetSummary),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionDevicesRead,
+						diagnosticHandler.GetSummary,
+					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/devices/{device_id}/provisioning",
-					authHandler.requireAdmin(diagnosticHandler.GetProvisioning),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionDevicesRead,
+						diagnosticHandler.GetProvisioning,
+					),
 				)
 			}
 			mux.HandleFunc(
 				"POST /api/v1/admin/devices/{device_id}/sessions/revoke",
-				authHandler.requireAdmin(runtimeHandler.revokeSessions),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionDevicesManage,
+					runtimeHandler.revokeSessions,
+				),
 			)
 		}
 		if options.AIService != nil {
@@ -691,91 +713,158 @@ func NewRouter(options RouterOptions) http.Handler {
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/families",
-				authHandler.requireAdmin(adminHandler.listFamilies),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionFamilyRead,
+					adminHandler.listFamilies,
+				),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/families",
-				authHandler.requireAdmin(adminHandler.createParent),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionFamilyManage,
+					adminHandler.createParent,
+				),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/families/{parent_account_id}/ai-account",
-				authHandler.requireAdmin(adminHandler.retryParentAIAccount),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionAIAccountsManage,
+					adminHandler.retryParentAIAccount,
+				),
 			)
 			mux.HandleFunc(
 				"PUT /api/v1/admin/families/{parent_account_id}/profile",
-				authHandler.requireAdmin(adminHandler.updateParentProfile),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionFamilyManage,
+					adminHandler.updateParentProfile,
+				),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/families/{parent_account_id}/password",
-				authHandler.requireAdmin(adminHandler.resetParentPassword),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionFamilyManage,
+					adminHandler.resetParentPassword,
+				),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/families/{parent_account_id}/devices",
-				authHandler.requireAdmin(adminHandler.listParentDevices),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionFamilyRead,
+					adminHandler.listParentDevices,
+				),
 			)
 			mux.HandleFunc(
 				"DELETE /api/v1/admin/families/{parent_account_id}/devices/{device_id}",
-				authHandler.requireAdmin(adminHandler.unbindParentDevice),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionFamilyManage,
+					adminHandler.unbindParentDevice,
+				),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/families/{parent_account_id}/children",
-				authHandler.requireAdmin(adminHandler.listFamilyChildren),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionFamilyRead,
+					adminHandler.listFamilyChildren,
+				),
 			)
 			if options.UsageReportService != nil {
 				usageHandler := usageReportHandler{service: options.UsageReportService}
 				mux.HandleFunc(
 					"GET /api/v1/admin/families/{parent_account_id}/usage-reports",
-					authHandler.requireAdmin(usageHandler.listAdminFamilyUsageReports),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionFamilyRead,
+						usageHandler.listAdminFamilyUsageReports,
+					),
 				)
 			}
 			mux.HandleFunc(
 				"GET /api/v1/admin/ai-accounts",
-				authHandler.requireAdmin(adminHandler.listAIAccounts),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionAIAccountsRead,
+					adminHandler.listAIAccounts,
+				),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/ai-account-defaults",
-				authHandler.requireAdmin(adminHandler.getAIAccountDefaults),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionAIAccountsRead,
+					adminHandler.getAIAccountDefaults,
+				),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/ai-models",
-				authHandler.requireAdmin(adminHandler.listAIModels),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionAIAccountsRead,
+					adminHandler.listAIModels,
+				),
 			)
 			mux.HandleFunc(
 				"PUT /api/v1/admin/ai-accounts/{provider_account_id}",
-				authHandler.requireAdmin(adminHandler.updateAIAccount),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionAIAccountsManage,
+					adminHandler.updateAIAccount,
+				),
 			)
 			if options.OperationsService != nil {
 				mux.HandleFunc(
 					"GET /api/v1/admin/overview",
-					authHandler.requireAdmin(adminHandler.getOverview),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStatsRead,
+						adminHandler.getOverview,
+					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/settings",
-					authHandler.requireAdmin(adminHandler.getSettings),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionSettingsRead,
+						adminHandler.getSettings,
+					),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/admin/settings",
-					authHandler.requireAdminAction("admin.settings.updated", adminHandler.updateSettings),
+					authHandler.requireAdminPermissionAction(
+						authdomain.AdminPermissionSettingsManage,
+						"admin.settings.updated",
+						adminHandler.updateSettings,
+					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/releases",
-					authHandler.requireAdmin(adminHandler.listReleases),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStorageRead,
+						adminHandler.listReleases,
+					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/admin/releases",
-					authHandler.requireAdminAction("admin.release.created", adminHandler.createRelease),
+					authHandler.requireAdminPermissionAction(
+						authdomain.AdminPermissionStorageManage,
+						"admin.release.created",
+						adminHandler.createRelease,
+					),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/admin/releases/{version}/publish",
-					authHandler.requireAdminAction("admin.release.published", adminHandler.publishRelease),
+					authHandler.requireAdminPermissionAction(
+						authdomain.AdminPermissionStorageManage,
+						"admin.release.published",
+						adminHandler.publishRelease,
+					),
 				)
 				mux.HandleFunc(
 					"DELETE /api/v1/admin/releases/{version}",
-					authHandler.requireAdminAction("admin.release.deleted", adminHandler.deleteRelease),
+					authHandler.requireAdminPermissionAction(
+						authdomain.AdminPermissionStorageManage,
+						"admin.release.deleted",
+						adminHandler.deleteRelease,
+					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/release-artifacts/{version}",
-					authHandler.requireAdmin(adminHandler.getReleaseArtifact),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStorageRead,
+						adminHandler.getReleaseArtifact,
+					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/app/update",
@@ -785,76 +874,129 @@ func NewRouter(options RouterOptions) http.Handler {
 			if options.ReleaseStoreService != nil {
 				mux.HandleFunc(
 					"GET /api/v1/admin/storage/files",
-					authHandler.requireAdmin(adminHandler.listReleaseFiles),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStorageRead,
+						adminHandler.listReleaseFiles,
+					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/admin/storage/files/upload",
-					authHandler.requireAdmin(adminHandler.uploadReleaseFile),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStorageManage,
+						adminHandler.uploadReleaseFile,
+					),
 				)
 				mux.HandleFunc(
 					"DELETE /api/v1/admin/storage/files/{path...}",
-					authHandler.requireAdmin(adminHandler.deleteReleaseFile),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStorageManage,
+						adminHandler.deleteReleaseFile,
+					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/storage/index/status",
-					authHandler.requireAdmin(adminHandler.getReleaseIndexStatus),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStorageRead,
+						adminHandler.getReleaseIndexStatus,
+					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/admin/storage/index/refresh",
-					authHandler.requireAdmin(adminHandler.refreshReleaseIndex),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStorageManage,
+						adminHandler.refreshReleaseIndex,
+					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/release-files",
-					authHandler.requireAdmin(adminHandler.listReleaseFiles),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStorageRead,
+						adminHandler.listReleaseFiles,
+					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/admin/release-files",
-					authHandler.requireAdmin(adminHandler.uploadReleaseFile),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStorageManage,
+						adminHandler.uploadReleaseFile,
+					),
 				)
 				mux.HandleFunc(
 					"DELETE /api/v1/admin/release-files",
-					authHandler.requireAdmin(adminHandler.deleteReleaseFile),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStorageManage,
+						adminHandler.deleteReleaseFile,
+					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/admin/release-index/refresh",
-					authHandler.requireAdmin(adminHandler.refreshReleaseIndex),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStorageManage,
+						adminHandler.refreshReleaseIndex,
+					),
 				)
 			}
 			if options.ServiceVersionService != nil {
 				mux.HandleFunc(
 					"GET /api/v1/admin/service-versions",
-					authHandler.requireAdmin(adminHandler.listServiceVersions),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionServiceRead,
+						adminHandler.listServiceVersions,
+					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/admin/service-versions/check",
-					authHandler.requireAdmin(adminHandler.checkServiceVersions),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionServiceRead,
+						adminHandler.checkServiceVersions,
+					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/admin/service-versions/upgrade",
-					authHandler.requireAdminAction("admin.service.upgrade.started", adminHandler.upgradeAllServices),
+					authHandler.requireAdminPermissionAction(
+						authdomain.AdminPermissionServiceUpgrade,
+						"admin.service.upgrade.started",
+						adminHandler.upgradeAllServices,
+					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/admin/service-versions/{service}/upgrade",
-					authHandler.requireAdminAction("admin.service.upgrade.started", adminHandler.upgradeService),
+					authHandler.requireAdminPermissionAction(
+						authdomain.AdminPermissionServiceUpgrade,
+						"admin.service.upgrade.started",
+						adminHandler.upgradeService,
+					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/service-versions/{service}/releases",
-					authHandler.requireAdmin(adminHandler.listServiceReleases),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionServiceRead,
+						adminHandler.listServiceReleases,
+					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/service-version-operations",
-					authHandler.requireAdmin(adminHandler.listServiceVersionOperations),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionServiceRead,
+						adminHandler.listServiceVersionOperations,
+					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/service-version-operations/{operation_id}",
-					authHandler.requireAdmin(adminHandler.getServiceVersionOperation),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionServiceRead,
+						adminHandler.getServiceVersionOperation,
+					),
 				)
 			}
 			if options.FeatureCenterService != nil {
 				featureCenterHandler := NewFeatureCenterHandler(options.FeatureCenterService)
 				featureCenterHandler.RegisterAdminRoutes(
 					mux,
-					authHandler.requireAdminAudited(featureCenterAuditAction),
+					authHandler.requireAdminPermissionAudited(
+						featureCenterPermission,
+						featureCenterAuditAction,
+					),
 				)
 			}
 			// parentScoped resolves the authenticated guardian id and is shared
@@ -931,7 +1073,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/audit",
-					authHandler.requireAdmin(privacyHandler.AdminAudit),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionAuditRead,
+						privacyHandler.AdminAudit,
+					),
 				)
 			}
 			if options.VisionService != nil {
@@ -978,7 +1123,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/vision/stats",
-					authHandler.requireAdmin(visionHandler.GetAdminStats),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStatsRead,
+						visionHandler.GetAdminStats,
+					),
 				)
 			}
 			if options.DisplayService != nil {
@@ -1001,7 +1149,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/display/stats",
-					authHandler.requireAdmin(displayHandler.adminStats),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStatsRead,
+						displayHandler.adminStats,
+					),
 				)
 			}
 			if options.ScreenService != nil {
@@ -1044,7 +1195,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/screen/stats",
-					authHandler.requireAdmin(screenHandler.adminStats),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStatsRead,
+						screenHandler.adminStats,
+					),
 				)
 			}
 			if options.InputService != nil {
@@ -1067,7 +1221,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/touch/stats",
-					authHandler.requireAdmin(inputHandler.adminStats),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStatsRead,
+						inputHandler.adminStats,
+					),
 				)
 			}
 			if options.ConnectivityService != nil {
@@ -1090,7 +1247,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/connectivity/stats",
-					authHandler.requireAdmin(connectivityHandler.adminStats),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStatsRead,
+						connectivityHandler.adminStats,
+					),
 				)
 			}
 			if options.PowerService != nil {
@@ -1113,7 +1273,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/power/stats",
-					authHandler.requireAdmin(powerHandler.adminStats),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStatsRead,
+						powerHandler.adminStats,
+					),
 				)
 			}
 			if options.MotionService != nil {
@@ -1136,7 +1299,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/motion/stats",
-					authHandler.requireAdmin(motionHandler.adminStats),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStatsRead,
+						motionHandler.adminStats,
+					),
 				)
 			}
 			if options.FormFactorService != nil {
@@ -1151,7 +1317,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/form-factor/stats",
-					authHandler.requireAdmin(formFactorHandler.adminStats),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStatsRead,
+						formFactorHandler.adminStats,
+					),
 				)
 			}
 			if options.VideoCompanionService != nil {
@@ -1194,7 +1363,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/video-companion/stats",
-					authHandler.requireAdmin(videoHandler.adminStats),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStatsRead,
+						videoHandler.adminStats,
+					),
 				)
 			}
 			if options.WearableService != nil {
@@ -1253,7 +1425,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/wearable/stats",
-					authHandler.requireAdmin(wearableHandler.adminStats),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStatsRead,
+						wearableHandler.adminStats,
+					),
 				)
 			}
 			if options.DeviceMeshService != nil {
@@ -1300,7 +1475,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/device-mesh/stats",
-					authHandler.requireAdmin(meshHandler.adminStats),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStatsRead,
+						meshHandler.adminStats,
+					),
 				)
 			}
 			if options.NotificationService != nil {
@@ -1344,23 +1522,40 @@ func NewRouter(options RouterOptions) http.Handler {
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/notifications",
-					authHandler.requireAdmin(adminNotificationHandler.AdminList),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionNotificationsRead,
+						adminNotificationHandler.AdminList,
+					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/admin/notifications",
-					authHandler.requireAdminAction("admin.notification.created", adminScoped(adminNotificationHandler.AdminCreate)),
+					authHandler.requireAdminPermissionAction(
+						authdomain.AdminPermissionNotificationsWrite,
+						"admin.notification.created",
+						adminScoped(adminNotificationHandler.AdminCreate),
+					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/notifications/stats",
-					authHandler.requireAdmin(adminNotificationHandler.AdminStats),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionNotificationsRead,
+						adminNotificationHandler.AdminStats,
+					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/notifications/{notification_id}",
-					authHandler.requireAdmin(adminNotificationHandler.AdminGet),
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionNotificationsRead,
+						adminNotificationHandler.AdminGet,
+					),
 				)
 				mux.HandleFunc(
 					"DELETE /api/v1/admin/notifications/{notification_id}",
-					authHandler.requireAdminAction("admin.notification.deleted", adminScoped(adminNotificationHandler.AdminDelete)),
+					authHandler.requireAdminPermissionAction(
+						authdomain.AdminPermissionNotificationsWrite,
+						"admin.notification.deleted",
+						adminScoped(adminNotificationHandler.AdminDelete),
+					),
 				)
 			}
 		}
@@ -1368,71 +1563,130 @@ func NewRouter(options RouterOptions) http.Handler {
 			contentHandler := contentHandler{service: options.ContentService}
 			mux.HandleFunc(
 				"GET /api/v1/admin/content/packages",
-				authHandler.requireAdmin(contentHandler.listPackages),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionContentRead,
+					contentHandler.listPackages,
+				),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/packages",
-				authHandler.requireAdmin(contentHandler.createPackage),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionContentReview,
+					contentHandler.createPackage,
+				),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/content/packages/{package_id}",
-				authHandler.requireAdmin(contentHandler.getPackage),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionContentRead,
+					contentHandler.getPackage,
+				),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/packages/{package_id}/versions",
-				authHandler.requireAdmin(contentHandler.createPackageVersion),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionContentReview,
+					contentHandler.createPackageVersion,
+				),
 			)
 			mux.HandleFunc(
 				"PUT /api/v1/admin/content/packages/{package_id}/versions/{package_version}",
-				authHandler.requireAdmin(contentHandler.updatePackage),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionContentReview,
+					contentHandler.updatePackage,
+				),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/submit",
-				authHandler.requireAdmin(contentHandler.submitPackage),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionContentReview,
+					contentHandler.submitPackage,
+				),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/approve",
-				authHandler.requireAdminAction("admin.content.reviewed", contentHandler.approvePackage),
+				authHandler.requireAdminPermissionAction(
+					authdomain.AdminPermissionContentReview,
+					"admin.content.reviewed",
+					contentHandler.approvePackage,
+				),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/reject",
-				authHandler.requireAdminAction("admin.content.reviewed", contentHandler.rejectPackage),
+				authHandler.requireAdminPermissionAction(
+					authdomain.AdminPermissionContentReview,
+					"admin.content.reviewed",
+					contentHandler.rejectPackage,
+				),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/publish",
-				authHandler.requireAdminAction("admin.content.published", contentHandler.publishPackage),
+				authHandler.requireAdminPermissionAction(
+					authdomain.AdminPermissionContentReview,
+					"admin.content.published",
+					contentHandler.publishPackage,
+				),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/withdraw",
-				authHandler.requireAdminAction("admin.content.withdrawn", contentHandler.withdrawPackage),
+				authHandler.requireAdminPermissionAction(
+					authdomain.AdminPermissionContentReview,
+					"admin.content.withdrawn",
+					contentHandler.withdrawPackage,
+				),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/packages/{package_id}/versions/{package_version}/archive",
-				authHandler.requireAdmin(contentHandler.archivePackage),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionContentReview,
+					contentHandler.archivePackage,
+				),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/content/theme-packs",
-				authHandler.requireAdmin(contentHandler.listThemePacks),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionContentRead,
+					contentHandler.listThemePacks,
+				),
 			)
 			mux.HandleFunc(
 				"PUT /api/v1/admin/content/theme-packs/{theme_id}",
-				authHandler.requireAdminAction("admin.content.theme_pack.updated", contentHandler.upsertThemePack),
+				authHandler.requireAdminPermissionAction(
+					authdomain.AdminPermissionContentReview,
+					"admin.content.theme_pack.updated",
+					contentHandler.upsertThemePack,
+				),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/content/theme-packs/{theme_id}",
-				authHandler.requireAdmin(contentHandler.getThemePack),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionContentRead,
+					contentHandler.getThemePack,
+				),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/theme-packs/{theme_id}/publish",
-				authHandler.requireAdminAction("admin.content.theme_pack.published", contentHandler.publishThemePack),
+				authHandler.requireAdminPermissionAction(
+					authdomain.AdminPermissionContentReview,
+					"admin.content.theme_pack.published",
+					contentHandler.publishThemePack,
+				),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/admin/content/theme-packs/{theme_id}/withdraw",
-				authHandler.requireAdminAction("admin.content.theme_pack.withdrawn", contentHandler.withdrawThemePack),
+				authHandler.requireAdminPermissionAction(
+					authdomain.AdminPermissionContentReview,
+					"admin.content.theme_pack.withdrawn",
+					contentHandler.withdrawThemePack,
+				),
 			)
 			mux.HandleFunc(
 				"DELETE /api/v1/admin/content/theme-packs/{theme_id}",
-				authHandler.requireAdminAction("admin.content.theme_pack.deleted", contentHandler.deleteThemePack),
+				authHandler.requireAdminPermissionAction(
+					authdomain.AdminPermissionContentReview,
+					"admin.content.theme_pack.deleted",
+					contentHandler.deleteThemePack,
+				),
 			)
 		}
 		if options.ContentOfflinePolicyService != nil {
@@ -1441,15 +1695,25 @@ func NewRouter(options RouterOptions) http.Handler {
 			}
 			mux.HandleFunc(
 				"GET /api/v1/admin/content/offline-policy",
-				authHandler.requireAdmin(adminOfflinePolicyHandler.adminCurrent),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionContentRead,
+					adminOfflinePolicyHandler.adminCurrent,
+				),
 			)
 			mux.HandleFunc(
 				"PUT /api/v1/admin/content/offline-policy",
-				authHandler.requireAdminAction("admin.content.offline_policy.published", adminOfflinePolicyHandler.adminPublish),
+				authHandler.requireAdminPermissionAction(
+					authdomain.AdminPermissionContentReview,
+					"admin.content.offline_policy.published",
+					adminOfflinePolicyHandler.adminPublish,
+				),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/content/offline-policy/acknowledgements",
-				authHandler.requireAdmin(adminOfflinePolicyHandler.acknowledgementsForAdmin),
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionContentRead,
+					adminOfflinePolicyHandler.acknowledgementsForAdmin,
+				),
 			)
 		}
 	}
@@ -1641,7 +1905,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				audit:   options.AuditRecorder,
 			}
 			requireAuthentication = authHandler.requireAuthentication
-			requireAdmin = authHandler.requireAdminAudited(otaAuditAction)
+			requireAdmin = authHandler.requireAdminPermissionAudited(
+				otaPermission,
+				otaAuditAction,
+			)
 		}
 		ota.registerRoutes(mux, requireAuthentication, requireAdmin)
 	}
@@ -1795,6 +2062,24 @@ func featureCenterAuditAction(request *http.Request) string {
 	default:
 		return "admin.feature_center.updated"
 	}
+}
+
+// featureCenterPermission splits the feature-center route group: reads need
+// the read capability, mutations need the manage capability.
+func featureCenterPermission(request *http.Request) string {
+	if isAdminMutation(request.Method) {
+		return authdomain.AdminPermissionFeatureCenterWrite
+	}
+	return authdomain.AdminPermissionFeatureCenterRead
+}
+
+// otaPermission splits the OTA route group: reads need the read capability,
+// lifecycle and deployment mutations need the manage capability.
+func otaPermission(request *http.Request) string {
+	if isAdminMutation(request.Method) {
+		return authdomain.AdminPermissionOTAManage
+	}
+	return authdomain.AdminPermissionOTARead
 }
 
 // otaAuditAction maps an OTA write route to a stable audit action covering the

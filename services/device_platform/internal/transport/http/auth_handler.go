@@ -343,20 +343,115 @@ func (handler authHandler) requireAdmin(next http.HandlerFunc) http.HandlerFunc 
 		response http.ResponseWriter,
 		request *http.Request,
 	) {
-		accountID, ok := authenticatedAccountID(request)
-		if !ok {
-			handler.recordAuthDenied(request, "", "admin.permission.denied", "unauthenticated")
-			writeError(response, request, http.StatusForbidden, "insufficient_permission", "你没有权限访问此页面")
-			return
-		}
-		account, err := handler.service.GetIdentity(request.Context(), accountID)
-		if err != nil || account.Role != authdomain.RoleAdmin {
-			handler.recordAuthDenied(request, accountID, "admin.permission.denied", "insufficient_role")
-			writeError(response, request, http.StatusForbidden, "insufficient_permission", "你没有权限访问此页面")
+		if _, ok := handler.authorizeAdmin(request, response, ""); !ok {
 			return
 		}
 		next(response, request)
 	})
+}
+
+// requireAdminPermission wraps a management handler with the administrator
+// role check plus one operation-level permission. A denial records the
+// required permission so an operator can tell a role rejection apart from a
+// capability rejection without reading request bodies.
+func (handler authHandler) requireAdminPermission(
+	permission string,
+	next http.HandlerFunc,
+) http.HandlerFunc {
+	return handler.requireAdminPermissionFunc(
+		func(*http.Request) string { return permission },
+		next,
+	)
+}
+
+// requireAdminPermissionFunc is requireAdminPermission with the required
+// permission resolved per request. Route groups whose read and write endpoints
+// share one registration (OTA, feature center) use it to demand only the read
+// capability from a GET and the manage capability from a mutation.
+func (handler authHandler) requireAdminPermissionFunc(
+	permissionOf func(*http.Request) string,
+	next http.HandlerFunc,
+) http.HandlerFunc {
+	return handler.requireAuthentication(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		if _, ok := handler.authorizeAdmin(request, response, permissionOf(request)); !ok {
+			return
+		}
+		next(response, request)
+	})
+}
+
+// requireAdminPermissionAction is requireAdminPermission plus the success audit
+// label used by sensitive mutations.
+func (handler authHandler) requireAdminPermissionAction(
+	permission string,
+	action string,
+	next http.HandlerFunc,
+) http.HandlerFunc {
+	return handler.requireAdminPermission(permission, handler.auditAfterSuccess(action, next))
+}
+
+// requireAdminPermissionAudited returns a route-group middleware that demands
+// the operation permission from permissionOf and records a success audit for
+// mutations labelled by labeler. It keeps OTA and feature-center registration
+// concise while applying the same read/manage split as the single-route form.
+func (handler authHandler) requireAdminPermissionAudited(
+	permissionOf func(*http.Request) string,
+	labeler func(*http.Request) string,
+) func(http.HandlerFunc) http.HandlerFunc {
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return handler.requireAdminPermissionFunc(permissionOf, func(
+			response http.ResponseWriter,
+			request *http.Request,
+		) {
+			if handler.audit == nil || !isAdminMutation(request.Method) {
+				next(response, request)
+				return
+			}
+			action := labeler(request)
+			if action == "" {
+				next(response, request)
+				return
+			}
+			handler.auditAfterSuccess(action, next)(response, request)
+		})
+	}
+}
+
+// authorizeAdmin enforces the administrator role and an optional operation
+// permission. On denial it writes the standard forbidden response and a narrow
+// audit event, returning the account id only when the request may proceed.
+func (handler authHandler) authorizeAdmin(
+	request *http.Request,
+	response http.ResponseWriter,
+	requiredPermission string,
+) (string, bool) {
+	accountID, ok := authenticatedAccountID(request)
+	if !ok {
+		handler.recordAuthDenied(request, "", "admin.permission.denied", "unauthenticated")
+		writeError(response, request, http.StatusForbidden, "insufficient_permission", "你没有权限访问此页面")
+		return "", false
+	}
+	account, err := handler.service.GetIdentity(request.Context(), accountID)
+	if err != nil || account.Role != authdomain.RoleAdmin {
+		handler.recordAuthDenied(request, accountID, "admin.permission.denied", "insufficient_role")
+		writeError(response, request, http.StatusForbidden, "insufficient_permission", "你没有权限访问此页面")
+		return "", false
+	}
+	if requiredPermission != "" &&
+		!authdomain.HasAdminPermission(account.AdminPermissions, requiredPermission) {
+		handler.recordAuthDenied(
+			request,
+			accountID,
+			"admin.permission.denied",
+			"insufficient_permission:"+requiredPermission,
+		)
+		writeError(response, request, http.StatusForbidden, "insufficient_permission", "你没有权限访问此页面")
+		return "", false
+	}
+	return accountID, true
 }
 
 // requireAdminAction wraps an administrator handler with a fixed audit action
@@ -369,10 +464,17 @@ func (handler authHandler) requireAdminAction(
 	action string,
 	next http.HandlerFunc,
 ) http.HandlerFunc {
-	return handler.requireAdmin(func(
-		response http.ResponseWriter,
-		request *http.Request,
-	) {
+	return handler.requireAdmin(handler.auditAfterSuccess(action, next))
+}
+
+// auditAfterSuccess records one fixed action label after a handler responds
+// successfully. It keeps the audit behaviour identical across the role-only,
+// permission, and route-group middleware.
+func (handler authHandler) auditAfterSuccess(
+	action string,
+	next http.HandlerFunc,
+) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
 		if handler.audit == nil {
 			next(response, request)
 			return
@@ -392,7 +494,7 @@ func (handler authHandler) requireAdminAction(
 				"route": request.Method + " " + request.URL.Path,
 			},
 		)
-	})
+	}
 }
 
 // requireAdminAudited returns an administrator middleware that records one
@@ -411,25 +513,12 @@ func (handler authHandler) requireAdminAudited(
 				next(response, request)
 				return
 			}
-			recorder := &statusRecorder{ResponseWriter: response, status: http.StatusOK}
-			next(recorder, request)
-			if recorder.status < http.StatusOK || recorder.status >= http.StatusMultipleChoices {
-				return
-			}
-			actorAccountID, _ := authenticatedAccountID(request)
 			action := labeler(request)
 			if action == "" {
+				next(response, request)
 				return
 			}
-			_ = handler.audit.RecordAudit(
-				request.Context(),
-				actorAccountID,
-				"",
-				action,
-				map[string]any{
-					"route": request.Method + " " + request.URL.Path,
-				},
-			)
+			handler.auditAfterSuccess(action, next)(response, request)
 		})
 	}
 }

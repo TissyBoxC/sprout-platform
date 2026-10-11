@@ -83,6 +83,8 @@ class ProfilePage extends ConsumerWidget {
                     onCellular: () => context.push('/me/cellular'),
                     onBattery: () => context.push('/me/battery'),
                     onMotion: () => context.push('/me/motion'),
+                    onVideoCompanion: () =>
+                        context.push('/me/video-companion'),
                     onUsageReports: () => context.push('/me/usage-reports'),
                     onNotifications: () => context.push('/me/notifications'),
                     onContent: () => context.push('/me/content'),
@@ -425,6 +427,7 @@ class _SettingsCard extends StatelessWidget {
     required this.onCellular,
     required this.onBattery,
     required this.onMotion,
+    required this.onVideoCompanion,
     required this.onUsageReports,
     required this.onNotifications,
     required this.onContent,
@@ -446,6 +449,7 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onCellular;
   final VoidCallback onBattery;
   final VoidCallback onMotion;
+  final VoidCallback onVideoCompanion;
   final VoidCallback onUsageReports;
   final VoidCallback onNotifications;
   final VoidCallback onContent;
@@ -547,6 +551,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('设置行走、舞蹈、尾巴动作与速度上限'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onMotion,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.videocam_outlined),
+            title: const Text('视频陪伴'),
+            subtitle: const Text('管理视频联系人，查看通话记录'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onVideoCompanion,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

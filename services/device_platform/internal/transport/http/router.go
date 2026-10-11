@@ -32,6 +32,7 @@ import (
 	englishservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/service"
 	featurecenterservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	formfactorservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/form_factor/service"
+	imageprivacyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/image_privacy/service"
 	inputservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/service"
 	learningvisualizationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/learning_visualization/service"
 	localcommandservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
@@ -60,50 +61,51 @@ import (
 
 // RouterOptions contains dependencies for the device platform HTTP transport.
 type RouterOptions struct {
-	Logger                      *slog.Logger
-	InternalAPIConfig           config.InternalAPIConfig
-	AuthService                 *authservice.Service
-	ChildService                *childservice.Service
-	CompanionshipService        *companionshipservice.Service
-	ParentPolicyService         *policeservice.Service
-	AIService                   *gatewayservice.Service
-	OperationsService           *operationsservice.Service
-	BindingService              *bindingservice.Service
-	RuntimeService              *runtimeservice.Service
-	DiagnosticService           auditService
-	ServiceVersionService       *serviceversionservice.Service
-	FeatureCenterService        *featurecenterservice.Service
-	ReleaseStoreService         *releasestoreservice.Service
-	OTAService                  *otaservice.Service
-	ContentService              *contentservice.Service
-	ContentOfflinePolicyService *contentofflinepolicyservice.Service
-	UITextService               *ui_textservice.Service
-	EnglishService              *englishservice.Service
-	PlaybackService             *playbackservice.Service
-	LocalCommandService         *localcommandservice.Service
-	RecommendationService       *recommendationservice.Service
-	UsageReportService          *usagereportservice.Service
-	VoiceTokenIssuer            bindingservice.VoiceTokenIssuer
-	VoiceWebSocketURL           string
-	VoiceConsentReader          voiceConsentReader
-	PrivacyService              *privacyservice.Service
-	NotificationService         *notificationservice.Service
-	VisionService               *visionservice.Service
-	DisplayService              *displayservice.Service
-	InputService                *inputservice.Service
-	ConnectivityService         *connectivityservice.Service
-	PowerService                *powerservice.Service
-	MotionService               *motionservice.Service
-	FormFactorService           *formfactorservice.Service
-	VideoCompanionService       *videoservice.Service
-	VideoSessionService         *videosessionservice.Service
-	AlarmReminderService        *alarmreminderservice.Service
-	BluetoothAudioService       *bluetoothaudioservice.Service
+	Logger                       *slog.Logger
+	InternalAPIConfig            config.InternalAPIConfig
+	AuthService                  *authservice.Service
+	ChildService                 *childservice.Service
+	CompanionshipService         *companionshipservice.Service
+	ParentPolicyService          *policeservice.Service
+	AIService                    *gatewayservice.Service
+	OperationsService            *operationsservice.Service
+	BindingService               *bindingservice.Service
+	RuntimeService               *runtimeservice.Service
+	DiagnosticService            auditService
+	ServiceVersionService        *serviceversionservice.Service
+	FeatureCenterService         *featurecenterservice.Service
+	ReleaseStoreService          *releasestoreservice.Service
+	OTAService                   *otaservice.Service
+	ContentService               *contentservice.Service
+	ContentOfflinePolicyService  *contentofflinepolicyservice.Service
+	UITextService                *ui_textservice.Service
+	EnglishService               *englishservice.Service
+	PlaybackService              *playbackservice.Service
+	LocalCommandService          *localcommandservice.Service
+	RecommendationService        *recommendationservice.Service
+	UsageReportService           *usagereportservice.Service
+	VoiceTokenIssuer             bindingservice.VoiceTokenIssuer
+	VoiceWebSocketURL            string
+	VoiceConsentReader           voiceConsentReader
+	PrivacyService               *privacyservice.Service
+	NotificationService          *notificationservice.Service
+	VisionService                *visionservice.Service
+	DisplayService               *displayservice.Service
+	InputService                 *inputservice.Service
+	ConnectivityService          *connectivityservice.Service
+	PowerService                 *powerservice.Service
+	MotionService                *motionservice.Service
+	FormFactorService            *formfactorservice.Service
+	VideoCompanionService        *videoservice.Service
+	VideoSessionService          *videosessionservice.Service
+	AlarmReminderService         *alarmreminderservice.Service
+	BluetoothAudioService        *bluetoothaudioservice.Service
 	LearningVisualizationService *learningvisualizationservice.Service
-	WearableService             *wearableservice.Service
-	DeviceMeshService           *devicemeshservice.Service
-	ScreenService               *screenservice.Service
-	AuditRecorder               auditRecorder
+	ImagePrivacyService          *imageprivacyservice.Service
+	WearableService              *wearableservice.Service
+	DeviceMeshService            *devicemeshservice.Service
+	ScreenService                *screenservice.Service
+	AuditRecorder                auditRecorder
 }
 
 // auditRecorder is the narrow operation-audit write surface used by existing
@@ -639,6 +641,26 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/learning-visualization/status",
 					deviceLearningVisualizationHandler.reportStatus,
+				)
+			}
+		}
+		if options.ImagePrivacyService != nil {
+			imagePrivacyHandler := imagePrivacyHandler{
+				service: options.ImagePrivacyService,
+			}
+			if options.BindingService != nil && options.RuntimeService != nil {
+				deviceImagePrivacyHandler := deviceImagePrivacyHandler{
+					handler:        &imagePrivacyHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/image-privacy/policy",
+					deviceImagePrivacyHandler.devicePolicy,
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/image-privacy/status",
+					deviceImagePrivacyHandler.reportStatus,
 				)
 			}
 		}
@@ -1407,6 +1429,34 @@ func NewRouter(options RouterOptions) http.Handler {
 					authHandler.requireAdminPermission(
 						authdomain.AdminPermissionStatsRead,
 						learningVisualizationHandler.adminStats,
+					),
+				)
+			}
+			if options.ImagePrivacyService != nil {
+				imagePrivacyHandler := imagePrivacyHandler{
+					service: options.ImagePrivacyService,
+				}
+				mux.HandleFunc(
+					"GET /api/v1/image-privacy/policy",
+					authHandler.requireAuthentication(imagePrivacyHandler.current),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/image-privacy/policy",
+					authHandler.requireAuthentication(imagePrivacyHandler.publish),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/image-privacy/devices",
+					authHandler.requireAuthentication(imagePrivacyHandler.statuses),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/image-privacy/capability",
+					authHandler.requireAuthentication(imagePrivacyHandler.capability),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/image-privacy/stats",
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStatsRead,
+						imagePrivacyHandler.adminStats,
 					),
 				)
 			}

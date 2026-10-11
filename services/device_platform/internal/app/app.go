@@ -51,6 +51,8 @@ import (
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	formFactorRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/form_factor/repository"
 	formFactorService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/form_factor/service"
+	imagePrivacyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/image_privacy/repository"
+	imagePrivacyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/image_privacy/service"
 	inputRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/repository"
 	inputService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/service"
 	learningVisualizationRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/learning_visualization/repository"
@@ -643,54 +645,61 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create learning visualization service: %w", err)
 	}
+	imagePrivacy, err := imagePrivacyService.New(imagePrivacyService.Options{
+		Repository: imagePrivacyRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
+	if err != nil {
+		return fmt.Errorf("create image privacy service: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
 		Handler: platformhttp.NewRouter(platformhttp.RouterOptions{
-			Logger:                      logger,
-			InternalAPIConfig:           cfg.Internal,
-			AuthService:                 parentAuthService,
-			ChildService:                childProfileService,
-			CompanionshipService:        companionshipCompanionService,
-			AlarmReminderService:        alarmReminder,
-			ParentPolicyService:         parentPolicyService,
-			AIService:                   aiAccountService,
-			OperationsService:           operations,
-			BindingService:              deviceBindingService,
-			RuntimeService:              deviceRuntimeService,
-			DiagnosticService:           diagnosticService,
-			ServiceVersionService:       serviceVersions,
-			FeatureCenterService:        featureCenter,
-			ReleaseStoreService:         releaseStore,
-			OTAService:                  ota,
-			ContentService:              contentLibraryService,
-			EnglishService:              englishLearningService,
-			PlaybackService:             playbackRequests,
-			RecommendationService:       contentRecommendations,
-			LocalCommandService:         localCommands,
-			ContentOfflinePolicyService: contentOfflinePolicy,
-			UITextService:               uiText,
-			UsageReportService:          usageReports,
-			VoiceTokenIssuer:            voiceTokenIssuer,
-			VoiceWebSocketURL:           cfg.VoiceGateway.WebSocketURL,
-			VoiceConsentReader:          privacy,
-			PrivacyService:              privacy,
-			NotificationService:         notifications,
-			VisionService:               vision,
-			DisplayService:              display,
-			InputService:                input,
-			ConnectivityService:         connectivity,
-			PowerService:                devicePower,
-			MotionService:               deviceMotion,
-			FormFactorService:           deviceFormFactor,
-			VideoCompanionService:       videoCompanion,
-			VideoSessionService:         videoSession,
-			BluetoothAudioService:       bluetoothAudio,
+			Logger:                       logger,
+			InternalAPIConfig:            cfg.Internal,
+			AuthService:                  parentAuthService,
+			ChildService:                 childProfileService,
+			CompanionshipService:         companionshipCompanionService,
+			AlarmReminderService:         alarmReminder,
+			ParentPolicyService:          parentPolicyService,
+			AIService:                    aiAccountService,
+			OperationsService:            operations,
+			BindingService:               deviceBindingService,
+			RuntimeService:               deviceRuntimeService,
+			DiagnosticService:            diagnosticService,
+			ServiceVersionService:        serviceVersions,
+			FeatureCenterService:         featureCenter,
+			ReleaseStoreService:          releaseStore,
+			OTAService:                   ota,
+			ContentService:               contentLibraryService,
+			EnglishService:               englishLearningService,
+			PlaybackService:              playbackRequests,
+			RecommendationService:        contentRecommendations,
+			LocalCommandService:          localCommands,
+			ContentOfflinePolicyService:  contentOfflinePolicy,
+			UITextService:                uiText,
+			UsageReportService:           usageReports,
+			VoiceTokenIssuer:             voiceTokenIssuer,
+			VoiceWebSocketURL:            cfg.VoiceGateway.WebSocketURL,
+			VoiceConsentReader:           privacy,
+			PrivacyService:               privacy,
+			NotificationService:          notifications,
+			VisionService:                vision,
+			DisplayService:               display,
+			InputService:                 input,
+			ConnectivityService:          connectivity,
+			PowerService:                 devicePower,
+			MotionService:                deviceMotion,
+			FormFactorService:            deviceFormFactor,
+			VideoCompanionService:        videoCompanion,
+			VideoSessionService:          videoSession,
+			BluetoothAudioService:        bluetoothAudio,
 			LearningVisualizationService: learningVisualization,
-			WearableService:             wearable,
-			DeviceMeshService:           deviceMesh,
-			ScreenService:               screen,
-			AuditRecorder:               privacy,
+			ImagePrivacyService:          imagePrivacy,
+			WearableService:              wearable,
+			DeviceMeshService:            deviceMesh,
+			ScreenService:                screen,
+			AuditRecorder:                privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

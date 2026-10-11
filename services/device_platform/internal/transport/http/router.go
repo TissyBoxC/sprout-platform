@@ -22,6 +22,7 @@ import (
 	contentservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/service"
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
+	englishservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/service"
 	featurecenterservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	notificationhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/handler"
 	notificationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
@@ -53,6 +54,7 @@ type RouterOptions struct {
 	ReleaseStoreService   *releasestoreservice.Service
 	OTAService            *otaservice.Service
 	ContentService        *contentservice.Service
+	EnglishService        *englishservice.Service
 	UsageReportService    *usagereportservice.Service
 	VoiceTokenIssuer      bindingservice.VoiceTokenIssuer
 	VoiceWebSocketURL     string
@@ -207,6 +209,41 @@ func NewRouter(options RouterOptions) http.Handler {
 				"DELETE /api/v1/companionship/habit-reminders/{reminder_id}",
 				authHandler.requireAuthentication(companionshipHandler.deleteHabitReminder),
 			)
+		}
+		if options.EnglishService != nil {
+			englishHandler := englishHandler{
+				service: options.EnglishService,
+			}
+			mux.HandleFunc(
+				"GET /api/v1/english/lessons",
+				authHandler.requireAuthentication(englishHandler.listLessons),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/english/lessons/{lesson_id}",
+				authHandler.requireAuthentication(englishHandler.getLesson),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/english/progress",
+				authHandler.requireAuthentication(englishHandler.listProgress),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/english/attempts",
+				authHandler.requireAuthentication(englishHandler.listAttempts),
+			)
+			// Firmware devices never receive a guardian credential, so the
+			// practice-attempt write is also exposed behind a device session
+			// token verified with the path device id.
+			if options.BindingService != nil && options.RuntimeService != nil {
+				deviceEnglishHandler := deviceEnglishHandler{
+					englishHandler: &englishHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/english/attempts",
+					deviceEnglishHandler.recordAttempt,
+				)
+			}
 		}
 		if options.BindingService != nil {
 			bindingHandler := deviceBindingHandler{

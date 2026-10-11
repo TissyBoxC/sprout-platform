@@ -32,6 +32,8 @@ import (
 	bindingService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 	runtimeRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/repository"
 	runtimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
+	englishRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/repository"
+	englishService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/service"
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/repository"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
@@ -97,6 +99,7 @@ func Run() error {
 	authPersistence := authRepository.NewPostgresRepository(databaseStore.Pool())
 	childPersistence := childRepository.NewPostgresRepository(databaseStore.Pool())
 	companionshipPersistence := companionshipRepository.NewPostgresRepository(databaseStore.Pool())
+	englishPersistence := englishRepository.NewPostgresRepository(databaseStore.Pool())
 	bindingPersistence := bindingRepository.NewPostgresRepository(databaseStore.Pool())
 	usagePersistence := usageReportRepository.NewPostgresRepository(databaseStore.Pool())
 
@@ -166,6 +169,12 @@ func Run() error {
 	})
 	if err != nil {
 		return fmt.Errorf("create companionship service: %w", err)
+	}
+	englishLearningService, err := englishService.New(englishService.Options{
+		Repository: englishPersistence,
+	})
+	if err != nil {
+		return fmt.Errorf("create english learning service: %w", err)
 	}
 	var voiceTokenIssuer bindingService.VoiceTokenIssuer
 	if strings.TrimSpace(cfg.VoiceGateway.WSTokenSecret) != "" {
@@ -460,6 +469,7 @@ func Run() error {
 			ReleaseStoreService:   releaseStore,
 			OTAService:            ota,
 			ContentService:        contentLibraryService,
+			EnglishService:        englishLearningService,
 			UsageReportService:    usageReports,
 			VoiceTokenIssuer:      voiceTokenIssuer,
 			VoiceWebSocketURL:     cfg.VoiceGateway.WebSocketURL,

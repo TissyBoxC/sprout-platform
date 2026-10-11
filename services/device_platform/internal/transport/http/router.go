@@ -23,6 +23,7 @@ import (
 	contentofflinepolicyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content_offline_policy/service"
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
+	displayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/display/service"
 	englishservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/service"
 	featurecenterservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	localcommandservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
@@ -71,6 +72,7 @@ type RouterOptions struct {
 	PrivacyService              *privacyservice.Service
 	NotificationService         *notificationservice.Service
 	VisionService               *visionservice.Service
+	DisplayService              *displayservice.Service
 	AuditRecorder               auditRecorder
 }
 
@@ -375,6 +377,20 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/content/offline-policy/acknowledgement",
 					deviceOfflinePolicyHandler.acknowledgeForDevice,
+				)
+			}
+		}
+		if options.DisplayService != nil {
+			displayHandler := displayHandler{service: options.DisplayService}
+			if options.BindingService != nil && options.RuntimeService != nil {
+				deviceDisplayHandler := deviceDisplayHandler{
+					handler:        &displayHandler,
+					bindingService: options.BindingService,
+					runtimeService: options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/display/status",
+					deviceDisplayHandler.reportStatus,
 				)
 			}
 		}
@@ -824,6 +840,29 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/admin/vision/stats",
 					authHandler.requireAdmin(visionHandler.GetAdminStats),
+				)
+			}
+			if options.DisplayService != nil {
+				displayHandler := displayHandler{service: options.DisplayService}
+				mux.HandleFunc(
+					"GET /api/v1/display/policy",
+					authHandler.requireAuthentication(displayHandler.current),
+				)
+				mux.HandleFunc(
+					"PUT /api/v1/display/policy",
+					authHandler.requireAuthentication(displayHandler.publish),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/display/devices",
+					authHandler.requireAuthentication(displayHandler.statuses),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/display/capability",
+					authHandler.requireAuthentication(displayHandler.capability),
+				)
+				mux.HandleFunc(
+					"GET /api/v1/admin/display/stats",
+					authHandler.requireAdmin(displayHandler.adminStats),
 				)
 			}
 			if options.NotificationService != nil {

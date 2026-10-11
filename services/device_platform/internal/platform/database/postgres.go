@@ -8,8 +8,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/migrations"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Store owns the PostgreSQL connection pool shared by database-backed

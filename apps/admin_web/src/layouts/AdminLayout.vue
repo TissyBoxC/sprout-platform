@@ -148,6 +148,10 @@ async function logout(): Promise<void> {
           <span class="nav-dot" aria-hidden="true"></span>
           系统设置
         </RouterLink>
+        <RouterLink to="/admin-permissions">
+          <span class="nav-dot" aria-hidden="true"></span>
+          管理员权限
+        </RouterLink>
       </nav>
       <div class="account-panel">
         <p>{{ authStore.account?.displayName }}</p>

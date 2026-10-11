@@ -9,6 +9,7 @@ import ChildProfilesPage from '@/features/child/presentation/ChildProfilesPage.v
 import ReleasePage from '@/features/ota/presentation/ReleasePage.vue'
 import DeviceOtaPage from '@/features/ota/presentation/DeviceOtaPage.vue'
 import SystemSettingsPage from '@/features/system/presentation/SystemSettingsPage.vue'
+import AdminPermissionPage from '@/features/admin_permission/presentation/AdminPermissionPage.vue'
 import VersionManagementPage from '@/features/version_management/presentation/VersionManagementPage.vue'
 import FeatureCenterPage from '@/features/feature_center/presentation/FeatureCenterPage.vue'
 import DownloadFilesPage from '@/features/downloads/presentation/DownloadFilesPage.vue'
@@ -112,6 +113,11 @@ export function createAdminRouter() {
         path: '/settings',
         name: 'settings',
         component: SystemSettingsPage,
+      },
+      {
+        path: '/admin-permissions',
+        name: 'admin-permissions',
+        component: AdminPermissionPage,
       },
       {
         path: '/feature-center',

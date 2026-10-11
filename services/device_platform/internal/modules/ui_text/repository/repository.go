@@ -54,8 +54,9 @@ type Repository interface {
 		ctx context.Context,
 		filter domain.VersionFilter,
 	) ([]domain.PackageVersion, int, error)
-	// ApplyTransition commits one lifecycle move. Publishing also withdraws the
-	// superseded publication and advances the catalog revision.
+	// ApplyTransition commits one lifecycle move. Publishing withdraws the
+	// superseded publication, while publish and withdraw both advance the
+	// catalog revision so clients receive additions and removals.
 	ApplyTransition(
 		ctx context.Context,
 		transition domain.TransitionInput,
@@ -63,7 +64,8 @@ type Repository interface {
 	) (*domain.Package, error)
 	// CurrentRevision returns the published-catalog cursor without listing.
 	CurrentRevision(ctx context.Context) (int64, error)
-	// ListPublished returns published packages newer than one revision.
+	// ListPublished returns published packages and withdrawn package keys newer
+	// than one revision.
 	ListPublished(
 		ctx context.Context,
 		sinceRevision int64,

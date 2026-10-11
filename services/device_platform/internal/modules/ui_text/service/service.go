@@ -309,7 +309,17 @@ func (s *Service) Published(
 	if sinceRevision < 0 {
 		return domain.RevisionPage{}, domain.ErrInvalidPackage
 	}
-	return s.repository.ListPublished(ctx, sinceRevision, limit)
+	page, err := s.repository.ListPublished(ctx, sinceRevision, limit)
+	if err != nil {
+		return domain.RevisionPage{}, err
+	}
+	if page.Packages == nil {
+		page.Packages = []domain.Package{}
+	}
+	if page.WithdrawnPackages == nil {
+		page.WithdrawnPackages = []domain.WithdrawnPackage{}
+	}
+	return page, nil
 }
 
 // PublishedPackage returns the currently published version of one package.

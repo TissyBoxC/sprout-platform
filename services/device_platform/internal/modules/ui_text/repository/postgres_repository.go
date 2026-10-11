@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
 	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ui_text/domain"
@@ -333,12 +335,19 @@ func (r *PostgresRepository) ApplyTransition(
 			  AND package_version = $4 AND status = 'in_review'
 		`, transition.PackageID, transition.Language, transition.Platform, transition.PackageVersion, now)
 	case domain.ActionWithdraw:
-		_, err = transaction.Exec(ctx, `
-			UPDATE ui_text_package_versions
-			SET status = 'withdrawn', withdrawn_at = $5, updated_at = $5
-			WHERE package_id = $1 AND language = $2 AND platform = $3
-			  AND package_version = $4 AND status = 'published'
-		`, transition.PackageID, transition.Language, transition.Platform, transition.PackageVersion, now)
+		revision, err = nextRevision(ctx, transaction)
+		if err == nil {
+			_, err = transaction.Exec(ctx, `
+				UPDATE ui_text_package_versions
+				SET status = 'withdrawn',
+				    withdrawn_at = $5,
+				    revision = $6,
+				    updated_at = $5
+				WHERE package_id = $1 AND language = $2 AND platform = $3
+				  AND package_version = $4 AND status = 'published'
+			`, transition.PackageID, transition.Language, transition.Platform,
+				transition.PackageVersion, now, revision)
+		}
 	case domain.ActionPublish:
 		revision, err = nextRevision(ctx, transaction)
 		if err == nil {
@@ -393,7 +402,10 @@ func (r *PostgresRepository) CurrentRevision(ctx context.Context) (int64, error)
 	return currentRevision(ctx, r.pool)
 }
 
-// ListPublished returns published packages newer than one revision.
+// ListPublished returns published packages and withdrawn package keys newer
+// than one revision. A logical package that still has a published version is
+// intentionally not reported as withdrawn, so a superseded publication does
+// not race ahead of the replacement in the same feed.
 func (r *PostgresRepository) ListPublished(
 	ctx context.Context,
 	sinceRevision int64,
@@ -408,6 +420,9 @@ func (r *PostgresRepository) ListPublished(
 	revision, err := currentRevision(ctx, r.pool)
 	if err != nil {
 		return domain.RevisionPage{}, err
+	}
+	if sinceRevision > revision {
+		return domain.RevisionPage{}, domain.ErrRevisionAhead
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+packageColumns+`
@@ -431,14 +446,96 @@ func (r *PostgresRepository) ListPublished(
 	if err := rows.Err(); err != nil {
 		return domain.RevisionPage{}, fmt.Errorf("iterate published ui text: %w", err)
 	}
-	hasMore := len(packages) > limit
+	withdrawnRows, err := r.pool.Query(ctx, `
+		SELECT package_id, language, platform, MAX(revision)
+		FROM ui_text_package_versions AS withdrawn
+		WHERE withdrawn.status = 'withdrawn'
+		  AND withdrawn.revision > $1
+		  AND NOT EXISTS (
+		      SELECT 1
+		      FROM ui_text_package_versions AS current_version
+		      WHERE current_version.package_id = withdrawn.package_id
+		        AND current_version.language = withdrawn.language
+		        AND current_version.platform = withdrawn.platform
+		        AND current_version.status = 'published'
+		  )
+		GROUP BY package_id, language, platform
+		ORDER BY MAX(revision)
+		LIMIT $2
+	`, sinceRevision, limit+1)
+	if err != nil {
+		return domain.RevisionPage{}, fmt.Errorf("list withdrawn ui text: %w", err)
+	}
+	defer withdrawnRows.Close()
+	withdrawn := make([]domain.WithdrawnPackage, 0, limit)
+	for withdrawnRows.Next() {
+		var item domain.WithdrawnPackage
+		if err := withdrawnRows.Scan(
+			&item.PackageID,
+			&item.Language,
+			&item.Platform,
+			&item.Revision,
+		); err != nil {
+			return domain.RevisionPage{}, fmt.Errorf("scan withdrawn ui text: %w", err)
+		}
+		withdrawn = append(withdrawn, item)
+	}
+	if err := withdrawnRows.Err(); err != nil {
+		return domain.RevisionPage{}, fmt.Errorf("iterate withdrawn ui text: %w", err)
+	}
+	type event struct {
+		revision  int64
+		isPackage bool
+		index     int
+	}
+	events := make([]event, 0, len(packages)+len(withdrawn))
+	for index := range packages {
+		events = append(events, event{
+			revision:  packages[index].Revision,
+			isPackage: true,
+			index:     index,
+		})
+	}
+	for index := range withdrawn {
+		events = append(events, event{
+			revision: withdrawn[index].Revision,
+			index:    index,
+		})
+	}
+	sort.Slice(events, func(left int, right int) bool {
+		if events[left].revision != events[right].revision {
+			return events[left].revision < events[right].revision
+		}
+		if events[left].isPackage != events[right].isPackage {
+			// A replacement publication sorts before its logical withdrawal
+			// when both somehow share a revision.
+			return events[left].isPackage
+		}
+		return events[left].index < events[right].index
+	})
+	hasMore := len(events) > limit
 	if hasMore {
-		packages = packages[:limit]
+		events = events[:limit]
+	}
+	pagedPackages := make([]domain.Package, 0, len(events))
+	pagedWithdrawn := make([]domain.WithdrawnPackage, 0, len(events))
+	for _, item := range events {
+		if item.isPackage {
+			pagedPackages = append(pagedPackages, packages[item.index])
+			continue
+		}
+		pagedWithdrawn = append(pagedWithdrawn, withdrawn[item.index])
+	}
+	nextCursor := ""
+	if hasMore && len(events) > 0 {
+		nextCursor = strconv.FormatInt(events[len(events)-1].revision, 10)
 	}
 	return domain.RevisionPage{
-		Revision: revision,
-		Packages: packages,
-		HasMore:  hasMore,
+		Revision:          revision,
+		Packages:          pagedPackages,
+		WithdrawnPackages: pagedWithdrawn,
+		HasMore:           hasMore,
+		NextCursor:        nextCursor,
 	}, nil
 }
 

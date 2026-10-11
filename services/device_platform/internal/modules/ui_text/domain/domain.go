@@ -205,12 +205,23 @@ type PackageVersion struct {
 	PublishedFor bool
 }
 
+// WithdrawnPackage identifies one logical UI text package that a client must
+// remove from its local cache. A withdrawal advances the same catalog revision
+// as a publication, so clients converge without a separate refresh path.
+type WithdrawnPackage struct {
+	PackageID string   `json:"package_id"`
+	Language  string   `json:"language"`
+	Platform  Platform `json:"platform"`
+	Revision  int64    `json:"revision"`
+}
+
 // RevisionPage is one page of the published catalog plus an incremental cursor.
 type RevisionPage struct {
-	Revision   int64     `json:"revision"`
-	Packages   []Package `json:"packages"`
-	HasMore    bool      `json:"has_more,omitempty"`
-	NextCursor string    `json:"next_cursor,omitempty"`
+	Revision          int64              `json:"revision"`
+	Packages          []Package          `json:"packages"`
+	WithdrawnPackages []WithdrawnPackage `json:"withdrawn_packages"`
+	HasMore           bool               `json:"has_more,omitempty"`
+	NextCursor        string             `json:"next_cursor,omitempty"`
 }
 
 // PublishedPackage is one published package with its entries, addressed by the

@@ -170,8 +170,10 @@ func (r *fakeRepository) ApplyTransition(
 		detail.Package.Status = domain.StatusDraft
 		detail.Package.SubmittedAt = nil
 	case domain.ActionWithdraw:
+		r.revision++
 		detail.Package.Status = domain.StatusWithdrawn
 		detail.Package.WithdrawnAt = &now
+		detail.Package.Revision = r.revision
 	case domain.ActionPublish:
 		r.revision++
 		detail.Package.Status = domain.StatusPublished
@@ -201,6 +203,33 @@ func (r *fakeRepository) ListPublished(
 		if detail.Package.Status == domain.StatusPublished &&
 			detail.Package.Revision > sinceRevision {
 			page.Packages = append(page.Packages, detail.Package)
+		}
+	}
+	for _, detail := range r.packages {
+		if detail.Package.Status != domain.StatusWithdrawn ||
+			detail.Package.Revision <= sinceRevision {
+			continue
+		}
+		hasPublished := false
+		for _, candidate := range r.packages {
+			if candidate.Package.PackageID == detail.Package.PackageID &&
+				candidate.Package.Language == detail.Package.Language &&
+				candidate.Package.Platform == detail.Package.Platform &&
+				candidate.Package.Status == domain.StatusPublished {
+				hasPublished = true
+				break
+			}
+		}
+		if !hasPublished {
+			page.WithdrawnPackages = append(
+				page.WithdrawnPackages,
+				domain.WithdrawnPackage{
+					PackageID: detail.Package.PackageID,
+					Language:  detail.Package.Language,
+					Platform:  detail.Package.Platform,
+					Revision:  detail.Package.Revision,
+				},
+			)
 		}
 	}
 	return page, nil
@@ -427,6 +456,71 @@ func TestPublishedRevisionAdvances(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected publish audit, got %v", audit.actions)
+	}
+}
+
+func TestWithdrawAdvancesRevisionAndReportsIncrementalRemoval(t *testing.T) {
+	service, _, _, _ := newTestService(t)
+	if _, err := service.CreateDraft(context.Background(), validDraftInput(), "actor"); err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+	if _, err := service.Submit(context.Background(), transitionFor(1, domain.ActionSubmit)); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if _, err := service.Publish(
+		context.Background(),
+		transitionFor(1, domain.ActionPublish),
+		domain.PublicationInput{SignatureKeyID: "ui-text-2026", Signature: "AAAA"},
+	); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	afterPublish, err := service.Published(context.Background(), 0, 20)
+	if err != nil {
+		t.Fatalf("published after publish: %v", err)
+	}
+	if _, err := service.Withdraw(
+		context.Background(),
+		transitionFor(1, domain.ActionWithdraw),
+	); err != nil {
+		t.Fatalf("withdraw: %v", err)
+	}
+	incremental, err := service.Published(
+		context.Background(),
+		afterPublish.Revision,
+		20,
+	)
+	if err != nil {
+		t.Fatalf("incremental published after withdraw: %v", err)
+	}
+	if incremental.Revision <= afterPublish.Revision {
+		t.Fatalf(
+			"withdraw revision did not advance: %d <= %d",
+			incremental.Revision,
+			afterPublish.Revision,
+		)
+	}
+	if len(incremental.Packages) != 0 {
+		t.Fatalf("withdrawn package still delivered: %+v", incremental.Packages)
+	}
+	if len(incremental.WithdrawnPackages) != 1 {
+		t.Fatalf(
+			"withdrawn packages = %+v, want one removal",
+			incremental.WithdrawnPackages,
+		)
+	}
+	removed := incremental.WithdrawnPackages[0]
+	if removed.PackageID != "home_screen" ||
+		removed.Language != "zh-CN" ||
+		removed.Platform != domain.PlatformParentApp {
+		t.Fatalf("unexpected removal identity: %+v", removed)
+	}
+	if _, err := service.PublishedPackage(
+		context.Background(),
+		"home_screen",
+		"zh-CN",
+		domain.PlatformParentApp,
+	); !errors.Is(err, domain.ErrPackageNotFound) {
+		t.Fatalf("withdrawn package lookup error = %v, want not found", err)
 	}
 }
 

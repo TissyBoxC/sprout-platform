@@ -18,6 +18,7 @@ import (
 	audithandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/handler"
 	authservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
 	childservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
+	companionshipservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/companionship/service"
 	contentservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/service"
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
@@ -40,6 +41,7 @@ type RouterOptions struct {
 	InternalAPIConfig     config.InternalAPIConfig
 	AuthService           *authservice.Service
 	ChildService          *childservice.Service
+	CompanionshipService  *companionshipservice.Service
 	ParentPolicyService   *policeservice.Service
 	AIService             *gatewayservice.Service
 	OperationsService     *operationsservice.Service
@@ -171,6 +173,39 @@ func NewRouter(options RouterOptions) http.Handler {
 			mux.HandleFunc(
 				"PUT /api/v1/children/{child_id}/policy",
 				authHandler.requireAuthentication(childHandler.updatePolicy),
+			)
+		}
+		if options.CompanionshipService != nil {
+			companionshipHandler := companionshipHandler{
+				service: options.CompanionshipService,
+			}
+			mux.HandleFunc(
+				"GET /api/v1/companionship/growth-records",
+				authHandler.requireAuthentication(companionshipHandler.listGrowthRecords),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/companionship/growth-records",
+				authHandler.requireAuthentication(companionshipHandler.createGrowthRecord),
+			)
+			mux.HandleFunc(
+				"DELETE /api/v1/companionship/growth-records/{record_id}",
+				authHandler.requireAuthentication(companionshipHandler.deleteGrowthRecord),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/companionship/habit-reminders",
+				authHandler.requireAuthentication(companionshipHandler.listHabitReminders),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/companionship/habit-reminders",
+				authHandler.requireAuthentication(companionshipHandler.createHabitReminder),
+			)
+			mux.HandleFunc(
+				"PUT /api/v1/companionship/habit-reminders/{reminder_id}",
+				authHandler.requireAuthentication(companionshipHandler.updateHabitReminder),
+			)
+			mux.HandleFunc(
+				"DELETE /api/v1/companionship/habit-reminders/{reminder_id}",
+				authHandler.requireAuthentication(companionshipHandler.deleteHabitReminder),
 			)
 		}
 		if options.BindingService != nil {

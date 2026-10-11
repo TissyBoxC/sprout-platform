@@ -24,6 +24,8 @@ import (
 	authService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
 	childRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/repository"
 	childService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
+	companionshipRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/companionship/repository"
+	companionshipService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/companionship/service"
 	contentRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/repository"
 	contentService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/service"
 	bindingRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/repository"
@@ -33,10 +35,10 @@ import (
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/repository"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
-	operationsRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/repository"
-	operationsService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
 	notificationRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/repository"
 	notificationService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
+	operationsRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/repository"
+	operationsService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
 	otaDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/domain"
 	otaRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/repository"
 	otaService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/service"
@@ -94,6 +96,7 @@ func Run() error {
 
 	authPersistence := authRepository.NewPostgresRepository(databaseStore.Pool())
 	childPersistence := childRepository.NewPostgresRepository(databaseStore.Pool())
+	companionshipPersistence := companionshipRepository.NewPostgresRepository(databaseStore.Pool())
 	bindingPersistence := bindingRepository.NewPostgresRepository(databaseStore.Pool())
 	usagePersistence := usageReportRepository.NewPostgresRepository(databaseStore.Pool())
 
@@ -158,6 +161,12 @@ func Run() error {
 		return fmt.Errorf("create child profile service: %w", err)
 	}
 	parentAuthService.SetChildProvisioner(childProfileService)
+	companionshipCompanionService, err := companionshipService.New(companionshipService.Options{
+		Repository: companionshipPersistence,
+	})
+	if err != nil {
+		return fmt.Errorf("create companionship service: %w", err)
+	}
 	var voiceTokenIssuer bindingService.VoiceTokenIssuer
 	if strings.TrimSpace(cfg.VoiceGateway.WSTokenSecret) != "" {
 		signer, signerErr := bindingService.NewVoiceTokenSigner(
@@ -439,6 +448,7 @@ func Run() error {
 			InternalAPIConfig:     cfg.Internal,
 			AuthService:           parentAuthService,
 			ChildService:          childProfileService,
+			CompanionshipService:  companionshipCompanionService,
 			ParentPolicyService:   parentPolicyService,
 			AIService:             aiAccountService,
 			OperationsService:     operations,

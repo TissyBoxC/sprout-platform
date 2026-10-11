@@ -83,9 +83,9 @@ class ProfilePage extends ConsumerWidget {
                     onCellular: () => context.push('/me/cellular'),
                     onBattery: () => context.push('/me/battery'),
                     onMotion: () => context.push('/me/motion'),
-                    onVideoCompanion: () =>
-                        context.push('/me/video-companion'),
+                    onVideoCompanion: () => context.push('/me/video-companion'),
                     onWearable: () => context.push('/me/wearable'),
+                    onMultiDevice: () => context.push('/me/multi-device'),
                     onUsageReports: () => context.push('/me/usage-reports'),
                     onNotifications: () => context.push('/me/notifications'),
                     onContent: () => context.push('/me/content'),
@@ -430,6 +430,7 @@ class _SettingsCard extends StatelessWidget {
     required this.onMotion,
     required this.onVideoCompanion,
     required this.onWearable,
+    required this.onMultiDevice,
     required this.onUsageReports,
     required this.onNotifications,
     required this.onContent,
@@ -453,6 +454,7 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onMotion;
   final VoidCallback onVideoCompanion;
   final VoidCallback onWearable;
+  final VoidCallback onMultiDevice;
   final VoidCallback onUsageReports;
   final VoidCallback onNotifications;
   final VoidCallback onContent;
@@ -570,6 +572,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('定位权限、电子围栏、紧急联系人与 SOS'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onWearable,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.devices_other_outlined),
+            title: const Text('多设备'),
+            subtitle: const Text('管理设备分组、家庭联动和内容同步'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onMultiDevice,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

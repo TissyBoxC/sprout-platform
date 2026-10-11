@@ -34,6 +34,7 @@ import '../../features/touch/presentation/touch_settings_page.dart';
 import '../../features/connectivity/presentation/cellular_settings_page.dart';
 import '../../features/power/presentation/battery_settings_page.dart';
 import '../../features/motion/presentation/motion_settings_page.dart';
+import '../../features/multi_device/presentation/multi_device_page.dart';
 import '../../shared/widgets/parent_shell.dart';
 
 /// Creates the application router with authentication-aware redirects.
@@ -140,6 +141,10 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/wearable',
         builder: (context, state) => const WearablePage(),
+      ),
+      GoRoute(
+        path: '/me/multi-device',
+        builder: (context, state) => const MultiDevicePage(),
       ),
       GoRoute(
         path: '/me/notifications',

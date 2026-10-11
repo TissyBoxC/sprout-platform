@@ -11,6 +11,7 @@ import type {
   DeviceHealthState,
   DeviceInteractionEvent,
   DeviceModuleFailure,
+  DeviceNetworkQualityLevel,
   DeviceRecoveryEvent,
   DeviceTemperatureState,
 } from '@/api/adminDeviceDiagnostics'
@@ -88,6 +89,26 @@ function temperatureDetail(device: AdminDiagnosticDevice): string {
 
 function temperatureIsConcerning(value: DeviceTemperatureState): boolean {
   return value === 'hot' || value === 'critical'
+}
+
+function networkQualityLabel(value: DeviceNetworkQualityLevel): string {
+  return (
+    {
+      excellent: '网络很好',
+      good: '网络良好',
+      fair: '网络一般',
+      poor: '网络较差',
+      unknown: '网络待补充',
+    }[value] ?? '网络待补充'
+  )
+}
+
+// Threshold alerting mirrors the shared contract: a poor band, high packet
+// loss, or a slow round trip is worth an operator's attention. The device
+// still works, so the badge stays informational rather than blocking.
+function networkQualityIsConcerning(device: AdminDiagnosticDevice): boolean {
+  const quality = device.networkQuality
+  return quality.level === 'poor' || quality.packetLossPercent >= 10 || quality.latencyMs >= 800
 }
 
 function resetReasonLabel(value: string): string {
@@ -362,6 +383,9 @@ function formatDuration(value: number): string {
                   ]"
                 >
                   {{ temperatureDetail(device) }}
+                </span>
+                <span v-if="networkQualityIsConcerning(device)" class="network-alert" role="status">
+                  {{ networkQualityLabel(device.networkQuality.level) }}
                 </span>
               </button>
             </li>
@@ -933,6 +957,16 @@ h1 {
 .temperature-state.concerning {
   background: #fdecef;
   color: #a12b4a;
+}
+
+.network-alert {
+  justify-self: start;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #fff4df;
+  color: #9a6207;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .health-dot {

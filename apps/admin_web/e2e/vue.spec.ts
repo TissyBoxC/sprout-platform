@@ -945,6 +945,12 @@ test('shows complete device diagnostics with bounded history and refresh', async
       runtime: {
         is_online: true,
         connection: { state: 'connected', transport: 'wifi' },
+        network_quality: {
+          level: 'poor',
+          rssi_dbm: -88,
+          latency_ms: 1200,
+          packet_loss_percent: 15,
+        },
       },
     },
     {
@@ -1111,6 +1117,7 @@ test('shows complete device diagnostics with bounded history and refresh', async
   expect(requestedDeviceIds).toContain('device-1')
 
   await expect(page.getByText('需要留意', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('网络较差')).toBeVisible()
   await expect(page.getByRole('heading', { name: '启动历史' })).toBeVisible()
   await expect(page.getByText('开机启动')).toBeVisible()
   await expect(page.getByRole('heading', { name: '最近故障' })).toBeVisible()

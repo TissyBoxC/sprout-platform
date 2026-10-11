@@ -11,6 +11,7 @@ export interface AdminDiagnosticDevice {
   firmwareVersion: string
   isOnline: boolean
   temperature: DeviceTemperature
+  networkQuality: DeviceNetworkQuality
 }
 
 export type DeviceTemperatureState = 'unknown' | 'normal' | 'warm' | 'hot' | 'critical'
@@ -18,6 +19,15 @@ export type DeviceTemperatureState = 'unknown' | 'normal' | 'warm' | 'hot' | 'cr
 export interface DeviceTemperature {
   state: DeviceTemperatureState
   celsiusTenths: number | null
+}
+
+export type DeviceNetworkQualityLevel = 'unknown' | 'poor' | 'fair' | 'good' | 'excellent'
+
+export interface DeviceNetworkQuality {
+  level: DeviceNetworkQualityLevel
+  rssiDbm: number
+  latencyMs: number
+  packetLossPercent: number
 }
 
 export interface DeviceBootEvent {
@@ -167,6 +177,29 @@ function toNullableDevice(value: unknown): AdminDiagnosticDevice | null {
     firmwareVersion: stringValue(record.firmware_version ?? record.firmwareVersion),
     isOnline: runtime.is_online === true || record.is_online === true,
     temperature: toTemperature(runtime.temperature),
+    networkQuality: toNetworkQuality(runtime.network_quality),
+  }
+}
+
+function toNetworkQuality(value: unknown): DeviceNetworkQuality {
+  const record = recordValue(value)
+  return {
+    level: networkQualityLevel(record.level),
+    rssiDbm: numberValue(record.rssi_dbm ?? record.rssiDbm),
+    latencyMs: numberValue(record.latency_ms ?? record.latencyMs),
+    packetLossPercent: numberValue(record.packet_loss_percent ?? record.packetLossPercent),
+  }
+}
+
+function networkQualityLevel(value: unknown): DeviceNetworkQualityLevel {
+  switch (value) {
+    case 'poor':
+    case 'fair':
+    case 'good':
+    case 'excellent':
+      return value
+    default:
+      return 'unknown'
   }
 }
 

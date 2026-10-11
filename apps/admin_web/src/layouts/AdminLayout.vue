@@ -59,6 +59,10 @@ async function logout(): Promise<void> {
           <span class="nav-dot" aria-hidden="true"></span>
           设备诊断
         </RouterLink>
+        <RouterLink to="/vision">
+          <span class="nav-dot" aria-hidden="true"></span>
+          摄像头与视觉
+        </RouterLink>
         <RouterLink to="/audit">
           <span class="nav-dot" aria-hidden="true"></span>
           操作审计

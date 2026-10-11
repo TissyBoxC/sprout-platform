@@ -19,6 +19,7 @@ import DeviceDiagnosticsPage from '@/features/audit/presentation/DeviceDiagnosti
 import OperationAuditPage from '@/features/audit/presentation/OperationAuditPage.vue'
 import UsageReportPage from '@/features/usage_report/presentation/UsageReportPage.vue'
 import NotificationCenterPage from '@/features/notifications/presentation/NotificationCenterPage.vue'
+import VisionStatsPage from '@/features/vision/presentation/VisionStatsPage.vue'
 import { useAuthStore } from '@/features/auth/application/authStore'
 
 /// Feature routes are registered here so removing a feature only changes its
@@ -116,6 +117,11 @@ export function createAdminRouter() {
         path: '/device-diagnostics',
         name: 'device-diagnostics',
         component: DeviceDiagnosticsPage,
+      },
+      {
+        path: '/vision',
+        name: 'vision',
+        component: VisionStatsPage,
       },
       {
         path: '/audit',

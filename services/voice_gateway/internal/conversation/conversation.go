@@ -24,6 +24,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/content_policy"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/moderation"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/prompt_guard"
+	securitysettings "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/settings"
 )
 
 const (
@@ -82,9 +83,15 @@ type Config struct {
 	// InputFilterEnabled and OutputFilterEnabled are explicit operator
 	// switches. The production configuration loader defaults both to true;
 	// direct package callers must set them explicitly because Go's bool zero
-	// value is false. Crisis intervention never depends on either switch.
+	// value is false. When SafetyPolicy is set, the platform console's
+	// output-moderation switch takes precedence over OutputFilterEnabled.
+	// Crisis intervention never depends on either switch.
 	InputFilterEnabled  bool
 	OutputFilterEnabled bool
+	// SafetyPolicy resolves the operator-controlled switches stored in the
+	// platform console. It is optional so text-only callers and tests keep
+	// working; crisis handling stays mandatory regardless of its value.
+	SafetyPolicy securitysettings.Reader
 	// DevicePolicy resolves the authenticated device's effective family policy.
 	// It constrains the system prompt by age tier and refuses a turn whose
 	// declared content category is not explicitly allowed. A nil value keeps
@@ -335,7 +342,7 @@ func (r *Runner) reply(
 	}
 	reply := truncateRunes(strings.TrimSpace(builder.String()), maxRunes)
 	decision := moderation.Decision{Allowed: true, Action: moderation.ActionAllow}
-	if r.config.OutputFilterEnabled {
+	if r.outputFilterEnabled(ctx) {
 		decision = r.config.Moderator.CheckOutput(reply)
 		if !decision.Allowed {
 			safeReply := r.safeReply(decision)
@@ -352,6 +359,24 @@ func (r *Runner) reply(
 	}
 	r.appendAssistantMessage(sessionID, reply)
 	return reply, decision, nil
+}
+
+// outputFilterEnabled resolves the effective ordinary output-moderation
+// switch. The platform console is authoritative when it is reachable; the
+// environment value remains the fallback for text-only deployments. A read
+// failure keeps the stricter value rather than silently weakening child safety.
+func (r *Runner) outputFilterEnabled(ctx context.Context) bool {
+	if r == nil {
+		return false
+	}
+	if r.config.SafetyPolicy != nil {
+		policy, err := r.config.SafetyPolicy.SafetyPolicy(ctx)
+		if err == nil {
+			return policy.OutputModerationEnabled
+		}
+		return true
+	}
+	return r.config.OutputFilterEnabled
 }
 
 func (r *Runner) speak(ctx context.Context, deviceID string, text string, sink Sink) error {

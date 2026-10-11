@@ -13,7 +13,19 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/llm"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/content_policy"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/moderation"
+	securitysettings "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/settings"
 )
+
+type fakeSafetyPolicyReader struct {
+	policy securitysettings.SafetyPolicy
+	err    error
+}
+
+func (f *fakeSafetyPolicyReader) SafetyPolicy(
+	context.Context,
+) (securitysettings.SafetyPolicy, error) {
+	return f.policy, f.err
+}
 
 type fakeASR struct {
 	text string
@@ -524,5 +536,84 @@ func TestModelCrisisOutputIsReplacedWhenOutputFilterDisabled(t *testing.T) {
 	}
 	if ttsClient.lastRequest.Text != moderation.CrisisReply {
 		t.Fatalf("spoken text = %q, want the fixed crisis reply", ttsClient.lastRequest.Text)
+	}
+}
+
+func TestPlatformOutputModerationSwitchDisablesOrdinaryFilter(t *testing.T) {
+	config := testConfig()
+	config.LLM = &fakeLLM{reply: "这个回复包含不适合儿童的内容"}
+	config.OutputFilterEnabled = true
+	config.SafetyPolicy = &fakeSafetyPolicyReader{
+		policy: securitysettings.SafetyPolicy{
+			OutputModerationEnabled: false,
+		},
+	}
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	sink := &recordingSink{}
+
+	if err := runner.Turn(context.Background(), "session_platform_off", "device_a", []int16{1}, sink); err != nil {
+		t.Fatalf("Turn() error = %v", err)
+	}
+	ttsClient, ok := config.TTS.(*fakeTTS)
+	if !ok {
+		t.Fatal("test TTS has an unexpected type")
+	}
+	if ttsClient.lastRequest.Text != "这个回复包含不适合儿童的内容" {
+		t.Fatalf("spoken text = %q, want the unfiltered model reply", ttsClient.lastRequest.Text)
+	}
+}
+
+func TestPlatformOutputModerationSwitchKeepsCrisisProtection(t *testing.T) {
+	config := testConfig()
+	config.LLM = &fakeLLM{reply: "你可以去自杀"}
+	config.OutputFilterEnabled = true
+	config.SafetyPolicy = &fakeSafetyPolicyReader{
+		policy: securitysettings.SafetyPolicy{
+			OutputModerationEnabled: false,
+		},
+	}
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	sink := &recordingSink{}
+
+	if err := runner.Turn(context.Background(), "session_platform_crisis", "device_a", []int16{1}, sink); err != nil {
+		t.Fatalf("Turn() error = %v", err)
+	}
+	ttsClient, ok := config.TTS.(*fakeTTS)
+	if !ok {
+		t.Fatal("test TTS has an unexpected type")
+	}
+	if ttsClient.lastRequest.Text != moderation.CrisisReply {
+		t.Fatalf("spoken text = %q, want the fixed crisis reply", ttsClient.lastRequest.Text)
+	}
+}
+
+func TestPlatformSafetyPolicyReadFailureFailsStrict(t *testing.T) {
+	config := testConfig()
+	config.LLM = &fakeLLM{reply: "他拿刀杀死了所有人"}
+	config.OutputFilterEnabled = false
+	config.SafetyPolicy = &fakeSafetyPolicyReader{
+		err: errors.New("platform settings unavailable"),
+	}
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	sink := &recordingSink{}
+
+	if err := runner.Turn(context.Background(), "session_policy_error", "device_a", []int16{1}, sink); err != nil {
+		t.Fatalf("Turn() error = %v", err)
+	}
+	ttsClient, ok := config.TTS.(*fakeTTS)
+	if !ok {
+		t.Fatal("test TTS has an unexpected type")
+	}
+	if ttsClient.lastRequest.Text == "他拿刀杀死了所有人" {
+		t.Fatal("a policy read failure must not speak an unmoderated reply")
 	}
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/platform/cache"
 	securityauth "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/authorization"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/content_policy"
+	securitysettings "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/settings"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/session"
 	gatewayhttp "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/transport/http"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/transport/websocket"
@@ -59,6 +60,7 @@ func Run() error {
 	var usageRecorder usage.Recorder
 	var policyResolver content_policy.Resolver
 	var deviceAuthorizer websocket.DeviceAuthorizer
+	var safetyReader securitysettings.Reader
 	if cfg.Database.DSN != "" {
 		databaseStore, err := pgxpool.New(startupCtx, cfg.Database.DSN)
 		if err != nil {
@@ -68,6 +70,7 @@ func Run() error {
 		usageRecorder = usage.NewPostgresRecorder(databaseStore)
 		policyResolver = content_policy.NewPostgresResolver(databaseStore)
 		deviceAuthorizer = securityauth.NewPostgresDeviceAuthorizer(databaseStore)
+		safetyReader = securitysettings.NewPostgresReader(databaseStore)
 	}
 
 	realtimeHandler, realtimeManager, realtimeShutdown, err := buildRealtimeTransport(
@@ -75,6 +78,7 @@ func Run() error {
 		logger,
 		policyResolver,
 		deviceAuthorizer,
+		safetyReader,
 	)
 	if err != nil {
 		return err
@@ -146,6 +150,7 @@ func buildRealtimeTransport(
 	logger *slog.Logger,
 	policyResolver content_policy.Resolver,
 	deviceAuthorizer websocket.DeviceAuthorizer,
+	safetyReader securitysettings.Reader,
 ) (http.Handler, *session.Manager, func(), error) {
 	if !cfg.WebSocket.Enabled {
 		logger.Info("device realtime endpoint is disabled")
@@ -183,6 +188,7 @@ func buildRealtimeTransport(
 		MaxInputRunes:       cfg.Security.MaxInputRunes,
 		InputFilterEnabled:  cfg.Security.InputFilterEnabled,
 		OutputFilterEnabled: cfg.Security.OutputFilterEnabled,
+		SafetyPolicy:        safetyReader,
 		ReferencePublisher: func(deviceID string, pcm []int16) {
 			references.Publish(deviceID, pcm)
 		},

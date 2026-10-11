@@ -57,6 +57,7 @@ class DeviceRuntimeStatus {
     required this.packetLossPercent,
     required this.temperatureState,
     required this.temperatureCelsiusTenths,
+    required this.recentCrashCount,
     required this.timeSyncState,
     required this.lastSyncedAt,
     required this.offlineState,
@@ -79,6 +80,8 @@ class DeviceRuntimeStatus {
   final String temperatureState;
   /// Reading in tenths of a degree Celsius, or null when none was reported.
   final int? temperatureCelsiusTenths;
+  /// Number of retained abnormal restarts, used for a calm stability hint.
+  final int recentCrashCount;
   final String timeSyncState;
   final DateTime? lastSyncedAt;
   final String offlineState;
@@ -93,6 +96,7 @@ class DeviceRuntimeStatus {
     final connection = _map(json['connection']);
     final quality = _map(json['network_quality']);
     final temperature = _map(json['temperature']);
+    final diagnostics = _map(json['diagnostics']);
     final timeSync = _map(json['time_sync']);
     final offline = _map(json['offline']);
     final provisioning = json['provisioning'];
@@ -106,6 +110,7 @@ class DeviceRuntimeStatus {
       packetLossPercent: _asInt(quality['packet_loss_percent']),
       temperatureState: _asString(temperature['state']),
       temperatureCelsiusTenths: _asNullableInt(temperature['celsius_tenths']),
+      recentCrashCount: _asInt(diagnostics['recent_crash_count']),
       timeSyncState: _asString(timeSync['state']),
       lastSyncedAt: _asDateTime(timeSync['last_synced_at']),
       offlineState: _asString(offline['state']),

@@ -647,6 +647,7 @@ String _deviceSubtitle(BoundDevice device) {
     if (runtime != null && runtime.temperatureState.isNotEmpty &&
         runtime.temperatureState != 'unknown')
       _temperatureLabel(runtime.temperatureState),
+    if (runtime != null && runtime.recentCrashCount > 0) '近期曾自动重启',
     if (runtime?.receivedAt != null)
       '最近连接 ${_relativeTime(runtime!.receivedAt!)}',
     if (device.hardwareModel.isNotEmpty) device.hardwareModel,

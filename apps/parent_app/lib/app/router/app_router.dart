@@ -28,6 +28,7 @@ import '../../features/usage_report/presentation/usage_report_page.dart';
 import '../../features/vision/presentation/vision_page.dart';
 import '../../features/form_factor/presentation/form_factor_page.dart';
 import '../../features/video_companion/presentation/video_companion_page.dart';
+import '../../features/wearable/presentation/wearable_page.dart';
 import '../../features/display/presentation/display_settings_page.dart';
 import '../../features/touch/presentation/touch_settings_page.dart';
 import '../../features/connectivity/presentation/cellular_settings_page.dart';
@@ -135,6 +136,10 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/video-companion',
         builder: (context, state) => const VideoCompanionPage(),
+      ),
+      GoRoute(
+        path: '/me/wearable',
+        builder: (context, state) => const WearablePage(),
       ),
       GoRoute(
         path: '/me/notifications',

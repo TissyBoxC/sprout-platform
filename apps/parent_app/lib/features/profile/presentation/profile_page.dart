@@ -85,6 +85,7 @@ class ProfilePage extends ConsumerWidget {
                     onMotion: () => context.push('/me/motion'),
                     onVideoCompanion: () =>
                         context.push('/me/video-companion'),
+                    onWearable: () => context.push('/me/wearable'),
                     onUsageReports: () => context.push('/me/usage-reports'),
                     onNotifications: () => context.push('/me/notifications'),
                     onContent: () => context.push('/me/content'),
@@ -428,6 +429,7 @@ class _SettingsCard extends StatelessWidget {
     required this.onBattery,
     required this.onMotion,
     required this.onVideoCompanion,
+    required this.onWearable,
     required this.onUsageReports,
     required this.onNotifications,
     required this.onContent,
@@ -450,6 +452,7 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onBattery;
   final VoidCallback onMotion;
   final VoidCallback onVideoCompanion;
+  final VoidCallback onWearable;
   final VoidCallback onUsageReports;
   final VoidCallback onNotifications;
   final VoidCallback onContent;
@@ -559,6 +562,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('管理视频联系人，查看通话记录'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onVideoCompanion,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.location_on_outlined),
+            title: const Text('穿戴与定位'),
+            subtitle: const Text('定位权限、电子围栏、紧急联系人与 SOS'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onWearable,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

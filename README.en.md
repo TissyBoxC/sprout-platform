@@ -85,7 +85,7 @@ order and never removes a capability.
 
 | ID | Capability | Modules | Status | Current state |
 | --- | --- | --- | --- | --- |
-| P2-01 | Display | Expressions, animation, point-to-read, video playback | `[Partially implemented]` | Screen capability reporting, policy delivery, and device display status are implemented; display drivers, point-to-read, and video playback remain. |
+| P2-01 | Display | Expressions, animation, point-to-read, video playback | `[Implemented]` | Firmware screen component (fixed expression and animation catalogs, point-to-read entry store, policy-clamped video profile and playback state machine), platform screen module (policy, device capability and status, point-to-read dictionary, and video playback APIs), parent app settings page, and admin statistics page are implemented; point-to-read entries are bounded and de-duplicated by term, video parameters are clamped to the policy ceiling, and out-of-range values are rejected. |
 | P2-02 | Eye-care display | Brightness, color temperature, distance, duration policy | `[Implemented]` | Firmware eye-care policy component, platform policy and status APIs, parent app settings page, and admin statistics page are implemented. |
 | P2-03 | Touch | Tap, swipe, gestures, haptic feedback | `[Implemented]` | Firmware touch configuration and gesture recognition, platform input module, parent app touch settings page, and admin statistics page are implemented. |
 | P2-04 | Cellular | eSIM, data usage, remote wake, connectivity switching | `[Implemented]` | Firmware cellular and eSIM policy component, platform connectivity module, parent app cellular settings page, and admin statistics page are implemented. |
@@ -102,7 +102,7 @@ order and never removes a capability.
 | --- | --- | --- | --- |
 | Foundation | Provisioning, wake, recording/playback, AI conversation, content, parent control, OTA | `[Partial]` | Audio capture, playback, wake, device interaction, AI conversation, and the content library exist. Parent control and OTA remain incomplete. |
 | Mainstream | Continuous conversation, content operations, companionship, English, remote messages, offline fallback, diagnostics, camera | `[Partial]` | Continuous conversation enhancement, content operations, companionship, remote messages, device status, and device firmware updates are usable; English, offline fallback, diagnostics enhancement, and camera remain incomplete. |
-| Differentiated | Display, touch, eye care, cellular, battery, motion, video, location, multi-device | `[Not implemented]` | Directories and plans are not implementation. Every capability still needs modular, capability-based delivery. |
+| Differentiated | Display, touch, eye care, cellular, battery, motion, video, location, multi-device | `[Implemented]` | Display, touch, eye care, cellular, battery, motion, video companionship, wearables/location, and multi-device all close the loop across firmware, platform, parent app, and admin console. |
 
 ### Supporting Modules
 

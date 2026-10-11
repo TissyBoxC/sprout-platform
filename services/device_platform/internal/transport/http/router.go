@@ -46,6 +46,7 @@ import (
 	releasestoreservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
 	screenservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/screen/service"
 	serviceversionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
+	ui_textservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ui_text/service"
 	usagereportservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
 	videoservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/service"
 	visionhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/handler"
@@ -72,6 +73,7 @@ type RouterOptions struct {
 	OTAService                  *otaservice.Service
 	ContentService              *contentservice.Service
 	ContentOfflinePolicyService *contentofflinepolicyservice.Service
+	UITextService               *ui_textservice.Service
 	EnglishService              *englishservice.Service
 	PlaybackService             *playbackservice.Service
 	LocalCommandService         *localcommandservice.Service
@@ -1734,6 +1736,79 @@ func NewRouter(options RouterOptions) http.Handler {
 				),
 			)
 		}
+		if options.UITextService != nil {
+			uiTextAdminHandler := uiTextHandler{service: options.UITextService}
+			mux.HandleFunc(
+				"GET /api/v1/admin/ui-text/packages",
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionContentRead,
+					uiTextAdminHandler.listVersions,
+				),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/ui-text/packages/drafts",
+				authHandler.requireAdminPermissionAction(
+					authdomain.AdminPermissionContentReview,
+					"admin.ui_text.draft.created",
+					uiTextAdminHandler.createDraft,
+				),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}",
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionContentRead,
+					uiTextAdminHandler.getVersion,
+				),
+			)
+			mux.HandleFunc(
+				"PUT /api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}",
+				authHandler.requireAdminPermissionAction(
+					authdomain.AdminPermissionContentReview,
+					"admin.ui_text.draft.updated",
+					uiTextAdminHandler.updateDraft,
+				),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}/submit",
+				authHandler.requireAdminPermissionAction(
+					authdomain.AdminPermissionContentReview,
+					"admin.ui_text.submit",
+					uiTextAdminHandler.submit,
+				),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}/approve",
+				authHandler.requireAdminPermissionAction(
+					authdomain.AdminPermissionContentReview,
+					"admin.ui_text.approve",
+					uiTextAdminHandler.approve,
+				),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}/reject",
+				authHandler.requireAdminPermissionAction(
+					authdomain.AdminPermissionContentReview,
+					"admin.ui_text.review.rejected",
+					uiTextAdminHandler.reject,
+				),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}/publish",
+				authHandler.requireAdminPermissionAction(
+					authdomain.AdminPermissionContentReview,
+					"admin.ui_text.published",
+					uiTextAdminHandler.publish,
+				),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}/withdraw",
+				authHandler.requireAdminPermissionAction(
+					authdomain.AdminPermissionContentReview,
+					"admin.ui_text.withdraw",
+					uiTextAdminHandler.withdraw,
+				),
+			)
+		}
 	}
 
 	if options.UsageReportService != nil && options.AuthService != nil {
@@ -1806,6 +1881,40 @@ func NewRouter(options RouterOptions) http.Handler {
 			mux.HandleFunc(
 				"GET /api/v1/devices/{device_id}/content/playback",
 				deviceHandler.listPlayHistory,
+			)
+		}
+	}
+
+	if options.UITextService != nil {
+		uiTextHandler := uiTextHandler{service: options.UITextService}
+		// The parent app and console pull published copy with a session so a
+		// client only ever renders text the platform has published.
+		if options.AuthService != nil {
+			authHandler := authHandler{service: options.AuthService}
+			mux.HandleFunc(
+				"GET /api/v1/ui-text/packages",
+				authHandler.requireAuthentication(uiTextHandler.published),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/ui-text/packages/{package_id}/{language}/{platform}",
+				authHandler.requireAuthentication(uiTextHandler.publishedPackage),
+			)
+		}
+		// Firmware devices hold a device session token instead of a guardian
+		// credential, so the same published copy is exposed behind a verified
+		// session keyed to the path device id.
+		if options.BindingService != nil {
+			deviceHandler := deviceUITextHandler{
+				handler:        uiTextHandler,
+				bindingService: options.BindingService,
+			}
+			mux.HandleFunc(
+				"GET /api/v1/devices/{device_id}/ui-text/packages",
+				deviceHandler.published,
+			)
+			mux.HandleFunc(
+				"GET /api/v1/devices/{device_id}/ui-text/packages/{package_id}/{language}/{platform}",
+				deviceHandler.publishedPackage,
 			)
 		}
 	}

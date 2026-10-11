@@ -198,11 +198,11 @@ type VersionFilter struct {
 
 // PackageVersion is one summary row in the operator version history.
 type PackageVersion struct {
-	Package      Package
-	EntryCount   int
-	IsPublished  bool
-	IsNewest     bool
-	PublishedFor bool
+	Package      Package `json:"package"`
+	EntryCount   int     `json:"entry_count"`
+	IsPublished  bool    `json:"is_published"`
+	IsNewest     bool    `json:"is_newest"`
+	PublishedFor bool    `json:"published_for"`
 }
 
 // WithdrawnPackage identifies one logical UI text package that a client must

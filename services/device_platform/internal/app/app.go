@@ -74,6 +74,8 @@ import (
 	screenService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/screen/service"
 	serviceVersionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/repository"
 	serviceVersionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
+	ui_textRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ui_text/repository"
+	ui_textService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ui_text/service"
 	usageReportRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/repository"
 	usageReportService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
 	videoCompanionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/repository"
@@ -313,6 +315,10 @@ func Run() error {
 			databaseStore.Pool(),
 			"SELECT 1 FROM content_package_versions LIMIT 1",
 		),
+		"ui_text": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM ui_text_package_versions LIMIT 1",
+		),
 		"usage_report": nonzeroRowProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM device_usage_daily LIMIT 1",
@@ -515,6 +521,20 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create notification service: %w", err)
 	}
+	uiTextVerifier, err := ui_textService.NewEd25519KeyringVerifier(
+		cfg.UIText.SignaturePublicKeys,
+	)
+	if err != nil {
+		return fmt.Errorf("create ui text signature verifier: %w", err)
+	}
+	uiText, err := ui_textService.New(ui_textService.Options{
+		Repository: ui_textRepository.NewPostgresRepository(databaseStore.Pool()),
+		Verifier:   uiTextVerifier,
+		Audit:      privacy,
+	})
+	if err != nil {
+		return fmt.Errorf("create ui text service: %w", err)
+	}
 	vision, err := visionService.New(visionService.Options{
 		Repository: visionRepository.NewPostgresRepository(databaseStore.Pool()),
 		ConsentReader: visionConsentReader{
@@ -614,6 +634,7 @@ func Run() error {
 			RecommendationService:       contentRecommendations,
 			LocalCommandService:         localCommands,
 			ContentOfflinePolicyService: contentOfflinePolicy,
+			UITextService:               uiText,
 			UsageReportService:          usageReports,
 			VoiceTokenIssuer:            voiceTokenIssuer,
 			VoiceWebSocketURL:           cfg.VoiceGateway.WebSocketURL,

@@ -437,7 +437,7 @@ func TestCheckHealthDoesNotMutateSharedRegistry(t *testing.T) {
 	}
 }
 
-func TestDefaultRegistryMarksUnimplementedFeaturesAsPlanned(t *testing.T) {
+func TestDefaultRegistryMarksUITextAsActive(t *testing.T) {
 	service, err := New(Options{
 		Repository:  newMemoryRepository(),
 		Definitions: DefaultRegistry(),
@@ -454,23 +454,17 @@ func TestDefaultRegistryMarksUnimplementedFeaturesAsPlanned(t *testing.T) {
 	for _, feature := range features {
 		byID[feature.ID] = feature
 	}
-	for _, featureID := range []string{"ui_text"} {
-		feature, ok := byID[featureID]
-		if !ok {
-			t.Fatalf("missing feature %q", featureID)
-		}
-		if feature.Status != domain.FeatureStatusPlanned {
-			t.Fatalf("%s status = %q, want planned", featureID, feature.Status)
-		}
-		if feature.ReadOnlyReason == "" {
-			t.Fatalf("%s should explain why it is not editable", featureID)
-		}
+	// Remote UI text is now implemented, so it must be an active capability
+	// with a read-only surface and polling metrics rather than a planned stub.
+	uiText, ok := byID["ui_text"]
+	if !ok {
+		t.Fatalf("missing feature %q", "ui_text")
 	}
-	if _, err := service.CheckHealth(context.Background(), "ui_text"); !errors.Is(
-		err,
-		domain.ErrHealthCheckUnavailable,
-	) {
-		t.Fatalf("planned feature health check should be unavailable, got %v", err)
+	if uiText.Status != domain.FeatureStatusActive {
+		t.Fatalf("ui_text status = %q, want active", uiText.Status)
+	}
+	if len(uiText.ReadOnlyMetrics) == 0 {
+		t.Fatalf("ui_text should expose read-only publication metrics")
 	}
 
 	// The notification module is now implemented, so it must be a registered

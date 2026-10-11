@@ -157,6 +157,14 @@ func buildRealtimeTransport(
 		return nil, nil, func() {}, nil
 	}
 
+	// Consent withdrawal must be detectable while a connection is open, which
+	// requires the database-backed authorizer. Configuration already refuses an
+	// enabled endpoint without a DSN; this second guard keeps the composition
+	// root from silently exposing the audio endpoint if that wiring changes.
+	if deviceAuthorizer == nil {
+		return nil, nil, nil, errors.New("realtime endpoint requires a device authorizer")
+	}
+
 	verifier, err := websocket.NewHMACDeviceTokenVerifier(cfg.WebSocket.AuthTokenSecret, nil)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("create device token verifier: %w", err)

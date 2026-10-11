@@ -332,6 +332,13 @@ func Load() (Config, error) {
 		if len(strings.TrimSpace(cfg.WebSocket.AuthTokenSecret)) < 32 {
 			return Config{}, fmt.Errorf("VOICE_GATEWAY_WS_TOKEN_SECRET must contain at least 32 characters when the realtime endpoint is enabled")
 		}
+		// The realtime endpoint re-checks the guardian's consent against the
+		// platform database. Without the database the authorizer cannot be
+		// constructed, so enabling the endpoint would silently fail open on
+		// consent withdrawal. Refuse that combination at configuration time.
+		if strings.TrimSpace(cfg.Database.DSN) == "" {
+			return Config{}, fmt.Errorf("VOICE_GATEWAY_DATABASE_DSN must be set when the realtime endpoint is enabled")
+		}
 		if !strings.HasPrefix(cfg.WebSocket.Path, "/") {
 			return Config{}, fmt.Errorf("VOICE_GATEWAY_WS_PATH must start with a slash")
 		}

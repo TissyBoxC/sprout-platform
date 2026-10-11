@@ -121,9 +121,34 @@ func TestLoadRejectsEnabledWebsiteSocketWithoutStrongSecret(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsEnabledWebsiteSocketWithoutDatabase(t *testing.T) {
+	t.Setenv("VOICE_GATEWAY_WS_ENABLED", "true")
+	t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
+	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected realtime endpoint without a database to be rejected")
+	}
+}
+
+func TestLoadAcceptsEnabledWebsiteSocketWithDatabase(t *testing.T) {
+	t.Setenv("VOICE_GATEWAY_WS_ENABLED", "true")
+	t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
+	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if !cfg.WebSocket.Enabled {
+		t.Fatal("expected realtime endpoint to stay enabled with a database configured")
+	}
+}
+
 func TestLoadRejectsUnsafeSessionTokenTTL(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_WS_ENABLED", "true")
 	t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
+	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
 	t.Setenv("VOICE_GATEWAY_WS_SESSION_TOKEN_TTL_SECONDS", "3600")
 
 	if _, err := Load(); err == nil {
@@ -142,6 +167,7 @@ func TestLoadRejectsInvalidMaxInputRunes(t *testing.T) {
 func TestLoadReadsWebsiteSocketLimits(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_WS_ENABLED", "true")
 	t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
+	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
 	t.Setenv("VOICE_GATEWAY_WS_MAX_TOTAL_SESSIONS", "128")
 	t.Setenv("VOICE_GATEWAY_WS_MAX_FRAME_BYTES", "2048")
 
@@ -184,6 +210,7 @@ func TestContinuityWindowDefaultsAndBounds(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Setenv("VOICE_GATEWAY_WS_ENABLED", "true")
 			t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
+			t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
 			t.Setenv("VOICE_GATEWAY_WS_CONTINUITY_WINDOW_SECONDS", testCase.value)
 			cfg, err := Load()
 			if testCase.wantErr && err == nil {

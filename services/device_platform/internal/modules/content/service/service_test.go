@@ -1107,6 +1107,95 @@ func TestDeviceDownloadDeniesDisallowedCategory(t *testing.T) {
 	}
 }
 
+// mutableAssetReader lets a test swap the stored blob after publish so the
+// download path can be exercised against a damaged or rotated asset.
+type mutableAssetReader struct {
+	asset *domain.Asset
+	err   error
+}
+
+func (reader *mutableAssetReader) FindContentAsset(
+	_ context.Context,
+	_ string,
+) (*domain.Asset, error) {
+	if reader.err != nil {
+		return nil, reader.err
+	}
+	return reader.asset, nil
+}
+
+// TestDownloadRejectsCorruptedBlobAfterPublish proves that a blob whose
+// checksum drifted since publish is rejected at download time, so a device
+// never receives bytes that no longer match the promised digest.
+func TestDownloadRejectsCorruptedBlobAfterPublish(t *testing.T) {
+	repository := newMemoryRepository()
+	reader := &mutableAssetReader{asset: &domain.Asset{
+		Key:         validMetadata().AssetKey,
+		SHA256:      validMetadata().SHA256,
+		SizeBytes:   1024,
+		DownloadURL: "https://download.example.test/content/story/moon-night-v1.bin",
+	}}
+	service := newContentService(t, repository, reader)
+	created := publishPackage(t, service, validMetadata())
+
+	// A fresh download succeeds while the blob matches the published digest.
+	if _, err := service.Download(context.Background(), created.PackageID); err != nil {
+		t.Fatalf("expected healthy download to succeed, got %v", err)
+	}
+
+	// Simulate on-disk corruption or a bad rebuild: same key, wrong digest.
+	reader.asset = &domain.Asset{
+		Key:         created.AssetKey,
+		SHA256:      "11111111111111111111111111111111",
+		SizeBytes:   1024,
+		DownloadURL: "https://download.example.test/content/story/moon-night-v1.bin",
+	}
+	if _, err := service.Download(
+		context.Background(),
+		created.PackageID,
+	); !errors.Is(err, domain.ErrAssetChecksumMismatch) {
+		t.Fatalf("expected checksum-mismatch rejection, got %v", err)
+	}
+}
+
+// TestDownloadReportsMissingBlob proves a published package whose blob has
+// disappeared is reported as a missing asset rather than served with a stale
+// URL, so the device can retry once the store recovers.
+func TestDownloadReportsMissingBlob(t *testing.T) {
+	repository := newMemoryRepository()
+	reader := &mutableAssetReader{asset: &domain.Asset{
+		Key:         validMetadata().AssetKey,
+		SHA256:      validMetadata().SHA256,
+		SizeBytes:   1024,
+		DownloadURL: "https://download.example.test/content/story/moon-night-v1.bin",
+	}}
+	service := newContentService(t, repository, reader)
+	created := publishPackage(t, service, validMetadata())
+
+	reader.asset = nil
+	if _, err := service.Download(
+		context.Background(),
+		created.PackageID,
+	); !errors.Is(err, domain.ErrAssetNotFound) {
+		t.Fatalf("expected asset-not-found, got %v", err)
+	}
+
+	// Recovery: once the blob is restored and matches, the download works.
+	reader.asset = &domain.Asset{
+		Key:         created.AssetKey,
+		SHA256:      created.SHA256,
+		SizeBytes:   created.SizeBytes,
+		DownloadURL: "https://download.example.test/content/story/moon-night-v1.bin",
+	}
+	info, err := service.Download(context.Background(), created.PackageID)
+	if err != nil {
+		t.Fatalf("expected recovery download to succeed, got %v", err)
+	}
+	if info.SHA256 != created.SHA256 {
+		t.Fatalf("download sha = %q, want %q", info.SHA256, created.SHA256)
+	}
+}
+
 func TestNextStatusRejectsIllegalMoves(t *testing.T) {
 	for _, test := range []struct {
 		current domain.Status

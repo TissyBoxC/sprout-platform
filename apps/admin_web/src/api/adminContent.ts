@@ -93,6 +93,33 @@ export interface ThemePackInput {
   packageIds: string[]
 }
 
+/// Platform-wide offline download policy. One published revision applies to
+/// every bound device; the revision lets the console tell whether a device is
+/// already on the current policy.
+export interface OfflinePolicy {
+  offlineEnabled: boolean
+  maxCachedPackages: number
+  maxCacheBytes: number
+  cacheTtlHours: number
+  downloadOverWifiOnly: boolean
+  revision: number
+}
+
+export interface OfflinePolicyInput {
+  offlineEnabled: boolean
+  maxCachedPackages: number
+  maxCacheBytes: number
+  cacheTtlHours: number
+  downloadOverWifiOnly: boolean
+}
+
+/// One device's applied offline-policy revision for a family.
+export interface OfflinePolicyAcknowledgement {
+  deviceId: string
+  revision: number
+  upToDate: boolean
+}
+
 /// Fields shared by the create-draft and update-draft forms. A version is
 /// allocated by the backend for an existing package, so the create payload
 /// carries only package identity and one initial version's metadata.
@@ -135,6 +162,11 @@ export interface AdminContentClient {
   publishThemePack(themeId: string): Promise<ThemePack>
   withdrawThemePack(themeId: string): Promise<ThemePack>
   deleteThemePack(themeId: string): Promise<void>
+
+  /// Offline download policy shared by the guardian app and every device.
+  loadOfflinePolicy(): Promise<OfflinePolicy>
+  saveOfflinePolicy(input: OfflinePolicyInput): Promise<OfflinePolicy>
+  loadOfflinePolicyAcknowledgements(familyId: string): Promise<OfflinePolicyAcknowledgement[]>
 }
 
 /// Creates the client for the content library. Every mutation returns the
@@ -276,7 +308,81 @@ export function createAdminContentClient(
         `/api/v1/admin/content/theme-packs/${encodeURIComponent(themeId)}`,
       )
     },
+
+    async loadOfflinePolicy(): Promise<OfflinePolicy> {
+      const response = await httpClient.get('/api/v1/admin/content/offline-policy')
+      return toOfflinePolicy(response.data?.data)
+    },
+
+    async saveOfflinePolicy(input: OfflinePolicyInput): Promise<OfflinePolicy> {
+      const response = await httpClient.put('/api/v1/admin/content/offline-policy', {
+        offline_enabled: input.offlineEnabled,
+        max_cached_packages: input.maxCachedPackages,
+        max_cache_bytes: input.maxCacheBytes,
+        cache_ttl_hours: input.cacheTtlHours,
+        download_over_wifi_only: input.downloadOverWifiOnly,
+      })
+      return toOfflinePolicy(response.data?.data)
+    },
+
+    async loadOfflinePolicyAcknowledgements(
+      familyId: string,
+    ): Promise<OfflinePolicyAcknowledgement[]> {
+      const response = await httpClient.get(
+        '/api/v1/admin/content/offline-policy/acknowledgements',
+        { params: { family_id: familyId.trim() } },
+      )
+      return toOfflinePolicyAcknowledgements(response.data?.data)
+    },
   }
+}
+
+function toOfflinePolicy(value: unknown): OfflinePolicy {
+  const record = recordValue(value)
+  return {
+    offlineEnabled: record.offline_enabled !== false && record.offlineEnabled !== false,
+    maxCachedPackages: nonNegativeInteger(
+      record.max_cached_packages ?? record.maxCachedPackages,
+      20,
+    ),
+    maxCacheBytes: nonNegativeInteger(
+      record.max_cache_bytes ?? record.maxCacheBytes,
+      512 * 1024 * 1024,
+    ),
+    cacheTtlHours: nonNegativeInteger(
+      record.cache_ttl_hours ?? record.cacheTtlHours,
+      720,
+    ),
+    downloadOverWifiOnly:
+      record.download_over_wifi_only !== false &&
+      record.downloadOverWifiOnly !== false,
+    revision: nonNegativeInteger(record.revision, 0),
+  }
+}
+
+function toOfflinePolicyAcknowledgements(
+  value: unknown,
+): OfflinePolicyAcknowledgement[] {
+  const record = recordValue(value)
+  const source = Array.isArray(record.devices)
+    ? record.devices
+    : Array.isArray(value)
+      ? value
+      : []
+  return source.flatMap((item: unknown) => {
+    const entry = recordValue(item)
+    const deviceId = stringValue(entry.device_id ?? entry.deviceId).trim()
+    if (!deviceId) {
+      return []
+    }
+    return [
+      {
+        deviceId,
+        revision: nonNegativeInteger(entry.revision, 0),
+        upToDate: entry.up_to_date === true || entry.upToDate === true,
+      },
+    ]
+  })
 }
 
 async function runThemeAction(

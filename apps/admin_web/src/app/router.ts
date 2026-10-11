@@ -14,6 +14,7 @@ import FeatureCenterPage from '@/features/feature_center/presentation/FeatureCen
 import DownloadFilesPage from '@/features/downloads/presentation/DownloadFilesPage.vue'
 import ContentLibraryPage from '@/features/content/presentation/ContentLibraryPage.vue'
 import ThemePackPage from '@/features/content/presentation/ThemePackPage.vue'
+import OfflinePolicyPage from '@/features/content/presentation/OfflinePolicyPage.vue'
 import DeviceDiagnosticsPage from '@/features/audit/presentation/DeviceDiagnosticsPage.vue'
 import OperationAuditPage from '@/features/audit/presentation/OperationAuditPage.vue'
 import UsageReportPage from '@/features/usage_report/presentation/UsageReportPage.vue'
@@ -85,6 +86,11 @@ export function createAdminRouter() {
         path: '/content/theme-packs',
         name: 'content-theme-packs',
         component: ThemePackPage,
+      },
+      {
+        path: '/content/offline-policy',
+        name: 'content-offline-policy',
+        component: OfflinePolicyPage,
       },
       {
         path: '/services',

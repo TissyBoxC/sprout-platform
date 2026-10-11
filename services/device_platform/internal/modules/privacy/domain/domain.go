@@ -71,6 +71,22 @@ type ConsentStatus struct {
 	ReconsentPath string     `json:"reconsent_path"`
 }
 
+// ConsentTypeStatus is the per-type guardian-facing consent projection.
+//
+// The guardian holds four independent decisions (service terms, child data
+// processing, AI interaction, email contact). They used to be collapsed into
+// one child_data_processing summary, so a client could neither see nor act on
+// the other three. Each entry carries its own latest decision so the client
+// can render and toggle one type without disturbing the rest.
+type ConsentTypeStatus struct {
+	ConsentType string     `json:"consent_type"`
+	Version     string     `json:"version"`
+	ConsentedAt *time.Time `json:"consented_at"`
+	WithdrawnAt *time.Time `json:"withdrawn_at"`
+	Status      string     `json:"status"`
+	Granted     bool       `json:"granted"`
+}
+
 // RetentionPolicy is the disclosed retention window for sensitive data.
 type RetentionPolicy struct {
 	AudioRetentionDays        int `json:"audio_retention_days"`
@@ -107,10 +123,11 @@ type ExportReceipt struct {
 
 // Status is the combined privacy control state returned to the guardian.
 type Status struct {
-	Consent  ConsentStatus   `json:"consent"`
-	Deletion DeletionRequest `json:"deletion"`
-	Export   ExportStatus    `json:"export"`
-	Policy   RetentionPolicy `json:"policy"`
+	Consent  ConsentStatus       `json:"consent"`
+	Consents []ConsentTypeStatus `json:"consents"`
+	Deletion DeletionRequest     `json:"deletion"`
+	Export   ExportStatus        `json:"export"`
+	Policy   RetentionPolicy     `json:"policy"`
 }
 
 // ExportStatus tells the client whether a data copy can be obtained now.

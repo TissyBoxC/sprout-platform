@@ -195,6 +195,7 @@ func (s *Service) Status(
 	consent := consentStatus(account, consents)
 	status := &domain.Status{
 		Consent:  consent,
+		Consents: consentTypeStatuses(account, consents),
 		Deletion: deletion,
 		Export: domain.ExportStatus{
 			Available: true,
@@ -809,6 +810,58 @@ func consentStatus(
 		status.Active = false
 	}
 	return status
+}
+
+// consentTypesInDisplayOrder fixes the order the guardian sees so the list is
+// stable across responses and easy to scan next to the four policy cards.
+func consentTypesInDisplayOrder() []string {
+	return []string{
+		domain.ConsentTypeGuardianTerms,
+		domain.ConsentTypeChildDataProcessing,
+		domain.ConsentTypeAIInteraction,
+		domain.ConsentTypeEmailContact,
+	}
+}
+
+// consentTypeStatuses projects every consent type independently. Each entry
+// follows the same rule as consentGrantedForParent: without a recorded event
+// the registration default still stands, and only an explicit decision flips
+// the type. The types never share state, so withdrawing one leaves the others
+// untouched as long as no event exists for them.
+func consentTypeStatuses(
+	account *authdomain.ParentAccount,
+	events []domain.ConsentEvent,
+) []domain.ConsentTypeStatus {
+	types := consentTypesInDisplayOrder()
+	statuses := make([]domain.ConsentTypeStatus, 0, len(types))
+	for _, consentType := range types {
+		status := domain.ConsentTypeStatus{
+			ConsentType: consentType,
+			Version:     account.GuardianConsentVersion,
+			ConsentedAt: &account.GuardianConsentedAt,
+			Status:      domain.ConsentStatusActive,
+			Granted:     true,
+		}
+		decision, decided := latestConsentDecision(events, consentType)
+		if !decided {
+			statuses = append(statuses, status)
+			continue
+		}
+		status.Version = decision.ConsentVersion
+		if decision.Granted {
+			status.ConsentedAt = &decision.CreatedAt
+			status.WithdrawnAt = nil
+			status.Status = domain.ConsentStatusActive
+			status.Granted = true
+		} else {
+			status.ConsentedAt = nil
+			status.WithdrawnAt = &decision.CreatedAt
+			status.Status = domain.ConsentStatusWithdrawn
+			status.Granted = false
+		}
+		statuses = append(statuses, status)
+	}
+	return statuses
 }
 
 // latestConsentDecision returns the newest decision for one consent type. The

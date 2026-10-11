@@ -488,6 +488,105 @@ func TestStatusFallsBackToActiveConsent(t *testing.T) {
 	}
 }
 
+func TestStatusProjectsAllConsentTypes(t *testing.T) {
+	service := newTestService(
+		t,
+		&memoryRepository{},
+		&fakeParentAccounts{},
+		&fakeDevices{},
+		&fakeAIDeletion{},
+	)
+
+	status, err := service.Status(context.Background(), testParentID)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(status.Consents) != 4 {
+		t.Fatalf("expected four consent types, got %d", len(status.Consents))
+	}
+	wantOrder := []string{
+		domain.ConsentTypeGuardianTerms,
+		domain.ConsentTypeChildDataProcessing,
+		domain.ConsentTypeAIInteraction,
+		domain.ConsentTypeEmailContact,
+	}
+	for index, want := range wantOrder {
+		entry := status.Consents[index]
+		if entry.ConsentType != want {
+			t.Fatalf("consent %d type = %q, want %q", index, entry.ConsentType, want)
+		}
+		// Without a recorded decision every type falls back to the
+		// registration default and must read as granted.
+		if !entry.Granted || entry.Status != domain.ConsentStatusActive {
+			t.Fatalf("consent %q = %+v, want active default", want, entry)
+		}
+	}
+}
+
+func TestWithdrawOneConsentLeavesOthersGranted(t *testing.T) {
+	repository := &memoryRepository{}
+	service := newTestService(
+		t,
+		repository,
+		&fakeParentAccounts{},
+		&fakeDevices{},
+		&fakeAIDeletion{},
+	)
+
+	status, err := service.WithdrawConsent(
+		context.Background(),
+		testParentID,
+		domain.ConsentTypeAIInteraction,
+		"2026-01",
+	)
+	if err != nil {
+		t.Fatalf("withdraw ai_interaction: %v", err)
+	}
+	byType := consentStatusesByType(status.Consents)
+	if byType[domain.ConsentTypeAIInteraction].Granted {
+		t.Fatalf("expected ai_interaction to be withdrawn")
+	}
+	for _, consentType := range []string{
+		domain.ConsentTypeGuardianTerms,
+		domain.ConsentTypeChildDataProcessing,
+		domain.ConsentTypeEmailContact,
+	} {
+		if !byType[consentType].Granted {
+			t.Fatalf("withdrawing ai_interaction also revoked %q", consentType)
+		}
+	}
+
+	// The child_data_processing summary must stay active because the guardian
+	// only withdrew AI interaction.
+	if !status.Consent.Active {
+		t.Fatalf("expected child_data_processing summary to stay active")
+	}
+
+	status, err = service.GrantConsent(
+		context.Background(),
+		testParentID,
+		domain.ConsentTypeAIInteraction,
+		"2026-01",
+	)
+	if err != nil {
+		t.Fatalf("grant ai_interaction: %v", err)
+	}
+	byType = consentStatusesByType(status.Consents)
+	if !byType[domain.ConsentTypeAIInteraction].Granted {
+		t.Fatalf("expected ai_interaction to be granted again")
+	}
+}
+
+func consentStatusesByType(
+	statuses []domain.ConsentTypeStatus,
+) map[string]domain.ConsentTypeStatus {
+	result := make(map[string]domain.ConsentTypeStatus, len(statuses))
+	for _, status := range statuses {
+		result[status.ConsentType] = status
+	}
+	return result
+}
+
 func TestExportNeverLeaksCredentials(t *testing.T) {
 	repository := &memoryRepository{}
 	service := newTestService(

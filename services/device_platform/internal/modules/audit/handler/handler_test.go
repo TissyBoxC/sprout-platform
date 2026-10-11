@@ -64,6 +64,9 @@ func TestGetDiagnosticsReturnsEmptyStateForDeviceWithoutHistory(t *testing.T) {
 			ErrorCount                int    `json:"error_count"`
 			InteractionEvents         []any  `json:"interaction_events"`
 			RetentionInteractionEvent int    `json:"retention_interaction_events"`
+			CrashEvents               []any  `json:"crash_events"`
+			CrashCount                int    `json:"crash_count"`
+			RetentionCrashEvents      int    `json:"retention_crash_events"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
@@ -73,7 +76,10 @@ func TestGetDiagnosticsReturnsEmptyStateForDeviceWithoutHistory(t *testing.T) {
 		envelope.Data.HealthState != domain.HealthUnknown ||
 		envelope.Data.ErrorCount != 0 ||
 		envelope.Data.InteractionEvents == nil ||
-		envelope.Data.RetentionInteractionEvent != domain.RetentionInteraction {
+		envelope.Data.RetentionInteractionEvent != domain.RetentionInteraction ||
+		envelope.Data.CrashEvents == nil ||
+		envelope.Data.CrashCount != 0 ||
+		envelope.Data.RetentionCrashEvents != domain.RetentionCrashes {
 		t.Fatalf("unexpected empty diagnostic response: %s", recorder.Body.String())
 	}
 }
@@ -147,12 +153,12 @@ func TestGetProvisioningReturnsEmptyStateForDeviceWithoutHistory(t *testing.T) {
 	}
 	var envelope struct {
 		Data struct {
-			DeviceID                   string `json:"device_id"`
-			State                      string `json:"state"`
-			SessionState               string `json:"session_state"`
+			DeviceID                   string  `json:"device_id"`
+			State                      string  `json:"state"`
+			SessionState               string  `json:"session_state"`
 			UpdatedAt                  *string `json:"updated_at"`
-			Events                     []any  `json:"events"`
-			RetentionProvisioningEvent int    `json:"retention_provisioning_events"`
+			Events                     []any   `json:"events"`
+			RetentionProvisioningEvent int     `json:"retention_provisioning_events"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {

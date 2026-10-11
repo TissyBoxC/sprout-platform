@@ -18,6 +18,7 @@ type Config struct {
 	Auth           AuthConfig
 	AI             AIConfig
 	OTA            OTAConfig
+	UIText         UITextConfig
 	Log            LogConfig
 	Database       DatabaseConfig
 	Redis          RedisConfig
@@ -80,6 +81,16 @@ type OTAConfig struct {
 	// deployment without firmware signing can still run; publishing any OTA
 	// release requires a trusted key and fails closed otherwise.
 	FirmwareSignaturePublicKeys string
+}
+
+// UITextConfig contains the remote UI text signing keyring. Credentials are
+// public keys only; the private signing key never reaches the service.
+type UITextConfig struct {
+	// SignaturePublicKeys is a JSON object mapping key ids to base64-encoded
+	// Ed25519 public keys. It is optional at startup so a deployment without
+	// UI text signing can still run; publishing any package requires a trusted
+	// key and fails closed otherwise.
+	SignaturePublicKeys string
 }
 
 // LogConfig contains logging settings.
@@ -195,6 +206,12 @@ func Load() (Config, error) {
 			ClientBaseURL:   env("DEVICE_PLATFORM_OTA_CLIENT_BASE_URL", ""),
 			FirmwareSignaturePublicKeys: env(
 				"DEVICE_PLATFORM_OTA_FIRMWARE_SIGNATURE_PUBLIC_KEYS",
+				"",
+			),
+		},
+		UIText: UITextConfig{
+			SignaturePublicKeys: env(
+				"DEVICE_PLATFORM_UI_TEXT_SIGNATURE_PUBLIC_KEYS",
 				"",
 			),
 		},

@@ -407,6 +407,27 @@ func (r *memoryRepository) UpdateLastLogin(
 	return nil
 }
 
+func (r *memoryRepository) ListAdminAccounts(
+	_ context.Context,
+) ([]domain.ParentAccount, error) {
+	if r.account == nil || r.account.Role != domain.RoleAdmin {
+		return []domain.ParentAccount{}, nil
+	}
+	return []domain.ParentAccount{*r.account}, nil
+}
+
+func (r *memoryRepository) UpdateAdminPermissions(
+	_ context.Context,
+	accountID string,
+	permissions []string,
+) error {
+	if r.account == nil || r.account.ID != accountID {
+		return domain.ErrAccountNotFound
+	}
+	r.account.AdminPermissions = permissions
+	return nil
+}
+
 func (r *memoryRepository) CreateSession(
 	_ context.Context,
 	_ *domain.Session,

@@ -25,6 +25,12 @@ type Repository interface {
 	UpdateEmail(ctx context.Context, accountID string, email string) error
 	UpdateProfile(ctx context.Context, account *domain.ParentAccount) error
 	UpdateLastLogin(ctx context.Context, accountID string) error
+	ListAdminAccounts(ctx context.Context) ([]domain.ParentAccount, error)
+	UpdateAdminPermissions(
+		ctx context.Context,
+		accountID string,
+		permissions []string,
+	) error
 	CreateSession(ctx context.Context, session *domain.Session) error
 	GetSessionByRefreshTokenHash(
 		ctx context.Context,
@@ -92,13 +98,14 @@ func (r *PostgresRepository) CreateParentAccount(
 			guardian_consented_at,
 			phone_verified_at,
 			email_verified_at,
+			admin_permissions,
 			last_login_at,
 			created_at,
 			updated_at
 		)
 		VALUES (
 			$1, NULLIF($2, ''), $3, $4, $5, $6, $7, NULLIF($8, '')::date, $9, $10,
-			$11, $12, $13, $14, $15, $16, $17
+			$11, $12, $13, $14, $15, $16, $17, $18
 		)
 	`,
 		account.ID,
@@ -115,6 +122,7 @@ func (r *PostgresRepository) CreateParentAccount(
 		account.GuardianConsentedAt,
 		account.PhoneVerifiedAt,
 		account.EmailVerifiedAt,
+		account.AdminPermissions,
 		account.LastLoginAt,
 		account.CreatedAt,
 		account.UpdatedAt,
@@ -227,6 +235,7 @@ func (r *PostgresRepository) GetParentAccountByEmail(
 			guardian_consented_at,
 			phone_verified_at,
 			email_verified_at,
+			admin_permissions,
 			last_login_at,
 			created_at,
 			updated_at
@@ -258,6 +267,7 @@ func (r *PostgresRepository) GetParentAccountByPhone(
 			guardian_consented_at,
 			phone_verified_at,
 			email_verified_at,
+			admin_permissions,
 			last_login_at,
 			created_at,
 			updated_at
@@ -288,6 +298,7 @@ func (r *PostgresRepository) GetParentAccountByID(
 			guardian_consented_at,
 			phone_verified_at,
 			email_verified_at,
+			admin_permissions,
 			last_login_at,
 			created_at,
 			updated_at
@@ -312,6 +323,79 @@ func (r *PostgresRepository) UpdateLastLogin(
 	`, accountID)
 	if err != nil {
 		return fmt.Errorf("update parent last login: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrAccountNotFound
+	}
+	return nil
+}
+
+// ListAdminAccounts returns every administrator with its permission set for
+// the management console. Guardians are excluded because they never hold an
+// administrator grant.
+func (r *PostgresRepository) ListAdminAccounts(
+	ctx context.Context,
+) ([]domain.ParentAccount, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT
+			id,
+			COALESCE(email, ''),
+			COALESCE(phone, ''),
+			password_hash,
+			display_name,
+			guardian_family_name,
+			COALESCE(child_nickname, ''),
+			COALESCE(child_birthday::text, ''),
+			status,
+			role,
+			guardian_consent_version,
+			guardian_consented_at,
+			phone_verified_at,
+			email_verified_at,
+			admin_permissions,
+			last_login_at,
+			created_at,
+			updated_at
+		FROM parent_accounts
+		WHERE role = 'admin'
+		ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list administrator accounts: %w", err)
+	}
+	defer rows.Close()
+
+	accounts := make([]domain.ParentAccount, 0)
+	for rows.Next() {
+		account, scanErr := scanParentAccount(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		accounts = append(accounts, *account)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate administrator accounts: %w", err)
+	}
+	return accounts, nil
+}
+
+// UpdateAdminPermissions replaces one administrator's permission set. The
+// role guard keeps a guardian id from being turned into an administrator
+// through this path, and it is the single write point for the grant.
+func (r *PostgresRepository) UpdateAdminPermissions(
+	ctx context.Context,
+	accountID string,
+	permissions []string,
+) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE parent_accounts
+		SET admin_permissions = $2,
+		    updated_at = NOW()
+		WHERE id = $1
+		  AND role = 'admin'
+	`, accountID, permissions)
+	if err != nil {
+		return fmt.Errorf("update administrator permissions: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return domain.ErrAccountNotFound
@@ -722,6 +806,7 @@ func scanParentAccount(row rowScanner) (*domain.ParentAccount, error) {
 		&account.GuardianConsentedAt,
 		&account.PhoneVerifiedAt,
 		&account.EmailVerifiedAt,
+		&account.AdminPermissions,
 		&account.LastLoginAt,
 		&account.CreatedAt,
 		&account.UpdatedAt,

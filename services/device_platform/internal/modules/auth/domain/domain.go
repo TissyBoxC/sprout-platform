@@ -34,6 +34,7 @@ var (
 	ErrInvalidChildBirthday  = errors.New("child birthday is invalid")
 	ErrAIAccountUnavailable  = errors.New("AI account is unavailable")
 	ErrInsufficientPrivilege = errors.New("insufficient privilege")
+	ErrUnknownAdminPermission = errors.New("unknown administrator permission")
 	ErrRegistrationDisabled  = errors.New("registration is disabled")
 	ErrEmailLoginDisabled    = errors.New("email login is disabled")
 )
@@ -59,6 +60,10 @@ type ParentAccount struct {
 	PhoneVerifiedAt        *time.Time
 	EmailVerifiedAt        *time.Time
 	Role                   string
+	// AdminPermissions is the operation-level grant for an administrator. It is
+	// empty for guardians and for an administrator whose capabilities were
+	// revoked. See AdminPermissionCatalog for the assignable values.
+	AdminPermissions       []string
 	LastLoginAt            *time.Time
 	CreatedAt              time.Time
 	UpdatedAt              time.Time

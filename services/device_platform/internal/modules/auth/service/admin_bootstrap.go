@@ -139,6 +139,10 @@ func (s *Service) BootstrapAdmin(
 		DisplayName:  displayName,
 		Status:       accountStatusActive,
 		Role:         domain.RoleAdmin,
+		// The first administrator is the trusted bootstrap identity, so it
+		// receives the wildcard. Later grants are narrowed through the
+		// permission-management screen.
+		AdminPermissions: []string{domain.AdminPermissionWildcard},
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}

@@ -17,6 +17,7 @@ import '../../features/device/presentation/device_provisioning_page.dart';
 import '../../features/device/presentation/device_qr_scan_page.dart';
 import '../../features/english/presentation/english_page.dart';
 import '../../features/family/presentation/family_home_page.dart';
+import '../../features/image_privacy/presentation/image_privacy_page.dart';
 import '../../features/learning_visualization/presentation/learning_visualization_page.dart';
 import '../../features/local_command/presentation/local_command_page.dart';
 import '../../features/notification/presentation/family_message_page.dart';
@@ -113,6 +114,10 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/learning-visualization',
         builder: (context, state) => const LearningVisualizationPage(),
+      ),
+      GoRoute(
+        path: '/me/image-privacy',
+        builder: (context, state) => const ImagePrivacyPage(),
       ),
       GoRoute(
         path: '/me/english',

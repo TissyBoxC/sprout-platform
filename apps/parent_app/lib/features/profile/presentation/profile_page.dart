@@ -78,6 +78,7 @@ class ProfilePage extends ConsumerWidget {
                     onBluetoothAudio: () => context.push('/me/bluetooth-audio'),
                     onLearningVisualization: () =>
                         context.push('/me/learning-visualization'),
+                    onImagePrivacy: () => context.push('/me/image-privacy'),
                     onEnglish: () => context.push('/me/english'),
                     onPlayback: () => context.push('/me/playback'),
                     onLocalCommands: () => context.push('/me/local-commands'),
@@ -427,6 +428,7 @@ class _SettingsCard extends StatelessWidget {
     required this.onAlarmReminders,
     required this.onBluetoothAudio,
     required this.onLearningVisualization,
+    required this.onImagePrivacy,
     required this.onEnglish,
     required this.onPlayback,
     required this.onLocalCommands,
@@ -455,6 +457,7 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onAlarmReminders;
   final VoidCallback onBluetoothAudio;
   final VoidCallback onLearningVisualization;
+  final VoidCallback onImagePrivacy;
   final VoidCallback onEnglish;
   final VoidCallback onPlayback;
   final VoidCallback onLocalCommands;
@@ -521,6 +524,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('设置触屏学习时的动画和反馈效果'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onLearningVisualization,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.image_outlined),
+            title: const Text('图片隐私'),
+            subtitle: const Text('管理图片处理、本机保护和上传授权'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onImagePrivacy,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

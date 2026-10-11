@@ -9,6 +9,7 @@ import type {
   DeviceInteractionEvent,
   DeviceModuleFailure,
   DeviceRecoveryEvent,
+  DeviceTemperatureState,
 } from '@/api/adminDeviceDiagnostics'
 import { useDeviceDiagnosticsStore } from '@/features/audit/application/deviceDiagnosticsStore'
 
@@ -60,6 +61,30 @@ function healthDescription(value: DeviceHealthState): string {
 
 function deviceHealth(deviceId: string): DeviceHealthState {
   return store.snapshots[deviceId]?.healthState ?? 'unknown'
+}
+
+function temperatureLabel(value: DeviceTemperatureState): string {
+  return (
+    {
+      normal: '温度正常',
+      warm: '温度偏高',
+      hot: '温度过高',
+      critical: '温度危险',
+      unknown: '温度待补充',
+    }[value] ?? '温度待补充'
+  )
+}
+
+function temperatureDetail(device: AdminDiagnosticDevice): string {
+  const tenths = device.temperature.celsiusTenths
+  if (tenths === null) {
+    return temperatureLabel(device.temperature.state)
+  }
+  return `${(tenths / 10).toFixed(1)}°C · ${temperatureLabel(device.temperature.state)}`
+}
+
+function temperatureIsConcerning(value: DeviceTemperatureState): boolean {
+  return value === 'hot' || value === 'critical'
 }
 
 function resetReasonLabel(value: string): string {
@@ -287,6 +312,16 @@ function formatDuration(value: number): string {
                 <span :class="['online-state', device.isOnline ? 'online' : 'offline']">
                   {{ device.isOnline ? '在线' : '离线' }}
                 </span>
+                <span
+                  v-if="device.temperature.state !== 'unknown'"
+                  :class="[
+                    'temperature-state',
+                    device.temperature.state,
+                    { concerning: temperatureIsConcerning(device.temperature.state) },
+                  ]"
+                >
+                  {{ temperatureDetail(device) }}
+                </span>
               </button>
             </li>
           </ul>
@@ -302,6 +337,15 @@ function formatDuration(value: number): string {
                   {{ store.selectedDevice.hardwareModel || '初芽' }} ·
                   {{ store.selectedDevice.firmwareVersion || '版本待补充' }} ·
                   {{ store.selectedDevice.isOnline ? '在线' : '离线' }}
+                </p>
+                <p
+                  v-if="store.selectedDevice.temperature.state !== 'unknown'"
+                  :class="[
+                    'overview-temperature',
+                    store.selectedDevice.temperature.state,
+                  ]"
+                >
+                  {{ temperatureDetail(store.selectedDevice) }}
                 </p>
               </div>
               <div v-if="store.snapshot" :class="['health-summary', store.snapshot.healthState]">
@@ -748,6 +792,28 @@ h1 {
   color: #1d6b3f;
 }
 
+.temperature-state {
+  justify-self: start;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #eef4ff;
+  color: #33528f;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.temperature-state.warm {
+  background: #fff4df;
+  color: #9a6207;
+}
+
+.temperature-state.hot,
+.temperature-state.critical,
+.temperature-state.concerning {
+  background: #fdecef;
+  color: #a12b4a;
+}
+
 .health-dot {
   width: 9px;
   height: 9px;
@@ -807,6 +873,23 @@ h1 {
 .overview-meta {
   margin: 7px 0 0;
   color: var(--sprout-text-muted);
+}
+
+.overview-temperature {
+  display: inline-block;
+  margin: 8px 0 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #eef4ff;
+  color: #33528f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.overview-temperature.hot,
+.overview-temperature.critical {
+  background: #fdecef;
+  color: #a12b4a;
 }
 
 .health-summary {

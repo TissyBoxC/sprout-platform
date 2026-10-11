@@ -10,6 +10,14 @@ export interface AdminDiagnosticDevice {
   hardwareModel: string
   firmwareVersion: string
   isOnline: boolean
+  temperature: DeviceTemperature
+}
+
+export type DeviceTemperatureState = 'unknown' | 'normal' | 'warm' | 'hot' | 'critical'
+
+export interface DeviceTemperature {
+  state: DeviceTemperatureState
+  celsiusTenths: number | null
 }
 
 export interface DeviceBootEvent {
@@ -113,6 +121,33 @@ function toNullableDevice(value: unknown): AdminDiagnosticDevice | null {
     hardwareModel: stringValue(record.hardware_model ?? record.hardwareModel),
     firmwareVersion: stringValue(record.firmware_version ?? record.firmwareVersion),
     isOnline: runtime.is_online === true || record.is_online === true,
+    temperature: toTemperature(runtime.temperature),
+  }
+}
+
+function toTemperature(value: unknown): DeviceTemperature {
+  const record = recordValue(value)
+  const rawTenths = record.celsius_tenths ?? record.celsiusTenths
+  const parsed = Number(rawTenths)
+  const celsiusTenths =
+    rawTenths === null || rawTenths === undefined || !Number.isFinite(parsed)
+      ? null
+      : Math.trunc(parsed)
+  return {
+    state: temperatureState(record.state),
+    celsiusTenths,
+  }
+}
+
+function temperatureState(value: unknown): DeviceTemperatureState {
+  switch (value) {
+    case 'normal':
+    case 'warm':
+    case 'hot':
+    case 'critical':
+      return value
+    default:
+      return 'unknown'
   }
 }
 

@@ -46,6 +46,8 @@ import (
 	otaService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/service"
 	policyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/repository"
 	policyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
+	playbackRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/playback/repository"
+	playbackService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/playback/service"
 	privacyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/repository"
 	privacyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/service"
 	releaseStoreService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
@@ -421,6 +423,18 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create content library service: %w", err)
 	}
+	playbackRequests, err := playbackService.New(playbackService.Options{
+		Repository: playbackRepository.NewPostgresRepository(databaseStore.Pool()),
+		DeviceReader: playbackService.BindingDeviceReader{
+			Service: deviceBindingService,
+		},
+		PackageReader: playbackService.ContentPackageReader{
+			Repository: contentRepository.NewPostgresRepository(databaseStore.Pool()),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("create playback request service: %w", err)
+	}
 	usageReports, err := usageReportService.New(usageReportService.Options{
 		Repository:    usagePersistence,
 		PolicyService: parentPolicyService,
@@ -470,6 +484,7 @@ func Run() error {
 			OTAService:            ota,
 			ContentService:        contentLibraryService,
 			EnglishService:        englishLearningService,
+			PlaybackService:       playbackRequests,
 			UsageReportService:    usageReports,
 			VoiceTokenIssuer:      voiceTokenIssuer,
 			VoiceWebSocketURL:     cfg.VoiceGateway.WebSocketURL,

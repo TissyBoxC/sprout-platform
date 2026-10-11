@@ -29,6 +29,7 @@ import (
 	operationsservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
 	otaservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/service"
 	policeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
+	playbackservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/playback/service"
 	privacyhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/handler"
 	privacyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/service"
 	releasestoreservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
@@ -55,6 +56,7 @@ type RouterOptions struct {
 	OTAService            *otaservice.Service
 	ContentService        *contentservice.Service
 	EnglishService        *englishservice.Service
+	PlaybackService       *playbackservice.Service
 	UsageReportService    *usagereportservice.Service
 	VoiceTokenIssuer      bindingservice.VoiceTokenIssuer
 	VoiceWebSocketURL     string
@@ -242,6 +244,49 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/english/attempts",
 					deviceEnglishHandler.recordAttempt,
+				)
+			}
+		}
+		if options.PlaybackService != nil {
+			playbackHandler := playbackHandler{
+				service: options.PlaybackService,
+			}
+			mux.HandleFunc(
+				"POST /api/v1/playback/requests",
+				authHandler.requireAuthentication(playbackHandler.create),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/playback/requests",
+				authHandler.requireAuthentication(playbackHandler.list),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/playback/requests/{request_id}",
+				authHandler.requireAuthentication(playbackHandler.get),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/playback/requests/{request_id}/cancel",
+				authHandler.requireAuthentication(playbackHandler.cancel),
+			)
+			// Firmware devices never receive a guardian credential, so the
+			// device-facing reads and outcome writes are exposed behind a
+			// device session token verified with the path device id.
+			if options.BindingService != nil && options.RuntimeService != nil {
+				devicePlaybackHandler := devicePlaybackHandler{
+					playbackHandler: &playbackHandler,
+					bindingService:  options.BindingService,
+					runtimeService:  options.RuntimeService,
+				}
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/playback/requests",
+					devicePlaybackHandler.listPending,
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/playback/requests/{request_id}/acknowledge",
+					devicePlaybackHandler.acknowledge,
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/playback/requests/{request_id}/complete",
+					devicePlaybackHandler.complete,
 				)
 			}
 		}

@@ -75,6 +75,7 @@ class ProfilePage extends ConsumerWidget {
                     onChildren: () => context.push('/me/children'),
                     onCompanionship: () => context.push('/me/companionship'),
                     onAlarmReminders: () => context.push('/me/alarm-reminders'),
+                    onBluetoothAudio: () => context.push('/me/bluetooth-audio'),
                     onEnglish: () => context.push('/me/english'),
                     onPlayback: () => context.push('/me/playback'),
                     onLocalCommands: () => context.push('/me/local-commands'),
@@ -422,6 +423,7 @@ class _SettingsCard extends StatelessWidget {
     required this.onChildren,
     required this.onCompanionship,
     required this.onAlarmReminders,
+    required this.onBluetoothAudio,
     required this.onEnglish,
     required this.onPlayback,
     required this.onLocalCommands,
@@ -448,6 +450,7 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onChildren;
   final VoidCallback onCompanionship;
   final VoidCallback onAlarmReminders;
+  final VoidCallback onBluetoothAudio;
   final VoidCallback onEnglish;
   final VoidCallback onPlayback;
   final VoidCallback onLocalCommands;
@@ -498,6 +501,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('设置起床、午睡和刷牙闹钟'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onAlarmReminders,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.bluetooth_audio_rounded),
+            title: const Text('蓝牙音箱'),
+            subtitle: const Text('设置设备作为蓝牙音箱的模式和配对'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onBluetoothAudio,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

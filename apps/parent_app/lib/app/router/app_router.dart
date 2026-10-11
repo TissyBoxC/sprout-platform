@@ -7,6 +7,7 @@ import '../../features/auth/application/auth_controller.dart';
 import '../../features/auth/presentation/bind_email_page.dart';
 import '../../features/auth/presentation/login_page.dart';
 import '../../features/auth/presentation/register_page.dart';
+import '../../features/bluetooth_audio/presentation/bluetooth_audio_page.dart';
 import '../../features/child_profile/presentation/child_profile_page.dart';
 import '../../features/companionship/presentation/companionship_page.dart';
 import '../../features/content_management/presentation/content_library_page.dart';
@@ -103,6 +104,10 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/alarm-reminders',
         builder: (context, state) => const AlarmReminderPage(),
+      ),
+      GoRoute(
+        path: '/me/bluetooth-audio',
+        builder: (context, state) => const BluetoothAudioPage(),
       ),
       GoRoute(
         path: '/me/english',

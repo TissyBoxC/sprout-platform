@@ -521,6 +521,9 @@ func runtimeStatusResponse(status *domain.RuntimeStatus) map[string]any {
 			"state":          status.Temperature,
 			"celsius_tenths": status.TemperatureTenths,
 		},
+		"diagnostics": map[string]any{
+			"recent_crash_count": status.Diagnostic.RecentCrashCount,
+		},
 		"time_sync": map[string]any{
 			"state":          status.TimeSyncState,
 			"source":         status.TimeSyncSource,

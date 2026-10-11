@@ -146,6 +146,10 @@ type Heartbeat struct {
 type RuntimeStatus struct {
 	Heartbeat
 	IsOnline bool
+	// Diagnostic summarizes the device's recent abnormal restarts so the
+	// guardian app can show one actionable, non-technical hint. It is derived
+	// from the audit crash stream and never contains raw crash detail.
+	Diagnostic DiagnosticHint
 	// Provisioning mirrors the provisioning columns on the runtime status row.
 	// They are read-only projections of the provisioning event stream and are
 	// never written through a heartbeat.
@@ -154,6 +158,14 @@ type RuntimeStatus struct {
 	SessionState      SessionState
 	LastProvisionedAt *time.Time
 	DroppedEvents     uint64
+}
+
+// DiagnosticHint is a bounded, guardian-safe view of a device's recent
+// stability. RecentCrashCount counts abnormal restarts inside the platform's
+// retention window; it is zero when the device is stable or has never
+// reported.
+type DiagnosticHint struct {
+	RecentCrashCount uint64
 }
 
 // CommandType is an operator-initiated network maintenance action.

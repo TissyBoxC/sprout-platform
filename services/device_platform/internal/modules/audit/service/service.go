@@ -236,6 +236,21 @@ func (s *Service) GetSummary(
 	return summary, nil
 }
 
+// RecentCrashCount returns the number of retained crash records for one
+// device. It satisfies the device_runtime DiagnosticReader contract so the
+// guardian device status can surface a single stability hint without coupling
+// the runtime module to the audit module.
+func (s *Service) RecentCrashCount(
+	ctx context.Context,
+	deviceID string,
+) (uint64, error) {
+	deviceID = strings.TrimSpace(deviceID)
+	if !diagnosticDevicePattern.MatchString(deviceID) {
+		return 0, domain.ErrEventNotFound
+	}
+	return s.repository.CountRecentCrashes(ctx, deviceID)
+}
+
 // ValidateProvisioning normalizes one optional provisioning payload without
 // persisting it. Transport calls this before accepting the runtime heartbeat
 // so an invalid provisioning extension cannot leave a half-applied state.

@@ -202,20 +202,21 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create device binding service: %w", err)
 	}
-	deviceRuntimeService, err := runtimeService.New(runtimeService.Options{
-		Repository:       runtimeRepository.NewPostgresRepository(databaseStore.Pool()),
-		BindingService:   deviceBindingService,
-		OfflineThreshold: cfg.DeviceRuntime.OfflineThreshold,
-		CommandTTL:       cfg.DeviceRuntime.CommandTTL,
-	})
-	if err != nil {
-		return fmt.Errorf("create device runtime service: %w", err)
-	}
 	diagnosticService, err := auditService.New(auditService.Options{
 		Repository: auditRepository.NewPostgresRepository(databaseStore.Pool()),
 	})
 	if err != nil {
 		return fmt.Errorf("create diagnostic service: %w", err)
+	}
+	deviceRuntimeService, err := runtimeService.New(runtimeService.Options{
+		Repository:       runtimeRepository.NewPostgresRepository(databaseStore.Pool()),
+		BindingService:   deviceBindingService,
+		DiagnosticReader: diagnosticService,
+		OfflineThreshold: cfg.DeviceRuntime.OfflineThreshold,
+		CommandTTL:       cfg.DeviceRuntime.CommandTTL,
+	})
+	if err != nil {
+		return fmt.Errorf("create device runtime service: %w", err)
 	}
 	operations, err := operationsService.New(operationsService.Options{
 		Repository: operationsRepository.NewPostgresRepository(

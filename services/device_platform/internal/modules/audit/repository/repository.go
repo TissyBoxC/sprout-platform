@@ -50,6 +50,13 @@ type Repository interface {
 		deviceID string,
 		since time.Time,
 	) (*domain.Summary, error)
+	// CountRecentCrashes returns how many redacted crash records are retained
+	// for one device. It is a COUNT over the bounded retention table, used to
+	// derive a guardian-facing stability hint, never raw crash detail.
+	CountRecentCrashes(
+		ctx context.Context,
+		deviceID string,
+	) (uint64, error)
 }
 
 type provisioningStatusScanner interface {
@@ -544,6 +551,24 @@ func (r *PostgresRepository) GetSummary(
 	}
 	summary.HealthState = health
 	return summary, nil
+}
+
+// CountRecentCrashes counts the retained crash records for one device. The
+// table itself is retention-bounded (domain.RetentionCrashes per device), so
+// this never grows into an unbounded scan.
+func (r *PostgresRepository) CountRecentCrashes(
+	ctx context.Context,
+	deviceID string,
+) (uint64, error) {
+	var count uint64
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM device_crash_events
+		WHERE device_id = $1
+	`, deviceID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count device crash events: %w", err)
+	}
+	return count, nil
 }
 
 // summaryHealthState derives a windowed health state from the newest failure

@@ -31,10 +31,18 @@ type BindingReader interface {
 	ListAllForAdmin(ctx context.Context) ([]bindingdomain.Binding, error)
 }
 
+// DiagnosticReader is the narrow diagnostic surface required to summarize a
+// device's recent stability. It is optional; when it is absent the runtime
+// status simply reports no recent crashes.
+type DiagnosticReader interface {
+	RecentCrashCount(ctx context.Context, deviceID string) (uint64, error)
+}
+
 // Service validates, stores, and exposes device runtime state.
 type Service struct {
 	repository       repository.Repository
 	bindingReader    BindingReader
+	diagnosticReader DiagnosticReader
 	timeSource       clock.Clock
 	offlineThreshold time.Duration
 	commandTTL       time.Duration
@@ -44,6 +52,7 @@ type Service struct {
 type Options struct {
 	Repository       repository.Repository
 	BindingService   BindingReader
+	DiagnosticReader DiagnosticReader
 	Clock            clock.Clock
 	OfflineThreshold time.Duration
 	CommandTTL       time.Duration
@@ -72,6 +81,7 @@ func New(options Options) (*Service, error) {
 	return &Service{
 		repository:       options.Repository,
 		bindingReader:    options.BindingService,
+		diagnosticReader: options.DiagnosticReader,
 		timeSource:       timeSource,
 		offlineThreshold: offlineThreshold,
 		commandTTL:       commandTTL,
@@ -169,7 +179,27 @@ func (s *Service) GetStatus(
 		return nil, err
 	}
 	status.IsOnline = s.isOnline(status.Heartbeat)
+	s.applyDiagnosticHint(ctx, status, deviceID)
 	return status, nil
+}
+
+// applyDiagnosticHint attaches a bounded recent-crash count when a diagnostic
+// reader is configured. A reader failure is non-fatal: the runtime status is
+// still returned, just without the hint, so a diagnostic outage never blocks
+// the guardian device list.
+func (s *Service) applyDiagnosticHint(
+	ctx context.Context,
+	status *domain.RuntimeStatus,
+	deviceID string,
+) {
+	if s.diagnosticReader == nil || status == nil {
+		return
+	}
+	count, err := s.diagnosticReader.RecentCrashCount(ctx, deviceID)
+	if err != nil {
+		return
+	}
+	status.Diagnostic.RecentCrashCount = count
 }
 
 // GetDeviceStatus returns binding metadata plus the latest runtime snapshot.
@@ -229,6 +259,7 @@ func (s *Service) ListDeviceStatuses(
 	runtimeByDeviceID := make(map[string]domain.RuntimeStatus, len(statuses))
 	for index := range statuses {
 		statuses[index].IsOnline = s.isOnline(statuses[index].Heartbeat)
+		s.applyDiagnosticHint(ctx, &statuses[index], statuses[index].DeviceID)
 		runtimeByDeviceID[statuses[index].DeviceID] = statuses[index]
 	}
 
@@ -269,6 +300,7 @@ func (s *Service) ListAllDeviceStatuses(
 	runtimeByDeviceID := make(map[string]domain.RuntimeStatus, len(statuses))
 	for index := range statuses {
 		statuses[index].IsOnline = s.isOnline(statuses[index].Heartbeat)
+		s.applyDiagnosticHint(ctx, &statuses[index], statuses[index].DeviceID)
 		runtimeByDeviceID[statuses[index].DeviceID] = statuses[index]
 	}
 

@@ -15,6 +15,7 @@ type stubRepository struct {
 	savedProvisioning *domain.Provisioning
 	getProvisioning   *domain.ProvisioningSnapshot
 	summary           *domain.Summary
+	recentCrashes     uint64
 	err               error
 }
 
@@ -60,6 +61,13 @@ func (stub *stubRepository) GetSummary(
 	_ time.Time,
 ) (*domain.Summary, error) {
 	return stub.summary, stub.err
+}
+
+func (stub *stubRepository) CountRecentCrashes(
+	_ context.Context,
+	_ string,
+) (uint64, error) {
+	return stub.recentCrashes, stub.err
 }
 
 var _ repository.Repository = (*stubRepository)(nil)

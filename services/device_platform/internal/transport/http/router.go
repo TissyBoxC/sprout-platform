@@ -348,6 +348,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				"PUT /api/v1/content/offline-policy",
 				authHandler.requireAuthentication(offlinePolicyHandler.publish),
 			)
+			mux.HandleFunc(
+				"GET /api/v1/content/offline-policy/acknowledgements",
+				authHandler.requireAuthentication(offlinePolicyHandler.acknowledgements),
+			)
 			// Firmware devices read the fleet policy with a device session
 			// token so the cache budget is enforced without a guardian present.
 			if options.BindingService != nil {
@@ -359,6 +363,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/content/offline-policy",
 					deviceOfflinePolicyHandler.currentForDevice,
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/content/offline-policy/acknowledgement",
+					deviceOfflinePolicyHandler.acknowledgeForDevice,
 				)
 			}
 		}

@@ -15,6 +15,7 @@ import (
 type contentOfflinePolicyTestService struct {
 	policy   contentofflinepolicydomain.Policy
 	revision int
+	acks     map[string]int
 }
 
 func (s *contentOfflinePolicyTestService) Current(
@@ -46,6 +47,37 @@ func (s *contentOfflinePolicyTestService) Publish(
 		Revision:             s.revision,
 	}
 	return s.policy, nil
+}
+
+func (s *contentOfflinePolicyTestService) Acknowledge(
+	_ context.Context,
+	_ string,
+	deviceID string,
+	revision int,
+) error {
+	if err := contentofflinepolicydomain.ValidateAcceptedRevision(revision); err != nil {
+		return err
+	}
+	if s.acks == nil {
+		s.acks = map[string]int{}
+	}
+	s.acks[deviceID] = revision
+	return nil
+}
+
+func (s *contentOfflinePolicyTestService) Acknowledgements(
+	_ context.Context,
+	_ string,
+) ([]contentofflinepolicydomain.Acknowledgement, error) {
+	acks := make([]contentofflinepolicydomain.Acknowledgement, 0, len(s.acks))
+	for deviceID, revision := range s.acks {
+		acks = append(acks, contentofflinepolicydomain.Acknowledgement{
+			DeviceID: deviceID,
+			Revision: revision,
+			UpToDate: revision >= s.revision,
+		})
+	}
+	return acks, nil
 }
 
 func newContentOfflinePolicyHandlerForTest() contentOfflinePolicyHandler {
@@ -148,6 +180,69 @@ func TestContentOfflinePolicyPublishRejectsOutOfRange(t *testing.T) {
 	if recorder.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want %d: %s",
 			recorder.Code, http.StatusUnprocessableEntity, recorder.Body.String())
+	}
+}
+
+func TestContentOfflinePolicyAcknowledgementsRequireAuthentication(t *testing.T) {
+	handler := newContentOfflinePolicyHandlerForTest()
+	request := englishRequest(
+		http.MethodGet,
+		"/api/v1/content/offline-policy/acknowledgements",
+		"",
+		"",
+	)
+	recorder := httptest.NewRecorder()
+	handler.acknowledgements(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestContentOfflinePolicyAcknowledgementsListDevices(t *testing.T) {
+	service := &contentOfflinePolicyTestService{revision: 3}
+	handler := contentOfflinePolicyHandler{service: service}
+	if err := service.Acknowledge(context.Background(), "family-1", "device-a", 3); err != nil {
+		t.Fatalf("seed ack: %v", err)
+	}
+	if err := service.Acknowledge(context.Background(), "family-1", "device-b", 1); err != nil {
+		t.Fatalf("seed ack: %v", err)
+	}
+	request := englishRequest(
+		http.MethodGet,
+		"/api/v1/content/offline-policy/acknowledgements",
+		"",
+		"family-1",
+	)
+	recorder := httptest.NewRecorder()
+	handler.acknowledgements(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s",
+			recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Devices []struct {
+				DeviceID string `json:"device_id"`
+				Revision int    `json:"revision"`
+				UpToDate bool   `json:"up_to_date"`
+			} `json:"devices"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(envelope.Data.Devices) != 2 {
+		t.Fatalf("devices = %d, want 2", len(envelope.Data.Devices))
+	}
+	upToDate := map[string]bool{}
+	for _, device := range envelope.Data.Devices {
+		upToDate[device.DeviceID] = device.UpToDate
+	}
+	if !upToDate["device-a"] {
+		t.Fatal("device-a should be up to date")
+	}
+	if upToDate["device-b"] {
+		t.Fatal("device-b should be behind the published revision")
 	}
 }
 

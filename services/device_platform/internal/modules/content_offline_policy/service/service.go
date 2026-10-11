@@ -16,6 +16,13 @@ import (
 type Repository interface {
 	Current(ctx context.Context) (domain.Policy, error)
 	Save(ctx context.Context, input domain.Input) (domain.Policy, error)
+	RecordAcknowledgement(
+		ctx context.Context,
+		familyID string,
+		deviceID string,
+		revision int,
+	) error
+	Acknowledgements(ctx context.Context, familyID string) ([]domain.Acknowledgement, error)
 }
 
 // Service owns offline policy reads and publishes.
@@ -54,4 +61,43 @@ func (s *Service) Publish(
 		return domain.Policy{}, err
 	}
 	return s.repository.Save(ctx, normalized)
+}
+
+// Acknowledge records the policy revision one device currently applies.
+func (s *Service) Acknowledge(
+	ctx context.Context,
+	familyID string,
+	deviceID string,
+	revision int,
+) error {
+	if s.repository == nil {
+		return nil
+	}
+	if err := domain.ValidateAcceptedRevision(revision); err != nil {
+		return err
+	}
+	return s.repository.RecordAcknowledgement(ctx, familyID, deviceID, revision)
+}
+
+// Acknowledgements returns each device's applied revision, annotated with
+// whether it is already on the newest published policy.
+func (s *Service) Acknowledgements(
+	ctx context.Context,
+	familyID string,
+) ([]domain.Acknowledgement, error) {
+	if s.repository == nil {
+		return []domain.Acknowledgement{}, nil
+	}
+	policy, err := s.repository.Current(ctx)
+	if err != nil {
+		return nil, err
+	}
+	acks, err := s.repository.Acknowledgements(ctx, familyID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range acks {
+		acks[index].UpToDate = acks[index].Revision >= policy.Revision
+	}
+	return acks, nil
 }

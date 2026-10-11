@@ -22,6 +22,16 @@ type contentOfflinePolicyService interface {
 		ctx context.Context,
 		input contentofflinepolicydomain.Input,
 	) (contentofflinepolicydomain.Policy, error)
+	Acknowledge(
+		ctx context.Context,
+		familyID string,
+		deviceID string,
+		revision int,
+	) error
+	Acknowledgements(
+		ctx context.Context,
+		familyID string,
+	) ([]contentofflinepolicydomain.Acknowledgement, error)
 }
 
 type contentOfflinePolicyHandler struct {
@@ -44,6 +54,10 @@ type contentOfflinePolicyPayload struct {
 	DownloadOverWifiOnly bool  `json:"download_over_wifi_only"`
 }
 
+type acknowledgeOfflinePolicyRequest struct {
+	Revision int `json:"revision"`
+}
+
 func (handler contentOfflinePolicyHandler) current(
 	response http.ResponseWriter,
 	request *http.Request,
@@ -58,6 +72,34 @@ func (handler contentOfflinePolicyHandler) current(
 		return
 	}
 	writeSuccess(response, request, http.StatusOK, contentOfflinePolicyResponse(policy))
+}
+
+// acknowledgements lists the applied revision per family device.
+func (handler contentOfflinePolicyHandler) acknowledgements(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	familyID, ok := authenticatedAccountID(request)
+	if !ok {
+		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
+		return
+	}
+	acks, err := handler.service.Acknowledgements(request.Context(), familyID)
+	if err != nil {
+		writeContentOfflinePolicyError(response, request, err)
+		return
+	}
+	devices := make([]map[string]any, 0, len(acks))
+	for index := range acks {
+		devices = append(devices, map[string]any{
+			"device_id":  acks[index].DeviceID,
+			"revision":   acks[index].Revision,
+			"up_to_date": acks[index].UpToDate,
+		})
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"devices": devices,
+	})
 }
 
 func (handler contentOfflinePolicyHandler) publish(
@@ -95,7 +137,7 @@ func (handler deviceContentOfflinePolicyHandler) currentForDevice(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	if _, ok := handler.verifyDevice(response, request); !ok {
+	if _, _, ok := handler.verifyDevice(response, request); !ok {
 		return
 	}
 	policy, err := handler.handler.service.Current(request.Context())
@@ -106,18 +148,47 @@ func (handler deviceContentOfflinePolicyHandler) currentForDevice(
 	writeSuccess(response, request, http.StatusOK, contentOfflinePolicyResponse(policy))
 }
 
+// acknowledgeForDevice records the revision a device currently applies.
+func (handler deviceContentOfflinePolicyHandler) acknowledgeForDevice(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	deviceID, familyID, ok := handler.verifyDevice(response, request)
+	if !ok {
+		return
+	}
+	var payload acknowledgeOfflinePolicyRequest
+	if err := decodeJSON(request, &payload); err != nil {
+		writeError(response, request, http.StatusBadRequest, "invalid_request", "请检查上报内容")
+		return
+	}
+	if err := handler.handler.service.Acknowledge(
+		request.Context(),
+		familyID,
+		deviceID,
+		payload.Revision,
+	); err != nil {
+		writeContentOfflinePolicyError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"device_id": deviceID,
+		"revision":  payload.Revision,
+	})
+}
+
 func (handler deviceContentOfflinePolicyHandler) verifyDevice(
 	response http.ResponseWriter,
 	request *http.Request,
-) (string, bool) {
+) (string, string, bool) {
 	if handler.bindingService == nil || handler.runtimeService == nil {
 		writeError(response, request, http.StatusUnauthorized, "device_session_expired", "设备登录已过期，请重新连接")
-		return "", false
+		return "", "", false
 	}
 	deviceSessionToken, ok := bearerToken(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "device_session_expired", "设备登录已过期，请重新连接")
-		return "", false
+		return "", "", false
 	}
 	pathDeviceID := strings.TrimSpace(request.PathValue("device_id"))
 	sessionDeviceID, err := handler.bindingService.VerifyDeviceSession(
@@ -126,7 +197,7 @@ func (handler deviceContentOfflinePolicyHandler) verifyDevice(
 	)
 	if err != nil || sessionDeviceID != pathDeviceID {
 		writeError(response, request, http.StatusUnauthorized, "device_session_expired", "设备登录已过期，请重新连接")
-		return "", false
+		return "", "", false
 	}
 	familyID, err := handler.runtimeService.ResolveDeviceFamily(
 		request.Context(),
@@ -135,9 +206,9 @@ func (handler deviceContentOfflinePolicyHandler) verifyDevice(
 	)
 	if err != nil {
 		writeContentOfflinePolicyError(response, request, err)
-		return "", false
+		return "", "", false
 	}
-	return familyID, true
+	return pathDeviceID, familyID, true
 }
 
 func contentOfflinePolicyResponse(

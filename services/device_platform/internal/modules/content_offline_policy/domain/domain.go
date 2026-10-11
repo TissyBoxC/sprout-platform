@@ -106,3 +106,12 @@ func ValidateAcceptedRevision(revision int) error {
 	}
 	return nil
 }
+
+// Acknowledgement records the policy revision one device currently applies.
+type Acknowledgement struct {
+	DeviceID string
+	FamilyID string
+	Revision int
+	// UpToDate reports whether the device has the newest published revision.
+	UpToDate bool
+}

@@ -19,6 +19,15 @@ type Repository interface {
 	// Save validates nothing itself (the service does) and bumps the revision
 	// inside one transaction so a device never reads a half-written policy.
 	Save(ctx context.Context, input domain.Input) (domain.Policy, error)
+	// RecordAcknowledgement upserts the revision one device currently applies.
+	RecordAcknowledgement(
+		ctx context.Context,
+		familyID string,
+		deviceID string,
+		revision int,
+	) error
+	// Acknowledgements returns the applied revision per device for a family.
+	Acknowledgements(ctx context.Context, familyID string) ([]domain.Acknowledgement, error)
 }
 
 // PostgresRepository is the PostgreSQL-backed offline policy repository.
@@ -116,4 +125,59 @@ func (r *PostgresRepository) Save(
 		DownloadOverWifiOnly: input.DownloadOverWifiOnly,
 		Revision:             revision,
 	}, nil
+}
+
+// RecordAcknowledgement upserts the revision one device currently applies.
+func (r *PostgresRepository) RecordAcknowledgement(
+	ctx context.Context,
+	familyID string,
+	deviceID string,
+	revision int,
+) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO content_offline_policy_acks (
+			device_id,
+			family_id,
+			applied_revision,
+			reported_at
+		) VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (device_id)
+		DO UPDATE SET
+			family_id = EXCLUDED.family_id,
+			applied_revision = EXCLUDED.applied_revision,
+			reported_at = NOW()
+	`, deviceID, familyID, revision)
+	if err != nil {
+		return fmt.Errorf("record offline policy acknowledgement: %w", err)
+	}
+	return nil
+}
+
+// Acknowledgements returns every device's applied revision for a family.
+func (r *PostgresRepository) Acknowledgements(
+	ctx context.Context,
+	familyID string,
+) ([]domain.Acknowledgement, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT device_id, family_id, applied_revision
+		FROM content_offline_policy_acks
+		WHERE family_id = $1
+		ORDER BY device_id
+	`, familyID)
+	if err != nil {
+		return nil, fmt.Errorf("list offline policy acknowledgements: %w", err)
+	}
+	defer rows.Close()
+	acks := make([]domain.Acknowledgement, 0, 8)
+	for rows.Next() {
+		var ack domain.Acknowledgement
+		if err := rows.Scan(&ack.DeviceID, &ack.FamilyID, &ack.Revision); err != nil {
+			return nil, fmt.Errorf("scan offline policy acknowledgement: %w", err)
+		}
+		acks = append(acks, ack)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate offline policy acknowledgements: %w", err)
+	}
+	return acks, nil
 }

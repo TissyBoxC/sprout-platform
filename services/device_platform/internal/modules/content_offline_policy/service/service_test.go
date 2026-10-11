@@ -11,6 +11,7 @@ import (
 type fakeRepository struct {
 	policy domain.Policy
 	saved  []domain.Input
+	acks   map[string]int
 }
 
 func (r *fakeRepository) Current(context.Context) (domain.Policy, error) {
@@ -31,6 +32,33 @@ func (r *fakeRepository) Save(
 		Revision:             len(r.saved),
 	}
 	return r.policy, nil
+}
+
+func (r *fakeRepository) RecordAcknowledgement(
+	_ context.Context,
+	_ string,
+	deviceID string,
+	revision int,
+) error {
+	if r.acks == nil {
+		r.acks = map[string]int{}
+	}
+	r.acks[deviceID] = revision
+	return nil
+}
+
+func (r *fakeRepository) Acknowledgements(
+	_ context.Context,
+	_ string,
+) ([]domain.Acknowledgement, error) {
+	acks := make([]domain.Acknowledgement, 0, len(r.acks))
+	for deviceID, revision := range r.acks {
+		acks = append(acks, domain.Acknowledgement{
+			DeviceID: deviceID,
+			Revision: revision,
+		})
+	}
+	return acks, nil
 }
 
 func TestCurrentReturnsRepositoryPolicy(t *testing.T) {
@@ -147,5 +175,71 @@ func TestPublishWithoutRepositoryReturnsDefault(t *testing.T) {
 	}
 	if policy.Revision != 0 {
 		t.Fatalf("expected fallback revision 0, got %d", policy.Revision)
+	}
+}
+
+func TestAcknowledgeRejectsNegativeRevision(t *testing.T) {
+	service := New(Options{Repository: &fakeRepository{}})
+
+	if err := service.Acknowledge(
+		context.Background(),
+		"family-1",
+		"device-1",
+		-1,
+	); !errors.Is(err, domain.ErrInvalidAcceptedRevision) {
+		t.Fatalf("expected ErrInvalidAcceptedRevision, got %v", err)
+	}
+}
+
+func TestAcknowledgementsMarkDevicesBehindThePolicy(t *testing.T) {
+	repository := &fakeRepository{
+		policy: domain.Policy{Revision: 5},
+	}
+	service := New(Options{Repository: repository})
+	if err := service.Acknowledge(
+		context.Background(),
+		"family-1",
+		"device-current",
+		5,
+	); err != nil {
+		t.Fatalf("Acknowledge() returned unexpected error: %v", err)
+	}
+	if err := service.Acknowledge(
+		context.Background(),
+		"family-1",
+		"device-behind",
+		2,
+	); err != nil {
+		t.Fatalf("Acknowledge() returned unexpected error: %v", err)
+	}
+
+	acks, err := service.Acknowledgements(context.Background(), "family-1")
+	if err != nil {
+		t.Fatalf("Acknowledgements() returned unexpected error: %v", err)
+	}
+	if len(acks) != 2 {
+		t.Fatalf("expected two acknowledgements, got %d", len(acks))
+	}
+	upToDate := map[string]bool{}
+	for _, ack := range acks {
+		upToDate[ack.DeviceID] = ack.UpToDate
+	}
+	if !upToDate["device-current"] {
+		t.Fatal("device on the published revision should be up to date")
+	}
+	if upToDate["device-behind"] {
+		t.Fatal("device behind the published revision must not be up to date")
+	}
+}
+
+func TestAcknowledgementsWithoutRepositoryIsEmpty(t *testing.T) {
+	service := New(Options{})
+
+	acks, err := service.Acknowledgements(context.Background(), "family-1")
+	if err != nil {
+		t.Fatalf("Acknowledgements() returned unexpected error: %v", err)
+	}
+	if len(acks) != 0 {
+		t.Fatalf("expected no acknowledgements, got %d", len(acks))
 	}
 }

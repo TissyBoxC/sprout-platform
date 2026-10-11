@@ -25,3 +25,18 @@ CREATE TABLE IF NOT EXISTS content_offline_policy (
         CHECK (cache_ttl_hours BETWEEN 1 AND 8760),
     CONSTRAINT content_offline_policy_revision_non_negative CHECK (revision >= 0)
 );
+
+-- One row per device recording the policy revision it currently applies, so
+-- the console can see which devices are behind without polling every device.
+
+CREATE TABLE IF NOT EXISTS content_offline_policy_acks (
+    device_id TEXT PRIMARY KEY REFERENCES device_credentials(device_id) ON DELETE CASCADE,
+    family_id UUID NOT NULL REFERENCES parent_accounts(id) ON DELETE CASCADE,
+    applied_revision INTEGER NOT NULL DEFAULT 0,
+    reported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT content_offline_policy_acks_revision_non_negative
+        CHECK (applied_revision >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS content_offline_policy_acks_family_idx
+    ON content_offline_policy_acks (family_id, device_id);

@@ -74,6 +74,7 @@ class ProfilePage extends ConsumerWidget {
                     account: account,
                     onChildren: () => context.push('/me/children'),
                     onCompanionship: () => context.push('/me/companionship'),
+                    onAlarmReminders: () => context.push('/me/alarm-reminders'),
                     onEnglish: () => context.push('/me/english'),
                     onPlayback: () => context.push('/me/playback'),
                     onLocalCommands: () => context.push('/me/local-commands'),
@@ -420,6 +421,7 @@ class _SettingsCard extends StatelessWidget {
     required this.account,
     required this.onChildren,
     required this.onCompanionship,
+    required this.onAlarmReminders,
     required this.onEnglish,
     required this.onPlayback,
     required this.onLocalCommands,
@@ -445,6 +447,7 @@ class _SettingsCard extends StatelessWidget {
   final ParentAccount account;
   final VoidCallback onChildren;
   final VoidCallback onCompanionship;
+  final VoidCallback onAlarmReminders;
   final VoidCallback onEnglish;
   final VoidCallback onPlayback;
   final VoidCallback onLocalCommands;
@@ -487,6 +490,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('记录成长瞬间，设置习惯提醒'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onCompanionship,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.alarm_rounded),
+            title: const Text('定时提醒'),
+            subtitle: const Text('设置起床、午睡和刷牙闹钟'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onAlarmReminders,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

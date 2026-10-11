@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/alarm_reminder/presentation/alarm_reminder_page.dart';
 import '../../features/auth/application/auth_controller.dart';
 import '../../features/auth/presentation/bind_email_page.dart';
 import '../../features/auth/presentation/login_page.dart';
@@ -98,6 +99,10 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/companionship',
         builder: (context, state) => const CompanionshipPage(),
+      ),
+      GoRoute(
+        path: '/me/alarm-reminders',
+        builder: (context, state) => const AlarmReminderPage(),
       ),
       GoRoute(
         path: '/me/english',

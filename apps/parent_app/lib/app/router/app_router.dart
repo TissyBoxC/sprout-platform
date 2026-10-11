@@ -18,6 +18,7 @@ import '../../features/family/presentation/family_home_page.dart';
 import '../../features/local_command/presentation/local_command_page.dart';
 import '../../features/notification/presentation/family_message_page.dart';
 import '../../features/notification/presentation/notification_inbox_page.dart';
+import '../../features/offline_policy/presentation/offline_policy_page.dart';
 import '../../features/ota/presentation/app_update_page.dart';
 import '../../features/parent_policy/presentation/parent_policy_page.dart';
 import '../../features/playback/presentation/playback_page.dart';
@@ -98,6 +99,10 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/local-commands',
         builder: (context, state) => const LocalCommandPage(),
+      ),
+      GoRoute(
+        path: '/me/offline-policy',
+        builder: (context, state) => const OfflinePolicyPage(),
       ),
       GoRoute(
         path: '/me/notifications',

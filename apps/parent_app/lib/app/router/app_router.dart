@@ -25,6 +25,7 @@ import '../../features/playback/presentation/playback_page.dart';
 import '../../features/profile/presentation/profile_page.dart';
 import '../../features/settings/presentation/privacy_page.dart';
 import '../../features/usage_report/presentation/usage_report_page.dart';
+import '../../features/vision/presentation/vision_page.dart';
 import '../../shared/widgets/parent_shell.dart';
 
 /// Creates the application router with authentication-aware redirects.
@@ -155,6 +156,16 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/devices/scan',
         builder: (context, state) => const DeviceQrScanPage(),
+      ),
+      GoRoute(
+        path: '/devices/:deviceId/vision',
+        builder: (context, state) {
+          final deviceId = state.pathParameters['deviceId'];
+          if (deviceId == null || deviceId.isEmpty) {
+            return const _RouteNotFoundPage();
+          }
+          return VisionPage(deviceId: deviceId);
+        },
       ),
       GoRoute(
         path: '/devices/provision',

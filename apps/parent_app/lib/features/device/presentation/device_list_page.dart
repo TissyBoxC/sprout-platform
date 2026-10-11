@@ -374,6 +374,20 @@ class DeviceListPage extends ConsumerWidget {
                         Chip(label: Text(_capabilityLabel(capability))),
                     ],
                   ),
+                if (device.capabilities.contains('camera')) ...[
+                  const SizedBox(height: 16),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.photo_camera_outlined),
+                    title: const Text('摄像头与视觉'),
+                    subtitle: const Text('拍照识物、绘本识别和拍照问答'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      context.push('/devices/${device.deviceId}/vision');
+                    },
+                  ),
+                ],
                 const SizedBox(height: 24),
                 const Divider(),
                 const SizedBox(height: 12),

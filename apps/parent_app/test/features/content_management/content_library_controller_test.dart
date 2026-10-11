@@ -101,4 +101,8 @@ class _FakeContentManagementApi implements ContentManagementApi {
   @override
   Future<List<ContentPlayRecord>> fetchPlayHistory({String? deviceId}) async =>
       const <ContentPlayRecord>[];
+
+  @override
+  Future<List<ContentThemePack>> fetchThemePacks() async =>
+      const <ContentThemePack>[];
 }

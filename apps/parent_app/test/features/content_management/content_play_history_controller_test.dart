@@ -148,4 +148,8 @@ class _FakeContentManagementApi implements ContentManagementApi {
 
   @override
   Future<void> removeFavorite(String packageId) async {}
+
+  @override
+  Future<List<ContentThemePack>> fetchThemePacks() async =>
+      const <ContentThemePack>[];
 }

@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:parent_app/features/content_management/application/content_favorites_controller.dart';
 import 'package:parent_app/features/content_management/application/content_library_controller.dart';
 import 'package:parent_app/features/content_management/application/content_play_history_controller.dart';
+import 'package:parent_app/features/content_management/application/content_theme_pack_controller.dart';
 import 'package:parent_app/features/content_management/domain/content_package.dart';
 import 'package:parent_app/features/content_management/presentation/content_library_page.dart';
 
@@ -18,6 +19,9 @@ void main() {
             () => _FakeContentPlayHistoryController(
               const ContentPlayHistoryState.initial(),
             ),
+          ),
+          contentThemePackControllerProvider.overrideWith(
+            () => _FakeContentThemePackController(const <ContentThemePack>[]),
           ),
           contentLibraryControllerProvider.overrideWith(
             () => _FakeContentLibraryController(
@@ -61,6 +65,9 @@ void main() {
             () => _FakeContentPlayHistoryController(
               const ContentPlayHistoryState.initial(),
             ),
+          ),
+          contentThemePackControllerProvider.overrideWith(
+            () => _FakeContentThemePackController(const <ContentThemePack>[]),
           ),
           contentLibraryControllerProvider.overrideWith(
             () => _FakeContentLibraryController(
@@ -114,6 +121,9 @@ void main() {
             () => _FakeContentPlayHistoryController(
               const ContentPlayHistoryState.initial(),
             ),
+          ),
+          contentThemePackControllerProvider.overrideWith(
+            () => _FakeContentThemePackController(const <ContentThemePack>[]),
           ),
           contentLibraryControllerProvider.overrideWith(
             () => _FakeContentLibraryController(
@@ -171,6 +181,9 @@ void main() {
             () => _FakeContentPlayHistoryController(
               const ContentPlayHistoryState.initial(),
             ),
+          ),
+          contentThemePackControllerProvider.overrideWith(
+            () => _FakeContentThemePackController(const <ContentThemePack>[]),
           ),
           contentLibraryControllerProvider.overrideWith(
             () => _FakeContentLibraryController(
@@ -230,6 +243,9 @@ void main() {
               ),
             ),
           ),
+          contentThemePackControllerProvider.overrideWith(
+            () => _FakeContentThemePackController(const <ContentThemePack>[]),
+          ),
           contentLibraryControllerProvider.overrideWith(
             () => _FakeContentLibraryController(
               const ContentLibraryState.initial(),
@@ -252,6 +268,51 @@ void main() {
     expect(find.text('story_001'), findsOneWidget);
     expect(find.text('已听完'), findsOneWidget);
     expect(find.textContaining('5 分 5 秒'), findsOneWidget);
+  });
+
+  testWidgets('renders published theme packs on the themes tab', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          contentThemePackControllerProvider.overrideWith(
+            () => _FakeContentThemePackController(const [
+              ContentThemePack(
+                themeId: 'theme_ocean',
+                title: '海洋主题',
+                summary: '一起探索海底世界',
+                ageTiers: [ContentAgeTier.age3to4],
+                packageIds: ['story_001', 'story_002'],
+                catalogRevision: 7,
+              ),
+            ]),
+          ),
+          contentPlayHistoryControllerProvider.overrideWith(
+            () => _FakeContentPlayHistoryController(
+              const ContentPlayHistoryState.initial(),
+            ),
+          ),
+          contentLibraryControllerProvider.overrideWith(
+            () => _FakeContentLibraryController(
+              const ContentLibraryState.initial(),
+            ),
+          ),
+          contentFavoritesControllerProvider.overrideWith(
+            () => _FakeContentFavoritesController(
+              const ContentFavoritesState.initial(),
+            ),
+          ),
+        ],
+        child: const MaterialApp(home: ContentLibraryPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('主题'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('海洋主题'), findsOneWidget);
+    expect(find.text('一起探索海底世界'), findsOneWidget);
+    expect(find.text('2 个内容'), findsOneWidget);
   });
 }
 
@@ -280,4 +341,13 @@ class _FakeContentPlayHistoryController extends ContentPlayHistoryController {
 
   @override
   Future<ContentPlayHistoryState> build() async => value;
+}
+
+class _FakeContentThemePackController extends ContentThemePackController {
+  _FakeContentThemePackController(this.value);
+
+  final List<ContentThemePack> value;
+
+  @override
+  Future<List<ContentThemePack>> build() async => value;
 }

@@ -280,6 +280,42 @@ class ContentPlayRecord {
   }
 }
 
+/// One curated theme pack shown to the guardian.
+///
+/// Members are package ids rather than embedded packages so the pack follows
+/// each package across new published versions.
+class ContentThemePack {
+  const ContentThemePack({
+    required this.themeId,
+    required this.title,
+    required this.summary,
+    required this.ageTiers,
+    required this.packageIds,
+    required this.catalogRevision,
+  });
+
+  final String themeId;
+  final String title;
+  final String summary;
+  final List<ContentAgeTier> ageTiers;
+  final List<String> packageIds;
+  final int catalogRevision;
+
+  factory ContentThemePack.fromJson(Map<String, Object?> json) {
+    return ContentThemePack(
+      themeId: _requiredString(json['theme_id'], 'theme_id'),
+      title: _requiredString(json['title'], 'title'),
+      summary: json['summary'] is String ? json['summary']! as String : '',
+      ageTiers: _stringList(json['age_tiers'])
+          .map(ContentAgeTier.fromApiValue)
+          .whereType<ContentAgeTier>()
+          .toList(growable: false),
+      packageIds: _stringList(json['package_ids']),
+      catalogRevision: _asInt(json['catalog_revision']),
+    );
+  }
+}
+
 /// Local lifecycle of a package that has entered the guardian library.
 enum ContentDownloadStatus {
   notDownloaded,

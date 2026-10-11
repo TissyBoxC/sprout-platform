@@ -8,10 +8,11 @@ import '../../../shared/widgets/app_state_switcher.dart';
 import '../application/content_favorites_controller.dart';
 import '../application/content_library_controller.dart';
 import '../application/content_play_history_controller.dart';
+import '../application/content_theme_pack_controller.dart';
 import '../domain/content_package.dart';
 
 /// Which slice of the library the page is showing.
-enum _LibraryTab { catalog, favorites, history }
+enum _LibraryTab { catalog, themes, favorites, history }
 
 /// Guardian-facing content library with filters and download controls.
 class ContentLibraryPage extends ConsumerStatefulWidget {
@@ -53,6 +54,11 @@ class _ContentLibraryPageState extends ConsumerState<ContentLibraryPage> {
                     value: _LibraryTab.catalog,
                     label: Text('全部内容'),
                     icon: Icon(Icons.grid_view_rounded),
+                  ),
+                  ButtonSegment<_LibraryTab>(
+                    value: _LibraryTab.themes,
+                    label: Text('主题'),
+                    icon: Icon(Icons.collections_bookmark_rounded),
                   ),
                   ButtonSegment<_LibraryTab>(
                     value: _LibraryTab.favorites,
@@ -99,6 +105,7 @@ class _ContentLibraryPageState extends ConsumerState<ContentLibraryPage> {
                   ),
                 ),
                 _LibraryTab.favorites => const _FavoritesList(),
+                _LibraryTab.themes => const _ThemePackList(),
                 _LibraryTab.history => const _HistoryList(),
               },
             ),
@@ -348,6 +355,149 @@ class _HistoryList extends ConsumerWidget {
                       ),
                   ],
                 ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ThemePackList extends ConsumerWidget {
+  const _ThemePackList();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themes = ref.watch(contentThemePackControllerProvider);
+    return AppStateSwitcher(
+      stateKey: themes.when(
+        data: (value) => value.isEmpty ? 'themes-empty' : 'themes-list',
+        error: (_, _) => 'themes-error',
+        loading: () => 'themes-loading',
+      ),
+      child: themes.when(
+        loading: () => const Center(
+          key: ValueKey<String>('themes-loading'),
+          child: CircularProgressIndicator(),
+        ),
+        error: (error, _) => _ErrorState(
+          key: const ValueKey<String>('themes-error'),
+          message: ContentThemePackController.messageFor(error),
+          onRetry: () =>
+              ref.read(contentThemePackControllerProvider.notifier).refresh(),
+        ),
+        data: (packs) => RefreshIndicator(
+          key: const ValueKey<String>('themes-content'),
+          onRefresh: () =>
+              ref.read(contentThemePackControllerProvider.notifier).refresh(),
+          child: packs.isEmpty
+              ? const _ThemePackEmptyList()
+              : ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                  children: [
+                    for (var index = 0; index < packs.length; index++)
+                      AppReveal(
+                        delay: Duration(milliseconds: 45 * index.clamp(0, 6)),
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _ThemePackCard(pack: packs[index]),
+                        ),
+                      ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ThemePackCard extends StatelessWidget {
+  const _ThemePackCard({required this.pack});
+
+  final ContentThemePack pack;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                  child: const Icon(Icons.collections_bookmark_rounded),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    pack.title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+              ],
+            ),
+            if (pack.summary.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(pack.summary),
+            ],
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final tier in pack.ageTiers)
+                  Chip(
+                    label: Text(tier.label),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                Chip(
+                  label: Text('${pack.packageIds.length} 个内容'),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ThemePackEmptyList extends StatelessWidget {
+  const _ThemePackEmptyList();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+      children: const [
+        AppReveal(child: _ThemePackEmptyCard()),
+      ],
+    );
+  }
+}
+
+class _ThemePackEmptyCard extends StatelessWidget {
+  const _ThemePackEmptyCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          children: [
+            Icon(
+              Icons.collections_bookmark_outlined,
+              size: 48,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(height: 12),
+            Text('还没有主题包', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 6),
+            const Text('平台发布主题包后，会显示在这里方便挑选。', textAlign: TextAlign.center),
+          ],
         ),
       ),
     );

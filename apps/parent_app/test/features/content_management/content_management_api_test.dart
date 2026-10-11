@@ -166,6 +166,36 @@ void main() {
     expect(history, isEmpty);
     expect(client.lastQueryParameters, isEmpty);
   });
+
+  test('parses the theme pack envelope returned by the platform', () async {
+    final api = HttpContentManagementApi(
+      _FakeApiClient(
+        response: <String, Object?>{
+          'data': <String, Object?>{
+            'theme_packs': <Object?>[
+              <String, Object?>{
+                'theme_id': 'theme_ocean',
+                'title': '海洋主题',
+                'summary': '一起探索海底世界',
+                'age_tiers': <Object?>['age_3_4'],
+                'package_ids': <Object?>['story_001', 'story_002'],
+                'catalog_revision': 7,
+              },
+            ],
+          },
+        },
+      ),
+    );
+
+    final packs = await api.fetchThemePacks();
+
+    expect(packs, hasLength(1));
+    expect(packs.single.themeId, 'theme_ocean');
+    expect(packs.single.title, '海洋主题');
+    expect(packs.single.ageTiers, <ContentAgeTier>[ContentAgeTier.age3to4]);
+    expect(packs.single.packageIds, <String>['story_001', 'story_002']);
+    expect(packs.single.catalogRevision, 7);
+  });
 }
 
 class _FakeApiClient implements ApiClient {

@@ -24,6 +24,9 @@ abstract interface class ContentManagementApi {
   ///
   /// Passing [deviceId] narrows the result to one owned device.
   Future<List<ContentPlayRecord>> fetchPlayHistory({String? deviceId});
+
+  /// Lists the published theme packs the guardian can browse.
+  Future<List<ContentThemePack>> fetchThemePacks();
 }
 
 /// Production implementation backed by the authenticated API client.
@@ -120,6 +123,25 @@ class HttpContentManagementApi implements ContentManagementApi {
         .whereType<Map>()
         .map(
           (item) => ContentPlayRecord.fromJson(Map<String, Object?>.from(item)),
+        )
+        .toList(growable: false);
+  }
+
+  @override
+  Future<List<ContentThemePack>> fetchThemePacks() async {
+    final response = await _apiClient.get('/api/v1/content/theme-packs');
+    final data = response['data'];
+    if (data is! Map) {
+      throw const FormatException('missing theme pack data');
+    }
+    final packs = data['theme_packs'];
+    if (packs is! List) {
+      return const <ContentThemePack>[];
+    }
+    return packs
+        .whereType<Map>()
+        .map(
+          (item) => ContentThemePack.fromJson(Map<String, Object?>.from(item)),
         )
         .toList(growable: false);
   }

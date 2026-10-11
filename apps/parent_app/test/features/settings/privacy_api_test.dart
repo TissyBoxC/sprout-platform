@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parent_app/core/network/api_client.dart';
 import 'package:parent_app/features/settings/data/privacy_api.dart';
+import 'package:parent_app/features/settings/domain/privacy_state.dart';
 
 void main() {
   test('reads consent, deletion, export, and retention state', () async {
@@ -147,11 +148,126 @@ void main() {
     });
     expect(client.postBodies['/api/v1/privacy/consent/withdraw'], {
       'confirmation': 'WITHDRAW',
+      'consent_type': 'child_data_processing',
     });
     expect(client.postBodies['/api/v1/privacy/consent/grant'], {
       'consent_type': 'child_data_processing',
     });
     expect(client.deletedPaths, contains('/api/v1/privacy/deletion'));
+  });
+
+  test('parses per-type consents and addresses each type independently', () async {
+    final client = _RecordingApiClient(
+      getResponses: {
+        '/api/v1/privacy': {
+          'data': {
+            'consent': {
+              'version': '2026-01',
+              'consented_at': '2026-10-01T08:00:00Z',
+              'withdrawn_at': null,
+              'status': 'active',
+              'reconsent_path': '/me/privacy',
+            },
+            'consents': [
+              {
+                'consent_type': 'guardian_terms',
+                'version': '2026-01',
+                'consented_at': '2026-10-01T08:00:00Z',
+                'withdrawn_at': null,
+                'status': 'active',
+                'granted': true,
+              },
+              {
+                'consent_type': 'ai_interaction',
+                'version': '2026-01',
+                'consented_at': null,
+                'withdrawn_at': '2026-10-07T09:00:00Z',
+                'status': 'withdrawn',
+                'granted': false,
+              },
+              // Unknown types must be dropped, not crash the parser.
+              {'consent_type': 'future_type', 'status': 'active'},
+            ],
+            'deletion': {'status': 'none'},
+            'policy': {
+              'audio_retention_days': 0,
+              'image_retention_days': 0,
+              'conversation_retention_days': 30,
+            },
+          },
+        },
+      },
+      postResponses: {
+        '/api/v1/privacy/consent/withdraw': {
+          'data': {
+            'consent': {
+              'version': '2026-01',
+              'status': 'active',
+              'reconsent_path': '/me/privacy',
+            },
+            'consents': [
+              {
+                'consent_type': 'ai_interaction',
+                'status': 'withdrawn',
+                'granted': false,
+              },
+            ],
+            'deletion': {'status': 'none'},
+            'policy': {
+              'audio_retention_days': 0,
+              'image_retention_days': 0,
+              'conversation_retention_days': 30,
+            },
+          },
+        },
+      },
+    );
+    final api = PrivacyApi(client);
+
+    final status = await api.status();
+    expect(status.hasPerTypeConsents, isTrue);
+    expect(status.consents, hasLength(2));
+    expect(status.consents.first.type, GuardianConsentKind.guardianTerms);
+    expect(status.consents.first.isGranted, isTrue);
+    expect(
+      status.consents[1].type,
+      GuardianConsentKind.aiInteraction,
+    );
+    expect(status.consents[1].isGranted, isFalse);
+    expect(status.consents[1].withdrawnAt, isNotNull);
+
+    await api.withdrawConsent(consentType: GuardianConsentKind.aiInteraction);
+    expect(client.postBodies['/api/v1/privacy/consent/withdraw'], {
+      'confirmation': 'WITHDRAW',
+      'consent_type': 'ai_interaction',
+    });
+  });
+
+  test('falls back to the single consent summary when types are absent', () async {
+    final client = _RecordingApiClient(
+      getResponses: {
+        '/api/v1/privacy': {
+          'data': {
+            'consent': {
+              'version': '2026-01',
+              'status': 'active',
+              'reconsent_path': '/me/privacy',
+            },
+            'deletion': {'status': 'none'},
+            'policy': {
+              'audio_retention_days': 0,
+              'image_retention_days': 0,
+              'conversation_retention_days': 30,
+            },
+          },
+        },
+      },
+    );
+
+    final status = await PrivacyApi(client).status();
+
+    expect(status.hasPerTypeConsents, isFalse);
+    expect(status.consent.isActive, isTrue);
   });
 
   test(

@@ -30,34 +30,56 @@ class PrivacyApi {
     return _deletionFrom(response);
   }
 
-  Future<GuardianConsent> withdrawConsent() async {
+  /// Withdraws one consent type. Returns the updated status so per-type
+  /// consents stay in sync; callers that only need the summary can read
+  /// [PrivacyStatus.consent].
+  Future<PrivacyStatus> withdrawConsent({
+    GuardianConsentKind consentType =
+        GuardianConsentKind.childDataProcessing,
+  }) async {
     final response = await _apiClient.post(
       '/api/v1/privacy/consent/withdraw',
-      body: const {'confirmation': 'WITHDRAW'},
+      body: {'confirmation': 'WITHDRAW', 'consent_type': consentType.wireValue},
     );
-    final payload = _payload(response);
-    final consent = payload['consent'];
-    return GuardianConsent.fromJson(
-      consent is Map
-          ? Map<String, Object?>.from(consent)
-          : _requiredMap(payload, 'consent'),
-    );
+    return _statusFrom(response);
   }
 
-  Future<GuardianConsent> grantConsent({
-    String consentType = 'child_data_processing',
+  /// Restores one consent type after a withdrawal.
+  Future<PrivacyStatus> grantConsent({
+    GuardianConsentKind consentType =
+        GuardianConsentKind.childDataProcessing,
   }) async {
     final response = await _apiClient.post(
       '/api/v1/privacy/consent/grant',
-      body: {'consent_type': consentType},
+      body: {'consent_type': consentType.wireValue},
     );
+    return _statusFrom(response);
+  }
+
+  PrivacyStatus _statusFrom(Map<String, Object?> response) {
     final payload = _payload(response);
-    final consent = payload['consent'];
-    return GuardianConsent.fromJson(
-      consent is Map
-          ? Map<String, Object?>.from(consent)
-          : _requiredMap(payload, 'consent'),
-    );
+    // The platform answers with the whole privacy status. An older server may
+    // reply with only the consent summary; synthesize the fields the parser
+    // needs and let the controller merge just the consent projection.
+    final isFullStatus =
+        payload['deletion'] is Map ||
+        payload['policy'] is Map ||
+        payload['consents'] is List;
+    if (isFullStatus) {
+      return PrivacyStatus.fromJson(payload);
+    }
+    final consent = payload['consent'] is Map
+        ? Map<String, Object?>.from(payload['consent'] as Map)
+        : _requiredMap(payload, 'consent');
+    return PrivacyStatus.fromJson({
+      'consent': consent,
+      'deletion': const <String, Object?>{'status': 'none'},
+      'policy': const <String, Object?>{
+        'audio_retention_days': 0,
+        'image_retention_days': 0,
+        'conversation_retention_days': 0,
+      },
+    });
   }
 
   PrivacyDeletion _deletionFrom(Map<String, Object?> response) {

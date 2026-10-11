@@ -5,12 +5,22 @@ class PrivacyStatus {
     required this.deletion,
     required this.exportAvailable,
     required this.policy,
+    this.consents = const <GuardianConsentType>[],
   });
 
   final GuardianConsent consent;
   final PrivacyDeletion deletion;
   final bool exportAvailable;
   final PrivacyRetentionPolicy policy;
+
+  /// Per-type consents when the platform supplies them.
+  ///
+  /// Older platforms only return the single [consent] summary; in that case
+  /// this stays empty and the UI falls back to the summary.
+  final List<GuardianConsentType> consents;
+
+  /// True when the platform exposed independently toggleable consent types.
+  bool get hasPerTypeConsents => consents.isNotEmpty;
 
   factory PrivacyStatus.fromJson(Map<String, Object?> json) {
     return PrivacyStatus(
@@ -26,6 +36,7 @@ class PrivacyStatus {
       policy: PrivacyRetentionPolicy.fromJson(
         _requiredMap(json['policy'], 'policy'),
       ),
+      consents: _consentTypes(json['consents']),
     );
   }
 
@@ -34,17 +45,72 @@ class PrivacyStatus {
     PrivacyDeletion? deletion,
     bool? exportAvailable,
     PrivacyRetentionPolicy? policy,
+    List<GuardianConsentType>? consents,
   }) {
     return PrivacyStatus(
       consent: consent ?? this.consent,
       deletion: deletion ?? this.deletion,
       exportAvailable: exportAvailable ?? this.exportAvailable,
       policy: policy ?? this.policy,
+      consents: consents ?? this.consents,
     );
   }
 }
 
 enum GuardianConsentStatus { active, withdrawn }
+
+/// The four guardian consent decisions tracked by the platform.
+enum GuardianConsentKind {
+  guardianTerms('guardian_terms'),
+  childDataProcessing('child_data_processing'),
+  aiInteraction('ai_interaction'),
+  emailContact('email_contact');
+
+  const GuardianConsentKind(this.wireValue);
+
+  /// The stable identifier exchanged with the platform API.
+  final String wireValue;
+
+  static GuardianConsentKind? fromWire(String? value) {
+    for (final type in GuardianConsentKind.values) {
+      if (type.wireValue == value) {
+        return type;
+      }
+    }
+    return null;
+  }
+}
+
+/// One consent type's latest decision, independent of the other types.
+class GuardianConsentType {
+  const GuardianConsentType({
+    required this.type,
+    required this.version,
+    required this.consentedAt,
+    required this.withdrawnAt,
+    required this.status,
+  });
+
+  /// Null only when the platform sent an unknown consent type, in which case
+  /// [_consentTypes] drops the entry before it reaches the UI.
+  final GuardianConsentKind? type;
+  final String version;
+  final DateTime? consentedAt;
+  final DateTime? withdrawnAt;
+  final GuardianConsentStatus status;
+
+  bool get isGranted => status == GuardianConsentStatus.active;
+
+  factory GuardianConsentType.fromJson(Map<String, Object?> json) {
+    return GuardianConsentType(
+      type: GuardianConsentKind.fromWire(_optionalString(json['consent_type'])),
+      version: _firstString(json, const ['version', 'consent_version']),
+      consentedAt: _optionalDateTime(json['consented_at']),
+      withdrawnAt: _optionalDateTime(json['withdrawn_at']),
+      status: _consentStatus(json),
+    );
+  }
+}
 
 /// The guardian's current consent version and withdrawal state.
 class GuardianConsent {
@@ -87,14 +153,6 @@ class GuardianConsent {
   bool get canReauthorize => reconsentRoute != null;
 
   factory GuardianConsent.fromJson(Map<String, Object?> json) {
-    final status = switch (_optionalString(json['status'])) {
-      'withdrawn' => GuardianConsentStatus.withdrawn,
-      'active' => GuardianConsentStatus.active,
-      _ =>
-        json['active'] == false
-            ? GuardianConsentStatus.withdrawn
-            : GuardianConsentStatus.active,
-    };
     return GuardianConsent(
       version: _firstString(json, const [
         'guardian_consent_version',
@@ -104,7 +162,7 @@ class GuardianConsent {
         json['guardian_consented_at'] ?? json['consented_at'],
       ),
       withdrawnAt: _optionalDateTime(json['withdrawn_at']),
-      status: status,
+      status: _consentStatus(json),
       reconsentPath: _optionalNullableString(json['reconsent_path']),
     );
   }
@@ -190,6 +248,38 @@ Map<String, Object?> _requiredMap(Object? value, String field) {
     return Map<String, Object?>.from(value);
   }
   throw FormatException('missing $field');
+}
+
+/// Parses the per-type consent list, dropping any entry with an unknown type
+/// so a newer server cannot crash an older client.
+List<GuardianConsentType> _consentTypes(Object? value) {
+  if (value is! List) {
+    return const <GuardianConsentType>[];
+  }
+  final result = <GuardianConsentType>[];
+  for (final entry in value) {
+    if (entry is! Map) {
+      continue;
+    }
+    final consent = GuardianConsentType.fromJson(
+      Map<String, Object?>.from(entry),
+    );
+    if (consent.type != null) {
+      result.add(consent);
+    }
+  }
+  return result;
+}
+
+GuardianConsentStatus _consentStatus(Map<String, Object?> json) {
+  return switch (_optionalString(json['status'])) {
+    'withdrawn' => GuardianConsentStatus.withdrawn,
+    'active' => GuardianConsentStatus.active,
+    _ =>
+      json['active'] == false || json['granted'] == false
+          ? GuardianConsentStatus.withdrawn
+          : GuardianConsentStatus.active,
+  };
 }
 
 Map<String, Object?> _map(Object? value) {

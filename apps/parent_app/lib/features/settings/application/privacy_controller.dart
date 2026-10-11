@@ -61,26 +61,33 @@ class PrivacyController extends AsyncNotifier<PrivacyStatus> {
     return deletion;
   }
 
-  Future<GuardianConsent> withdrawConsent() async {
-    final consent = await _api.withdrawConsent();
-    _updateConsent(consent);
-    return consent;
+  /// Withdraws one consent type and applies the refreshed projection.
+  ///
+  /// The platform revokes every guardian session on withdrawal, so callers
+  /// still end the local session afterwards; the returned status simply keeps
+  /// the per-type list correct for the re-login that follows.
+  Future<PrivacyStatus> withdrawConsent({
+    GuardianConsentKind consentType =
+        GuardianConsentKind.childDataProcessing,
+  }) async {
+    final status = await _api.withdrawConsent(consentType: consentType);
+    _applyStatus(status);
+    return status;
   }
 
-  Future<GuardianConsent> grantConsent() async {
-    final consent = await _api.grantConsent();
-    _updateConsent(consent);
-    return consent;
+  /// Restores one consent type and applies the refreshed projection.
+  Future<PrivacyStatus> grantConsent({
+    GuardianConsentKind consentType =
+        GuardianConsentKind.childDataProcessing,
+  }) async {
+    final status = await _api.grantConsent(consentType: consentType);
+    _applyStatus(status);
+    return status;
   }
 
-  void _updateConsent(GuardianConsent consent) {
-    final current = state.value ?? _lastSuccessful;
-    if (current == null) {
-      return;
-    }
-    final next = current.copyWith(consent: consent);
-    _lastSuccessful = next;
-    state = AsyncData(next);
+  void _applyStatus(PrivacyStatus status) {
+    _lastSuccessful = status;
+    state = AsyncData(status);
   }
 
   void _updateDeletion(PrivacyDeletion deletion) {

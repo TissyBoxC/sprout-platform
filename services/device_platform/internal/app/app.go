@@ -454,10 +454,7 @@ func Run() error {
 			databaseStore.Pool(),
 			"SELECT 1 FROM playback_requests LIMIT 1",
 		),
-		"recommendation": nonzeroRowProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM content_play_history LIMIT 1",
-		),
+		"recommendation": recommendationReadinessProbe(nil),
 		"privacy_lifecycle": nonzeroRowProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM parent_consent_events LIMIT 1",
@@ -632,6 +629,9 @@ func Run() error {
 				},
 			},
 		},
+	)
+	featureCenterHealthProbes["recommendation"] = recommendationReadinessProbe(
+		contentRecommendations,
 	)
 	localCommands := localCommandService.New(localCommandService.Options{
 		Repository: localCommandRepository.NewPostgresRepository(databaseStore.Pool()),

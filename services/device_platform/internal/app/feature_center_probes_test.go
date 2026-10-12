@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -125,6 +126,38 @@ func TestVoiceGatewayReadinessProbeMapsNetworkFailure(t *testing.T) {
 		&http.Client{Timeout: 100 * time.Millisecond},
 	)
 	status, err := probe.Check(context.Background(), "voice_gateway")
+	if err != nil {
+		t.Fatalf("check probe: %v", err)
+	}
+	if status != featureCenterDomain.HealthUnavailable {
+		t.Fatalf("status = %q, want unavailable", status)
+	}
+}
+
+type stubRecommendationProbe struct {
+	err error
+}
+
+func (stub stubRecommendationProbe) CheckReadiness(context.Context) error {
+	return stub.err
+}
+
+func TestRecommendationReadinessProbeAcceptsEmptyHistory(t *testing.T) {
+	probe := recommendationReadinessProbe(stubRecommendationProbe{})
+	status, err := probe.Check(context.Background(), "recommendation")
+	if err != nil {
+		t.Fatalf("check probe: %v", err)
+	}
+	if status != featureCenterDomain.HealthHealthy {
+		t.Fatalf("status = %q, want healthy", status)
+	}
+}
+
+func TestRecommendationReadinessProbeMapsCatalogFailure(t *testing.T) {
+	probe := recommendationReadinessProbe(stubRecommendationProbe{
+		err: errors.New("catalog unavailable"),
+	})
+	status, err := probe.Check(context.Background(), "recommendation")
 	if err != nil {
 		t.Fatalf("check probe: %v", err)
 	}

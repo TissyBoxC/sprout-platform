@@ -113,3 +113,25 @@ func voiceGatewayReadinessURL(rawWebSocketURL string) (string, bool) {
 	parsed.Fragment = ""
 	return parsed.String(), true
 }
+
+// recommendationReadinessProbe verifies the recommendation catalog without a
+// family scope. This separates "no playback history yet" from "recommendation
+// unavailable": an empty catalog is a healthy first-deployment state, while a
+// catalog read failure is not.
+func recommendationReadinessProbe(
+	service interface {
+		CheckReadiness(ctx context.Context) error
+	},
+) featureCenterService.HealthProbe {
+	return featureCenterService.HealthProbeFunc(
+		func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+			if service == nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			if err := service.CheckReadiness(ctx); err != nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			return featureCenterDomain.HealthHealthy, nil
+		},
+	)
+}

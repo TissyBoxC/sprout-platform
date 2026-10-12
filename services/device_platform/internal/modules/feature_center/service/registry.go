@@ -259,7 +259,7 @@ func DefaultRegistry() []Definition {
 		readOnlyFeatureDef("recommendation", "内容推荐", "按年龄层与播放信号的内容推荐。", "content", "内容平台",
 			"推荐由平台基于已发布内容与播放信号生成，功能中心只提供能力状态和统计。",
 			metrics(
-				"recommendation_candidate_count", "推荐内容", "个",
+				"recommendation_candidate_count", "可推荐内容", "个",
 			)),
 		readOnlyFeatureDef("privacy_lifecycle", "隐私与数据生命周期", "监护人授权、导出与账号注销清理。", "security", "安全团队",
 			"授权、导出和注销清理由监护人自助执行并留下审计，功能中心只提供能力状态和统计。",

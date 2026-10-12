@@ -201,3 +201,26 @@ func TestRecommendPropagatesCatalogError(t *testing.T) {
 		t.Fatal("expected an error")
 	}
 }
+
+func TestCheckReadinessAcceptsEmptyCatalog(t *testing.T) {
+	service := New(Options{Catalog: stubCatalog{}})
+	if err := service.CheckReadiness(context.Background()); err != nil {
+		t.Fatalf("check readiness: %v", err)
+	}
+}
+
+func TestCheckReadinessMapsCatalogFailure(t *testing.T) {
+	service := New(Options{
+		Catalog: stubCatalog{err: errors.New("catalog unavailable")},
+	})
+	if err := service.CheckReadiness(context.Background()); err == nil {
+		t.Fatal("expected an error")
+	}
+}
+
+func TestCheckReadinessRejectsMissingCatalog(t *testing.T) {
+	service := New(Options{})
+	if err := service.CheckReadiness(context.Background()); err == nil {
+		t.Fatal("expected an error")
+	}
+}

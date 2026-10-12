@@ -51,11 +51,40 @@ type Repository interface {
 		reason string,
 	) error
 	PurgeParentData(ctx context.Context, parentAccountID string) error
+	PurgeExpiredRecords(
+		ctx context.Context,
+		now time.Time,
+	) (ExpiredRecordPurge, error)
 	AppendAudit(ctx context.Context, entry *domain.AuditEntry) error
 	QueryAudit(
 		ctx context.Context,
 		filter domain.AuditFilter,
 	) (*domain.AuditPage, error)
+}
+
+// ExpiredRecordPurge reports how many already-expired rows were removed per
+// table so the retention worker can be observed without reading row contents.
+type ExpiredRecordPurge struct {
+	AuthSessions             int64 `json:"auth_sessions"`
+	AdminMFAChallenges       int64 `json:"admin_mfa_challenges"`
+	DeviceSessions           int64 `json:"device_sessions"`
+	DeviceBindingTokens      int64 `json:"device_binding_tokens"`
+	DeviceRegistrationTokens int64 `json:"device_registration_tokens"`
+	DeviceChallenges         int64 `json:"device_challenges"`
+	PhoneVerificationCodes   int64 `json:"phone_verification_codes"`
+	ExportReceipts           int64 `json:"export_receipts"`
+}
+
+// Total returns the number of rows removed across every table.
+func (purge ExpiredRecordPurge) Total() int64 {
+	return purge.AuthSessions +
+		purge.AdminMFAChallenges +
+		purge.DeviceSessions +
+		purge.DeviceBindingTokens +
+		purge.DeviceRegistrationTokens +
+		purge.DeviceChallenges +
+		purge.PhoneVerificationCodes +
+		purge.ExportReceipts
 }
 
 // PostgresRepository is the PostgreSQL-backed privacy repository.
@@ -715,6 +744,86 @@ func (r *PostgresRepository) PurgeParentData(
 		return fmt.Errorf("commit guardian data purge: %w", err)
 	}
 	return nil
+}
+
+// PurgeExpiredRecords removes authentication artefacts and export receipts
+// whose lifetime has elapsed. It never removes live rows: every statement is
+// bounded by `expires_at <= $1` so the caller's clock decides eligibility.
+// Consumed-but-unexpired rows are deliberately retained until their own expiry
+// so a late replay is still rejected by the existing validity checks. Each
+// delete is independent, so a transient failure on one table does not hide
+// progress on the others.
+func (r *PostgresRepository) PurgeExpiredRecords(
+	ctx context.Context,
+	now time.Time,
+) (ExpiredRecordPurge, error) {
+	var purge ExpiredRecordPurge
+	statements := []struct {
+		query string
+		dest  *int64
+		label string
+	}{
+		{
+			query: `DELETE FROM auth_sessions
+				WHERE expires_at <= $1`,
+			dest:  &purge.AuthSessions,
+			label: "parent sessions",
+		},
+		{
+			query: `DELETE FROM admin_mfa_challenges
+				WHERE expires_at <= $1`,
+			dest:  &purge.AdminMFAChallenges,
+			label: "MFA challenges",
+		},
+		{
+			query: `DELETE FROM device_sessions
+				WHERE expires_at <= $1`,
+			dest:  &purge.DeviceSessions,
+			label: "device sessions",
+		},
+		{
+			query: `DELETE FROM device_binding_tokens
+				WHERE expires_at <= $1`,
+			dest:  &purge.DeviceBindingTokens,
+			label: "binding tokens",
+		},
+		{
+			query: `DELETE FROM device_registration_tokens
+				WHERE expires_at <= $1`,
+			dest:  &purge.DeviceRegistrationTokens,
+			label: "registration tokens",
+		},
+		{
+			query: `DELETE FROM device_challenges
+				WHERE expires_at <= $1`,
+			dest:  &purge.DeviceChallenges,
+			label: "device challenges",
+		},
+		{
+			query: `DELETE FROM phone_verification_codes
+				WHERE expires_at <= $1`,
+			dest:  &purge.PhoneVerificationCodes,
+			label: "phone verification codes",
+		},
+		{
+			query: `DELETE FROM parent_data_export_receipts
+				WHERE expires_at <= $1`,
+			dest:  &purge.ExportReceipts,
+			label: "export receipts",
+		},
+	}
+	for _, statement := range statements {
+		tag, err := r.pool.Exec(ctx, statement.query, now)
+		if err != nil {
+			return purge, fmt.Errorf(
+				"purge expired guardian %s: %w",
+				statement.label,
+				err,
+			)
+		}
+		*statement.dest = tag.RowsAffected()
+	}
+	return purge, nil
 }
 
 // AppendAudit inserts one safe operation event.

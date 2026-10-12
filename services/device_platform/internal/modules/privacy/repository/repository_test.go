@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -88,5 +89,31 @@ func TestPurgeParentDataCoversOwnedTables(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("no owned tables were discovered; migration scan is broken")
+	}
+}
+
+// TestPurgeExpiredRecordsCoversEphemeralTables guards the retention job that
+// migration 0034 promises. Every table below stores an `expires_at` deadline;
+// if the job stops deleting one, expired credential material accumulates in
+// the database indefinitely even though the schema says it is short-lived.
+func TestPurgeExpiredRecordsCoversEphemeralTables(t *testing.T) {
+	source, err := os.ReadFile("repository.go")
+	if err != nil {
+		t.Fatalf("read repository.go: %v", err)
+	}
+	required := []string{
+		"DELETE FROM auth_sessions",
+		"DELETE FROM admin_mfa_challenges",
+		"DELETE FROM device_sessions",
+		"DELETE FROM device_binding_tokens",
+		"DELETE FROM device_registration_tokens",
+		"DELETE FROM device_challenges",
+		"DELETE FROM phone_verification_codes",
+		"DELETE FROM parent_data_export_receipts",
+	}
+	for _, fragment := range required {
+		if !bytes.Contains(source, []byte(fragment)) {
+			t.Errorf("PurgeExpiredRecords is missing %q", fragment)
+		}
 	}
 }

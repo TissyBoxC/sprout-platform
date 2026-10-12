@@ -715,6 +715,7 @@ func Run() error {
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
 	go runDeletionWorker(workerCtx, logger, privacy)
+	go runRetentionWorker(workerCtx, logger, privacy, vision)
 
 	stopCh := make(chan os.Signal, 1)
 	signal.Notify(stopCh, os.Interrupt, syscall.SIGTERM)
@@ -745,6 +746,52 @@ func runDeletionWorker(
 	for {
 		if err := privacy.ExecuteDueDeletions(ctx, 20); err != nil {
 			logger.Error("privacy deletion worker failed", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// runRetentionWorker enforces the disclosed short-retention windows. Migration
+// 0034 promises that expired vision results are removed by "the same retention
+// job that prunes sensitive caches"; this is that job. It also reclaims expired
+// authentication artefacts so a long-running deployment does not accumulate
+// dead sessions, challenge hashes, verification codes, or export receipts.
+func runRetentionWorker(
+	ctx context.Context,
+	logger *slog.Logger,
+	privacy *privacyService.Service,
+	vision *visionService.Service,
+) {
+	const interval = time.Hour
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if privacy != nil {
+			purged, err := privacy.PurgeExpiredRecords(ctx)
+			if err != nil {
+				logger.Error("privacy retention worker failed", "error", err)
+			} else if total := purged.Total(); total > 0 {
+				logger.Info(
+					"privacy retention worker purged expired records",
+					"total", total,
+				)
+			}
+		}
+		if vision != nil {
+			expiredTasks, deletedResults, err := vision.PruneExpired(ctx)
+			if err != nil {
+				logger.Error("vision retention worker failed", "error", err)
+			} else if expiredTasks > 0 || deletedResults > 0 {
+				logger.Info(
+					"vision retention worker pruned data",
+					"expired_tasks", expiredTasks,
+					"deleted_results", deletedResults,
+				)
+			}
 		}
 		select {
 		case <-ctx.Done():

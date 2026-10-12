@@ -13,6 +13,7 @@ import (
 	runtimedomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
 	operationsdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/domain"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/repository"
 	usagedomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/domain"
 )
 
@@ -24,6 +25,7 @@ type memoryRepository struct {
 	deletions       []domain.DeletionRequest
 	audits          []domain.AuditEntry
 	purged          []string
+	purgedExpiredAt []time.Time
 	nextDeletionSeq int
 }
 
@@ -190,6 +192,14 @@ func (r *memoryRepository) PurgeParentData(
 ) error {
 	r.purged = append(r.purged, parentAccountID)
 	return nil
+}
+
+func (r *memoryRepository) PurgeExpiredRecords(
+	_ context.Context,
+	now time.Time,
+) (repository.ExpiredRecordPurge, error) {
+	r.purgedExpiredAt = append(r.purgedExpiredAt, now)
+	return repository.ExpiredRecordPurge{}, nil
 }
 
 func (r *memoryRepository) AppendAudit(
@@ -1048,5 +1058,32 @@ func TestRequestDeletionRejectsOverlongReason(t *testing.T) {
 	)
 	if !errors.Is(err, domain.ErrInvalidDeletionReason) {
 		t.Fatalf("expected ErrInvalidDeletionReason, got %v", err)
+	}
+}
+
+func TestPurgeExpiredRecordsUsesInjectedClock(t *testing.T) {
+	repository := &memoryRepository{}
+	service := newTestService(
+		t,
+		repository,
+		&fakeParentAccounts{},
+		&fakeDevices{},
+		&fakeAIDeletion{},
+	)
+	if _, err := service.PurgeExpiredRecords(context.Background()); err != nil {
+		t.Fatalf("purge expired records: %v", err)
+	}
+	if len(repository.purgedExpiredAt) != 1 {
+		t.Fatalf(
+			"purge calls = %d, want 1",
+			len(repository.purgedExpiredAt),
+		)
+	}
+	if !repository.purgedExpiredAt[0].Equal(testNow()) {
+		t.Fatalf(
+			"purge used %v, want the injected clock %v",
+			repository.purgedExpiredAt[0],
+			testNow(),
+		)
 	}
 }

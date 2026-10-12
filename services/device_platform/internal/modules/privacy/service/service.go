@@ -589,6 +589,16 @@ func (s *Service) ExecuteDueDeletions(
 	return nil
 }
 
+// PurgeExpiredRecords runs the time-based half of the privacy lifecycle. Every
+// row deleted here has already passed its own expiry, so the job only reclaims
+// storage an attacker could otherwise enumerate; it never shortens a live
+// session, token, or usable export. It is safe to call on a timer.
+func (s *Service) PurgeExpiredRecords(
+	ctx context.Context,
+) (repository.ExpiredRecordPurge, error) {
+	return s.repository.PurgeExpiredRecords(ctx, s.clock.Now().UTC())
+}
+
 func (s *Service) executeDeletion(
 	ctx context.Context,
 	candidate domain.DeletionCandidate,

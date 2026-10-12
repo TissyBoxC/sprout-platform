@@ -16,6 +16,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/repository"
 	authdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
+	childdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/domain"
 	operationsdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
 	"github.com/google/uuid"
@@ -29,6 +30,7 @@ const (
 // Provider calls the private sub2api account and API key API.
 type Provider interface {
 	GetRuntimeConfig(ctx context.Context) (*domain.ProviderRuntimeConfig, error)
+	GetChildPolicy(ctx context.Context) (*domain.ProviderChildPolicy, error)
 	GetAccount(
 		ctx context.Context,
 		providerAccountID string,
@@ -75,6 +77,20 @@ func (s *Service) RuntimeConfigForAdmin(
 	ctx context.Context,
 ) (*domain.ProviderRuntimeConfig, error) {
 	return s.provider.GetRuntimeConfig(ctx)
+}
+
+// ChildPolicyAlignmentForAdmin projects the gateway's enforced child policy
+// onto the platform's canonical age tiers so operators can confirm every age
+// is actually enforced. It never exposes the injected safety-boundary text or
+// the internal service token.
+func (s *Service) ChildPolicyAlignmentForAdmin(
+	ctx context.Context,
+) (*domain.ChildPolicyAlignment, error) {
+	policy, err := s.provider.GetChildPolicy(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return alignChildPolicy(policy), nil
 }
 
 // UsageReconciliationForAdmin returns the AI gateway's aggregated, content-free
@@ -977,6 +993,66 @@ func (c *AESGCMCipher) Decrypt(ciphertext []byte, nonce []byte) ([]byte, error) 
 func providerAccountIDForParent(parentAccountID string) string {
 	compact := strings.ReplaceAll(strings.ToLower(parentAccountID), "-", "")
 	return "parent_" + compact
+}
+
+// alignChildPolicy projects the gateway's enforced policy onto the platform's
+// canonical age tiers. A tier is aligned only when the gateway binds it to a
+// configured age band; an unbound tier would be rejected by enforcement, so the
+// whole policy is reported as not aligned. Tiers are emitted in the platform's
+// canonical order so the console renders a stable list.
+func alignChildPolicy(policy *domain.ProviderChildPolicy) *domain.ChildPolicyAlignment {
+	if policy == nil {
+		return &domain.ChildPolicyAlignment{}
+	}
+	bandByName := make(map[string]domain.ProviderAgeBandPolicy, len(policy.AgeBands))
+	bands := make([]domain.ProviderAgeBandPolicy, 0, len(policy.AgeBands))
+	for _, band := range policy.AgeBands {
+		copied := domain.ProviderAgeBandPolicy{
+			Name:            band.Name,
+			AllowedModels:   append([]string(nil), band.AllowedModels...),
+			MaxOutputTokens: band.MaxOutputTokens,
+			ContentRating:   band.ContentRating,
+		}
+		bandByName[band.Name] = copied
+		bands = append(bands, copied)
+	}
+	bandByTier := make(map[string]string, len(policy.PolicyVersions))
+	for _, binding := range policy.PolicyVersions {
+		bandByTier[binding.Version] = binding.AgeBand
+	}
+
+	alignment := &domain.ChildPolicyAlignment{
+		Enabled:              policy.Enabled,
+		RequirePolicyVersion: policy.RequirePolicyVersion,
+		DefaultAgeBand:       policy.DefaultAgeBand,
+		InjectSafetyBoundary: policy.InjectSafetyBoundary,
+		AgeBands:             bands,
+		Tiers:                make([]domain.ChildPolicyTierAlignment, 0, len(childdomain.AgeTiers)),
+		Aligned:              policy.Enabled,
+	}
+	for _, tier := range childdomain.AgeTiers {
+		bandName := bandByTier[tier]
+		band, bandExists := bandByName[bandName]
+		tierAlignment := domain.ChildPolicyTierAlignment{
+			AgeTier:        tier,
+			AgeBand:        bandName,
+			Bound:          bandName != "" && bandExists,
+			AgeBandMissing: bandName != "" && !bandExists,
+		}
+		if bandExists {
+			tierAlignment.AllowedModels = band.AllowedModels
+			tierAlignment.MaxOutputTokens = band.MaxOutputTokens
+			tierAlignment.ContentRating = band.ContentRating
+		}
+		if !tierAlignment.Bound {
+			// A configured age tier the gateway cannot enforce is a real
+			// safety gap, so surface the whole policy as unaligned rather than
+			// letting the console imply the tier is protected.
+			alignment.Aligned = false
+		}
+		alignment.Tiers = append(alignment.Tiers, tierAlignment)
+	}
+	return alignment
 }
 
 func controlledEmail(parentEmail string, parentAccountID string) string {

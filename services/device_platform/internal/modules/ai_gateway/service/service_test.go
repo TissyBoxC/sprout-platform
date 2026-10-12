@@ -699,6 +699,115 @@ func TestUsageReconciliationForAdminFailsWhenAccountMissing(t *testing.T) {
 	}
 }
 
+func TestChildPolicyAlignmentForAdminMapsEveryCanonicalTier(t *testing.T) {
+	provider := &stubProvider{
+		childPolicy: &domain.ProviderChildPolicy{
+			Enabled:              true,
+			RequirePolicyVersion: true,
+			InjectSafetyBoundary: true,
+			PolicyVersions: []domain.ProviderPolicyVersionBinding{
+				{Version: "age_3_4", AgeBand: "3-5"},
+				{Version: "age_5_6", AgeBand: "6-8"},
+				{Version: "age_7_8", AgeBand: "9-12"},
+			},
+			AgeBands: []domain.ProviderAgeBandPolicy{
+				{Name: "3-5", AllowedModels: []string{"gpt-5-mini"}, MaxOutputTokens: 768, ContentRating: "G"},
+				{Name: "6-8", AllowedModels: []string{"gpt-5-mini"}, MaxOutputTokens: 1536, ContentRating: "G"},
+				{Name: "9-12", AllowedModels: []string{"gpt-5-mini"}, MaxOutputTokens: 3072, ContentRating: "PG"},
+			},
+		},
+	}
+	service := newTestService(t, &memoryRepository{}, provider)
+
+	alignment, err := service.ChildPolicyAlignmentForAdmin(context.Background())
+	if err != nil {
+		t.Fatalf("align child policy: %v", err)
+	}
+	if !alignment.Aligned {
+		t.Fatalf("expected a fully bound policy to be aligned: %#v", alignment)
+	}
+	if len(alignment.Tiers) != 3 {
+		t.Fatalf("expected three canonical tiers, got %#v", alignment.Tiers)
+	}
+	if alignment.Tiers[0].AgeTier != "age_3_4" ||
+		!alignment.Tiers[0].Bound ||
+		alignment.Tiers[0].AgeBand != "3-5" ||
+		alignment.Tiers[0].ContentRating != "G" {
+		t.Fatalf("unexpected youngest tier alignment: %#v", alignment.Tiers[0])
+	}
+	if alignment.Tiers[2].ContentRating != "PG" ||
+		alignment.Tiers[2].MaxOutputTokens != 3072 {
+		t.Fatalf("unexpected oldest tier alignment: %#v", alignment.Tiers[2])
+	}
+}
+
+func TestChildPolicyAlignmentForAdminFlagsUnboundTier(t *testing.T) {
+	provider := &stubProvider{
+		childPolicy: &domain.ProviderChildPolicy{
+			Enabled:              true,
+			RequirePolicyVersion: true,
+			PolicyVersions: []domain.ProviderPolicyVersionBinding{
+				{Version: "age_3_4", AgeBand: "3-5"},
+				{Version: "age_5_6", AgeBand: "6-8"},
+			},
+			AgeBands: []domain.ProviderAgeBandPolicy{
+				{Name: "3-5", AllowedModels: []string{"gpt-5-mini"}, MaxOutputTokens: 768, ContentRating: "G"},
+				{Name: "6-8", AllowedModels: []string{"gpt-5-mini"}, MaxOutputTokens: 1536, ContentRating: "G"},
+			},
+		},
+	}
+	service := newTestService(t, &memoryRepository{}, provider)
+
+	alignment, err := service.ChildPolicyAlignmentForAdmin(context.Background())
+	if err != nil {
+		t.Fatalf("align child policy: %v", err)
+	}
+	if alignment.Aligned {
+		t.Fatal("expected a policy missing the oldest tier to be flagged unaligned")
+	}
+	if alignment.Tiers[2].AgeTier != "age_7_8" || alignment.Tiers[2].Bound {
+		t.Fatalf("expected the oldest tier to be reported unbound: %#v", alignment.Tiers[2])
+	}
+}
+
+func TestChildPolicyAlignmentForAdminFlagsMissingBand(t *testing.T) {
+	provider := &stubProvider{
+		childPolicy: &domain.ProviderChildPolicy{
+			Enabled: true,
+			PolicyVersions: []domain.ProviderPolicyVersionBinding{
+				{Version: "age_3_4", AgeBand: "3-5"},
+				{Version: "age_5_6", AgeBand: "6-8"},
+				{Version: "age_7_8", AgeBand: "unknown-band"},
+			},
+			AgeBands: []domain.ProviderAgeBandPolicy{
+				{Name: "3-5", AllowedModels: []string{"gpt-5-mini"}, MaxOutputTokens: 768, ContentRating: "G"},
+				{Name: "6-8", AllowedModels: []string{"gpt-5-mini"}, MaxOutputTokens: 1536, ContentRating: "G"},
+			},
+		},
+	}
+	service := newTestService(t, &memoryRepository{}, provider)
+
+	alignment, err := service.ChildPolicyAlignmentForAdmin(context.Background())
+	if err != nil {
+		t.Fatalf("align child policy: %v", err)
+	}
+	if alignment.Aligned {
+		t.Fatal("expected a binding to a missing band to be flagged unaligned")
+	}
+	if !alignment.Tiers[2].AgeBandMissing || alignment.Tiers[2].Bound {
+		t.Fatalf("expected the oldest tier to report a missing band: %#v", alignment.Tiers[2])
+	}
+}
+
+func TestChildPolicyAlignmentForAdminPropagatesProviderError(t *testing.T) {
+	provider := &stubProvider{childPolicyErr: domain.ErrProviderUnavailable}
+	service := newTestService(t, &memoryRepository{}, provider)
+
+	if _, err := service.ChildPolicyAlignmentForAdmin(context.Background()); !errors.Is(err, domain.ErrProviderUnavailable) {
+		t.Fatalf("expected provider-unavailable, got %v", err)
+	}
+}
+
 func newTestService(
 	t *testing.T,
 	accountRepository repository.Repository,
@@ -827,6 +936,8 @@ type stubProvider struct {
 	createAccountErr          error
 	runtimeConfig             *domain.ProviderRuntimeConfig
 	runtimeConfigErr          error
+	childPolicy               *domain.ProviderChildPolicy
+	childPolicyErr            error
 	getAccountInitialNotFound bool
 	createdAccount            *domain.ProviderAccount
 	key                       *domain.ProviderAPIKey
@@ -854,6 +965,24 @@ func (p *stubProvider) GetRuntimeConfig(
 	}
 	copy := *p.runtimeConfig
 	copy.Models = append([]domain.ProviderModelLatency(nil), p.runtimeConfig.Models...)
+	return &copy, nil
+}
+
+func (p *stubProvider) GetChildPolicy(
+	_ context.Context,
+) (*domain.ProviderChildPolicy, error) {
+	if p.childPolicyErr != nil {
+		return nil, p.childPolicyErr
+	}
+	if p.childPolicy == nil {
+		return &domain.ProviderChildPolicy{}, nil
+	}
+	copy := *p.childPolicy
+	copy.AgeBands = append([]domain.ProviderAgeBandPolicy(nil), p.childPolicy.AgeBands...)
+	copy.PolicyVersions = append(
+		[]domain.ProviderPolicyVersionBinding(nil),
+		p.childPolicy.PolicyVersions...,
+	)
 	return &copy, nil
 }
 

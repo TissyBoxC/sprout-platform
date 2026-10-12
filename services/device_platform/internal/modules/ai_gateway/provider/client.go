@@ -102,6 +102,25 @@ func (c *Client) GetRuntimeConfig(
 	}, nil
 }
 
+// GetChildPolicy returns the child-safety policy the gateway is enforcing so
+// the platform can align its own age bands and content ratings. The gateway
+// never returns its safety-boundary text or service token through this call.
+func (c *Client) GetChildPolicy(
+	ctx context.Context,
+) (*gatewaydomain.ProviderChildPolicy, error) {
+	var response providerChildPolicyData
+	if _, err := c.doJSON(
+		ctx,
+		http.MethodGet,
+		"/internal/sprout/v1/child-policy",
+		nil,
+		&response,
+	); err != nil {
+		return nil, err
+	}
+	return response.toDomain(), nil
+}
+
 // CreateAccount creates one provider execution account.
 func (c *Client) CreateAccount(
 	ctx context.Context,
@@ -424,6 +443,62 @@ type providerModelLatencyData struct {
 	PrimaryLatencyMs          *int   `json:"primary_latency_ms"`
 	AverageLatency7DaysMs     *int   `json:"average_latency_7d_ms"`
 	RecommendedForNewAccounts bool   `json:"recommended_for_new_accounts"`
+}
+
+type providerChildPolicyData struct {
+	Enabled              bool                            `json:"enabled"`
+	RequirePolicyVersion bool                            `json:"require_policy_version"`
+	DefaultAgeBand       string                          `json:"default_age_band"`
+	InjectSafetyBoundary bool                            `json:"inject_safety_boundary"`
+	PolicyVersions       []providerPolicyVersionData     `json:"policy_versions"`
+	AgeBands             []providerAgeBandPolicyData     `json:"age_bands"`
+}
+
+type providerPolicyVersionData struct {
+	Version string `json:"version"`
+	AgeBand string `json:"age_band"`
+}
+
+type providerAgeBandPolicyData struct {
+	Name            string   `json:"name"`
+	AllowedModels   []string `json:"allowed_models"`
+	MaxOutputTokens int      `json:"max_output_tokens"`
+	ContentRating   string   `json:"content_rating"`
+}
+
+func (data providerChildPolicyData) toDomain() *gatewaydomain.ProviderChildPolicy {
+	versions := make(
+		[]gatewaydomain.ProviderPolicyVersionBinding,
+		0,
+		len(data.PolicyVersions),
+	)
+	for _, binding := range data.PolicyVersions {
+		versions = append(versions, gatewaydomain.ProviderPolicyVersionBinding{
+			Version: binding.Version,
+			AgeBand: binding.AgeBand,
+		})
+	}
+	bands := make(
+		[]gatewaydomain.ProviderAgeBandPolicy,
+		0,
+		len(data.AgeBands),
+	)
+	for _, band := range data.AgeBands {
+		bands = append(bands, gatewaydomain.ProviderAgeBandPolicy{
+			Name:            band.Name,
+			AllowedModels:   append([]string(nil), band.AllowedModels...),
+			MaxOutputTokens: band.MaxOutputTokens,
+			ContentRating:   band.ContentRating,
+		})
+	}
+	return &gatewaydomain.ProviderChildPolicy{
+		Enabled:              data.Enabled,
+		RequirePolicyVersion: data.RequirePolicyVersion,
+		DefaultAgeBand:       data.DefaultAgeBand,
+		InjectSafetyBoundary: data.InjectSafetyBoundary,
+		PolicyVersions:       versions,
+		AgeBands:             bands,
+	}
 }
 
 func (data providerAccountData) toDomain() *gatewaydomain.ProviderAccount {

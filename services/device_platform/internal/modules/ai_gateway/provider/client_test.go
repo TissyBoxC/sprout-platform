@@ -276,6 +276,74 @@ func TestGetRuntimeConfigDecodesModelsAndDefaults(t *testing.T) {
 	}
 }
 
+func TestGetChildPolicyDecodesEnforcedBandsAndBindings(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		if request.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", request.Method)
+		}
+		if request.URL.Path != "/internal/sprout/v1/child-policy" {
+			t.Fatalf("unexpected path %s", request.URL.Path)
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{
+			"schema_version":"1.0.0",
+			"request_id":"request-1",
+			"data":{
+				"enabled":true,
+				"require_policy_version":true,
+				"default_age_band":"",
+				"inject_safety_boundary":true,
+				"policy_versions":[
+					{"version":"age_3_4","age_band":"3-5"},
+					{"version":"age_5_6","age_band":"6-8"}
+				],
+				"age_bands":[
+					{
+						"name":"3-5",
+						"allowed_models":["gpt-5-mini"],
+						"max_output_tokens":768,
+						"content_rating":"G"
+					},
+					{
+						"name":"6-8",
+						"allowed_models":["gpt-5-mini","claude-haiku-4-5"],
+						"max_output_tokens":1536,
+						"content_rating":"G"
+					}
+				]
+			},
+			"error":null
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, strings.Repeat("x", 32), server.Client())
+	if err != nil {
+		t.Fatalf("create provider client: %v", err)
+	}
+	policy, err := client.GetChildPolicy(context.Background())
+	if err != nil {
+		t.Fatalf("get child policy: %v", err)
+	}
+	if !policy.Enabled || !policy.RequirePolicyVersion || !policy.InjectSafetyBoundary {
+		t.Fatalf("unexpected policy flags: %#v", policy)
+	}
+	if len(policy.PolicyVersions) != 2 ||
+		policy.PolicyVersions[0].Version != "age_3_4" ||
+		policy.PolicyVersions[0].AgeBand != "3-5" {
+		t.Fatalf("unexpected policy bindings: %#v", policy.PolicyVersions)
+	}
+	if len(policy.AgeBands) != 2 ||
+		policy.AgeBands[1].Name != "6-8" ||
+		policy.AgeBands[1].MaxOutputTokens != 1536 ||
+		len(policy.AgeBands[1].AllowedModels) != 2 {
+		t.Fatalf("unexpected age bands: %#v", policy.AgeBands)
+	}
+}
+
 func TestGetUsageReconciliationSendsWindowAndDecodesTotals(t *testing.T) {
 	var receivedQuery string
 	server := httptest.NewServer(http.HandlerFunc(func(

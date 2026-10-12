@@ -622,6 +622,68 @@ func (handler adminHandler) listAIModels(
 	writeSuccess(response, request, http.StatusOK, map[string]any{"models": models})
 }
 
+// getAIGatewayChildPolicy exposes the child-safety policy the AI gateway is
+// enforcing, projected onto the platform's canonical age tiers. Operators use
+// it to confirm every age actually maps to an enforced band. The response never
+// includes the injected safety-boundary text or the internal service token.
+func (handler adminHandler) getAIGatewayChildPolicy(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	alignment, err := handler.service.ChildPolicyAlignmentForAdmin(request.Context())
+	if err != nil {
+		writeError(response, request, http.StatusBadGateway, "provider_error", "暂时无法读取儿童安全策略")
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, childPolicyAlignmentResponse(alignment))
+}
+
+// childPolicyAlignmentResponse renders the aligned policy for the console. It
+// mirrors the domain shape and deliberately omits the gateway's safety-boundary
+// text and service token.
+func childPolicyAlignmentResponse(
+	alignment *gatewaydomain.ChildPolicyAlignment,
+) map[string]any {
+	if alignment == nil {
+		return map[string]any{
+			"enabled": false,
+			"tiers":   []map[string]any{},
+			"bands":   []map[string]any{},
+			"aligned": false,
+		}
+	}
+	bands := make([]map[string]any, 0, len(alignment.AgeBands))
+	for _, band := range alignment.AgeBands {
+		bands = append(bands, map[string]any{
+			"name":              band.Name,
+			"allowed_models":    band.AllowedModels,
+			"max_output_tokens": band.MaxOutputTokens,
+			"content_rating":    band.ContentRating,
+		})
+	}
+	tiers := make([]map[string]any, 0, len(alignment.Tiers))
+	for _, tier := range alignment.Tiers {
+		tiers = append(tiers, map[string]any{
+			"age_tier":          tier.AgeTier,
+			"age_band":          tier.AgeBand,
+			"bound":             tier.Bound,
+			"age_band_missing":  tier.AgeBandMissing,
+			"allowed_models":    tier.AllowedModels,
+			"max_output_tokens": tier.MaxOutputTokens,
+			"content_rating":    tier.ContentRating,
+		})
+	}
+	return map[string]any{
+		"enabled":                alignment.Enabled,
+		"require_policy_version": alignment.RequirePolicyVersion,
+		"default_age_band":       alignment.DefaultAgeBand,
+		"inject_safety_boundary": alignment.InjectSafetyBoundary,
+		"aligned":                alignment.Aligned,
+		"bands":                  bands,
+		"tiers":                  tiers,
+	}
+}
+
 // getFamilyAIUsage reconciles one guardian's AI spend against the gateway's
 // own aggregated usage. It never returns provider credentials or any prompt or
 // reply content; the window defaults to the last 24 hours and is capped so a

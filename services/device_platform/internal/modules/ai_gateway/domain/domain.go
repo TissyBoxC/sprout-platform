@@ -121,6 +121,63 @@ type ProviderUsageReconciliation struct {
 	Models            []ProviderUsageModelStat
 }
 
+// ProviderChildPolicy is the child-safety policy the AI gateway enforces for
+// requests tagged with a platform age tier. It mirrors the gateway's internal
+// contract and deliberately excludes the injected safety-boundary text and the
+// internal service token, which never leave the gateway.
+type ProviderChildPolicy struct {
+	Enabled              bool
+	RequirePolicyVersion bool
+	DefaultAgeBand       string
+	InjectSafetyBoundary bool
+	PolicyVersions       []ProviderPolicyVersionBinding
+	AgeBands             []ProviderAgeBandPolicy
+}
+
+// ProviderPolicyVersionBinding maps one platform policy version (an age tier)
+// to the age band the gateway enforces for it.
+type ProviderPolicyVersionBinding struct {
+	Version string
+	AgeBand string
+}
+
+// ProviderAgeBandPolicy is the gateway's model allowlist, output-token ceiling,
+// and content rating for one age band.
+type ProviderAgeBandPolicy struct {
+	Name            string
+	AllowedModels   []string
+	MaxOutputTokens int
+	ContentRating   string
+}
+
+// ChildPolicyTierAlignment reports how one platform age tier maps onto the
+// gateway's enforced child policy. Bound is true only when the gateway binds
+// the tier to a configured age band, so an operator can see at a glance whether
+// tagged requests for that age would be enforced or rejected outright.
+type ChildPolicyTierAlignment struct {
+	AgeTier         string
+	AgeBand         string
+	Bound           bool
+	AgeBandMissing  bool
+	AllowedModels   []string
+	MaxOutputTokens int
+	ContentRating   string
+}
+
+// ChildPolicyAlignment is the platform's aligned view of the child-safety
+// policy the gateway is enforcing. Aligned is true only when the policy is
+// enabled and every canonical platform age tier is bound to a configured age
+// band, which is the precondition for tagged requests to pass enforcement.
+type ChildPolicyAlignment struct {
+	Enabled              bool
+	RequirePolicyVersion bool
+	DefaultAgeBand       string
+	InjectSafetyBoundary bool
+	AgeBands             []ProviderAgeBandPolicy
+	Tiers                []ChildPolicyTierAlignment
+	Aligned              bool
+}
+
 // Credential is the decrypted provider credential used by server-side services.
 type Credential struct {
 	ProviderAccountID string

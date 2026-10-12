@@ -475,6 +475,7 @@ func Run() error {
 			cfg.DeviceRuntime.OfflineThreshold,
 		),
 		serviceVersions: serviceVersions,
+		releaseStore:    releaseStore,
 	})
 	contentLibraryService, err := contentService.New(contentService.Options{
 		Repository:  contentRepository.NewPostgresRepository(databaseStore.Pool()),

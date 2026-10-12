@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 
+	releaseStoreDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/domain"
 	serviceVersionDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/domain"
 	serviceVersionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
 )
@@ -18,6 +19,9 @@ type featureCenterMetricsReader struct {
 		FeatureMetrics(ctx context.Context, featureID string) (map[string]any, error)
 	}
 	serviceVersions *serviceVersionService.Service
+	releaseStore    interface {
+		IndexStatus(ctx context.Context) (releaseStoreDomain.IndexStatus, error)
+	}
 }
 
 // FeatureMetrics returns the metric values for one feature. Keys with no
@@ -30,26 +34,71 @@ func (reader featureCenterMetricsReader) FeatureMetrics(
 	if err != nil {
 		return nil, err
 	}
-	if featureID != "service_version" || reader.serviceVersions == nil {
-		return values, nil
+	merged := values
+	switch featureID {
+	case "service_version":
+		merged = reader.withOutdatedServiceCount(ctx, merged)
+	case "download_server":
+		merged = reader.withDownloadFileCount(ctx, merged)
 	}
-	snapshot, _, err := reader.serviceVersions.Snapshot(ctx)
+	return merged, nil
+}
+
+// withOutdatedServiceCount merges the upgrade worker's live view. The worker
+// state is optional infrastructure, so a read failure keeps the repository
+// values and leaves the outdated count unreported rather than guessing.
+func (reader featureCenterMetricsReader) withOutdatedServiceCount(
+	ctx context.Context,
+	values map[string]any,
+) map[string]any {
+	if reader.serviceVersions == nil {
+		return values
+	}
+	result, err := reader.serviceVersions.SnapshotResult(ctx)
 	if err != nil {
-		// The upgrade worker state is optional infrastructure. A read failure
-		// must not blank the feature's other metrics, so keep the repository
-		// values and leave the outdated count unreported.
-		return values, nil
+		return values
+	}
+	// Without a worker-written snapshot every service is projected as unknown.
+	// Counting that fallback would report "0 outdated" and falsely claim the
+	// fleet is current, so the count stays unreported until the worker reports.
+	if result.StateSource != "worker" {
+		return values
 	}
 	outdated := 0
-	for _, service := range snapshot {
+	for _, service := range result.Services {
 		if service.Status == serviceVersionDomain.ServiceStatusOutdated {
 			outdated++
 		}
 	}
-	merged := make(map[string]any, len(values)+1)
-	for key, value := range values {
-		merged[key] = value
+	return mergeMetric(values, "outdated_service_count", outdated)
+}
+
+// withDownloadFileCount reports how many canonical release files are published
+// in the download store. A missing index is a valid first-deployment state, so
+// the count stays unreported until the store has a readable index.
+func (reader featureCenterMetricsReader) withDownloadFileCount(
+	ctx context.Context,
+	values map[string]any,
+) map[string]any {
+	if reader.releaseStore == nil {
+		return values
 	}
-	merged["outdated_service_count"] = outdated
-	return merged, nil
+	status, err := reader.releaseStore.IndexStatus(ctx)
+	if err != nil || !status.IsAvailable {
+		return values
+	}
+	return mergeMetric(values, "download_file_count", status.IndexedFileCount)
+}
+
+func mergeMetric(
+	values map[string]any,
+	key string,
+	value any,
+) map[string]any {
+	merged := make(map[string]any, len(values)+1)
+	for existingKey, existingValue := range values {
+		merged[existingKey] = existingValue
+	}
+	merged[key] = value
+	return merged
 }

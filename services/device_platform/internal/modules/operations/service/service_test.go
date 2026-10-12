@@ -100,6 +100,7 @@ func validSettings() *domain.Settings {
 		Retention: domain.RetentionSettings{
 			ConversationDays: 30,
 		},
+		Voice: domain.DefaultVoiceSettings(),
 	}
 }
 
@@ -150,6 +151,58 @@ func TestUpdateSettingsRejectsNegativeVersion(t *testing.T) {
 	}
 
 	_, _, err = service.UpdateSettings(context.Background(), validSettings(), "actor-id", -1)
+	if !errors.Is(err, domain.ErrInvalidSettings) {
+		t.Fatalf("expected invalid settings, got %v", err)
+	}
+}
+
+func TestUpdateSettingsPreservesStoredVoiceDefaultsWhenOmitted(t *testing.T) {
+	repository := &fakeSettingsRepository{
+		currentVersion: 2,
+		savedSettings: &domain.Settings{
+			Voice: domain.VoiceSettings{
+				ContinuousConversationEnabled: false,
+				IdleWindowSeconds:             25,
+				BargeInEnabled:                false,
+				FarFieldEnabled:               true,
+			},
+		},
+	}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	settings := validSettings()
+	settings.Voice = domain.VoiceSettings{}
+	saved, _, err := service.UpdateSettings(
+		context.Background(),
+		settings,
+		"actor-id",
+		2,
+	)
+	if err != nil {
+		t.Fatalf("update settings: %v", err)
+	}
+	if saved.Voice != repository.savedSettings.Voice {
+		t.Fatalf("expected stored voice defaults preserved, got %+v", saved.Voice)
+	}
+}
+
+func TestUpdateSettingsRejectsOutOfRangeVoiceIdleWindow(t *testing.T) {
+	repository := &fakeSettingsRepository{currentVersion: 1}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	settings := validSettings()
+	settings.Voice.IdleWindowSeconds = 1
+	settings.SetVoiceConfigured()
+	_, _, err = service.UpdateSettings(
+		context.Background(),
+		settings,
+		"actor-id",
+		1,
+	)
 	if !errors.Is(err, domain.ErrInvalidSettings) {
 		t.Fatalf("expected invalid settings, got %v", err)
 	}

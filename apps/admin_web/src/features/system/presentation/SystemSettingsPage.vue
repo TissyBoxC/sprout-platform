@@ -305,6 +305,61 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
         <div class="section-heading">
           <div>
             <p class="section-index">04</p>
+            <h2>语音对话</h2>
+          </div>
+          <p>作为新儿童策略的默认值，家长仍可为每个孩子单独收紧。</p>
+        </div>
+        <div class="field-grid">
+          <label>
+            <span>空闲保持时长</span>
+            <input
+              v-model.number="store.settings.voiceIdleWindowSeconds"
+              type="number"
+              min="2"
+              max="60"
+              step="1"
+            />
+            <small class="field-hint">允许范围 2–60 秒。</small>
+          </label>
+        </div>
+        <div class="toggle-list">
+          <label class="toggle-row">
+            <span>
+              <strong>默认启用连续会话</strong>
+              <small>孩子在空闲窗口内无需再次唤醒即可继续对话。</small>
+            </span>
+            <input
+              v-model="store.settings.continuousConversationEnabled"
+              type="checkbox"
+            />
+          </label>
+          <label class="toggle-row">
+            <span>
+              <strong>允许说话打断播放</strong>
+              <small>孩子开口时可以中断当前回复。</small>
+            </span>
+            <input
+              v-model="store.settings.bargeInEnabled"
+              type="checkbox"
+            />
+          </label>
+          <label class="toggle-row">
+            <span>
+              <strong>启用远场拾音</strong>
+              <small>开启远场降噪与回声处理，提升距离较远时的识别效果。</small>
+            </span>
+            <input
+              v-model="store.settings.farFieldEnabled"
+              type="checkbox"
+            />
+          </label>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="section-heading">
+          <div>
+            <p class="section-index">05</p>
             <h2>更新与发布</h2>
           </div>
           <p>统一控制应用和设备的更新渠道，减少不同版本之间的兼容问题。</p>
@@ -347,7 +402,7 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
       <section class="settings-section">
         <div class="section-heading">
           <div>
-            <p class="section-index">05</p>
+            <p class="section-index">06</p>
             <h2>隐私与数据</h2>
           </div>
           <p>音视频上传默认关闭。需要上传时，应先获得监护人明确同意。</p>

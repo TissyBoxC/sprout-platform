@@ -81,7 +81,7 @@ func DefaultRegistry() []Definition {
 		featureDef("voice_conversation", "语音对话", "全双工、连续会话与远场拾音的默认策略。", "voice", "语音平台", true,
 			configFields(
 				boolField("continuous_conversation_enabled", "默认启用连续会话", true, true),
-				integerField("idle_window_seconds", "空闲保持时长", 8, true, true, "秒"),
+				boundedIntegerField("idle_window_seconds", "空闲保持时长", 8, 2, 60, true, "秒"),
 				boolField("barge_in_enabled", "允许打断语音", true, true),
 				boolField("far_field_enabled", "启用远场拾音", true, true),
 			),
@@ -301,6 +301,21 @@ func integerField(
 	field := baseField(key, label, domain.ConfigFieldInteger, value, editable)
 	field.Required = required
 	field.Unit = unit
+	return field
+}
+
+func boundedIntegerField(
+	key string,
+	label string,
+	value float64,
+	minimum float64,
+	maximum float64,
+	editable bool,
+	unit string,
+) domain.ConfigField {
+	field := integerField(key, label, value, true, editable, unit)
+	field.Min = &minimum
+	field.Max = &maximum
 	return field
 }
 

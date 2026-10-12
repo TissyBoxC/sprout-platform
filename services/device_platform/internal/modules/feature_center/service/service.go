@@ -273,11 +273,6 @@ func (s *Service) project(
 	feature.Values = effectiveValues(feature.ConfigSchema)
 	feature.ConfigVersion = 0
 	feature.UpdatedAt = nil
-	if runtimeValues, version, err := s.runtimeValues(ctx, feature.ID); err == nil &&
-		len(runtimeValues) > 0 {
-		feature.Values = mergeValues(feature.Values, runtimeValues)
-		feature.ConfigVersion = version
-	}
 	if overlay != nil {
 		feature.Values = mergeValues(feature.Values, overlay.Values)
 		if feature.ConfigVersion == 0 {
@@ -285,6 +280,14 @@ func (s *Service) project(
 			updatedAt := overlay.UpdatedAt.UTC()
 			feature.UpdatedAt = &updatedAt
 		}
+	}
+	// Runtime-backed fields win over any legacy overlay. Otherwise an old
+	// feature-center row could mask the configuration that services actually
+	// consume and make a saved change appear to take effect when it did not.
+	if runtimeValues, version, err := s.runtimeValues(ctx, feature.ID); err == nil &&
+		len(runtimeValues) > 0 {
+		feature.Values = mergeValues(feature.Values, runtimeValues)
+		feature.ConfigVersion = version
 	}
 	applyValues(feature.ConfigSchema, feature.Values)
 	s.enrichDynamicOptions(ctx, &feature)

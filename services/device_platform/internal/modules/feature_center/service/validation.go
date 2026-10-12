@@ -85,15 +85,18 @@ func validateSubmittedObject(
 		if !field.Editable {
 			return validationError(joinField(path, key), domain.ErrImmutableConfigField)
 		}
-		if field.Type != domain.ConfigFieldObject {
+		if field.Type == domain.ConfigFieldObject {
+			nested, ok := asObject(value)
+			if !ok {
+				return validationError(joinField(path, key), domain.ErrInvalidConfig)
+			}
+			if err := validateSubmittedObject(field.Fields, nested, joinField(path, key)); err != nil {
+				return err
+			}
 			continue
 		}
-		nested, ok := asObject(value)
-		if !ok {
-			return validationError(joinField(path, key), domain.ErrInvalidConfig)
-		}
-		if err := validateSubmittedObject(field.Fields, nested, joinField(path, key)); err != nil {
-			return err
+		if err := validateValue(field, value); err != nil {
+			return validationError(joinField(path, key), err)
 		}
 	}
 	return nil

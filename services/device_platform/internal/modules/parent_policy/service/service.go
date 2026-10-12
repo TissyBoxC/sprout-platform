@@ -37,14 +37,32 @@ const (
 
 // Service owns time, content, and volume restrictions.
 type Service struct {
-	repository repository.Repository
-	timeSource clock.Clock
+	repository    repository.Repository
+	voiceDefaults VoiceDefaultsReader
+	timeSource    clock.Clock
+}
+
+// VoiceDefaultsReader supplies the platform-level defaults applied to a newly
+// created child policy. This interface stays narrow so the parent policy
+// module does not depend on the operations persistence model.
+type VoiceDefaultsReader interface {
+	VoiceDefaults(ctx context.Context) (VoiceDefaults, error)
+}
+
+// VoiceDefaults is the platform-level realtime voice profile applied to a new
+// child. Guardians can still tighten these values per child.
+type VoiceDefaults struct {
+	ContinuousConversationEnabled bool
+	IdleWindowSeconds             int
+	BargeInEnabled                bool
+	FarFieldEnabled               bool
 }
 
 // Options contains parent policy service dependencies.
 type Options struct {
-	Repository repository.Repository
-	Clock      clock.Clock
+	Repository    repository.Repository
+	VoiceDefaults VoiceDefaultsReader
+	Clock         clock.Clock
 }
 
 // New creates the parent policy service.
@@ -56,7 +74,21 @@ func New(options Options) (*Service, error) {
 	if timeSource == nil {
 		timeSource = clock.SystemClock{}
 	}
-	return &Service{repository: options.Repository, timeSource: timeSource}, nil
+	return &Service{
+		repository:    options.Repository,
+		voiceDefaults: options.VoiceDefaults,
+		timeSource:    timeSource,
+	}, nil
+}
+
+// SetVoiceDefaultsReader wires the platform-level voice defaults after both
+// services have been constructed. It is optional so isolated unit tests keep
+// the conservative built-in defaults.
+func (s *Service) SetVoiceDefaultsReader(reader VoiceDefaultsReader) {
+	if s == nil {
+		return
+	}
+	s.voiceDefaults = reader
 }
 
 // CreateDefaultForChild creates the conservative default policy a new child
@@ -71,6 +103,7 @@ func (s *Service) CreateDefaultForChild(
 	if len(categories) == 0 {
 		categories = append([]string(nil), childdomain.ContentCategories...)
 	}
+	voice := s.defaultVoiceConversationPolicy(ctx)
 	now := s.timeSource.Now().UTC()
 	policy := &domain.Policy{
 		ID:                uuid.NewString(),
@@ -81,21 +114,44 @@ func (s *Service) CreateDefaultForChild(
 		AllowedCategories: categories,
 		DisabledPeriods:   []domain.DisabledPeriod{},
 		MaxVolumePercent:  DefaultMaxVolumePercent,
-		VoiceConversation: defaultVoiceConversationPolicy(),
+		VoiceConversation: voice,
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
 	return s.repository.Create(ctx, policy)
 }
 
-// defaultVoiceConversationPolicy is the conservative realtime voice profile a
-// new child receives before a guardian changes it.
-func defaultVoiceConversationPolicy() domain.VoiceConversationPolicy {
-	return domain.VoiceConversationPolicy{
+// defaultVoiceConversationPolicy resolves the platform-level realtime voice
+// profile for a new child. A missing or failing reader falls back to the
+// conservative service defaults so policy provisioning never fails open.
+func (s *Service) defaultVoiceConversationPolicy(
+	ctx context.Context,
+) domain.VoiceConversationPolicy {
+	fallback := domain.VoiceConversationPolicy{
 		ContinuousConversationEnabled: DefaultContinuousConversationEnabled,
 		IdleWindowSeconds:             DefaultVoiceIdleWindowSeconds,
 		BargeInEnabled:                DefaultBargeInEnabled,
 		FarFieldEnabled:               DefaultFarFieldEnabled,
+	}
+	if s == nil || s.voiceDefaults == nil {
+		return fallback
+	}
+	defaults, err := s.voiceDefaults.VoiceDefaults(ctx)
+	if err != nil {
+		return fallback
+	}
+	idle := defaults.IdleWindowSeconds
+	if idle < MinVoiceIdleWindowSeconds {
+		idle = MinVoiceIdleWindowSeconds
+	}
+	if idle > MaxVoiceIdleWindowSeconds {
+		idle = MaxVoiceIdleWindowSeconds
+	}
+	return domain.VoiceConversationPolicy{
+		ContinuousConversationEnabled: defaults.ContinuousConversationEnabled,
+		IdleWindowSeconds:             idle,
+		BargeInEnabled:                defaults.BargeInEnabled,
+		FarFieldEnabled:               defaults.FarFieldEnabled,
 	}
 }
 

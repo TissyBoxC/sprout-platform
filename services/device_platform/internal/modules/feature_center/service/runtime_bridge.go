@@ -88,6 +88,13 @@ func (s *Service) runtimeValues(
 			"output_moderation_enabled":   settings.Safety.OutputModerationEnabled,
 			"crisis_intervention_enabled": settings.Safety.CrisisInterventionEnabled,
 		}, version, nil
+	case "voice_conversation":
+		return map[string]any{
+			"continuous_conversation_enabled": settings.Voice.ContinuousConversationEnabled,
+			"idle_window_seconds":             settings.Voice.IdleWindowSeconds,
+			"barge_in_enabled":                settings.Voice.BargeInEnabled,
+			"far_field_enabled":               settings.Voice.FarFieldEnabled,
+		}, version, nil
 	default:
 		return nil, 0, nil
 	}
@@ -172,6 +179,27 @@ func (s *Service) updateRuntimeValues(
 		if value, ok := boolValue(values, "crisis_intervention_enabled"); ok {
 			settings.Safety.CrisisInterventionEnabled = value
 		}
+		_, _, err := s.runtimeSettings.UpdateSettings(
+			ctx,
+			settings,
+			actorID,
+			expectedVersion,
+		)
+		return true, err
+	case "voice_conversation":
+		if value, ok := boolValue(values, "continuous_conversation_enabled"); ok {
+			settings.Voice.ContinuousConversationEnabled = value
+		}
+		if value, ok := intValue(values, "idle_window_seconds"); ok {
+			settings.Voice.IdleWindowSeconds = value
+		}
+		if value, ok := boolValue(values, "barge_in_enabled"); ok {
+			settings.Voice.BargeInEnabled = value
+		}
+		if value, ok := boolValue(values, "far_field_enabled"); ok {
+			settings.Voice.FarFieldEnabled = value
+		}
+		settings.SetVoiceConfigured()
 		_, _, err := s.runtimeSettings.UpdateSettings(
 			ctx,
 			settings,

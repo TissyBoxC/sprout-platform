@@ -2,6 +2,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -104,8 +105,65 @@ type Settings struct {
 	AI        AISettings        `json:"ai"`
 	Account   AccountSettings   `json:"account"`
 	Safety    SafetySettings    `json:"safety"`
+	Voice     VoiceSettings     `json:"voice"`
 	Update    UpdateSettings    `json:"update"`
 	Retention RetentionSettings `json:"retention"`
+
+	voiceConfigured bool
+}
+
+// DefaultVoiceSettings returns the conservative realtime voice defaults used
+// when a settings document predates the voice section or a client omits it.
+func DefaultVoiceSettings() VoiceSettings {
+	return VoiceSettings{
+		ContinuousConversationEnabled: true,
+		IdleWindowSeconds:             8,
+		BargeInEnabled:                true,
+		FarFieldEnabled:               true,
+	}
+}
+
+// VoiceConfigured reports whether the decoded settings document explicitly
+// contained a voice section. It lets updates preserve the stored values when
+// an older console version saves a document that does not know about voice.
+func (s *Settings) VoiceConfigured() bool {
+	return s != nil && s.voiceConfigured
+}
+
+// ApplyVoiceDefaults fills a missing or zero-valued voice section with the
+// conservative platform defaults.
+func (s *Settings) ApplyVoiceDefaults() {
+	if s == nil {
+		return
+	}
+	if s.Voice.IdleWindowSeconds == 0 {
+		s.Voice = DefaultVoiceSettings()
+	}
+}
+
+// SetVoiceConfigured marks the voice section as explicitly supplied so an
+// update is not mistaken for a forward-compatible client that omitted it.
+func (s *Settings) SetVoiceConfigured() {
+	if s != nil {
+		s.voiceConfigured = true
+	}
+}
+
+// UnmarshalJSON keeps the explicit presence of the voice section so the
+// service can distinguish an omitted section from an intentional update.
+func (s *Settings) UnmarshalJSON(data []byte) error {
+	type settingsAlias Settings
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var decoded settingsAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*s = Settings(decoded)
+	_, s.voiceConfigured = raw["voice"]
+	return nil
 }
 
 // AISettings controls defaults applied to new parent AI accounts.
@@ -129,6 +187,15 @@ type SafetySettings struct {
 	CrisisInterventionEnabled bool `json:"crisis_intervention_enabled"`
 	AllowAudioUpload          bool `json:"allow_audio_upload"`
 	AllowImageUpload          bool `json:"allow_image_upload"`
+}
+
+// VoiceSettings controls the defaults applied to a newly created child's
+// realtime voice policy. Guardians can still tighten each child's policy.
+type VoiceSettings struct {
+	ContinuousConversationEnabled bool `json:"continuous_conversation_enabled"`
+	IdleWindowSeconds             int  `json:"idle_window_seconds"`
+	BargeInEnabled                bool `json:"barge_in_enabled"`
+	FarFieldEnabled               bool `json:"far_field_enabled"`
 }
 
 // UpdateSettings controls the default update channel and minimum versions.

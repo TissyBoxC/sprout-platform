@@ -234,6 +234,7 @@ func (r *PostgresRepository) GetSettings(
 	if err := json.Unmarshal(raw, &settings); err != nil {
 		return nil, 0, fmt.Errorf("decode platform settings: %w", err)
 	}
+	settings.ApplyVoiceDefaults()
 	return &settings, version, nil
 }
 

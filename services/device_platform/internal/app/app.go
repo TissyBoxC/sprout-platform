@@ -272,6 +272,9 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create operations service: %w", err)
 	}
+	parentPolicyService.SetVoiceDefaultsReader(operationsVoiceDefaults{
+		operations: operations,
+	})
 	aiAccountService.SetPolicyReader(operations)
 	parentAuthService.SetPolicyReader(operations)
 	parentAuthService.SetOverviewReader(operations)

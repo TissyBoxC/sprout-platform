@@ -127,6 +127,17 @@ func (fixedClock) Now() time.Time {
 	return time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC)
 }
 
+type fixedVoiceDefaults struct {
+	defaults VoiceDefaults
+	err      error
+}
+
+func (reader fixedVoiceDefaults) VoiceDefaults(
+	context.Context,
+) (VoiceDefaults, error) {
+	return reader.defaults, reader.err
+}
+
 func TestCreateDefaultForChildUsesAllApprovedCategoriesWhenUnset(t *testing.T) {
 	repository := newMemoryPolicyRepository()
 	service, err := New(Options{Repository: repository, Clock: fixedClock{}})
@@ -351,6 +362,76 @@ func TestCreateDefaultForChildEnablesVoiceConversationDefaults(t *testing.T) {
 	}
 	if voice.IdleWindowSeconds != DefaultVoiceIdleWindowSeconds {
 		t.Fatalf("idle window = %d, want %d", voice.IdleWindowSeconds, DefaultVoiceIdleWindowSeconds)
+	}
+}
+
+func TestCreateDefaultForChildUsesInjectedPlatformVoiceDefaults(t *testing.T) {
+	repository := newMemoryPolicyRepository()
+	service, err := New(Options{
+		Repository: repository,
+		Clock:      fixedClock{},
+		VoiceDefaults: fixedVoiceDefaults{defaults: VoiceDefaults{
+			ContinuousConversationEnabled: false,
+			IdleWindowSeconds:             25,
+			BargeInEnabled:                false,
+			FarFieldEnabled:               true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	if err := service.CreateDefaultForChild(
+		context.Background(),
+		"family_1",
+		"child_1",
+		nil,
+	); err != nil {
+		t.Fatalf("create default policy: %v", err)
+	}
+	policy, err := service.Get(context.Background(), "family_1", "child_1")
+	if err != nil {
+		t.Fatalf("get policy: %v", err)
+	}
+	if policy.VoiceConversation != (domain.VoiceConversationPolicy{
+		ContinuousConversationEnabled: false,
+		IdleWindowSeconds:             25,
+		BargeInEnabled:                false,
+		FarFieldEnabled:               true,
+	}) {
+		t.Fatalf("unexpected voice defaults: %+v", policy.VoiceConversation)
+	}
+}
+
+func TestCreateDefaultForChildFallsBackWhenVoiceDefaultsFail(t *testing.T) {
+	repository := newMemoryPolicyRepository()
+	service, err := New(Options{
+		Repository: repository,
+		Clock:      fixedClock{},
+		VoiceDefaults: fixedVoiceDefaults{
+			err: errors.New("settings unavailable"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	if err := service.CreateDefaultForChild(
+		context.Background(),
+		"family_1",
+		"child_1",
+		nil,
+	); err != nil {
+		t.Fatalf("create default policy: %v", err)
+	}
+	policy, err := service.Get(context.Background(), "family_1", "child_1")
+	if err != nil {
+		t.Fatalf("get policy: %v", err)
+	}
+	if policy.VoiceConversation.IdleWindowSeconds != DefaultVoiceIdleWindowSeconds {
+		t.Fatalf(
+			"idle window = %d, want fallback %d",
+			policy.VoiceConversation.IdleWindowSeconds,
+			DefaultVoiceIdleWindowSeconds,
+		)
 	}
 }
 

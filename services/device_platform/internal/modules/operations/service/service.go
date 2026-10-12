@@ -170,6 +170,22 @@ func (s *Service) Settings(
 	return s.repository.GetSettings(ctx)
 }
 
+// VoiceDefaults returns the platform-level realtime voice profile applied to
+// newly created child policies.
+func (s *Service) VoiceDefaults(
+	ctx context.Context,
+) (*domain.VoiceSettings, error) {
+	settings, _, err := s.repository.GetSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	voice := settings.Voice
+	if voice.IdleWindowSeconds == 0 {
+		voice = domain.DefaultVoiceSettings()
+	}
+	return &voice, nil
+}
+
 // RuntimePolicy returns the policy projection used by account creation.
 func (s *Service) RuntimePolicy(
 	ctx context.Context,
@@ -189,6 +205,24 @@ func (s *Service) UpdateSettings(
 	}
 	if expectedVersion < 0 {
 		return nil, 0, domain.ErrInvalidSettings
+	}
+	if !settings.VoiceConfigured() {
+		// Forward-compatible clients may save an older document shape. Keep
+		// the stored voice defaults instead of resetting them to the registry
+		// defaults or zero values.
+		current, _, err := s.repository.GetSettings(ctx)
+		if err != nil && !errors.Is(err, domain.ErrSettingsNotFound) {
+			return nil, 0, err
+		}
+		if current != nil {
+			settings.Voice = current.Voice
+			if settings.Voice.IdleWindowSeconds == 0 {
+				settings.Voice = domain.DefaultVoiceSettings()
+			}
+		} else {
+			settings.Voice = domain.DefaultVoiceSettings()
+		}
+		settings.SetVoiceConfigured()
 	}
 	if err := validateSettings(settings); err != nil {
 		return nil, 0, err
@@ -350,6 +384,10 @@ func validateSettings(settings *domain.Settings) error {
 		settings.Retention.ImageDays < 0 ||
 		settings.Retention.ConversationDays < 0 ||
 		settings.Retention.ConversationDays > 3650 {
+		return domain.ErrInvalidSettings
+	}
+	if settings.Voice.IdleWindowSeconds < 2 ||
+		settings.Voice.IdleWindowSeconds > 60 {
 		return domain.ErrInvalidSettings
 	}
 	seenModels := make(map[string]struct{}, len(settings.AI.DefaultModels))

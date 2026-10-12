@@ -9,6 +9,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/repository"
+	operationsdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/domain"
 )
 
 type memoryRepository struct {
@@ -79,6 +80,34 @@ type fixedClock struct{}
 
 func (fixedClock) Now() time.Time {
 	return time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+}
+
+type memoryRuntimeSettings struct {
+	settings *operationsdomain.Settings
+	version  int64
+}
+
+func (reader *memoryRuntimeSettings) Settings(
+	context.Context,
+) (*operationsdomain.Settings, int64, error) {
+	return reader.settings, reader.version, nil
+}
+
+func (reader *memoryRuntimeSettings) UpdateSettings(
+	_ context.Context,
+	settings *operationsdomain.Settings,
+	_ string,
+	expectedVersion int64,
+) (*operationsdomain.Settings, int64, error) {
+	if expectedVersion != reader.version {
+		return nil, 0, &operationsdomain.SettingsVersionConflictError{
+			ExpectedVersion: expectedVersion,
+			CurrentVersion:  reader.version,
+		}
+	}
+	reader.settings = settings
+	reader.version++
+	return settings, reader.version, nil
 }
 
 func newTestService(t *testing.T) (*Service, *memoryRepository) {
@@ -391,6 +420,88 @@ func TestUpdateConfigRejectsStaleVersion(t *testing.T) {
 	)
 	if !errors.Is(err, domain.ErrConfigVersionConflict) {
 		t.Fatalf("expected version conflict, got %v", err)
+	}
+}
+
+func TestVoiceConversationConfigBridgesToRuntimeSettings(t *testing.T) {
+	service, err := New(Options{
+		Repository:  newMemoryRepository(),
+		Definitions: DefaultRegistry(),
+		Clock:       fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	settings := &operationsdomain.Settings{
+		AI: operationsdomain.AISettings{DefaultConcurrency: 1},
+		Voice: operationsdomain.VoiceSettings{
+			ContinuousConversationEnabled: true,
+			IdleWindowSeconds:             8,
+			BargeInEnabled:                true,
+			FarFieldEnabled:               true,
+		},
+	}
+	settings.SetVoiceConfigured()
+	runtimeSettings := &memoryRuntimeSettings{settings: settings}
+	service.SetRuntimeSettingsReader(runtimeSettings)
+
+	feature, err := service.UpdateConfig(
+		context.Background(),
+		"voice_conversation",
+		map[string]any{
+			"continuous_conversation_enabled": false,
+			"idle_window_seconds":             float64(25),
+			"barge_in_enabled":                false,
+			"far_field_enabled":               true,
+		},
+		"admin-001",
+		0,
+	)
+	if err != nil {
+		t.Fatalf("update voice conversation: %v", err)
+	}
+	if runtimeSettings.settings.Voice != (operationsdomain.VoiceSettings{
+		ContinuousConversationEnabled: false,
+		IdleWindowSeconds:             25,
+		BargeInEnabled:                false,
+		FarFieldEnabled:               true,
+	}) {
+		t.Fatalf("runtime voice settings = %+v", runtimeSettings.settings.Voice)
+	}
+	if feature.Values["idle_window_seconds"] != 25 {
+		t.Fatalf("projected idle window = %#v, want 25", feature.Values["idle_window_seconds"])
+	}
+}
+
+func TestVoiceConversationConfigRejectsIdleOutsideRuntimeBounds(t *testing.T) {
+	service, err := New(Options{
+		Repository:  newMemoryRepository(),
+		Definitions: DefaultRegistry(),
+		Clock:       fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	runtimeSettings := &memoryRuntimeSettings{
+		settings: &operationsdomain.Settings{
+			Voice: operationsdomain.DefaultVoiceSettings(),
+		},
+	}
+	runtimeSettings.settings.SetVoiceConfigured()
+	service.SetRuntimeSettingsReader(runtimeSettings)
+
+	for _, idle := range []float64{1, 61} {
+		_, err := service.UpdateConfig(
+			context.Background(),
+			"voice_conversation",
+			map[string]any{"idle_window_seconds": idle},
+			"admin-001",
+			0,
+		)
+		var validation *domain.ConfigValidationError
+		if !errors.As(err, &validation) {
+			t.Fatalf("idle=%v: expected validation error, got %v", idle, err)
+		}
 	}
 }
 

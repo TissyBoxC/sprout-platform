@@ -96,6 +96,12 @@ VALUES (
             "allow_audio_upload": false,
             "allow_image_upload": false
         },
+        "voice": {
+            "continuous_conversation_enabled": true,
+            "idle_window_seconds": 8,
+            "barge_in_enabled": true,
+            "far_field_enabled": true
+        },
         "update": {
             "channel": "stable",
             "min_client_version": "",

@@ -19,6 +19,10 @@ export interface SystemSettings {
   minorModeDefaultEnabled: boolean
   outputModerationEnabled: boolean
   crisisInterventionEnabled: boolean
+  continuousConversationEnabled: boolean
+  voiceIdleWindowSeconds: number
+  bargeInEnabled: boolean
+  farFieldEnabled: boolean
   releaseChannel: string
   minimumClientVersion: string
   mandatoryUpdateThreshold: string
@@ -37,6 +41,10 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   minorModeDefaultEnabled: true,
   outputModerationEnabled: true,
   crisisInterventionEnabled: true,
+  continuousConversationEnabled: true,
+  voiceIdleWindowSeconds: 8,
+  bargeInEnabled: true,
+  farFieldEnabled: true,
   releaseChannel: 'stable',
   minimumClientVersion: '',
   mandatoryUpdateThreshold: '',
@@ -221,6 +229,7 @@ function toSettings(value: Record<string, unknown>): SystemSettings {
   const ai = recordValue(value.ai)
   const account = recordValue(value.account)
   const safety = recordValue(value.safety)
+  const voice = recordValue(value.voice)
   const update = recordValue(value.update)
   const retention = recordValue(value.retention)
 
@@ -254,6 +263,22 @@ function toSettings(value: Record<string, unknown>): SystemSettings {
     crisisInterventionEnabled: booleanValue(
       safety.crisis_intervention_enabled,
       defaults.crisisInterventionEnabled,
+    ),
+    continuousConversationEnabled: booleanValue(
+      voice.continuous_conversation_enabled,
+      defaults.continuousConversationEnabled,
+    ),
+    voiceIdleWindowSeconds: numberValue(
+      voice.idle_window_seconds,
+      defaults.voiceIdleWindowSeconds,
+    ),
+    bargeInEnabled: booleanValue(
+      voice.barge_in_enabled,
+      defaults.bargeInEnabled,
+    ),
+    farFieldEnabled: booleanValue(
+      voice.far_field_enabled,
+      defaults.farFieldEnabled,
     ),
     releaseChannel: stringValue(update.channel, defaults.releaseChannel),
     minimumClientVersion: stringValue(
@@ -300,6 +325,13 @@ function toPayload(settings: SystemSettings): Record<string, unknown> {
       // P0 约束要求儿童音视频默认不上传。开启前必须实现逐项监护人授权流程。
       allow_audio_upload: false,
       allow_image_upload: false,
+    },
+    voice: {
+      continuous_conversation_enabled:
+        settings.continuousConversationEnabled,
+      idle_window_seconds: settings.voiceIdleWindowSeconds,
+      barge_in_enabled: settings.bargeInEnabled,
+      far_field_enabled: settings.farFieldEnabled,
     },
     update: {
       channel: settings.releaseChannel,

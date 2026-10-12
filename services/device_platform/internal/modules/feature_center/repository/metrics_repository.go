@@ -120,6 +120,149 @@ func (r *MetricsRepository) FeatureMetrics(
 			"notification_pending_delivery",
 			"notification_failed_delivery",
 		)
+	case "vision":
+		return r.pair(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM vision_tasks),
+				(SELECT COUNT(*) FROM vision_tasks WHERE status = 'failed')`,
+			"vision_task_count",
+			"vision_failed_task_count",
+		)
+	case "display":
+		return r.pair(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM display_device_status),
+				(SELECT COUNT(*) FROM display_device_status WHERE touch_supported = true)`,
+			"display_device_count",
+			"display_touch_device_count",
+		)
+	case "touch":
+		return r.pair(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM touch_device_status),
+				(SELECT COUNT(*) FROM touch_device_status WHERE haptic_supported = true)`,
+			"touch_device_count",
+			"touch_haptic_device_count",
+		)
+	case "screen":
+		return r.pair(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM screen_device_status),
+				(SELECT COUNT(*) FROM screen_device_status WHERE point_read_supported = true)`,
+			"screen_device_count",
+			"screen_point_read_device_count",
+		)
+	case "connectivity":
+		return r.pair(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM device_connectivity_status WHERE bearer = 'cellular'),
+				(SELECT COUNT(*) FROM device_connectivity_status WHERE roaming = true)`,
+			"cellular_device_count",
+			"cellular_roaming_count",
+		)
+	case "power":
+		return r.triad(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM device_power_status),
+				(SELECT COUNT(*) FROM device_power_status WHERE power_mode = 'low_power'),
+				(SELECT COUNT(*) FROM device_power_status WHERE power_mode = 'deep_sleep')`,
+			"power_device_count",
+			"power_low_power_count",
+			"power_deep_sleep_count",
+		)
+	case "motion":
+		return r.triad(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM device_motion_status),
+				(SELECT COUNT(*) FROM device_motion_status WHERE state = 'running'),
+				(SELECT COUNT(*) FROM device_motion_status WHERE faulted = true)`,
+			"motion_device_count",
+			"motion_running_count",
+			"motion_faulted_count",
+		)
+	case "form_factor":
+		return r.pair(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM device_form_factor),
+				(SELECT COUNT(*) FROM device_form_factor WHERE action_mask > 0)`,
+			"form_factor_device_count",
+			"form_factor_action_count",
+		)
+	case "video_companion":
+		return r.scalar(ctx,
+			"SELECT COUNT(*) FROM video_calls",
+			"video_call_count",
+		)
+	case "video_session":
+		return r.scalar(ctx,
+			"SELECT COUNT(*) FROM device_video_session_status",
+			"video_session_device_count",
+		)
+	case "wearable":
+		return r.pair(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM wearable_device_status),
+				(SELECT COUNT(*) FROM wearable_sos_events)`,
+			"wearable_device_count",
+			"wearable_sos_event_count",
+		)
+	case "device_mesh":
+		return r.pair(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM device_groups),
+				(SELECT COUNT(*) FROM content_sync_states WHERE sync_state <> 'applied')`,
+			"device_group_count",
+			"device_mesh_pending_sync_count",
+		)
+	case "bluetooth_audio":
+		return r.pair(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM device_bluetooth_audio_status),
+				(SELECT COUNT(*) FROM device_bluetooth_audio_status WHERE adapter_state = 'connected')`,
+			"bluetooth_device_count",
+			"bluetooth_connected_count",
+		)
+	case "learning_visualization":
+		return r.scalar(ctx,
+			"SELECT COUNT(*) FROM device_learning_visualization_status",
+			"learning_visualization_device_count",
+		)
+	case "image_privacy":
+		return r.pair(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM device_image_privacy_status),
+				(SELECT COUNT(*) FROM device_image_privacy_status WHERE upload_allowed = true)`,
+			"image_privacy_device_count",
+			"image_privacy_upload_allowed_count",
+		)
+	case "english_learning":
+		return r.pair(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM english_lessons),
+				(SELECT COUNT(*) FROM english_practice_attempts)`,
+			"english_course_count",
+			"english_practice_count",
+		)
+	case "companionship":
+		return r.triad(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM companionship_growth_records),
+				(SELECT COUNT(*) FROM companionship_habit_reminders),
+				(SELECT COUNT(*) FROM alarm_reminders)`,
+			"companionship_record_count",
+			"habit_reminder_count",
+			"alarm_reminder_count",
+		)
+	case "local_command":
+		return r.scalar(ctx,
+			"SELECT COUNT(*) FROM local_commands",
+			"local_command_count",
+		)
+	case "offline_content":
+		return r.scalar(ctx,
+			"SELECT COUNT(*) FROM content_offline_policy",
+			"offline_policy_device_count",
+		)
 	default:
 		return nil, nil
 	}
@@ -156,6 +299,25 @@ func (r *MetricsRepository) triad(
 		firstKey:  first,
 		secondKey: second,
 		thirdKey:  third,
+	}, nil
+}
+
+func (r *MetricsRepository) pair(
+	ctx context.Context,
+	query string,
+	firstKey string,
+	secondKey string,
+) (map[string]any, error) {
+	if r == nil || r.pool == nil {
+		return nil, fmt.Errorf("feature metrics database is unavailable")
+	}
+	var first, second int64
+	if err := r.pool.QueryRow(ctx, query).Scan(&first, &second); err != nil {
+		return nil, fmt.Errorf("load feature metrics %s: %w", firstKey, err)
+	}
+	return map[string]any{
+		firstKey:  first,
+		secondKey: second,
 	}, nil
 }
 

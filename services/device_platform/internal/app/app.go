@@ -347,6 +347,82 @@ func Run() error {
 			databaseStore.Pool(),
 			"SELECT 1 FROM admin_totp_credentials LIMIT 1",
 		),
+		"vision": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM vision_tasks LIMIT 1",
+		),
+		"display": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM display_device_status LIMIT 1",
+		),
+		"touch": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM touch_device_status LIMIT 1",
+		),
+		"screen": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM screen_device_status LIMIT 1",
+		),
+		"connectivity": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM device_connectivity_status LIMIT 1",
+		),
+		"power": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM device_power_status LIMIT 1",
+		),
+		"motion": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM device_motion_status LIMIT 1",
+		),
+		"form_factor": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM device_form_factor LIMIT 1",
+		),
+		"video_companion": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM video_calls LIMIT 1",
+		),
+		"video_session": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM device_video_session_status LIMIT 1",
+		),
+		"wearable": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM wearable_device_status LIMIT 1",
+		),
+		"device_mesh": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM device_groups LIMIT 1",
+		),
+		"bluetooth_audio": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM device_bluetooth_audio_status LIMIT 1",
+		),
+		"learning_visualization": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM device_learning_visualization_status LIMIT 1",
+		),
+		"image_privacy": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM device_image_privacy_status LIMIT 1",
+		),
+		"english_learning": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM english_lessons LIMIT 1",
+		),
+		"companionship": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM companionship_growth_records LIMIT 1",
+		),
+		"local_command": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM local_commands LIMIT 1",
+		),
+		"offline_content": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM content_offline_policy LIMIT 1",
+		),
 		"deployment_infrastructure": featureCenterService.HealthProbeFunc(
 			func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
 				if err := databaseStore.Pool().Ping(ctx); err != nil {

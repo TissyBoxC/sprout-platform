@@ -82,6 +82,45 @@ type ProviderAPIKey struct {
 	ExpiresAt *time.Time
 }
 
+// ProviderUsageTotals is the content-free aggregate usage the AI gateway
+// reports for one provider account over a bounded reconciliation window.
+type ProviderUsageTotals struct {
+	Requests            int64
+	InputTokens         int64
+	OutputTokens        int64
+	CacheCreationTokens int64
+	CacheReadTokens     int64
+	TotalTokens         int64
+	CostUSD             float64
+	ActualCostUSD       float64
+	AverageDurationMs   float64
+}
+
+// ProviderUsageModelStat is the per-model breakdown of reconciled usage.
+type ProviderUsageModelStat struct {
+	Model               string
+	Requests            int64
+	InputTokens         int64
+	OutputTokens        int64
+	CacheCreationTokens int64
+	CacheReadTokens     int64
+	TotalTokens         int64
+	CostUSD             float64
+	ActualCostUSD       float64
+}
+
+// ProviderUsageReconciliation is one provider account's aggregated usage for a
+// bounded window, as published by the AI gateway's internal reconciliation API.
+// It never carries prompt or response content.
+type ProviderUsageReconciliation struct {
+	ProviderAccountID string
+	UserID            int64
+	StartTime         time.Time
+	EndTime           time.Time
+	Totals            ProviderUsageTotals
+	Models            []ProviderUsageModelStat
+}
+
 // Credential is the decrypted provider credential used by server-side services.
 type Credential struct {
 	ProviderAccountID string

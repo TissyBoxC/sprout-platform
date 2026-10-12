@@ -246,6 +246,41 @@ func (c *Client) DeleteAccount(
 	return err
 }
 
+// GetUsageReconciliation returns the AI gateway's aggregated, content-free
+// usage for one controlled provider account over the given window. It is used
+// to reconcile platform spend against the gateway without reading sub2api
+// tables. A zero time is omitted so the gateway applies its own default window.
+func (c *Client) GetUsageReconciliation(
+	ctx context.Context,
+	providerAccountID string,
+	startTime time.Time,
+	endTime time.Time,
+) (*gatewaydomain.ProviderUsageReconciliation, error) {
+	query := url.Values{}
+	if !startTime.IsZero() {
+		query.Set("start_time", startTime.UTC().Format(time.RFC3339))
+	}
+	if !endTime.IsZero() {
+		query.Set("end_time", endTime.UTC().Format(time.RFC3339))
+	}
+	var response providerUsageReconciliationData
+	status, err := c.doJSONWithQuery(
+		ctx,
+		http.MethodGet,
+		"/internal/sprout/v1/usage/"+url.PathEscape(providerAccountID),
+		query,
+		nil,
+		&response,
+	)
+	if status == http.StatusNotFound {
+		return nil, gatewaydomain.ErrAccountNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return response.toDomain(), nil
+}
+
 func (c *Client) writeAPIKey(
 	ctx context.Context,
 	path string,
@@ -276,8 +311,22 @@ func (c *Client) doJSON(
 	requestBody any,
 	result any,
 ) (int, error) {
+	return c.doJSONWithQuery(ctx, method, path, nil, requestBody, result)
+}
+
+func (c *Client) doJSONWithQuery(
+	ctx context.Context,
+	method string,
+	path string,
+	query url.Values,
+	requestBody any,
+	result any,
+) (int, error) {
 	requestURL := *c.baseURL
 	requestURL.Path = strings.TrimRight(c.baseURL.Path, "/") + path
+	if len(query) > 0 {
+		requestURL.RawQuery = query.Encode()
+	}
 	var body io.Reader
 	if requestBody != nil {
 		encoded, err := json.Marshal(requestBody)
@@ -396,4 +445,72 @@ type providerAPIKeyData struct {
 	Status    string     `json:"status"`
 	QuotaUSD  float64    `json:"quota_usd"`
 	ExpiresAt *time.Time `json:"expires_at"`
+}
+
+type providerUsageReconciliationData struct {
+	ProviderAccountID string                   `json:"provider_account_id"`
+	UserID            int64                    `json:"user_id"`
+	StartTime         time.Time                `json:"start_time"`
+	EndTime           time.Time                `json:"end_time"`
+	Totals            providerUsageTotalsData  `json:"totals"`
+	Models            []providerUsageModelData `json:"models"`
+}
+
+type providerUsageTotalsData struct {
+	Requests            int64   `json:"requests"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	TotalTokens         int64   `json:"total_tokens"`
+	CostUSD             float64 `json:"cost_usd"`
+	ActualCostUSD       float64 `json:"actual_cost_usd"`
+	AverageDurationMs   float64 `json:"average_duration_ms"`
+}
+
+type providerUsageModelData struct {
+	Model               string  `json:"model"`
+	Requests            int64   `json:"requests"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	TotalTokens         int64   `json:"total_tokens"`
+	CostUSD             float64 `json:"cost_usd"`
+	ActualCostUSD       float64 `json:"actual_cost_usd"`
+}
+
+func (data providerUsageReconciliationData) toDomain() *gatewaydomain.ProviderUsageReconciliation {
+	models := make([]gatewaydomain.ProviderUsageModelStat, 0, len(data.Models))
+	for _, model := range data.Models {
+		models = append(models, gatewaydomain.ProviderUsageModelStat{
+			Model:               model.Model,
+			Requests:            model.Requests,
+			InputTokens:         model.InputTokens,
+			OutputTokens:        model.OutputTokens,
+			CacheCreationTokens: model.CacheCreationTokens,
+			CacheReadTokens:     model.CacheReadTokens,
+			TotalTokens:         model.TotalTokens,
+			CostUSD:             model.CostUSD,
+			ActualCostUSD:       model.ActualCostUSD,
+		})
+	}
+	return &gatewaydomain.ProviderUsageReconciliation{
+		ProviderAccountID: data.ProviderAccountID,
+		UserID:            data.UserID,
+		StartTime:         data.StartTime.UTC(),
+		EndTime:           data.EndTime.UTC(),
+		Totals: gatewaydomain.ProviderUsageTotals{
+			Requests:            data.Totals.Requests,
+			InputTokens:         data.Totals.InputTokens,
+			OutputTokens:        data.Totals.OutputTokens,
+			CacheCreationTokens: data.Totals.CacheCreationTokens,
+			CacheReadTokens:     data.Totals.CacheReadTokens,
+			TotalTokens:         data.Totals.TotalTokens,
+			CostUSD:             data.Totals.CostUSD,
+			ActualCostUSD:       data.Totals.ActualCostUSD,
+			AverageDurationMs:   data.Totals.AverageDurationMs,
+		},
+		Models: models,
+	}
 }

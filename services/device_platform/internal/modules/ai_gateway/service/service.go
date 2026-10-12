@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/repository"
@@ -60,6 +61,12 @@ type Provider interface {
 		apiKeyID int64,
 	) error
 	DeleteAccount(ctx context.Context, providerAccountID string) error
+	GetUsageReconciliation(
+		ctx context.Context,
+		providerAccountID string,
+		startTime time.Time,
+		endTime time.Time,
+	) (*domain.ProviderUsageReconciliation, error)
 }
 
 // RuntimeConfigForAdmin returns the authoritative gateway defaults and model
@@ -68,6 +75,28 @@ func (s *Service) RuntimeConfigForAdmin(
 	ctx context.Context,
 ) (*domain.ProviderRuntimeConfig, error) {
 	return s.provider.GetRuntimeConfig(ctx)
+}
+
+// UsageReconciliationForAdmin returns the AI gateway's aggregated, content-free
+// usage for one platform parent account over a bounded window. The platform
+// projection resolves the provider account id so an operator never supplies an
+// internal identifier, and the gateway remains the source of truth for spend.
+func (s *Service) UsageReconciliationForAdmin(
+	ctx context.Context,
+	parentAccountID string,
+	startTime time.Time,
+	endTime time.Time,
+) (*domain.ProviderUsageReconciliation, error) {
+	account, err := s.repository.GetByParentAccountID(ctx, parentAccountID)
+	if err != nil {
+		return nil, err
+	}
+	return s.provider.GetUsageReconciliation(
+		ctx,
+		account.ProviderAccountID,
+		startTime,
+		endTime,
+	)
 }
 
 // CredentialCipher encrypts provider API keys before they reach PostgreSQL.

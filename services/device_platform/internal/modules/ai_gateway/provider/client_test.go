@@ -3,11 +3,14 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	gatewaydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/domain"
 )
@@ -270,5 +273,116 @@ func TestGetRuntimeConfigDecodesModelsAndDefaults(t *testing.T) {
 		*config.Models[0].PrimaryLatencyMs != 120 ||
 		!config.Models[0].RecommendedForNewAccounts {
 		t.Fatalf("unexpected runtime models: %#v", config.Models)
+	}
+}
+
+func TestGetUsageReconciliationSendsWindowAndDecodesTotals(t *testing.T) {
+	var receivedQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		if request.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", request.Method)
+		}
+		if request.URL.Path != "/internal/sprout/v1/usage/parent_abc" {
+			t.Fatalf("unexpected path %s", request.URL.Path)
+		}
+		receivedQuery = request.URL.RawQuery
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{
+			"schema_version":"1.0.0",
+			"request_id":"request-1",
+			"data":{
+				"provider_account_id":"parent_abc",
+				"user_id":42,
+				"start_time":"2026-10-01T00:00:00Z",
+				"end_time":"2026-10-02T00:00:00Z",
+				"totals":{
+					"requests":12,
+					"input_tokens":100,
+					"output_tokens":200,
+					"cache_creation_tokens":5,
+					"cache_read_tokens":7,
+					"total_tokens":300,
+					"cost_usd":1.25,
+					"actual_cost_usd":1.1,
+					"average_duration_ms":820
+				},
+				"models":[
+					{
+						"model":"model-a",
+						"requests":12,
+						"total_tokens":300,
+						"cost_usd":1.25
+					}
+				]
+			},
+			"error":null
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, strings.Repeat("x", 32), server.Client())
+	if err != nil {
+		t.Fatalf("create provider client: %v", err)
+	}
+	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	usage, err := client.GetUsageReconciliation(
+		context.Background(),
+		"parent_abc",
+		start,
+		end,
+	)
+	if err != nil {
+		t.Fatalf("get usage reconciliation: %v", err)
+	}
+	if usage.ProviderAccountID != "parent_abc" ||
+		usage.Totals.Requests != 12 ||
+		usage.Totals.TotalTokens != 300 ||
+		usage.Totals.CostUSD != 1.25 ||
+		usage.Totals.ActualCostUSD != 1.1 {
+		t.Fatalf("unexpected usage totals: %#v", usage.Totals)
+	}
+	if len(usage.Models) != 1 || usage.Models[0].Model != "model-a" {
+		t.Fatalf("unexpected usage models: %#v", usage.Models)
+	}
+	values, err := url.ParseQuery(receivedQuery)
+	if err != nil {
+		t.Fatalf("parse usage query: %v", err)
+	}
+	if values.Get("start_time") != start.Format(time.RFC3339) ||
+		values.Get("end_time") != end.Format(time.RFC3339) {
+		t.Fatalf("unexpected usage window query: %q", receivedQuery)
+	}
+}
+
+func TestGetUsageReconciliationMapsMissingAccountToNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		_ *http.Request,
+	) {
+		response.WriteHeader(http.StatusNotFound)
+		_, _ = response.Write([]byte(`{
+			"schema_version":"1.0.0",
+			"request_id":"request-1",
+			"data":null,
+			"error":{"code":"not_found","message":"missing","retryable":false}
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, strings.Repeat("x", 32), server.Client())
+	if err != nil {
+		t.Fatalf("create provider client: %v", err)
+	}
+	if _, err := client.GetUsageReconciliation(
+		context.Background(),
+		"parent_missing",
+		time.Time{},
+		time.Time{},
+	); !errors.Is(err, gatewaydomain.ErrAccountNotFound) {
+		t.Fatalf("expected account-not-found, got %v", err)
 	}
 }

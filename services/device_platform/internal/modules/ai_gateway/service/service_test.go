@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/repository"
@@ -638,6 +639,66 @@ func TestCreateParentWithAIAccountPropagatesProvisioningFailure(t *testing.T) {
 	}
 }
 
+func TestUsageReconciliationForAdminResolvesProviderAccountID(t *testing.T) {
+	accountRepository := &memoryRepository{
+		account: &domain.Account{
+			ID:                "account-1",
+			ParentAccountID:   "parent-001",
+			ProviderAccountID: "parent_abc",
+		},
+	}
+	provider := &stubProvider{
+		usageReconciliation: &domain.ProviderUsageReconciliation{
+			ProviderAccountID: "parent_abc",
+			Totals:            domain.ProviderUsageTotals{Requests: 3},
+		},
+	}
+	service := newTestService(t, accountRepository, provider)
+
+	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	usage, err := service.UsageReconciliationForAdmin(
+		context.Background(),
+		"parent-001",
+		start,
+		end,
+	)
+	if err != nil {
+		t.Fatalf("usage reconciliation: %v", err)
+	}
+	if provider.lastUsageProviderAccount != "parent_abc" {
+		t.Fatalf(
+			"resolved provider account = %q, want parent_abc",
+			provider.lastUsageProviderAccount,
+		)
+	}
+	if !provider.lastUsageStart.Equal(start) || !provider.lastUsageEnd.Equal(end) {
+		t.Fatalf(
+			"forwarded window = %v..%v, want %v..%v",
+			provider.lastUsageStart,
+			provider.lastUsageEnd,
+			start,
+			end,
+		)
+	}
+	if usage == nil || usage.Totals.Requests != 3 {
+		t.Fatalf("unexpected reconciliation result: %#v", usage)
+	}
+}
+
+func TestUsageReconciliationForAdminFailsWhenAccountMissing(t *testing.T) {
+	service := newTestService(t, &memoryRepository{}, &stubProvider{})
+	_, err := service.UsageReconciliationForAdmin(
+		context.Background(),
+		"parent-missing",
+		time.Time{},
+		time.Time{},
+	)
+	if !errors.Is(err, domain.ErrAccountNotFound) {
+		t.Fatalf("expected account-not-found, got %v", err)
+	}
+}
+
 func newTestService(
 	t *testing.T,
 	accountRepository repository.Repository,
@@ -775,6 +836,11 @@ type stubProvider struct {
 	rotateKeyCalls            int
 	deletedKeyIDs             []int64
 	deletedAccountIDs         []string
+	usageReconciliation       *domain.ProviderUsageReconciliation
+	usageReconciliationErr    error
+	lastUsageProviderAccount  string
+	lastUsageStart            time.Time
+	lastUsageEnd              time.Time
 }
 
 func (p *stubProvider) GetRuntimeConfig(
@@ -890,6 +956,29 @@ func (p *stubProvider) DeleteAccount(
 	p.deletedAccountIDs = append(p.deletedAccountIDs, providerAccountID)
 	p.account = nil
 	return nil
+}
+
+func (p *stubProvider) GetUsageReconciliation(
+	_ context.Context,
+	providerAccountID string,
+	startTime time.Time,
+	endTime time.Time,
+) (*domain.ProviderUsageReconciliation, error) {
+	p.lastUsageProviderAccount = providerAccountID
+	p.lastUsageStart = startTime
+	p.lastUsageEnd = endTime
+	if p.usageReconciliationErr != nil {
+		return nil, p.usageReconciliationErr
+	}
+	if p.usageReconciliation == nil {
+		return &domain.ProviderUsageReconciliation{}, nil
+	}
+	copy := *p.usageReconciliation
+	copy.Models = append(
+		[]domain.ProviderUsageModelStat(nil),
+		p.usageReconciliation.Models...,
+	)
+	return &copy, nil
 }
 
 var _ repository.Repository = (*memoryRepository)(nil)

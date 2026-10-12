@@ -948,6 +948,13 @@ func NewRouter(options RouterOptions) http.Handler {
 				),
 			)
 			mux.HandleFunc(
+				"GET /api/v1/admin/families/{parent_account_id}/ai-usage",
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionAIAccountsRead,
+					adminHandler.getFamilyAIUsage,
+				),
+			)
+			mux.HandleFunc(
 				"PUT /api/v1/admin/ai-accounts/{provider_account_id}",
 				authHandler.requireAdminPermission(
 					authdomain.AdminPermissionAIAccountsManage,

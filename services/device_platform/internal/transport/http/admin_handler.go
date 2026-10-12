@@ -622,6 +622,119 @@ func (handler adminHandler) listAIModels(
 	writeSuccess(response, request, http.StatusOK, map[string]any{"models": models})
 }
 
+// getFamilyAIUsage reconciles one guardian's AI spend against the gateway's
+// own aggregated usage. It never returns provider credentials or any prompt or
+// reply content; the window defaults to the last 24 hours and is capped so a
+// single console request cannot force an unbounded gateway scan.
+func (handler adminHandler) getFamilyAIUsage(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	parentAccountID := strings.TrimSpace(request.PathValue("parent_account_id"))
+	if parentAccountID == "" {
+		writeError(response, request, http.StatusBadRequest, "invalid_request", "请检查填写的内容")
+		return
+	}
+	startTime, endTime, ok := aiUsageReconciliationWindow(request)
+	if !ok {
+		writeError(response, request, http.StatusUnprocessableEntity, "invalid_window", "查询时间范围不正确")
+		return
+	}
+	usage, err := handler.service.UsageReconciliationForAdmin(
+		request.Context(),
+		parentAccountID,
+		startTime,
+		endTime,
+	)
+	if err != nil {
+		handler.writeAIUsageError(response, request, err)
+		return
+	}
+	models := make([]map[string]any, 0, len(usage.Models))
+	for _, model := range usage.Models {
+		models = append(models, map[string]any{
+			"model":                 model.Model,
+			"requests":              model.Requests,
+			"input_tokens":          model.InputTokens,
+			"output_tokens":         model.OutputTokens,
+			"cache_creation_tokens": model.CacheCreationTokens,
+			"cache_read_tokens":     model.CacheReadTokens,
+			"total_tokens":          model.TotalTokens,
+			"cost_usd":              model.CostUSD,
+			"actual_cost_usd":       model.ActualCostUSD,
+		})
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"provider_account_id": usage.ProviderAccountID,
+		"start_time":          usage.StartTime,
+		"end_time":            usage.EndTime,
+		"totals": map[string]any{
+			"requests":              usage.Totals.Requests,
+			"input_tokens":          usage.Totals.InputTokens,
+			"output_tokens":         usage.Totals.OutputTokens,
+			"cache_creation_tokens": usage.Totals.CacheCreationTokens,
+			"cache_read_tokens":     usage.Totals.CacheReadTokens,
+			"total_tokens":          usage.Totals.TotalTokens,
+			"cost_usd":              usage.Totals.CostUSD,
+			"actual_cost_usd":       usage.Totals.ActualCostUSD,
+			"average_duration_ms":   usage.Totals.AverageDurationMs,
+		},
+		"models": models,
+	})
+}
+
+// aiUsageReconciliationWindowMaxDays bounds a single reconciliation query to
+// match the gateway's own limit; the default window is the last day.
+const aiUsageReconciliationWindowMaxDays = 92
+
+func aiUsageReconciliationWindow(
+	request *http.Request,
+) (time.Time, time.Time, bool) {
+	if request == nil || request.URL == nil {
+		return time.Time{}, time.Time{}, false
+	}
+	query := request.URL.Query()
+	endTime := time.Now().UTC()
+	if raw := strings.TrimSpace(query.Get("end_time")); raw != "" {
+		parsed, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return time.Time{}, time.Time{}, false
+		}
+		endTime = parsed.UTC()
+	}
+	startTime := endTime.AddDate(0, 0, -1)
+	if raw := strings.TrimSpace(query.Get("start_time")); raw != "" {
+		parsed, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return time.Time{}, time.Time{}, false
+		}
+		startTime = parsed.UTC()
+	}
+	if startTime.After(endTime) {
+		return time.Time{}, time.Time{}, false
+	}
+	if endTime.Sub(startTime) > aiUsageReconciliationWindowMaxDays*24*time.Hour {
+		return time.Time{}, time.Time{}, false
+	}
+	return startTime, endTime, true
+}
+
+func (handler adminHandler) writeAIUsageError(
+	response http.ResponseWriter,
+	request *http.Request,
+	err error,
+) {
+	switch {
+	case errors.Is(err, gatewaydomain.ErrAccountNotFound):
+		writeError(response, request, http.StatusNotFound, "ai_account_not_found", "这个账号还没有 AI 服务")
+	case errors.Is(err, gatewaydomain.ErrProviderUnavailable),
+		errors.Is(err, gatewaydomain.ErrProviderRejected):
+		writeError(response, request, http.StatusBadGateway, "ai_service_unavailable", "AI 服务暂时不可用，请稍后重试")
+	default:
+		writeError(response, request, http.StatusInternalServerError, "service_error", "操作没有完成，请稍后重试")
+	}
+}
+
 func (handler adminHandler) updateAIAccount(
 	response http.ResponseWriter,
 	request *http.Request,

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 
+import type { AIGatewayChildPolicy } from '@/api/adminOperations'
 import { useSystemSettingsStore } from '@/features/system/application/systemSettingsStore'
 
 const store = useSystemSettingsStore()
@@ -11,9 +12,52 @@ const selectedDefaultModel = computed({
   },
 })
 
+const childPolicy = computed<AIGatewayChildPolicy | null>(
+  () => store.childPolicy,
+)
+const childPolicyTiers = computed(() => childPolicy.value?.tiers ?? [])
+
 onMounted(() => {
   void store.load()
 })
+
+const AGE_TIER_LABELS: Record<string, string> = {
+  age_3_4: '3–4 岁',
+  age_5_6: '5–6 岁',
+  age_7_8: '7–8 岁',
+}
+
+function ageTierLabel(ageTier: string): string {
+  return AGE_TIER_LABELS[ageTier] ?? ageTier
+}
+
+function ageBandLabel(ageBand: string): string {
+  const trimmed = ageBand.trim()
+  if (!trimmed) {
+    return '未指定'
+  }
+  return /^\d+-\d+$/.test(trimmed) ? `${trimmed.replace('-', '–')} 岁` : trimmed
+}
+
+function contentRatingLabel(contentRating: string): string {
+  switch (contentRating.trim().toUpperCase()) {
+    case 'G':
+      return '全年龄适用'
+    case 'PG':
+      return '需家长陪同'
+    case '':
+      return '未标注'
+    default:
+      return contentRating
+  }
+}
+
+function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
+  if (bound) {
+    return '已对齐'
+  }
+  return ageBandMissing ? '策略指向的年龄层缺失' : '尚未绑定年龄层'
+}
 </script>
 
 <template>
@@ -172,6 +216,88 @@ onMounted(() => {
               type="checkbox"
             />
           </label>
+        </div>
+
+        <div class="gateway-policy">
+          <div class="gateway-policy-heading">
+            <div>
+              <h3>儿童安全策略（网关生效）</h3>
+              <p>读取 AI 网关当前实际执行的年龄分级策略，确认每个年龄段都被覆盖。</p>
+            </div>
+            <button
+              type="button"
+              class="text-button"
+              :disabled="store.isChildPolicyLoading"
+              @click="store.reloadChildPolicy"
+            >
+              {{ store.isChildPolicyLoading ? '正在读取…' : '重新读取' }}
+            </button>
+          </div>
+
+          <div v-if="store.isChildPolicyLoading" class="inline-state">
+            正在读取网关策略…
+          </div>
+          <div v-else-if="store.childPolicyError" class="inline-state error">
+            {{ store.childPolicyError.message }}
+            <button
+              type="button"
+              class="text-button"
+              @click="store.reloadChildPolicy"
+            >
+              重新读取
+            </button>
+          </div>
+          <div v-else-if="!childPolicy || !childPolicy.enabled" class="empty-section">
+            <p>网关尚未启用儿童安全策略，目前不按年龄层限制可用模型与回复长度。</p>
+          </div>
+          <template v-else>
+            <ul class="policy-summary">
+              <li>
+                <span>整体对齐</span>
+                <strong :class="childPolicy.aligned ? 'ok' : 'warn'">
+                  {{ childPolicy.aligned ? '全部年龄段已对齐' : '存在未覆盖的年龄段' }}
+                </strong>
+              </li>
+              <li>
+                <span>缺少策略标识时</span>
+                <strong>
+                  {{
+                    childPolicy.requirePolicyVersion
+                      ? '拒绝请求'
+                      : `回退到 ${ageBandLabel(childPolicy.defaultAgeBand)}`
+                  }}
+                </strong>
+              </li>
+              <li>
+                <span>安全边界注入</span>
+                <strong>{{ childPolicy.injectSafetyBoundary ? '已开启' : '未开启' }}</strong>
+              </li>
+            </ul>
+
+            <ul v-if="childPolicyTiers.length" class="policy-tier-list">
+              <li v-for="tier in childPolicyTiers" :key="tier.ageTier">
+                <div class="policy-tier-header">
+                  <strong>{{ ageTierLabel(tier.ageTier) }}</strong>
+                  <span
+                    class="policy-badge"
+                    :class="tier.bound ? 'ok' : 'warn'"
+                  >
+                    {{ tierBindingLabel(tier.bound, tier.ageBandMissing) }}
+                  </span>
+                </div>
+                <p v-if="tier.bound" class="policy-tier-meta">
+                  对应 {{ ageBandLabel(tier.ageBand) }} ·
+                  {{ contentRatingLabel(tier.contentRating) }} ·
+                  单次回复长度上限 {{ tier.maxOutputTokens }} ·
+                  可用模型 {{ tier.allowedModels.length }} 个
+                </p>
+                <p v-else class="policy-tier-meta">
+                  网关无法为这个年龄段套用安全策略，需要先在网关配置绑定。
+                </p>
+              </li>
+            </ul>
+            <p v-else class="field-hint">网关还没有返回任何年龄段配置。</p>
+          </template>
         </div>
       </section>
 
@@ -582,6 +708,165 @@ textarea:focus {
   margin-top: 16px;
 }
 
+.gateway-policy {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid #f7d9e2;
+  border-radius: 16px;
+  background: #fffbfc;
+}
+
+.gateway-policy-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+.gateway-policy-heading h3,
+.gateway-policy-heading p {
+  margin: 0;
+}
+
+.gateway-policy-heading h3 {
+  color: var(--sprout-text);
+  font-size: 16px;
+}
+
+.gateway-policy-heading p {
+  margin-top: 4px;
+  color: var(--sprout-text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.text-button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid #e9a5b8;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #c94175;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.inline-state,
+.empty-section {
+  padding: 14px 16px;
+  border: 1px solid #f7d9e2;
+  border-radius: 14px;
+  background: #ffffff;
+  color: var(--sprout-text-muted);
+  font-size: 13px;
+}
+
+.inline-state.error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-color: #f3c2c0;
+  color: #b3261e;
+}
+
+.empty-section p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.policy-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+}
+
+.policy-summary li {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #f7d9e2;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.policy-summary span {
+  color: var(--sprout-text-muted);
+  font-size: 12px;
+}
+
+.policy-summary strong {
+  color: var(--sprout-text);
+  font-size: 14px;
+}
+
+.policy-summary strong.ok,
+.policy-badge.ok {
+  color: #1d6b3f;
+}
+
+.policy-summary strong.warn,
+.policy-badge.warn {
+  color: #a12b4a;
+}
+
+.policy-tier-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.policy-tier-list li {
+  padding: 14px 16px;
+  border: 1px solid #f7d9e2;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.policy-tier-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.policy-tier-header strong {
+  color: var(--sprout-text);
+  font-size: 15px;
+}
+
+.policy-badge {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #fff0f2;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.policy-badge.ok {
+  background: #eaf6ef;
+}
+
+.policy-tier-meta {
+  margin: 8px 0 0;
+  color: var(--sprout-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .form-footer {
   display: flex;
   align-items: center;
@@ -617,6 +902,7 @@ textarea:focus {
 
 @media (max-width: 760px) {
   .page-header,
+  .gateway-policy-heading,
   .section-heading,
   .form-footer {
     display: grid;
@@ -628,6 +914,10 @@ textarea:focus {
 
   .field-grid .span-two {
     grid-column: auto;
+  }
+
+  .policy-summary {
+    grid-template-columns: 1fr;
   }
 }
 </style>

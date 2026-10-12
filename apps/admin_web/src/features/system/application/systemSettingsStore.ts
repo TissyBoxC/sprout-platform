@@ -4,6 +4,7 @@ import { ref } from 'vue'
 import { mapApiError, type ApiError } from '@/api/apiError'
 import {
   createAdminOperationsClient,
+  type AIGatewayChildPolicy,
   type AIModelOption,
 } from '@/api/adminOperations'
 import { createHttpClient } from '@/api/httpClient'
@@ -51,6 +52,9 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
   const settings = ref<SystemSettings>({ ...DEFAULT_SYSTEM_SETTINGS })
   const version = ref(0)
   const modelOptions = ref<AIModelOption[]>([])
+  const childPolicy = ref<AIGatewayChildPolicy | null>(null)
+  const isChildPolicyLoading = ref(false)
+  const childPolicyError = ref<ApiError | null>(null)
   const defaultBalanceSource = ref('')
   const integrationNotice = ref('')
   const isLoading = ref(false)
@@ -110,23 +114,29 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
   }
 
   return {
+    childPolicy,
+    childPolicyError,
     defaultBalanceSource,
     error,
     integrationNotice,
+    isChildPolicyLoading,
     isLoading,
     isSaving,
     lastMessage,
     load,
     modelOptions,
+    reloadChildPolicy,
     save,
     settings,
   }
 
   async function synchronizeAIProviderDefaults(): Promise<void> {
-    const [defaultsResult, modelsResult] = await Promise.allSettled([
-      operationsClient.loadAIAccountDefaults(),
-      operationsClient.loadAIModels(),
-    ])
+    const [defaultsResult, modelsResult, childPolicyResult] =
+      await Promise.allSettled([
+        operationsClient.loadAIAccountDefaults(),
+        operationsClient.loadAIModels(),
+        operationsClient.loadAIGatewayChildPolicy(),
+      ])
 
     if (defaultsResult.status === 'fulfilled' && defaultsResult.value !== null) {
       const defaults = defaultsResult.value
@@ -153,9 +163,33 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
       }
     }
 
-    if (defaultsResult.status === 'rejected' || modelsResult.status === 'rejected') {
+    if (childPolicyResult.status === 'fulfilled') {
+      childPolicy.value = childPolicyResult.value
+      childPolicyError.value = null
+    } else {
+      childPolicy.value = null
+      childPolicyError.value = mapApiError(childPolicyResult.reason)
+    }
+
+    if (
+      defaultsResult.status === 'rejected' ||
+      modelsResult.status === 'rejected'
+    ) {
       integrationNotice.value =
         '暂时无法读取 AI 服务的最新配置，当前显示上次保存的内容。'
+    }
+  }
+
+  async function reloadChildPolicy(): Promise<void> {
+    isChildPolicyLoading.value = true
+    childPolicyError.value = null
+    try {
+      childPolicy.value = await operationsClient.loadAIGatewayChildPolicy()
+    } catch (caught: unknown) {
+      childPolicy.value = null
+      childPolicyError.value = mapApiError(caught)
+    } finally {
+      isChildPolicyLoading.value = false
     }
   }
 })

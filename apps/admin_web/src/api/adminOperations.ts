@@ -13,6 +13,33 @@ export interface AIAccountDefaults {
   source: string
 }
 
+export interface AIGatewayChildPolicyBand {
+  name: string
+  allowedModels: string[]
+  maxOutputTokens: number
+  contentRating: string
+}
+
+export interface AIGatewayChildPolicyTier {
+  ageTier: string
+  ageBand: string
+  bound: boolean
+  ageBandMissing: boolean
+  allowedModels: string[]
+  maxOutputTokens: number
+  contentRating: string
+}
+
+export interface AIGatewayChildPolicy {
+  enabled: boolean
+  requirePolicyVersion: boolean
+  defaultAgeBand: string
+  injectSafetyBoundary: boolean
+  aligned: boolean
+  bands: AIGatewayChildPolicyBand[]
+  tiers: AIGatewayChildPolicyTier[]
+}
+
 export interface ReleaseArtifact {
   version: string
   kind: string
@@ -24,6 +51,7 @@ export interface ReleaseArtifact {
 export interface AdminOperationsClient {
   loadAIAccountDefaults(): Promise<AIAccountDefaults | null>
   loadAIModels(): Promise<AIModelOption[]>
+  loadAIGatewayChildPolicy(): Promise<AIGatewayChildPolicy | null>
   loadReleaseArtifact(
     version: string,
     kind: string,
@@ -65,6 +93,37 @@ export function createAdminOperationsClient(
         .filter((model): model is AIModelOption => model !== null)
     },
 
+    async loadAIGatewayChildPolicy(): Promise<AIGatewayChildPolicy | null> {
+      const response = await httpClient.get(
+        '/api/v1/admin/ai-gateway/child-policy',
+      )
+      const value = recordValue(response.data?.data)
+      if (Object.keys(value).length === 0) {
+        return null
+      }
+      const bands = Array.isArray(value.bands)
+        ? value.bands
+            .map(toChildPolicyBand)
+            .filter((band): band is AIGatewayChildPolicyBand => band !== null)
+        : []
+      const tiers = Array.isArray(value.tiers)
+        ? value.tiers
+            .map(toChildPolicyTier)
+            .filter((tier): tier is AIGatewayChildPolicyTier => tier !== null)
+        : []
+      return {
+        enabled: value.enabled === true,
+        requirePolicyVersion: value.require_policy_version === true,
+        defaultAgeBand: stringValue(
+          value.default_age_band ?? value.defaultAgeBand,
+        ),
+        injectSafetyBoundary: value.inject_safety_boundary === true,
+        aligned: value.aligned === true,
+        bands,
+        tiers,
+      }
+    },
+
     async loadReleaseArtifact(
       version: string,
       kind: string,
@@ -101,6 +160,42 @@ function toAIModelOption(value: unknown): AIModelOption | null {
   }
 }
 
+function toChildPolicyBand(value: unknown): AIGatewayChildPolicyBand | null {
+  const record = recordValue(value)
+  const name = stringValue(record.name)
+  if (!name) {
+    return null
+  }
+  return {
+    name,
+    allowedModels: stringArray(record.allowed_models ?? record.allowedModels),
+    maxOutputTokens: numberValue(
+      record.max_output_tokens ?? record.maxOutputTokens,
+    ),
+    contentRating: stringValue(record.content_rating ?? record.contentRating),
+  }
+}
+
+function toChildPolicyTier(value: unknown): AIGatewayChildPolicyTier | null {
+  const record = recordValue(value)
+  const ageTier = stringValue(record.age_tier ?? record.ageTier)
+  if (!ageTier) {
+    return null
+  }
+  return {
+    ageTier,
+    ageBand: stringValue(record.age_band ?? record.ageBand),
+    bound: record.bound === true,
+    ageBandMissing:
+      (record.age_band_missing ?? record.ageBandMissing) === true,
+    allowedModels: stringArray(record.allowed_models ?? record.allowedModels),
+    maxOutputTokens: numberValue(
+      record.max_output_tokens ?? record.maxOutputTokens,
+    ),
+    contentRating: stringValue(record.content_rating ?? record.contentRating),
+  }
+}
+
 function recordValue(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -109,6 +204,20 @@ function recordValue(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value
+    .map((item) => (typeof item === 'string' ? item : ''))
+    .filter((item) => item.length > 0)
+}
+
+function numberValue(value: unknown, fallback = 0): number {
+  const parsed = nullableNumber(value)
+  return parsed === null ? fallback : parsed
 }
 
 function nullableNumber(value: unknown): number | null {

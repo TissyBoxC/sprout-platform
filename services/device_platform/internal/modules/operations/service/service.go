@@ -116,8 +116,24 @@ func (s *Service) AppUpdate(
 	if !isReleasePlatform(platform) || platform == "all" {
 		return nil, domain.ErrUpdateNotAvailable
 	}
+	if channel != "" && !isReleaseChannel(channel) {
+		return nil, domain.ErrUpdateNotAvailable
+	}
+	settings, _, err := s.repository.GetSettings(ctx)
+	if err != nil && !errors.Is(err, domain.ErrSettingsNotFound) {
+		return nil, err
+	}
+	if settings == nil {
+		settings = &domain.Settings{}
+	}
 	if channel == "" {
-		channel = domain.ReleaseChannelStable
+		// The operator-configured default channel is authoritative for clients
+		// that do not pin a channel themselves. Falling back to "stable"
+		// unconditionally would silently ignore the console setting.
+		channel = strings.TrimSpace(settings.Update.Channel)
+		if channel == "" {
+			channel = domain.ReleaseChannelStable
+		}
 	}
 	if !isReleaseChannel(channel) {
 		return nil, domain.ErrUpdateNotAvailable
@@ -138,10 +154,6 @@ func (s *Service) AppUpdate(
 		s.ota.ResourceBaseURL != "" &&
 		!strings.HasPrefix(release.DownloadURL, s.ota.ResourceBaseURL) {
 		return nil, domain.ErrUpdateNotAvailable
-	}
-	settings, _, err := s.repository.GetSettings(ctx)
-	if err != nil {
-		return nil, err
 	}
 	isMandatory := release.IsMandatory
 	if settings.Update.MinClientVersion != "" &&

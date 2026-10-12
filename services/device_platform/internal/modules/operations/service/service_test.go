@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,10 +12,12 @@ import (
 )
 
 type fakeSettingsRepository struct {
-	savedSettings  *domain.Settings
-	savedActorID   string
-	savedVersion   int64
-	currentVersion int64
+	savedSettings    *domain.Settings
+	savedActorID     string
+	savedVersion     int64
+	currentVersion   int64
+	requestedChannel string
+	latestUpdate     *domain.Release
 }
 
 func (repository *fakeSettingsRepository) GetSettings(
@@ -80,8 +83,16 @@ func (*fakeSettingsRepository) FindReleaseArtifact(context.Context, string, stri
 	return nil, nil
 }
 
-func (*fakeSettingsRepository) LatestPublishedUpdate(context.Context, string, string) (*domain.Release, error) {
-	return nil, nil
+func (repository *fakeSettingsRepository) LatestPublishedUpdate(
+	_ context.Context,
+	_ string,
+	channel string,
+) (*domain.Release, error) {
+	repository.requestedChannel = channel
+	if repository.latestUpdate == nil {
+		return nil, domain.ErrReleaseNotFound
+	}
+	return repository.latestUpdate, nil
 }
 
 func validSettings() *domain.Settings {
@@ -206,5 +217,79 @@ func TestUpdateSettingsRejectsOutOfRangeVoiceIdleWindow(t *testing.T) {
 	)
 	if !errors.Is(err, domain.ErrInvalidSettings) {
 		t.Fatalf("expected invalid settings, got %v", err)
+	}
+}
+
+// A client that does not pin a channel must be served the operator-configured
+// default channel, not an unconditional "stable" fallback that ignores the
+// console setting.
+func TestAppUpdateUsesConfiguredDefaultChannelWhenClientOmitsChannel(t *testing.T) {
+	repository := &fakeSettingsRepository{
+		savedSettings: &domain.Settings{
+			Update: domain.UpdateSettings{Channel: domain.ReleaseChannelBeta},
+		},
+		latestUpdate: &domain.Release{
+			Kind:        domain.ReleaseKindClient,
+			Version:     "1.2.0",
+			Channel:     domain.ReleaseChannelBeta,
+			DownloadURL: "https://downloads.example.com/app-1.2.0.apk",
+			SHA256:      strings.Repeat("a", 64),
+		},
+	}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	update, err := service.AppUpdate(context.Background(), "android", "", "1.1.0")
+	if err != nil {
+		t.Fatalf("app update: %v", err)
+	}
+	if repository.requestedChannel != domain.ReleaseChannelBeta {
+		t.Fatalf(
+			"requested channel = %q, want %q",
+			repository.requestedChannel,
+			domain.ReleaseChannelBeta,
+		)
+	}
+	if update == nil || update.Version != "1.2.0" {
+		t.Fatalf("unexpected update: %+v", update)
+	}
+}
+
+// An explicit client channel still overrides the configured default so a
+// tester can opt into beta/canary without changing platform settings.
+func TestAppUpdateExplicitChannelOverridesDefault(t *testing.T) {
+	repository := &fakeSettingsRepository{
+		savedSettings: &domain.Settings{
+			Update: domain.UpdateSettings{Channel: domain.ReleaseChannelStable},
+		},
+		latestUpdate: &domain.Release{
+			Kind:        domain.ReleaseKindClient,
+			Version:     "1.3.0",
+			Channel:     domain.ReleaseChannelCanary,
+			DownloadURL: "https://downloads.example.com/app-1.3.0.apk",
+			SHA256:      strings.Repeat("b", 64),
+		},
+	}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	if _, err := service.AppUpdate(
+		context.Background(),
+		"android",
+		domain.ReleaseChannelCanary,
+		"1.1.0",
+	); err != nil {
+		t.Fatalf("app update: %v", err)
+	}
+	if repository.requestedChannel != domain.ReleaseChannelCanary {
+		t.Fatalf(
+			"requested channel = %q, want %q",
+			repository.requestedChannel,
+			domain.ReleaseChannelCanary,
+		)
 	}
 }

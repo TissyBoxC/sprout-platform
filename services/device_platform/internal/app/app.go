@@ -508,17 +508,10 @@ func Run() error {
 				return featureCenterDomain.HealthHealthy, nil
 			},
 		),
-		"voice_gateway": featureCenterService.HealthProbeFunc(
-			func(_ context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
-				if strings.TrimSpace(cfg.VoiceGateway.WebSocketURL) == "" ||
-					strings.TrimSpace(cfg.VoiceGateway.WSTokenSecret) == "" {
-					return featureCenterDomain.HealthUnknown, nil
-				}
-				if voiceTokenIssuer == nil {
-					return featureCenterDomain.HealthDegraded, nil
-				}
-				return featureCenterDomain.HealthHealthy, nil
-			},
+		"voice_gateway": voiceGatewayReadinessProbe(
+			cfg.VoiceGateway.WebSocketURL,
+			voiceTokenIssuer != nil,
+			nil,
 		),
 		"device_runtime": featureCenterService.HealthProbeFunc(
 			func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {

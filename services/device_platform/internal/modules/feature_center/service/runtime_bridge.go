@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	operationsdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/domain"
 )
 
@@ -24,6 +25,16 @@ type RuntimeSettingsReader interface {
 // feature can offer real selectable options instead of a static placeholder.
 type ModelCatalogReader interface {
 	ModelOptions(ctx context.Context) ([]ModelOption, error)
+}
+
+// MetricsReader supplies live, read-only operational values for registered
+// feature metrics. Implementations must scope their queries to the specific
+// feature so an unknown or removed metric can never leak another module's data.
+type MetricsReader interface {
+	FeatureMetrics(
+		ctx context.Context,
+		featureID string,
+	) (map[string]any, error)
 }
 
 // ModelOption is one selectable AI model projected from the gateway catalogue.
@@ -48,6 +59,40 @@ func (s *Service) SetModelCatalogReader(reader ModelCatalogReader) {
 		return
 	}
 	s.modelCatalog = reader
+}
+
+// SetMetricsReader wires the live read-only metric source. It is optional so
+// pure unit tests keep registry-only behavior.
+func (s *Service) SetMetricsReader(reader MetricsReader) {
+	if s == nil {
+		return
+	}
+	s.metrics = reader
+}
+
+// enrichMetrics replaces every registered metric value with the live value
+// reported by the metrics reader. Metrics without a value stay empty so the
+// console continues to distinguish "not reported" from a real zero.
+func (s *Service) enrichMetrics(
+	ctx context.Context,
+	feature *domain.Feature,
+) {
+	if s == nil || s.metrics == nil || feature == nil ||
+		len(feature.ReadOnlyMetrics) == 0 {
+		return
+	}
+	values, err := s.metrics.FeatureMetrics(ctx, feature.ID)
+	if err != nil {
+		return
+	}
+	for index := range feature.ReadOnlyMetrics {
+		key := feature.ReadOnlyMetrics[index].Key
+		value, ok := values[key]
+		if !ok {
+			continue
+		}
+		feature.ReadOnlyMetrics[index].Value = value
+	}
 }
 
 // runtimeValues projects existing operations settings into feature-center

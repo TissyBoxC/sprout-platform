@@ -47,6 +47,7 @@ type Service struct {
 
 	runtimeSettings RuntimeSettingsReader
 	modelCatalog    ModelCatalogReader
+	metrics         MetricsReader
 }
 
 // ValidateHealthProbeCoverage rejects a runtime composition where an active
@@ -270,6 +271,7 @@ func (s *Service) project(
 ) domain.Feature {
 	feature := definition.Feature
 	feature.ConfigSchema = cloneFields(feature.ConfigSchema)
+	feature.ReadOnlyMetrics = cloneMetrics(feature.ReadOnlyMetrics)
 	feature.Values = effectiveValues(feature.ConfigSchema)
 	feature.ConfigVersion = 0
 	feature.UpdatedAt = nil
@@ -291,6 +293,7 @@ func (s *Service) project(
 	}
 	applyValues(feature.ConfigSchema, feature.Values)
 	s.enrichDynamicOptions(ctx, &feature)
+	s.enrichMetrics(ctx, &feature)
 	maskSecrets(feature.ConfigSchema)
 	feature.Values = valuesFromFields(feature.ConfigSchema)
 	return feature
@@ -486,6 +489,17 @@ func cloneFields(fields []domain.ConfigField) []domain.ConfigField {
 		result[index].Options = append([]domain.ConfigOption(nil), result[index].Options...)
 		result[index].Fields = cloneFields(result[index].Fields)
 		result[index].Default = cloneValue(result[index].Default)
+		result[index].Value = cloneValue(result[index].Value)
+	}
+	return result
+}
+
+// cloneMetrics copies the registry metric slice so a live value projected for
+// one caller can never leak into the shared registry or a concurrent request.
+func cloneMetrics(metrics []domain.Metric) []domain.Metric {
+	result := make([]domain.Metric, len(metrics))
+	copy(result, metrics)
+	for index := range result {
 		result[index].Value = cloneValue(result[index].Value)
 	}
 	return result

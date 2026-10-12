@@ -469,6 +469,10 @@ func Run() error {
 	}
 	featureCenter.SetRuntimeSettingsReader(operations)
 	featureCenter.SetModelCatalogReader(aiModelCatalogReader{service: aiAccountService})
+	featureCenter.SetMetricsReader(featureCenterRepository.NewMetricsRepository(
+		databaseStore.Pool(),
+		cfg.DeviceRuntime.OfflineThreshold,
+	))
 	contentLibraryService, err := contentService.New(contentService.Options{
 		Repository:  contentRepository.NewPostgresRepository(databaseStore.Pool()),
 		AssetReader: contentAssetReader{store: releaseStore},

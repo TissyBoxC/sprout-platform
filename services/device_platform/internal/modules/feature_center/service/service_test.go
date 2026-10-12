@@ -702,6 +702,128 @@ func (catalog staticModelCatalog) ModelOptions(
 	return catalog.options, nil
 }
 
+type staticMetricsReader struct {
+	values map[string]map[string]any
+}
+
+func (reader staticMetricsReader) FeatureMetrics(
+	_ context.Context,
+	featureID string,
+) (map[string]any, error) {
+	return reader.values[featureID], nil
+}
+
+func TestProjectMergesLiveMetrics(t *testing.T) {
+	service, err := New(Options{
+		Repository:  newMemoryRepository(),
+		Definitions: DefaultRegistry(),
+		Clock:       fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	service.SetMetricsReader(staticMetricsReader{values: map[string]map[string]any{
+		"parent_account": {"active_parent_count": int64(7)},
+		"usage_report":   {"reported_usage_days": int64(3)},
+	}})
+
+	parentAccount, err := service.Get(context.Background(), "parent_account")
+	if err != nil {
+		t.Fatalf("get parent_account: %v", err)
+	}
+	if len(parentAccount.ReadOnlyMetrics) != 1 {
+		t.Fatalf(
+			"parent_account metric count = %d, want 1",
+			len(parentAccount.ReadOnlyMetrics),
+		)
+	}
+	if value := parentAccount.ReadOnlyMetrics[0].Value; value != int64(7) {
+		t.Fatalf("active_parent_count value = %#v, want 7", value)
+	}
+
+	usageReport, err := service.Get(context.Background(), "usage_report")
+	if err != nil {
+		t.Fatalf("get usage_report: %v", err)
+	}
+	if len(usageReport.ReadOnlyMetrics) != 1 {
+		t.Fatalf(
+			"usage_report metric count = %d, want 1",
+			len(usageReport.ReadOnlyMetrics),
+		)
+	}
+	if value := usageReport.ReadOnlyMetrics[0].Value; value != int64(3) {
+		t.Fatalf("reported_usage_days value = %#v, want 3", value)
+	}
+}
+
+func TestProjectLeavesUnknownMetricsEmpty(t *testing.T) {
+	service, err := New(Options{
+		Repository:  newMemoryRepository(),
+		Definitions: DefaultRegistry(),
+		Clock:       fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	// The reader reports a key that the registry does not declare. It must be
+	// ignored, and a declared key with no live value must stay unset rather
+	// than being rendered as a real zero.
+	service.SetMetricsReader(staticMetricsReader{values: map[string]map[string]any{
+		"parent_account": {"active_parent_count": int64(7), "unknown_metric": int64(1)},
+	}})
+
+	features, err := service.List(context.Background())
+	if err != nil {
+		t.Fatalf("list features: %v", err)
+	}
+	byID := make(map[string]domain.Feature, len(features))
+	for _, feature := range features {
+		byID[feature.ID] = feature
+	}
+	aiAccount := byID["ai_account"]
+	if len(aiAccount.ReadOnlyMetrics) != 1 {
+		t.Fatalf("ai_account metric count = %d, want 1", len(aiAccount.ReadOnlyMetrics))
+	}
+	if aiAccount.ReadOnlyMetrics[0].Value != nil {
+		t.Fatalf(
+			"unreported ai_account metric = %#v, want nil",
+			aiAccount.ReadOnlyMetrics[0].Value,
+		)
+	}
+	if len(byID["parent_account"].ReadOnlyMetrics) != 1 {
+		t.Fatalf("parent_account metric count changed")
+	}
+}
+
+func TestLiveMetricsDoNotMutateSharedRegistry(t *testing.T) {
+	service, err := New(Options{
+		Repository:  newMemoryRepository(),
+		Definitions: DefaultRegistry(),
+		Clock:       fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	service.SetMetricsReader(staticMetricsReader{values: map[string]map[string]any{
+		"parent_account": {"active_parent_count": int64(9)},
+	}})
+	if _, err := service.Get(context.Background(), "parent_account"); err != nil {
+		t.Fatalf("get parent_account: %v", err)
+	}
+	// A second call must not observe a registry mutated by the first.
+	service.SetMetricsReader(nil)
+	feature, err := service.Get(context.Background(), "parent_account")
+	if err != nil {
+		t.Fatalf("get parent_account: %v", err)
+	}
+	if feature.ReadOnlyMetrics[0].Value != nil {
+		t.Fatalf(
+			"registry metric leaked across calls: %#v",
+			feature.ReadOnlyMetrics[0].Value,
+		)
+	}
+}
+
 func TestAICAccountMergesLiveModelOptions(t *testing.T) {
 	repository := newMemoryRepository()
 	service, err := New(Options{

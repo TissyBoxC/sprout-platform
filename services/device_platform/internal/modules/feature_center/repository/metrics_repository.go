@@ -110,6 +110,19 @@ func (r *MetricsRepository) FeatureMetrics(
 			"SELECT COUNT(DISTINCT report_date) FROM device_usage_daily",
 			"reported_usage_days",
 		)
+	case "telemetry":
+		return r.triad(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM device_runtime_status),
+				(SELECT COUNT(*) FROM device_runtime_status
+				 WHERE connection_state = 'online'
+				   AND received_at >= NOW() - INTERVAL '90 seconds'),
+				(SELECT COALESCE(SUM(pending_telemetry), 0)
+				 FROM device_runtime_status)`,
+			"telemetry_device_count",
+			"telemetry_online_count",
+			"telemetry_pending_total",
+		)
 	case "notification":
 		return r.triad(ctx,
 			`SELECT

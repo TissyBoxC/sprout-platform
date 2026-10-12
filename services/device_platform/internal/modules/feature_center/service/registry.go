@@ -98,6 +98,13 @@ func DefaultRegistry() []Definition {
 				boundedIntegerField("retention_days", "数据保留天数", 365, 1, 3650, true, "天"),
 			),
 			metrics("reported_usage_days", "已上报天数", "天")),
+		readOnlyFeatureDef("telemetry", "遥测监控", "设备心跳、网络质量、温度与积压趋势。", "platform", "平台运维",
+			"遥测数据由设备心跳和使用报告聚合产生，功能中心只提供实时状态和统计。",
+			metrics(
+				"telemetry_device_count", "接入设备", "台",
+				"telemetry_online_count", "在线设备", "台",
+				"telemetry_pending_total", "待上报积压", "条",
+			)),
 		readOnlyFeatureDef("notification", "消息通知", "家长站内通知、远程留言、短信与消息触达。", "platform", "平台运维",
 			"站内通知始终可用；推送、短信和邮件由部署侧发送器配置管理，功能中心只展示真实配置状态和投递指标。",
 			metrics(

@@ -50,6 +50,7 @@ import (
 	releasestoreservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/service"
 	screenservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/screen/service"
 	serviceversionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
+	telemetryservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/telemetry/service"
 	ui_textservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ui_text/service"
 	usagereportservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
 	videoservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/service"
@@ -73,6 +74,7 @@ type RouterOptions struct {
 	RuntimeService               *runtimeservice.Service
 	DiagnosticService            auditService
 	ServiceVersionService        *serviceversionservice.Service
+	TelemetryService             *telemetryservice.Service
 	FeatureCenterService         *featurecenterservice.Service
 	ReleaseStoreService          *releasestoreservice.Service
 	OTAService                   *otaservice.Service
@@ -976,6 +978,18 @@ func NewRouter(options RouterOptions) http.Handler {
 						adminHandler.getOverview,
 					),
 				)
+				if options.TelemetryService != nil {
+					telemetryHandler := telemetryHandler{
+						service: options.TelemetryService,
+					}
+					mux.HandleFunc(
+						"GET /api/v1/admin/telemetry/summary",
+						authHandler.requireAdminPermission(
+							authdomain.AdminPermissionStatsRead,
+							telemetryHandler.summary,
+						),
+					)
+				}
 				mux.HandleFunc(
 					"GET /api/v1/admin/settings",
 					authHandler.requireAdminPermission(

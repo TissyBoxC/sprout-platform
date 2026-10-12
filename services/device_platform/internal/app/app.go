@@ -83,6 +83,8 @@ import (
 	screenService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/screen/service"
 	serviceVersionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/repository"
 	serviceVersionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
+	telemetryRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/telemetry/repository"
+	telemetryService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/telemetry/service"
 	ui_textRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ui_text/repository"
 	ui_textService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ui_text/service"
 	usageReportRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/repository"
@@ -259,6 +261,15 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create device runtime service: %w", err)
 	}
+	fleetTelemetry, err := telemetryService.New(telemetryService.Options{
+		Repository: telemetryRepository.NewPostgresRepository(
+			databaseStore.Pool(),
+		),
+		OnlineThreshold: cfg.DeviceRuntime.OfflineThreshold,
+	})
+	if err != nil {
+		return fmt.Errorf("create telemetry service: %w", err)
+	}
 	operations, err := operationsService.New(operationsService.Options{
 		Repository: operationsRepository.NewPostgresRepository(
 			databaseStore.Pool(),
@@ -342,6 +353,10 @@ func Run() error {
 		"usage_report": nonzeroRowProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM device_usage_daily LIMIT 1",
+		),
+		"telemetry": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM device_runtime_status LIMIT 1",
 		),
 		"platform_security": nonzeroRowProbe(
 			databaseStore.Pool(),
@@ -815,6 +830,7 @@ func Run() error {
 			RuntimeService:               deviceRuntimeService,
 			DiagnosticService:            diagnosticService,
 			ServiceVersionService:        serviceVersions,
+			TelemetryService:             fleetTelemetry,
 			FeatureCenterService:         featureCenter,
 			ReleaseStoreService:          releaseStore,
 			OTAService:                   ota,

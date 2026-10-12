@@ -298,6 +298,7 @@ func TestDefaultRegistryCoversRequiredFeatures(t *testing.T) {
 		"voice_conversation",
 		"ai_model_gateway",
 		"usage_report",
+		"telemetry",
 		"notification",
 		"platform_security",
 		"vision",

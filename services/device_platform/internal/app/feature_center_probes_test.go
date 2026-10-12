@@ -9,6 +9,7 @@ import (
 	"time"
 
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
+	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
 )
 
 func TestVoiceGatewayReadinessURL(t *testing.T) {
@@ -158,6 +159,54 @@ func TestRecommendationReadinessProbeMapsCatalogFailure(t *testing.T) {
 		err: errors.New("catalog unavailable"),
 	})
 	status, err := probe.Check(context.Background(), "recommendation")
+	if err != nil {
+		t.Fatalf("check probe: %v", err)
+	}
+	if status != featureCenterDomain.HealthUnavailable {
+		t.Fatalf("status = %q, want unavailable", status)
+	}
+}
+
+type stubNotificationProbe struct {
+	health notificationDomain.DeliveryHealth
+	err    error
+}
+
+func (stub stubNotificationProbe) DeliveryHealth(
+	context.Context,
+) (notificationDomain.DeliveryHealth, error) {
+	return stub.health, stub.err
+}
+
+func TestNotificationReadinessProbeHealthyWithoutExternalSenders(t *testing.T) {
+	probe := notificationReadinessProbe(stubNotificationProbe{})
+	status, err := probe.Check(context.Background(), "notification")
+	if err != nil {
+		t.Fatalf("check probe: %v", err)
+	}
+	if status != featureCenterDomain.HealthHealthy {
+		t.Fatalf("status = %q, want healthy", status)
+	}
+}
+
+func TestNotificationReadinessProbeDegradesOnFailedDelivery(t *testing.T) {
+	probe := notificationReadinessProbe(stubNotificationProbe{
+		health: notificationDomain.DeliveryHealth{FailedCount: 1},
+	})
+	status, err := probe.Check(context.Background(), "notification")
+	if err != nil {
+		t.Fatalf("check probe: %v", err)
+	}
+	if status != featureCenterDomain.HealthDegraded {
+		t.Fatalf("status = %q, want degraded", status)
+	}
+}
+
+func TestNotificationReadinessProbeUnavailableOnRepositoryFailure(t *testing.T) {
+	probe := notificationReadinessProbe(stubNotificationProbe{
+		err: errors.New("database unavailable"),
+	})
+	status, err := probe.Check(context.Background(), "notification")
 	if err != nil {
 		t.Fatalf("check probe: %v", err)
 	}

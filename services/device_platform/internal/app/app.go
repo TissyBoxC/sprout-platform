@@ -681,21 +681,7 @@ func Run() error {
 		releaseStore:    releaseStore,
 		notifications:   notifications,
 	})
-	featureCenterHealthProbes["notification"] = featureCenterService.HealthProbeFunc(
-		func(_ context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
-			if notifications == nil {
-				return featureCenterDomain.HealthUnavailable, nil
-			}
-			// In-app delivery is built into the platform and removes the row
-			// from the queue immediately. External channels are optional, so
-			// their absence is reported as degraded rather than healthy until
-			// at least one real sender is wired.
-			if len(notifications.DeliveryChannels()) == 0 {
-				return featureCenterDomain.HealthDegraded, nil
-			}
-			return featureCenterDomain.HealthHealthy, nil
-		},
-	)
+	featureCenterHealthProbes["notification"] = notificationReadinessProbe(notifications)
 	uiTextVerifier, err := ui_textService.NewEd25519KeyringVerifier(
 		cfg.UIText.SignaturePublicKeys,
 	)

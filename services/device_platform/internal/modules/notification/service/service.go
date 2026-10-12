@@ -149,6 +149,21 @@ func (s *Service) DeliveryChannels() []string {
 	return channels
 }
 
+// DeliveryHealth returns a read-only notification readiness snapshot. It
+// deliberately ignores optional external sender configuration: in-app
+// notifications are always available, while delivery failures are the
+// actionable signal that degrades the capability.
+func (s *Service) DeliveryHealth(
+	ctx context.Context,
+) (domain.DeliveryHealth, error) {
+	if s == nil || s.repository == nil {
+		return domain.DeliveryHealth{}, errors.New(
+			"notification repository is unavailable",
+		)
+	}
+	return s.repository.DeliveryHealth(ctx)
+}
+
 // ProcessPendingDeliveries drains one bounded batch for a channel.
 //
 // A delivery is marked delivered on success. Provider errors leave a failed

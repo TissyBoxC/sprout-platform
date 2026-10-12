@@ -80,6 +80,8 @@ type Repository interface {
 		channel string,
 		limit int,
 	) ([]*domain.Delivery, error)
+	// DeliveryHealth returns exact queue counters for feature health checks.
+	DeliveryHealth(ctx context.Context) (domain.DeliveryHealth, error)
 }
 
 // PostgresRepository is the PostgreSQL-backed notification repository.
@@ -664,6 +666,26 @@ func (r *PostgresRepository) PendingDeliveries(
 		return nil, fmt.Errorf("iterate pending deliveries: %w", err)
 	}
 	return deliveries, nil
+}
+
+// DeliveryHealth returns exact queue counters without loading delivery rows.
+func (r *PostgresRepository) DeliveryHealth(
+	ctx context.Context,
+) (domain.DeliveryHealth, error) {
+	var health domain.DeliveryHealth
+	err := r.pool.QueryRow(ctx, `
+		SELECT
+			COUNT(*) FILTER (WHERE status = 'pending')::int,
+			COUNT(*) FILTER (WHERE status = 'failed')::int
+		FROM notification_deliveries
+	`).Scan(&health.PendingCount, &health.FailedCount)
+	if err != nil {
+		return domain.DeliveryHealth{}, fmt.Errorf(
+			"read notification delivery health: %w",
+			err,
+		)
+	}
+	return health, nil
 }
 
 type rowScanner interface {

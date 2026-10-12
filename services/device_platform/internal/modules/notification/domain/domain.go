@@ -211,6 +211,14 @@ type AdminStats struct {
 	FailedDeliveryCount  int `json:"failed_delivery_count"`
 }
 
+// DeliveryHealth is the read-only delivery queue state used by feature health
+// checks. Pending deliveries are normal queue depth; failed deliveries are
+// actionable and degrade the notification capability.
+type DeliveryHealth struct {
+	PendingCount int `json:"pending_count"`
+	FailedCount  int `json:"failed_count"`
+}
+
 // AdminFilter bounds and scopes an administrator notification query.
 type AdminFilter struct {
 	Category string

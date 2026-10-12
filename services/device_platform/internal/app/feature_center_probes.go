@@ -10,6 +10,7 @@ import (
 
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
+	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -130,6 +131,31 @@ func recommendationReadinessProbe(
 			}
 			if err := service.CheckReadiness(ctx); err != nil {
 				return featureCenterDomain.HealthUnavailable, nil
+			}
+			return featureCenterDomain.HealthHealthy, nil
+		},
+	)
+}
+
+// notificationReadinessProbe validates the durable notification store without
+// treating optional external senders as a prerequisite. In-app notifications
+// are built in; failed delivery rows are the actionable degradation signal.
+func notificationReadinessProbe(
+	service interface {
+		DeliveryHealth(ctx context.Context) (notificationDomain.DeliveryHealth, error)
+	},
+) featureCenterService.HealthProbe {
+	return featureCenterService.HealthProbeFunc(
+		func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+			if service == nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			health, err := service.DeliveryHealth(ctx)
+			if err != nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			if health.FailedCount > 0 {
+				return featureCenterDomain.HealthDegraded, nil
 			}
 			return featureCenterDomain.HealthHealthy, nil
 		},

@@ -21,6 +21,7 @@ type memoryRepository struct {
 	notifications map[string]*domain.Notification
 	deliveries    []*domain.Delivery
 	devices       map[string]string // deviceID -> parentAccountID
+	healthErr     error
 }
 
 func newMemoryRepository() *memoryRepository {
@@ -283,6 +284,24 @@ func (m *memoryRepository) PendingDeliveries(
 	return result, nil
 }
 
+func (m *memoryRepository) DeliveryHealth(
+	_ context.Context,
+) (domain.DeliveryHealth, error) {
+	if m.healthErr != nil {
+		return domain.DeliveryHealth{}, m.healthErr
+	}
+	var health domain.DeliveryHealth
+	for _, delivery := range m.deliveries {
+		switch delivery.Status {
+		case domain.DeliveryStatusPending:
+			health.PendingCount++
+		case domain.DeliveryStatusFailed:
+			health.FailedCount++
+		}
+	}
+	return health, nil
+}
+
 type fakeDeliverySender struct {
 	sent int
 	err  error
@@ -524,6 +543,63 @@ func TestAdminStatsCountsBroadcastAndFailures(t *testing.T) {
 	}
 	if stats.PendingDeliveryCount != 1 {
 		t.Fatalf("expected 1 pending push delivery, got %d", stats.PendingDeliveryCount)
+	}
+}
+
+func TestDeliveryHealthIgnoresUnconfiguredExternalChannels(t *testing.T) {
+	repo := newMemoryRepository()
+	service := newTestService(t, repo, &fakeCommander{})
+	if _, err := service.CreateAdministratorNotice(context.Background(), "", domain.AdministratorInput{
+		Category:        domain.CategorySystemAnnouncement,
+		Title:           "站内通知",
+		Body:            "内容",
+		Audience:        domain.AudienceParent,
+		Channels:        []string{domain.ChannelInApp},
+		ParentAccountID: testParentID,
+	}); err != nil {
+		t.Fatalf("seed notice: %v", err)
+	}
+
+	health, err := service.DeliveryHealth(context.Background())
+	if err != nil {
+		t.Fatalf("delivery health: %v", err)
+	}
+	if health.PendingCount != 0 || health.FailedCount != 0 {
+		t.Fatalf("unexpected delivery health %#v", health)
+	}
+	if len(service.DeliveryChannels()) != 0 {
+		t.Fatalf("expected no optional external senders")
+	}
+}
+
+func TestDeliveryHealthReportsFailedDeliveries(t *testing.T) {
+	repo := newMemoryRepository()
+	service := newTestService(t, repo, &fakeCommander{})
+	repo.deliveries = append(repo.deliveries, &domain.Delivery{
+		ID:              "delivery-1",
+		NotificationID:  "notification-1",
+		ParentAccountID: testParentID,
+		Channel:         domain.ChannelPush,
+		Status:          domain.DeliveryStatusFailed,
+		FailureCode:     domain.DeliveryFailureProviderError,
+	})
+
+	health, err := service.DeliveryHealth(context.Background())
+	if err != nil {
+		t.Fatalf("delivery health: %v", err)
+	}
+	if health.FailedCount != 1 {
+		t.Fatalf("failed count = %d, want 1", health.FailedCount)
+	}
+}
+
+func TestDeliveryHealthMapsRepositoryFailure(t *testing.T) {
+	repo := newMemoryRepository()
+	repo.healthErr = errors.New("database unavailable")
+	service := newTestService(t, repo, &fakeCommander{})
+
+	if _, err := service.DeliveryHealth(context.Background()); err == nil {
+		t.Fatalf("expected repository failure")
 	}
 }
 

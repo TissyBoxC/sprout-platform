@@ -640,6 +640,8 @@ func (r *PostgresRepository) PurgeParentData(
 		{`DELETE FROM notifications WHERE parent_account_id = $1`, "notifications"},
 		{`DELETE FROM companionship_growth_records WHERE family_id = $1`, "companionship growth records"},
 		{`DELETE FROM companionship_habit_reminders WHERE family_id = $1`, "companionship habit reminders"},
+		{`DELETE FROM alarm_reminder_events WHERE family_id = $1`, "alarm reminder events"},
+		{`DELETE FROM alarm_reminders WHERE family_id = $1`, "alarm reminders"},
 		{`DELETE FROM english_practice_attempts WHERE family_id = $1`, "english practice attempts"},
 		{`DELETE FROM local_commands WHERE family_id = $1`, "local commands"},
 		{`DELETE FROM local_command_revisions WHERE family_id = $1`, "local command revisions"},

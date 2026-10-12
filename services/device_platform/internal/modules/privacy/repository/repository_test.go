@@ -31,6 +31,8 @@ var (
 		`(?is)CREATE TABLE IF NOT EXISTS\s+([a-z_]+)\s*\((.*?)\n\);`)
 	ownedColumnPattern = regexp.MustCompile(
 		`(?im)^\s*(family_id|parent_account_id)\s`)
+	expiresAtColumnPattern = regexp.MustCompile(
+		`(?im)^\s*expires_at\s`)
 )
 
 // TestPurgeParentDataCoversOwnedTables fails when a migration introduces a
@@ -92,28 +94,65 @@ func TestPurgeParentDataCoversOwnedTables(t *testing.T) {
 	}
 }
 
+// retentionExemptTables are tables whose `expires_at` rows are reclaimed by
+// another scheduled job (not the privacy retention worker) or which must be
+// retained by design. They are exempt from the privacy retention coverage scan.
+var retentionExemptTables = map[string]string{
+	"vision_tasks":   "pruned by the vision module's PruneExpired job",
+	"vision_results": "pruned by the vision module's PruneExpired job",
+	// notifications.expires_at bounds inbox visibility only. Operator-authored
+	// broadcast history is intentionally retained for the admin console, so the
+	// row is not deleted when the notice stops being visible to guardians.
+	"notifications": "expiry hides the notice from inboxes; admin history is retained",
+}
+
 // TestPurgeExpiredRecordsCoversEphemeralTables guards the retention job that
-// migration 0034 promises. Every table below stores an `expires_at` deadline;
-// if the job stops deleting one, expired credential material accumulates in
-// the database indefinitely even though the schema says it is short-lived.
+// migration 0034 promises. It scans every migration for a table with an
+// `expires_at` deadline and requires PurgeExpiredRecords to delete from that
+// table (or an explicit exemption for a table reclaimed elsewhere). Without
+// this, a new short-lived table silently accumulates expired rows forever.
 func TestPurgeExpiredRecordsCoversEphemeralTables(t *testing.T) {
 	source, err := os.ReadFile("repository.go")
 	if err != nil {
 		t.Fatalf("read repository.go: %v", err)
 	}
-	required := []string{
-		"DELETE FROM auth_sessions",
-		"DELETE FROM admin_mfa_challenges",
-		"DELETE FROM device_sessions",
-		"DELETE FROM device_binding_tokens",
-		"DELETE FROM device_registration_tokens",
-		"DELETE FROM device_challenges",
-		"DELETE FROM phone_verification_codes",
-		"DELETE FROM parent_data_export_receipts",
+
+	migrationDir := filepath.Join("..", "..", "..", "..", "migrations")
+	entries, err := os.ReadDir(migrationDir)
+	if err != nil {
+		t.Fatalf("read migrations dir: %v", err)
 	}
-	for _, fragment := range required {
-		if !bytes.Contains(source, []byte(fragment)) {
-			t.Errorf("PurgeExpiredRecords is missing %q", fragment)
+
+	checked := 0
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".sql" {
+			continue
 		}
+		contents, err := os.ReadFile(filepath.Join(migrationDir, entry.Name()))
+		if err != nil {
+			t.Fatalf("read migration %s: %v", entry.Name(), err)
+		}
+		for _, table := range migrationTablePattern.FindAllStringSubmatch(
+			string(contents), -1) {
+			name := table[1]
+			if !expiresAtColumnPattern.MatchString(table[2]) {
+				continue
+			}
+			checked++
+			if bytes.Contains(source, []byte("DELETE FROM "+name)) {
+				continue
+			}
+			if _, exempt := retentionExemptTables[name]; exempt {
+				continue
+			}
+			t.Errorf(
+				"table %q has an expires_at column but no DELETE in "+
+					"PurgeExpiredRecords; add a delete or a documented exemption",
+				name,
+			)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no expires_at tables were discovered; migration scan is broken")
 	}
 }

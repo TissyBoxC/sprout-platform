@@ -2153,6 +2153,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				"GET /api/v1/devices/{device_id}/content/favorites",
 				deviceHandler.listFavorites,
 			)
+			mux.HandleFunc(
+				"GET /api/v1/devices/{device_id}/content/theme-packs",
+				deviceHandler.listThemePacks,
+			)
 		}
 	}
 

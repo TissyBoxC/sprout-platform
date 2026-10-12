@@ -888,6 +888,32 @@ func (handler deviceContentHandler) listFavorites(
 	})
 }
 
+// listThemePacks returns the published theme packs so the device can mirror
+// the parent app's thematic quick-play menu. Theme packs are global published
+// content, not family data, so no family scoping is required, but the device
+// session is still verified to keep the manifest off unauthenticated callers.
+func (handler deviceContentHandler) listThemePacks(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	if _, ok := handler.verifyDeviceFamily(response, request); !ok {
+		return
+	}
+	packs, err := handler.contentHandler.service.ListThemePacks(
+		request.Context(),
+		contentdomain.ThemePackQuery{
+			Status: string(contentdomain.ThemePackPublished),
+		},
+	)
+	if err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"theme_packs": packs,
+	})
+}
+
 func writeContentError(
 	response http.ResponseWriter,
 	request *http.Request,

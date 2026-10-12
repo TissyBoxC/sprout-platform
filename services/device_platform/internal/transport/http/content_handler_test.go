@@ -694,13 +694,17 @@ func TestDevicePlaybackRequiresMatchingDeviceSession(t *testing.T) {
 	for _, path := range []string{
 		"/api/v1/devices/sprout_device_001/content/playback",
 		"/api/v1/devices/sprout_device_001/content/favorites",
+		"/api/v1/devices/sprout_device_001/content/theme-packs",
 	} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		request.SetPathValue("device_id", "sprout_device_002")
 		recorder := httptest.NewRecorder()
-		if strings.HasSuffix(path, "/favorites") {
+		switch {
+		case strings.HasSuffix(path, "/favorites"):
 			handler.listFavorites(recorder, request)
-		} else {
+		case strings.HasSuffix(path, "/theme-packs"):
+			handler.listThemePacks(recorder, request)
+		default:
 			handler.listPlayHistory(recorder, request)
 		}
 		if recorder.Code != http.StatusUnauthorized {
@@ -766,6 +770,59 @@ func TestDeviceFavoritesMirrorGuardianListForOwningFamily(t *testing.T) {
 		envelope.Data.Favorites[0].PackageID != "content_story_001" ||
 		!envelope.Data.Favorites[0].Available {
 		t.Fatalf("unexpected favorite list: %s", recorder.Body.String())
+	}
+}
+
+func TestDeviceThemePacksReturnPublishedPacks(t *testing.T) {
+	repository := newContentTestRepository()
+	repository.themePacks["theme_ocean"] = contentdomain.ThemePack{
+		ThemeID:         "theme_ocean",
+		Title:           "海洋主题",
+		AgeTiers:        []contentdomain.AgeTier{contentdomain.AgeTier3To4},
+		PackageIDs:      []string{"content_story_001"},
+		Status:          contentdomain.ThemePackPublished,
+		CatalogRevision: 7,
+	}
+	service, err := contentservice.New(contentservice.Options{
+		Repository:  repository,
+		AssetReader: contentTestAssetReader{},
+	})
+	if err != nil {
+		t.Fatalf("create content service: %v", err)
+	}
+	handler := deviceContentHandler{
+		contentHandler: contentHandler{service: service},
+		bindingService: contentTestBindingService{sessionDeviceID: "sprout_device_001"},
+		runtimeService: contentTestRuntimeService{familyID: "family-001"},
+	}
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/devices/sprout_device_001/content/theme-packs",
+		nil,
+	)
+	request.SetPathValue("device_id", "sprout_device_001")
+	request.Header.Set("Authorization", "Bearer device-session-token")
+	recorder := httptest.NewRecorder()
+	handler.listThemePacks(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			ThemePacks []struct {
+				ThemeID         string   `json:"theme_id"`
+				PackageIDs      []string `json:"package_ids"`
+				CatalogRevision int64    `json:"catalog_revision"`
+			} `json:"theme_packs"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode theme pack response: %v", err)
+	}
+	if len(envelope.Data.ThemePacks) != 1 ||
+		envelope.Data.ThemePacks[0].ThemeID != "theme_ocean" ||
+		envelope.Data.ThemePacks[0].CatalogRevision != 7 {
+		t.Fatalf("unexpected theme pack list: %s", recorder.Body.String())
 	}
 }
 

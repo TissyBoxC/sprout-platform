@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 // Equal plain versions previously panicked because the comparator indexed a
 // pre-release segment that SplitN never produced. The OTA and service-version
@@ -49,5 +52,46 @@ func TestCompareVersionsOrdering(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+// A settings document written before usage-report retention existed must still
+// receive the conservative default so the scheduled cleanup bounds the ledger
+// instead of the field decoding to zero and disabling the purge.
+func TestRetentionApplyUsageReportDefaultsBackfillsLegacyDocument(t *testing.T) {
+	t.Parallel()
+
+	var settings Settings
+	if err := json.Unmarshal([]byte(`{"retention":{"conversation_days":30}}`), &settings); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if settings.Retention.UsageReportConfigured() {
+		t.Fatal("legacy document must not report the field as explicitly configured")
+	}
+	settings.Retention.ApplyUsageReportDefaults()
+	if settings.Retention.UsageReportDays != DefaultUsageReportRetentionDays {
+		t.Fatalf(
+			"usage report days = %d, want %d",
+			settings.Retention.UsageReportDays,
+			DefaultUsageReportRetentionDays,
+		)
+	}
+}
+
+// An explicit zero (or any explicit value) must survive decoding so an update
+// is not silently rewritten by the defaulting helper.
+func TestRetentionApplyUsageReportDefaultsPreservesExplicitValue(t *testing.T) {
+	t.Parallel()
+
+	var settings Settings
+	if err := json.Unmarshal([]byte(`{"retention":{"usage_report_days":0}}`), &settings); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if !settings.Retention.UsageReportConfigured() {
+		t.Fatal("explicit usage_report_days must be reported as configured")
+	}
+	settings.Retention.ApplyUsageReportDefaults()
+	if settings.Retention.UsageReportDays != 0 {
+		t.Fatalf("explicit zero was overwritten with %d", settings.Retention.UsageReportDays)
 	}
 }

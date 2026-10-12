@@ -95,6 +95,10 @@ func (s *Service) runtimeValues(
 			"barge_in_enabled":                settings.Voice.BargeInEnabled,
 			"far_field_enabled":               settings.Voice.FarFieldEnabled,
 		}, version, nil
+	case "usage_report":
+		return map[string]any{
+			"retention_days": settings.Retention.UsageReportDays,
+		}, version, nil
 	default:
 		return nil, 0, nil
 	}
@@ -200,6 +204,18 @@ func (s *Service) updateRuntimeValues(
 			settings.Voice.FarFieldEnabled = value
 		}
 		settings.SetVoiceConfigured()
+		_, _, err := s.runtimeSettings.UpdateSettings(
+			ctx,
+			settings,
+			actorID,
+			expectedVersion,
+		)
+		return true, err
+	case "usage_report":
+		if value, ok := intValue(values, "retention_days"); ok {
+			settings.Retention.UsageReportDays = value
+		}
+		settings.Retention.SetUsageReportConfigured()
 		_, _, err := s.runtimeSettings.UpdateSettings(
 			ctx,
 			settings,

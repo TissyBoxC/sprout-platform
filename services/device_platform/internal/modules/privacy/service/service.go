@@ -599,6 +599,44 @@ func (s *Service) PurgeExpiredRecords(
 	return s.repository.PurgeExpiredRecords(ctx, s.clock.Now().UTC())
 }
 
+// PurgeUsageReports removes aggregated usage-ledger days older than the
+// operator-configured window. A zero window disables the scheduled purge so a
+// deployment can retain usage days indefinitely; the console validates a
+// positive window for the normal path, so zero only appears from a stored
+// document that opted out.
+func (s *Service) PurgeUsageReports(
+	ctx context.Context,
+) (repository.UsageReportPurge, error) {
+	days := s.usageReportRetentionDays(ctx)
+	if days <= 0 {
+		return repository.UsageReportPurge{}, nil
+	}
+	now := s.clock.Now().UTC()
+	cutoff := now.AddDate(0, 0, -days)
+	cutoff = time.Date(
+		cutoff.Year(),
+		cutoff.Month(),
+		cutoff.Day(),
+		0,
+		0,
+		0,
+		0,
+		time.UTC,
+	)
+	return s.repository.PurgeUsageReports(ctx, cutoff)
+}
+
+func (s *Service) usageReportRetentionDays(ctx context.Context) int {
+	if s.retention == nil {
+		return 0
+	}
+	settings, _, err := s.retention.Settings(ctx)
+	if err != nil || settings == nil {
+		return 0
+	}
+	return settings.Retention.UsageReportDays
+}
+
 func (s *Service) executeDeletion(
 	ctx context.Context,
 	candidate domain.DeletionCandidate,

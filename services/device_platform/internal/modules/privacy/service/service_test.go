@@ -20,13 +20,14 @@ import (
 // --- memory repository -----------------------------------------------------
 
 type memoryRepository struct {
-	consents        []domain.ConsentEvent
-	receipts        []domain.ExportReceipt
-	deletions       []domain.DeletionRequest
-	audits          []domain.AuditEntry
-	purged          []string
-	purgedExpiredAt []time.Time
-	nextDeletionSeq int
+	consents          []domain.ConsentEvent
+	receipts          []domain.ExportReceipt
+	deletions         []domain.DeletionRequest
+	audits            []domain.AuditEntry
+	purged            []string
+	purgedExpiredAt   []time.Time
+	purgedUsageBefore []time.Time
+	nextDeletionSeq   int
 }
 
 func (r *memoryRepository) AppendConsentEvent(
@@ -200,6 +201,14 @@ func (r *memoryRepository) PurgeExpiredRecords(
 ) (repository.ExpiredRecordPurge, error) {
 	r.purgedExpiredAt = append(r.purgedExpiredAt, now)
 	return repository.ExpiredRecordPurge{}, nil
+}
+
+func (r *memoryRepository) PurgeUsageReports(
+	_ context.Context,
+	before time.Time,
+) (repository.UsageReportPurge, error) {
+	r.purgedUsageBefore = append(r.purgedUsageBefore, before)
+	return repository.UsageReportPurge{}, nil
 }
 
 func (r *memoryRepository) AppendAudit(
@@ -1084,6 +1093,72 @@ func TestPurgeExpiredRecordsUsesInjectedClock(t *testing.T) {
 			"purge used %v, want the injected clock %v",
 			repository.purgedExpiredAt[0],
 			testNow(),
+		)
+	}
+}
+
+// The usage-report cleanup cutoff must be derived from the operator-configured
+// window and floored to a whole UTC day, so the retention job deletes report
+// days strictly before the window rather than a mid-day timestamp.
+func TestPurgeUsageReportsUsesConfiguredWindow(t *testing.T) {
+	repository := &memoryRepository{}
+	service := newTestService(
+		t,
+		repository,
+		&fakeParentAccounts{},
+		&fakeDevices{},
+		&fakeAIDeletion{},
+		func(options *Options) {
+			options.Retention = &fakeRetention{settings: &operationsdomain.Settings{
+				Retention: operationsdomain.RetentionSettings{
+					UsageReportDays: 30,
+				},
+			}}
+		},
+	)
+	if _, err := service.PurgeUsageReports(context.Background()); err != nil {
+		t.Fatalf("purge usage reports: %v", err)
+	}
+	if len(repository.purgedUsageBefore) != 1 {
+		t.Fatalf(
+			"usage purge calls = %d, want 1",
+			len(repository.purgedUsageBefore),
+		)
+	}
+	want := testNow().AddDate(0, 0, -30)
+	want = time.Date(want.Year(), want.Month(), want.Day(), 0, 0, 0, 0, time.UTC)
+	if !repository.purgedUsageBefore[0].Equal(want) {
+		t.Fatalf(
+			"usage purge cutoff = %v, want %v",
+			repository.purgedUsageBefore[0],
+			want,
+		)
+	}
+}
+
+// A zero window disables the scheduled purge entirely so a deployment can opt
+// out without the job deleting the whole ledger.
+func TestPurgeUsageReportsDisabledWhenWindowZero(t *testing.T) {
+	repository := &memoryRepository{}
+	service := newTestService(
+		t,
+		repository,
+		&fakeParentAccounts{},
+		&fakeDevices{},
+		&fakeAIDeletion{},
+		func(options *Options) {
+			options.Retention = &fakeRetention{settings: &operationsdomain.Settings{
+				Retention: operationsdomain.RetentionSettings{UsageReportDays: 0},
+			}}
+		},
+	)
+	if _, err := service.PurgeUsageReports(context.Background()); err != nil {
+		t.Fatalf("purge usage reports: %v", err)
+	}
+	if len(repository.purgedUsageBefore) != 0 {
+		t.Fatalf(
+			"usage purge calls = %d, want 0",
+			len(repository.purgedUsageBefore),
 		)
 	}
 }

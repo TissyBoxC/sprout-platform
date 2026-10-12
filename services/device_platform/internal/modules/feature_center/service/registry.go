@@ -93,8 +93,10 @@ func DefaultRegistry() []Definition {
 		readOnlyFeatureDef("ai_model_gateway", "模型网关", "模型路由、限额与供应商健康。", "ai", "AI 服务",
 			"模型供应商和路由由 AI 服务统一管理，功能中心只提供健康状态和统计。",
 			metrics("model_request_count", "模型调用", "次")),
-		readOnlyFeatureDef("usage_report", "使用报告", "设备使用时长和内容统计。", "family", "家庭平台",
-			"数据保留天数尚未接入自动清理任务，接入后才会开放修改。",
+		featureDef("usage_report", "使用报告", "设备使用时长和内容统计。", "family", "家庭平台", true,
+			configFields(
+				boundedIntegerField("retention_days", "数据保留天数", 365, 1, 3650, true, "天"),
+			),
 			metrics("reported_usage_days", "已上报天数", "天")),
 		featureDef("notification", "消息通知", "家长站内通知、远程留言、短信与消息触达。", "platform", "平台运维", false,
 			nil,

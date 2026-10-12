@@ -783,6 +783,15 @@ func runRetentionWorker(
 					"total", total,
 				)
 			}
+			usagePurged, err := privacy.PurgeUsageReports(ctx)
+			if err != nil {
+				logger.Error("usage report retention worker failed", "error", err)
+			} else if total := usagePurged.Total(); total > 0 {
+				logger.Info(
+					"usage report retention worker purged old days",
+					"total", total,
+				)
+			}
 		}
 		if vision != nil {
 			expiredTasks, deletedResults, err := vision.PruneExpired(ctx)

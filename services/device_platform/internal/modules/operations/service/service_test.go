@@ -99,6 +99,7 @@ func validSettings() *domain.Settings {
 		},
 		Retention: domain.RetentionSettings{
 			ConversationDays: 30,
+			UsageReportDays:  domain.DefaultUsageReportRetentionDays,
 		},
 		Voice: domain.DefaultVoiceSettings(),
 	}

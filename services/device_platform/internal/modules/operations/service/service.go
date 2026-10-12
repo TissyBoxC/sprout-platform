@@ -224,6 +224,20 @@ func (s *Service) UpdateSettings(
 		}
 		settings.SetVoiceConfigured()
 	}
+	if !settings.Retention.UsageReportConfigured() {
+		// Same forward-compatibility rule for the usage-report cleanup window:
+		// an older console that does not know the field must not silently
+		// disable or reset the scheduled purge.
+		current, _, err := s.repository.GetSettings(ctx)
+		if err != nil && !errors.Is(err, domain.ErrSettingsNotFound) {
+			return nil, 0, err
+		}
+		if current != nil {
+			settings.Retention.UsageReportDays = current.Retention.UsageReportDays
+		}
+		settings.Retention.ApplyUsageReportDefaults()
+		settings.Retention.SetUsageReportConfigured()
+	}
 	if err := validateSettings(settings); err != nil {
 		return nil, 0, err
 	}
@@ -384,6 +398,10 @@ func validateSettings(settings *domain.Settings) error {
 		settings.Retention.ImageDays < 0 ||
 		settings.Retention.ConversationDays < 0 ||
 		settings.Retention.ConversationDays > 3650 {
+		return domain.ErrInvalidSettings
+	}
+	if settings.Retention.UsageReportDays < domain.MinUsageReportRetentionDays ||
+		settings.Retention.UsageReportDays > domain.MaxUsageReportRetentionDays {
 		return domain.ErrInvalidSettings
 	}
 	if settings.Voice.IdleWindowSeconds < 2 ||

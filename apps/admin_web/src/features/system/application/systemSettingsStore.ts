@@ -29,6 +29,7 @@ export interface SystemSettings {
   audioRetentionDays: number
   imageRetentionDays: number
   conversationRetentionDays: number
+  usageReportRetentionDays: number
 }
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
@@ -51,6 +52,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   audioRetentionDays: 0,
   imageRetentionDays: 0,
   conversationRetentionDays: 30,
+  usageReportRetentionDays: 365,
 }
 
 // 设置按后端文档整体读取与整体保存，避免局部写入造成运行策略不一致。
@@ -301,6 +303,10 @@ function toSettings(value: Record<string, unknown>): SystemSettings {
       retention.conversation_days,
       defaults.conversationRetentionDays,
     ),
+    usageReportRetentionDays: numberValue(
+      retention.usage_report_days,
+      defaults.usageReportRetentionDays,
+    ),
   }
 }
 
@@ -342,6 +348,7 @@ function toPayload(settings: SystemSettings): Record<string, unknown> {
       audio_days: settings.audioRetentionDays,
       image_days: settings.imageRetentionDays,
       conversation_days: settings.conversationRetentionDays,
+      usage_report_days: settings.usageReportRetentionDays,
     },
   }
 }

@@ -50,6 +50,13 @@ const (
 	ReleaseStatusDraft     = "draft"
 	ReleaseStatusPublished = "published"
 	ReleaseStatusRetired   = "retired"
+
+	// Usage-report retention bounds. The ledger is pruned by report day, so a
+	// positive window is required; the platform never keeps usage days forever
+	// once the scheduled cleanup is wired in.
+	MinUsageReportRetentionDays     = 1
+	MaxUsageReportRetentionDays     = 3650
+	DefaultUsageReportRetentionDays = 365
 )
 
 // Overview is the operations dashboard projection.
@@ -206,10 +213,69 @@ type UpdateSettings struct {
 }
 
 // RetentionSettings controls how long sensitive data is kept.
+//
+// UsageReportDays is the automatic-cleanup window for the aggregated device
+// and platform usage ledgers. It is enforced by the scheduled retention job.
 type RetentionSettings struct {
 	AudioDays        int `json:"audio_days"`
 	ImageDays        int `json:"image_days"`
 	ConversationDays int `json:"conversation_days"`
+	UsageReportDays  int `json:"usage_report_days"`
+
+	usageReportConfigured bool
+}
+
+// DefaultRetentionSettings returns the conservative retention defaults applied
+// when a settings document predates the usage-report cleanup window.
+func DefaultRetentionSettings() RetentionSettings {
+	return RetentionSettings{
+		ConversationDays: 30,
+		UsageReportDays:  DefaultUsageReportRetentionDays,
+	}
+}
+
+// UsageReportConfigured reports whether the decoded document explicitly
+// contained the usage-report retention field. It lets updates preserve the
+// stored window when an older console version saves a document that does not
+// know about usage-report cleanup yet.
+func (r *RetentionSettings) UsageReportConfigured() bool {
+	return r != nil && r.usageReportConfigured
+}
+
+// ApplyUsageReportDefaults fills a missing usage-report window with the
+// platform default so stored documents without the field still get cleaned up.
+func (r *RetentionSettings) ApplyUsageReportDefaults() {
+	if r == nil {
+		return
+	}
+	if !r.usageReportConfigured && r.UsageReportDays == 0 {
+		r.UsageReportDays = DefaultUsageReportRetentionDays
+	}
+}
+
+// SetUsageReportConfigured marks the usage-report window as explicitly
+// supplied so an update is not mistaken for a forward-compatible client.
+func (r *RetentionSettings) SetUsageReportConfigured() {
+	if r != nil {
+		r.usageReportConfigured = true
+	}
+}
+
+// UnmarshalJSON keeps the explicit presence of the usage-report window so the
+// service can distinguish an omitted field from an intentional update.
+func (r *RetentionSettings) UnmarshalJSON(data []byte) error {
+	type retentionAlias RetentionSettings
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var decoded retentionAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = RetentionSettings(decoded)
+	_, r.usageReportConfigured = raw["usage_report_days"]
+	return nil
 }
 
 // Release describes one resource, client, or firmware delivery.

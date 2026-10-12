@@ -55,6 +55,10 @@ type Repository interface {
 		ctx context.Context,
 		now time.Time,
 	) (ExpiredRecordPurge, error)
+	PurgeUsageReports(
+		ctx context.Context,
+		before time.Time,
+	) (UsageReportPurge, error)
 	AppendAudit(ctx context.Context, entry *domain.AuditEntry) error
 	QueryAudit(
 		ctx context.Context,
@@ -85,6 +89,18 @@ func (purge ExpiredRecordPurge) Total() int64 {
 		purge.DeviceChallenges +
 		purge.PhoneVerificationCodes +
 		purge.ExportReceipts
+}
+
+// UsageReportPurge reports how many aggregated usage-ledger rows were removed
+// by the usage-report retention window.
+type UsageReportPurge struct {
+	DeviceUsageDays   int64 `json:"device_usage_days"`
+	PlatformUsageDays int64 `json:"platform_usage_days"`
+}
+
+// Total returns the number of rows removed across both usage ledgers.
+func (purge UsageReportPurge) Total() int64 {
+	return purge.DeviceUsageDays + purge.PlatformUsageDays
 }
 
 // PostgresRepository is the PostgreSQL-backed privacy repository.
@@ -817,6 +833,47 @@ func (r *PostgresRepository) PurgeExpiredRecords(
 		if err != nil {
 			return purge, fmt.Errorf(
 				"purge expired guardian %s: %w",
+				statement.label,
+				err,
+			)
+		}
+		*statement.dest = tag.RowsAffected()
+	}
+	return purge, nil
+}
+
+// PurgeUsageReports removes aggregated usage-ledger days older than the
+// configured window. Both the device-reported and the gateway-recorded ledgers
+// are pruned by report day so the guardian usage report stays bounded. The
+// caller passes a cutoff date; every row strictly before it is removed.
+func (r *PostgresRepository) PurgeUsageReports(
+	ctx context.Context,
+	before time.Time,
+) (UsageReportPurge, error) {
+	var purge UsageReportPurge
+	statements := []struct {
+		query string
+		dest  *int64
+		label string
+	}{
+		{
+			query: `DELETE FROM device_usage_daily
+				WHERE report_date < $1`,
+			dest:  &purge.DeviceUsageDays,
+			label: "device usage report days",
+		},
+		{
+			query: `DELETE FROM platform_usage_daily
+				WHERE usage_day < $1`,
+			dest:  &purge.PlatformUsageDays,
+			label: "platform usage report days",
+		},
+	}
+	for _, statement := range statements {
+		tag, err := r.pool.Exec(ctx, statement.query, before)
+		if err != nil {
+			return purge, fmt.Errorf(
+				"purge %s: %w",
 				statement.label,
 				err,
 			)

@@ -473,6 +473,78 @@ func TestVoiceConversationConfigBridgesToRuntimeSettings(t *testing.T) {
 	}
 }
 
+func TestUsageReportConfigBridgesToRuntimeSettings(t *testing.T) {
+	service, err := New(Options{
+		Repository:  newMemoryRepository(),
+		Definitions: DefaultRegistry(),
+		Clock:       fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	runtimeSettings := &memoryRuntimeSettings{settings: &operationsdomain.Settings{
+		Retention: operationsdomain.RetentionSettings{
+			ConversationDays: 30,
+			UsageReportDays:  365,
+		},
+	}}
+	runtimeSettings.settings.Retention.SetUsageReportConfigured()
+	service.SetRuntimeSettingsReader(runtimeSettings)
+
+	feature, err := service.UpdateConfig(
+		context.Background(),
+		"usage_report",
+		map[string]any{"retention_days": float64(120)},
+		"admin-001",
+		0,
+	)
+	if err != nil {
+		t.Fatalf("update usage report: %v", err)
+	}
+	if runtimeSettings.settings.Retention.UsageReportDays != 120 {
+		t.Fatalf(
+			"runtime usage report days = %d, want 120",
+			runtimeSettings.settings.Retention.UsageReportDays,
+		)
+	}
+	if feature.Values["retention_days"] != 120 {
+		t.Fatalf(
+			"projected usage report days = %#v, want 120",
+			feature.Values["retention_days"],
+		)
+	}
+}
+
+func TestUsageReportConfigRejectsOutOfRangeRetention(t *testing.T) {
+	service, err := New(Options{
+		Repository:  newMemoryRepository(),
+		Definitions: DefaultRegistry(),
+		Clock:       fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	settings := &operationsdomain.Settings{
+		Retention: operationsdomain.RetentionSettings{UsageReportDays: 365},
+	}
+	settings.Retention.SetUsageReportConfigured()
+	service.SetRuntimeSettingsReader(&memoryRuntimeSettings{settings: settings})
+
+	for _, days := range []float64{0, 3651} {
+		_, err := service.UpdateConfig(
+			context.Background(),
+			"usage_report",
+			map[string]any{"retention_days": days},
+			"admin-001",
+			0,
+		)
+		var validation *domain.ConfigValidationError
+		if !errors.As(err, &validation) {
+			t.Fatalf("days=%v: expected validation error, got %v", days, err)
+		}
+	}
+}
+
 func TestVoiceConversationConfigRejectsIdleOutsideRuntimeBounds(t *testing.T) {
 	service, err := New(Options{
 		Repository:  newMemoryRepository(),

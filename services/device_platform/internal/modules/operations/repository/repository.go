@@ -235,6 +235,7 @@ func (r *PostgresRepository) GetSettings(
 		return nil, 0, fmt.Errorf("decode platform settings: %w", err)
 	}
 	settings.ApplyVoiceDefaults()
+	settings.Retention.ApplyUsageReportDefaults()
 	return &settings, version, nil
 }
 

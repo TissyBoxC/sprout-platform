@@ -435,6 +435,17 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
               step="1"
             />
           </label>
+          <label>
+            <span>使用报告保留天数</span>
+            <input
+              v-model.number="store.settings.usageReportRetentionDays"
+              type="number"
+              min="1"
+              max="3650"
+              step="1"
+            />
+            <small class="field-hint">超出天数的设备与平台使用统计会被自动清理。</small>
+          </label>
         </div>
         <div class="toggle-list privacy-toggles">
           <div class="toggle-row readonly-row">

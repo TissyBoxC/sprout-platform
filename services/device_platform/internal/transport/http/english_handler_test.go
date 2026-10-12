@@ -354,6 +354,80 @@ func TestDeviceEnglishLessonCatalogRejectsSessionDeviceMismatch(t *testing.T) {
 	}
 }
 
+func TestDeviceEnglishRecordAttemptUsesVerifiedFamily(t *testing.T) {
+	handler, repository := newEnglishHandlerForTest(t)
+	deviceHandler := deviceEnglishHandler{
+		englishHandler: &handler,
+		bindingService: englishTestBindingService{
+			sessionDeviceID: "sprout_device_001",
+		},
+		runtimeService: englishTestRuntimeService{familyID: "family-001"},
+	}
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/devices/sprout_device_001/english/attempts",
+		strings.NewReader(`{
+			"child_id": "child_001",
+			"lesson_id": "lesson_fruit",
+			"item_id": "word-apple",
+			"item_type": "word",
+			"target_text": "apple",
+			"recognized_text": "apple",
+			"score": 140
+		}`),
+	)
+	request.SetPathValue("device_id", "sprout_device_001")
+	request.Header.Set("Authorization", "Bearer device-session-token")
+	recorder := httptest.NewRecorder()
+	deviceHandler.recordAttempt(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d: %s",
+			recorder.Code, http.StatusCreated, recorder.Body.String())
+	}
+	if len(repository.attempts) != 1 {
+		t.Fatalf("attempts = %d, want 1", len(repository.attempts))
+	}
+	attempt := repository.attempts[0]
+	if attempt.FamilyID != "family-001" ||
+		attempt.Score != 100 ||
+		!attempt.Passed {
+		t.Fatalf("unexpected attempt: %+v", attempt)
+	}
+}
+
+func TestDeviceEnglishRecordAttemptRejectsSessionDeviceMismatch(t *testing.T) {
+	handler, repository := newEnglishHandlerForTest(t)
+	deviceHandler := deviceEnglishHandler{
+		englishHandler: &handler,
+		bindingService: englishTestBindingService{
+			sessionDeviceID: "sprout_device_other",
+		},
+		runtimeService: englishTestRuntimeService{familyID: "family-001"},
+	}
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/devices/sprout_device_001/english/attempts",
+		strings.NewReader(`{
+			"lesson_id": "lesson_fruit",
+			"item_id": "word-apple",
+			"item_type": "word",
+			"target_text": "apple",
+			"score": 90
+		}`),
+	)
+	request.SetPathValue("device_id", "sprout_device_001")
+	request.Header.Set("Authorization", "Bearer device-session-token")
+	recorder := httptest.NewRecorder()
+	deviceHandler.recordAttempt(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d: %s",
+			recorder.Code, http.StatusUnauthorized, recorder.Body.String())
+	}
+	if len(repository.attempts) != 0 {
+		t.Fatalf("attempts = %d, want none", len(repository.attempts))
+	}
+}
+
 func TestEnglishListAttemptsIsFamilyScoped(t *testing.T) {
 	handler, repository := newEnglishHandlerForTest(t)
 	repository.attempts = []englishdomain.PracticeAttempt{

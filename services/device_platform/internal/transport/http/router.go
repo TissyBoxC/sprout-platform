@@ -2458,9 +2458,13 @@ func featureCenterAuditAction(request *http.Request) string {
 	}
 }
 
-// featureCenterPermission splits the feature-center route group: reads need
-// the read capability, mutations need the manage capability.
+// featureCenterPermission splits the feature-center route group: reading the
+// registry and running a manual health check need the read capability, while
+// configuration mutations need the manage capability.
 func featureCenterPermission(request *http.Request) string {
+	if strings.HasSuffix(request.URL.Path, "/health-check") {
+		return authdomain.AdminPermissionFeatureCenterRead
+	}
 	if isAdminMutation(request.Method) {
 		return authdomain.AdminPermissionFeatureCenterWrite
 	}

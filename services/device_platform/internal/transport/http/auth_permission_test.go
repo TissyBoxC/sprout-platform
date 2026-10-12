@@ -166,6 +166,14 @@ func TestFeatureCenterPermissionSplitsReadAndWrite(t *testing.T) {
 	if got := featureCenterPermission(readRequest); got != authdomain.AdminPermissionFeatureCenterRead {
 		t.Fatalf("read route permission = %q", got)
 	}
+	healthRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/admin/feature-center/notification/health-check",
+		nil,
+	)
+	if got := featureCenterPermission(healthRequest); got != authdomain.AdminPermissionFeatureCenterRead {
+		t.Fatalf("health route permission = %q", got)
+	}
 	writeRequest := httptest.NewRequest(
 		http.MethodPut,
 		"/api/v1/admin/feature-center/voice_gateway/config",

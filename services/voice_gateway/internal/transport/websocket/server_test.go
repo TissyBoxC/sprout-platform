@@ -592,6 +592,54 @@ func TestDisconnectRevokesAuthenticatedToken(t *testing.T) {
 	})
 }
 
+// A closed connection must release per-device resources such as the retained
+// speaker reference audio so raw playback PCM does not outlive the session.
+func TestDisconnectReleasesPerDeviceResources(t *testing.T) {
+	manager := session.NewManager(session.ManagerConfig{MaxSessions: 8, MaxSessionsPerDevice: 2})
+	defer manager.CloseAll()
+
+	verifier, err := NewHMACDeviceTokenVerifier(testTokenSecret, nil)
+	if err != nil {
+		t.Fatalf("create verifier: %v", err)
+	}
+	token, err := verifier.IssueDeviceToken("device_disconnect", "token_disconnect", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("issue token: %v", err)
+	}
+
+	disconnected := make(chan string, 1)
+	server, err := NewServer(ServerConfig{
+		Manager:  manager,
+		Verifier: verifier,
+		OnDeviceDisconnected: func(deviceID string) {
+			select {
+			case disconnected <- deviceID:
+			default:
+			}
+		},
+		DetectorFactory: func() vad.Detector {
+			return &scriptedWebSocketDetector{values: []bool{true, true, false}}
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("create websocket server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, token)
+	_ = connection.Close()
+
+	select {
+	case deviceID := <-disconnected:
+		if deviceID != "device_disconnect" {
+			t.Fatalf("OnDeviceDisconnected device = %q, want device_disconnect", deviceID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnDeviceDisconnected was not called on disconnect")
+	}
+}
+
 func TestHeartbeatPingPong(t *testing.T) {
 	server, manager := newTestServer(t)
 	server.config.PingInterval = 20 * time.Millisecond

@@ -85,8 +85,13 @@ type ServerConfig struct {
 	// ReferenceAudio returns the most recent speaker playback for one device so
 	// echo cancellation can subtract it from that device's microphone signal.
 	// A nil provider or nil result means speaker output is silent.
-	ReferenceAudio  func(deviceID string) []int16
-	OnSessionClosed func(sessionID string, cause error)
+	ReferenceAudio func(deviceID string) []int16
+	// OnDeviceDisconnected releases per-device resources that must not outlive
+	// the connection, such as the retained speaker reference audio. It is
+	// called once per accepted connection after close, before the token is
+	// revoked. A nil value releases nothing.
+	OnDeviceDisconnected func(deviceID string)
+	OnSessionClosed      func(sessionID string, cause error)
 	// OnContinuityExpired reports the session identifier when the idle grace
 	// window elapses and the session resources are released.
 	OnContinuityExpired func(sessionID string)
@@ -261,6 +266,9 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 	defer cancel()
 	defer connection.Close()
 	defer func() {
+		if s.config.OnDeviceDisconnected != nil {
+			s.config.OnDeviceDisconnected(identity.DeviceID)
+		}
 		if s.config.TokenRevoker != nil {
 			s.config.TokenRevoker(identity)
 		}

@@ -253,6 +253,11 @@ func buildRealtimeTransport(
 		ReferenceAudio: func(deviceID string) []int16 {
 			return references.Latest(deviceID)
 		},
+		OnDeviceDisconnected: func(deviceID string) {
+			// Drop the retained speaker reference so raw playback PCM cannot
+			// outlive the connection it was captured for.
+			references.Clear(deviceID)
+		},
 		OnSessionClosed: func(sessionID string, cause error) {
 			runner.ClearSession(sessionID)
 		},

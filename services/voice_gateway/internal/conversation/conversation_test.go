@@ -156,6 +156,7 @@ func (denyAllPolicy) CheckText(string) content_policy.Decision {
 type fakeDevicePolicy struct {
 	allowedCategory   string
 	promptDenyReason  string
+	ageTier           string
 	categoryDecision  content_policy.Decision
 	lastCategory      string
 	lastDeviceID      string
@@ -172,7 +173,11 @@ func (p *fakeDevicePolicy) CheckDeviceCategory(
 	p.lastCategory = category
 	p.categoryCallCount++
 	if category == p.allowedCategory {
-		return content_policy.Decision{Allowed: true, Reason: content_policy.ReasonAllowed}
+		return content_policy.Decision{
+			Allowed: true,
+			Reason:  content_policy.ReasonAllowed,
+			AgeTier: p.ageTier,
+		}
 	}
 	if p.categoryDecision.Reason != "" {
 		return p.categoryDecision
@@ -180,6 +185,7 @@ func (p *fakeDevicePolicy) CheckDeviceCategory(
 	return content_policy.Decision{
 		Allowed: false,
 		Reason:  content_policy.ReasonCategoryNotAllowed,
+		AgeTier: p.ageTier,
 	}
 }
 
@@ -195,6 +201,7 @@ func (p *fakeDevicePolicy) ComposeSystemPrompt(
 	return basePrompt + "\n[constrained]", content_policy.Decision{
 		Allowed: true,
 		Reason:  content_policy.ReasonAllowed,
+		AgeTier: p.ageTier,
 	}
 }
 
@@ -248,6 +255,36 @@ func TestTurnForwardsDeviceAndSessionProvenance(t *testing.T) {
 	}
 	if llmClient.lastRequest.SessionID != "session_1" {
 		t.Fatalf("SessionID = %q, want session_1", llmClient.lastRequest.SessionID)
+	}
+}
+
+// The AI gateway child-policy middleware only runs for requests that carry a
+// policy version. The runner must forward the resolved child age tier as that
+// version, otherwise the age-band policy never engages on real voice traffic.
+func TestTurnForwardsResolvedAgeTierAsPolicyVersion(t *testing.T) {
+	config := testConfig()
+	llmClient := &fakeLLM{reply: "你好呀"}
+	config.LLM = llmClient
+	config.DevicePolicy = &fakeDevicePolicy{allowedCategory: "story", ageTier: "age_5_6"}
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := runner.TurnWithCategory(
+		context.Background(),
+		"session_1",
+		"device_alpha",
+		"story",
+		[]int16{1, 2, 3, 4},
+		&recordingSink{},
+	); err != nil {
+		t.Fatalf("TurnWithCategory() error = %v", err)
+	}
+	if llmClient.lastRequest.PolicyVersion != "age_5_6" {
+		t.Fatalf(
+			"PolicyVersion = %q, want the resolved age tier age_5_6",
+			llmClient.lastRequest.PolicyVersion,
+		)
 	}
 }
 

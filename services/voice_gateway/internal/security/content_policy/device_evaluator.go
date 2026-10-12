@@ -72,14 +72,29 @@ func (e *DeviceEvaluator) CheckDeviceCategory(
 		return Decision{Allowed: false, Reason: ReasonPolicyUnavailable}
 	}
 	if len(profile.AllowedCategories) == 0 {
-		return Decision{Allowed: false, Reason: ReasonCategoryNotAllowed, PolicyVersion: policyVersion(profile)}
+		return Decision{
+			Allowed:       false,
+			Reason:        ReasonCategoryNotAllowed,
+			PolicyVersion: policyVersion(profile),
+			AgeTier:       profile.AgeTier,
+		}
 	}
 	for _, allowed := range profile.AllowedCategories {
 		if allowed == category {
-			return Decision{Allowed: true, Reason: ReasonAllowed, PolicyVersion: policyVersion(profile)}
+			return Decision{
+				Allowed:       true,
+				Reason:        ReasonAllowed,
+				PolicyVersion: policyVersion(profile),
+				AgeTier:       profile.AgeTier,
+			}
 		}
 	}
-	return Decision{Allowed: false, Reason: ReasonCategoryNotAllowed, PolicyVersion: policyVersion(profile)}
+	return Decision{
+		Allowed:       false,
+		Reason:        ReasonCategoryNotAllowed,
+		PolicyVersion: policyVersion(profile),
+		AgeTier:       profile.AgeTier,
+	}
 }
 
 // ComposeSystemPrompt constrains a base prompt to the device's effective
@@ -106,7 +121,12 @@ func (e *DeviceEvaluator) ComposeSystemPrompt(
 		return basePrompt, Decision{Allowed: false, Reason: ReasonPolicyUnavailable}
 	}
 	if len(profile.AllowedCategories) == 0 {
-		return basePrompt, Decision{Allowed: false, Reason: ReasonCategoryNotAllowed, PolicyVersion: policyVersion(profile)}
+		return basePrompt, Decision{
+			Allowed:       false,
+			Reason:        ReasonCategoryNotAllowed,
+			PolicyVersion: policyVersion(profile),
+			AgeTier:       profile.AgeTier,
+		}
 	}
 
 	prompt := strings.TrimSpace(basePrompt)
@@ -123,7 +143,12 @@ func (e *DeviceEvaluator) ComposeSystemPrompt(
 		categories,
 		ageInstruction,
 	)
-	return prompt, Decision{Allowed: true, Reason: ReasonAllowed, PolicyVersion: policyVersion(profile)}
+	return prompt, Decision{
+		Allowed:       true,
+		Reason:        ReasonAllowed,
+		PolicyVersion: policyVersion(profile),
+		AgeTier:       profile.AgeTier,
+	}
 }
 
 // policyVersion renders the effective policy revision for audit records.

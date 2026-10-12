@@ -68,6 +68,11 @@ type Decision struct {
 	// that did not resolve a stored family policy. It is safe to audit because
 	// it is a monotonic revision number, not child data.
 	PolicyVersion string
+	// AgeTier is the resolved child age tier (for example "age_3_4") used to
+	// constrain the turn. It is set only on checks that resolved a stored
+	// family policy. It is a bounded, non-identifying vocabulary value, safe to
+	// forward to the AI gateway as its child-safety policy selector.
+	AgeTier string
 }
 
 // Policy checks input and output text.

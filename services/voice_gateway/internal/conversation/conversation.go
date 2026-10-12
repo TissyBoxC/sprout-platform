@@ -246,6 +246,13 @@ func (r *Runner) TurnWithCategory(
 	}
 
 	systemPrompt := r.config.SystemPrompt
+	// effectivePolicyVersion is the AI gateway child-safety selector for this
+	// turn. The gateway keys its age-band policy on this value, so the resolved
+	// child age tier is the correct selector: it is a bounded, non-identifying
+	// vocabulary value, whereas the platform's monotonic revision number would
+	// not map to a configured age band. It stays empty for text-only callers
+	// and turns that did not resolve a stored family policy.
+	effectivePolicyVersion := ""
 	if safetyExempt {
 		systemPrompt = safetySystemPrompt
 	} else if r.config.DevicePolicy != nil {
@@ -263,6 +270,7 @@ func (r *Runner) TurnWithCategory(
 			})
 			return fmt.Errorf("%w: %s", ErrContentBlocked, decision.Reason)
 		}
+		effectivePolicyVersion = decision.AgeTier
 		if strings.TrimSpace(category) != "" {
 			categoryDecision := r.config.DevicePolicy.CheckDeviceCategory(
 				ctx,
@@ -277,6 +285,9 @@ func (r *Runner) TurnWithCategory(
 					PolicyVersion: categoryDecision.PolicyVersion,
 				})
 				return fmt.Errorf("%w: %s", ErrContentBlocked, categoryDecision.Reason)
+			}
+			if categoryDecision.AgeTier != "" {
+				effectivePolicyVersion = categoryDecision.AgeTier
 			}
 		}
 		systemPrompt = composed
@@ -294,7 +305,14 @@ func (r *Runner) TurnWithCategory(
 		systemPrompt = guardResult.SystemPrompt
 	}
 
-	reply, outputDecision, err := r.reply(ctx, sessionID, deviceID, systemPrompt, text)
+	reply, outputDecision, err := r.reply(
+		ctx,
+		sessionID,
+		deviceID,
+		effectivePolicyVersion,
+		systemPrompt,
+		text,
+	)
 	if err != nil {
 		return err
 	}
@@ -351,15 +369,17 @@ func (r *Runner) reply(
 	ctx context.Context,
 	sessionID string,
 	deviceID string,
+	policyVersion string,
 	systemPrompt string,
 	text string,
 ) (string, moderation.Decision, error) {
 	messages := r.appendUserMessage(sessionID, systemPrompt, text)
 	stream, err := r.config.LLM.Chat(ctx, llm.Request{
-		Model:     r.config.Model,
-		Messages:  messages,
-		DeviceID:  deviceID,
-		SessionID: sessionID,
+		Model:         r.config.Model,
+		Messages:      messages,
+		DeviceID:      deviceID,
+		PolicyVersion: policyVersion,
+		SessionID:     sessionID,
 	})
 	if err != nil {
 		return "", moderation.Decision{}, observability.NewSafeError("对话服务暂不可用", err)

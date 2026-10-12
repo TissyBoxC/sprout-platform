@@ -74,6 +74,9 @@ func TestChatSendsSproutProvenanceHeaders(t *testing.T) {
 		if got := request.Header.Get("X-Sprout-Project"); got != "voice" {
 			t.Errorf("X-Sprout-Project = %q", got)
 		}
+		if got := request.Header.Get("X-Sprout-Policy-Version"); got != "age_5_6" {
+			t.Errorf("X-Sprout-Policy-Version = %q", got)
+		}
 		writer.Header().Set("Content-Type", "text/event-stream")
 		_, _ = writer.Write([]byte("data: [DONE]\n"))
 	}))
@@ -81,10 +84,11 @@ func TestChatSendsSproutProvenanceHeaders(t *testing.T) {
 
 	client := New(server.URL, "secret")
 	stream, err := client.Chat(context.Background(), llm.Request{
-		Model:     "sprout-chat",
-		Messages:  []llm.Message{{Role: "user", Content: "你好"}},
-		DeviceID:  "72453d1e-dce3-401a-96db-e96db54c9fd5",
-		SessionID: "session_1",
+		Model:         "sprout-chat",
+		Messages:      []llm.Message{{Role: "user", Content: "你好"}},
+		DeviceID:      "72453d1e-dce3-401a-96db-e96db54c9fd5",
+		PolicyVersion: "age_5_6",
+		SessionID:     "session_1",
 	})
 	if err != nil {
 		t.Fatalf("chat: %v", err)
@@ -103,6 +107,9 @@ func TestChatOmitsProvenanceWhenUnset(t *testing.T) {
 		}
 		if got := request.Header.Get("X-Sprout-Session-ID"); got != "" {
 			t.Errorf("X-Sprout-Session-ID = %q, want empty", got)
+		}
+		if got := request.Header.Get("X-Sprout-Policy-Version"); got != "" {
+			t.Errorf("X-Sprout-Policy-Version = %q, want empty", got)
 		}
 		writer.Header().Set("Content-Type", "text/event-stream")
 		_, _ = writer.Write([]byte("data: [DONE]\n"))

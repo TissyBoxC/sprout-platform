@@ -15,10 +15,14 @@ type Message struct {
 // AI gateway. They carry no personal data; SessionID is the gateway session
 // identifier, never recognized speech or model output.
 type Request struct {
-	Model     string
-	Messages  []Message
-	DeviceID  string
-	SessionID string
+	Model    string
+	Messages []Message
+	DeviceID string
+	// PolicyVersion is the effective family child-safety policy revision
+	// attached so the AI gateway can enforce age-appropriate model and
+	// parameter policy. It is a monotonic revision number, never child data.
+	PolicyVersion string
+	SessionID     string
 }
 
 // Stream emits model response chunks.

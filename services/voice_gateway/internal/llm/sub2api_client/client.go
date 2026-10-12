@@ -105,6 +105,12 @@ func (c *Client) Chat(ctx context.Context, request llm.Request) (llm.Stream, err
 	if sessionID := strings.TrimSpace(request.SessionID); sessionID != "" {
 		httpRequest.Header.Set("X-Sprout-Session-ID", sessionID)
 	}
+	// The effective child-safety policy revision lets the AI gateway enforce
+	// age-appropriate model and parameter policy for robot traffic. It is a
+	// monotonic revision number, never child data, prompt, or credentials.
+	if policyVersion := strings.TrimSpace(request.PolicyVersion); policyVersion != "" {
+		httpRequest.Header.Set("X-Sprout-Policy-Version", policyVersion)
+	}
 	httpRequest.Header.Set("X-Sprout-Project", "voice")
 
 	httpClient := c.HTTPClient

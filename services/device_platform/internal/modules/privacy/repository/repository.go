@@ -533,6 +533,22 @@ func (r *PostgresRepository) PurgeParentData(
 				label: "device video status",
 			},
 			{
+				query: `DELETE FROM device_video_session_status WHERE device_id = ANY($1)`,
+				label: "device video session status",
+			},
+			{
+				query: `DELETE FROM device_bluetooth_audio_status WHERE device_id = ANY($1)`,
+				label: "device Bluetooth audio status",
+			},
+			{
+				query: `DELETE FROM device_learning_visualization_status WHERE device_id = ANY($1)`,
+				label: "device learning visualization status",
+			},
+			{
+				query: `DELETE FROM device_image_privacy_status WHERE device_id = ANY($1)`,
+				label: "device image privacy status",
+			},
+			{
 				query: `DELETE FROM display_device_status WHERE device_id = ANY($1)`,
 				label: "display device status",
 			},
@@ -631,6 +647,10 @@ func (r *PostgresRepository) PurgeParentData(
 		{`DELETE FROM content_sync_states WHERE family_id = $1`, "content sync states"},
 		{`DELETE FROM video_calls WHERE family_id = $1`, "video calls"},
 		{`DELETE FROM video_contacts WHERE family_id = $1`, "video contacts"},
+		{`DELETE FROM video_session_policies WHERE family_id = $1`, "video session policies"},
+		{`DELETE FROM bluetooth_audio_policies WHERE family_id = $1`, "Bluetooth audio policies"},
+		{`DELETE FROM learning_visualization_policies WHERE family_id = $1`, "learning visualization policies"},
+		{`DELETE FROM image_privacy_policies WHERE family_id = $1`, "image privacy policies"},
 		{`DELETE FROM wearable_sos_events WHERE family_id = $1`, "wearable SOS events"},
 		{`DELETE FROM wearable_device_status WHERE family_id = $1`, "wearable device status"},
 		{`DELETE FROM wearable_geofences WHERE family_id = $1`, "wearable geofences"},

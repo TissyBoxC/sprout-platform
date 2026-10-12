@@ -156,3 +156,36 @@ func TestComposeSystemPromptFailsClosedOnResolverError(t *testing.T) {
 		t.Fatalf("decision = %+v, want fail-closed unavailable reason", decision)
 	}
 }
+
+// Cached profiles must be evicted once their TTL passes, otherwise a
+// long-running gateway accumulates one entry for every device it has ever
+// served.
+func TestDeviceEvaluatorPrunesExpiredProfileCache(t *testing.T) {
+	resolver := &fakeResolver{profile: Profile{
+		AgeTier:           "age_3_4",
+		AllowedCategories: []string{"story"},
+	}}
+	evaluator := NewDeviceEvaluator(resolver, time.Minute)
+	now := time.Now().UTC()
+	evaluator.now = func() time.Time { return now }
+
+	for _, device := range []string{"device_a", "device_b", "device_c"} {
+		if decision := evaluator.CheckDeviceCategory(context.Background(), device, "story"); !decision.Allowed {
+			t.Fatalf("device %s decision = %+v, want allowed", device, decision)
+		}
+	}
+
+	// Advance past the TTL, then resolve one device so the write path prunes.
+	now = now.Add(2 * time.Minute)
+	if decision := evaluator.CheckDeviceCategory(context.Background(), "device_a", "story"); !decision.Allowed {
+		t.Fatalf("decision after expiry = %+v, want allowed", decision)
+	}
+
+	evaluator.mutex.Lock()
+	cached := len(evaluator.entries)
+	_, retained := evaluator.entries["device_b"]
+	evaluator.mutex.Unlock()
+	if cached != 1 || retained {
+		t.Fatalf("cache size = %d (device_b present=%v), want only the refreshed device", cached, retained)
+	}
+}

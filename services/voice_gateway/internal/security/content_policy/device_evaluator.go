@@ -162,6 +162,14 @@ func (e *DeviceEvaluator) profileForDevice(
 		return Profile{}, err
 	}
 	e.mutex.Lock()
+	// Opportunistically drop expired entries on each successful write so the
+	// cache stays bounded by the devices active within one TTL window instead
+	// of accumulating one entry per device the process has ever seen.
+	for key, cached := range e.entries {
+		if !now.Before(cached.expiresAt) {
+			delete(e.entries, key)
+		}
+	}
 	e.entries[deviceID] = cachedProfile{
 		profile:   profile,
 		expiresAt: now.Add(e.ttl),

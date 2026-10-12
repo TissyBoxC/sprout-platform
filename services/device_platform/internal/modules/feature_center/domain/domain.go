@@ -72,6 +72,7 @@ const (
 	ConfigFieldSecret      ConfigFieldType = "secret"
 	ConfigFieldDuration    ConfigFieldType = "duration"
 	ConfigFieldURL         ConfigFieldType = "url"
+	ConfigFieldVersion     ConfigFieldType = "version"
 	ConfigFieldObject      ConfigFieldType = "object"
 )
 

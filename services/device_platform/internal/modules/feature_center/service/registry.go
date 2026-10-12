@@ -62,8 +62,8 @@ func DefaultRegistry() []Definition {
 					{Value: "beta", Label: "测试版"},
 					{Value: "canary", Label: "灰度版"},
 				}, true),
-				stringField("minimum_client_version", "最低客户端版本", "", true),
-				stringField("mandatory_update_threshold", "强制更新线", "", true),
+				versionField("minimum_client_version", "最低客户端版本", "", true),
+				versionField("mandatory_update_threshold", "强制更新线", "", true),
 			),
 			metrics("app_release_count", "已发布应用版本", "个")),
 		featureDef("download_server", "下载服务", "内容、更新和应用文件的分发。", "release", "发布平台", false,
@@ -445,6 +445,17 @@ func boolField(key string, label string, value bool, editable bool) domain.Confi
 
 func stringField(key string, label string, value string, editable bool) domain.ConfigField {
 	return baseField(key, label, domain.ConfigFieldString, value, editable)
+}
+
+func versionField(
+	key string,
+	label string,
+	value string,
+	editable bool,
+) domain.ConfigField {
+	field := baseField(key, label, domain.ConfigFieldVersion, value, editable)
+	field.Help = "使用三段式版本号，例如 1.2.3"
+	return field
 }
 
 func integerField(

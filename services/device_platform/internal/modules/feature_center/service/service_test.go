@@ -163,6 +163,17 @@ func newTestService(t *testing.T) (*Service, *memoryRepository) {
 	return service, repository
 }
 
+func registeredDefinition(t *testing.T, featureID string) Definition {
+	t.Helper()
+	for _, definition := range DefaultRegistry() {
+		if definition.Feature.ID == featureID {
+			return definition
+		}
+	}
+	t.Fatalf("registered feature %q not found", featureID)
+	return Definition{}
+}
+
 func TestUpdateConfigValidatesAndPersistsValues(t *testing.T) {
 	service, _ := newTestService(t)
 	feature, err := service.UpdateConfig(
@@ -225,6 +236,56 @@ func TestUpdateConfigRejectsInvalidValuesBySchema(t *testing.T) {
 	var validation *domain.ConfigValidationError
 	if !errors.As(err, &validation) {
 		t.Fatalf("expected validation error, got %v", err)
+	}
+}
+
+func TestUpdateConfigRejectsInvalidAppVersion(t *testing.T) {
+	service, err := New(Options{
+		Repository:  newMemoryRepository(),
+		Definitions: []Definition{registeredDefinition(t, "app_update")},
+		Clock:       fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create feature center service: %v", err)
+	}
+	_, err = service.UpdateConfig(
+		context.Background(),
+		"app_update",
+		map[string]any{"minimum_client_version": "latest"},
+		"admin-001",
+		0,
+	)
+	var validation *domain.ConfigValidationError
+	if !errors.As(err, &validation) ||
+		!errors.Is(validation.Err, domain.ErrInvalidConfig) {
+		t.Fatalf("expected invalid version error, got %v", err)
+	}
+}
+
+func TestUpdateConfigAcceptsSemanticAppVersion(t *testing.T) {
+	service, err := New(Options{
+		Repository:  newMemoryRepository(),
+		Definitions: []Definition{registeredDefinition(t, "app_update")},
+		Clock:       fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create feature center service: %v", err)
+	}
+	feature, err := service.UpdateConfig(
+		context.Background(),
+		"app_update",
+		map[string]any{"minimum_client_version": "1.2.3"},
+		"admin-001",
+		0,
+	)
+	if err != nil {
+		t.Fatalf("update app version: %v", err)
+	}
+	if feature.Values["minimum_client_version"] != "1.2.3" {
+		t.Fatalf(
+			"minimum_client_version = %#v, want 1.2.3",
+			feature.Values["minimum_client_version"],
+		)
 	}
 }
 

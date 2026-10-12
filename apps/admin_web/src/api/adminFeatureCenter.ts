@@ -18,6 +18,7 @@ export type FeatureConfigFieldType =
   | 'multiselect'
   | 'duration'
   | 'url'
+  | 'version'
   | 'secret'
 
 export type FeatureConfigValue = boolean | number | string | string[] | null
@@ -585,6 +586,9 @@ function configFieldType(
   if (format === 'uri' || format === 'url' || explicit === 'url') {
     return 'url'
   }
+  if (format === 'version' || explicit === 'version') {
+    return 'version'
+  }
   return 'string'
 }
 
@@ -653,6 +657,7 @@ function normalizeConfigValue(
     case 'string':
     case 'duration':
     case 'url':
+    case 'version':
       return typeof value === 'string' || typeof value === 'number'
         ? String(value)
         : field.defaultValue === null

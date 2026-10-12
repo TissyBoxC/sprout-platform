@@ -12,7 +12,10 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 )
 
-var durationPattern = regexp.MustCompile(`^[1-9][0-9]*(ms|s|m|h|d)$`)
+var (
+	durationPattern = regexp.MustCompile(`^[1-9][0-9]*(ms|s|m|h|d)$`)
+	versionPattern  = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
+)
 
 func validateObject(
 	fields []domain.ConfigField,
@@ -166,6 +169,14 @@ func validateValue(field domain.ConfigField, value any) error {
 		}
 		parsed, err := url.ParseRequestURI(text)
 		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return domain.ErrInvalidConfig
+		}
+	case domain.ConfigFieldVersion:
+		text, ok := value.(string)
+		if ok && strings.TrimSpace(text) == "" {
+			return nil
+		}
+		if !ok || !versionPattern.MatchString(text) {
 			return domain.ErrInvalidConfig
 		}
 	default:

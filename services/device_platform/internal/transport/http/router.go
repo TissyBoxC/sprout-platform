@@ -339,6 +339,10 @@ func NewRouter(options RouterOptions) http.Handler {
 					"POST /api/v1/devices/{device_id}/english/attempts",
 					deviceEnglishHandler.recordAttempt,
 				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/english/lessons",
+					deviceEnglishHandler.listLessons,
+				)
 			}
 		}
 		if options.PlaybackService != nil {

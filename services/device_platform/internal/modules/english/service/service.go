@@ -73,6 +73,29 @@ func (s *Service) GetLesson(
 	return s.repository.GetLesson(ctx, normalized)
 }
 
+// LessonCatalog returns the published catalogue with each lesson's ordered
+// words and sentences so a device can cache the full teaching content in one
+// read. It hydrates from the summary list plus the per-lesson loader rather
+// than adding a second repository query shape.
+func (s *Service) LessonCatalog(
+	ctx context.Context,
+	ageTier string,
+) ([]domain.Lesson, error) {
+	summaries, err := s.ListLessons(ctx, ageTier)
+	if err != nil {
+		return nil, err
+	}
+	catalog := make([]domain.Lesson, 0, len(summaries))
+	for index := range summaries {
+		lesson, err := s.GetLesson(ctx, summaries[index].LessonID)
+		if err != nil {
+			return nil, err
+		}
+		catalog = append(catalog, *lesson)
+	}
+	return catalog, nil
+}
+
 // RecordAttempt validates and stores one practice attempt, deriving Passed
 // from the reported score so a client cannot claim an unearned pass.
 func (s *Service) RecordAttempt(

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
 	englishdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/domain"
 	englishservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/service"
 )
@@ -19,6 +18,7 @@ import (
 type englishService interface {
 	ListLessons(ctx context.Context, ageTier string) ([]englishdomain.Lesson, error)
 	GetLesson(ctx context.Context, lessonID string) (*englishdomain.Lesson, error)
+	LessonCatalog(ctx context.Context, ageTier string) ([]englishdomain.Lesson, error)
 	RecordAttempt(
 		ctx context.Context,
 		familyID string,
@@ -42,6 +42,17 @@ type englishSessionResolver interface {
 	VerifyDeviceSession(ctx context.Context, deviceSessionToken string) (string, error)
 }
 
+// englishRuntimeResolver resolves the family that owns a verified device
+// session. The narrow interface keeps the HTTP handler independent of the
+// runtime module and lets tests substitute a small fake.
+type englishRuntimeResolver interface {
+	ResolveDeviceFamily(
+		ctx context.Context,
+		deviceSessionToken string,
+		pathDeviceID string,
+	) (string, error)
+}
+
 type englishHandler struct {
 	service englishService
 }
@@ -51,7 +62,7 @@ type englishHandler struct {
 type deviceEnglishHandler struct {
 	englishHandler *englishHandler
 	bindingService englishSessionResolver
-	runtimeService *runtimeservice.Service
+	runtimeService englishRuntimeResolver
 }
 
 type practiceAttemptRequest struct {
@@ -205,6 +216,34 @@ func (handler deviceEnglishHandler) recordAttempt(
 	}
 	writeSuccess(response, request, http.StatusCreated, map[string]any{
 		"attempt": attemptResponse(attempt),
+	})
+}
+
+// listLessons returns the published English lesson catalogue for the path
+// device so the firmware can cache it and run the learning flow offline. The
+// catalogue is global published content, but the device session is still
+// verified so the manifest never leaks to an unauthenticated caller.
+func (handler deviceEnglishHandler) listLessons(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	if _, ok := handler.verifyDeviceFamily(response, request); !ok {
+		return
+	}
+	lessons, err := handler.englishHandler.service.LessonCatalog(
+		request.Context(),
+		strings.TrimSpace(request.URL.Query().Get("age_tier")),
+	)
+	if err != nil {
+		writeEnglishError(response, request, err)
+		return
+	}
+	result := make([]map[string]any, 0, len(lessons))
+	for index := range lessons {
+		result = append(result, lessonDetailResponse(&lessons[index]))
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"lessons": result,
 	})
 }
 

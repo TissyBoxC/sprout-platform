@@ -16,8 +16,9 @@ import (
 // englishTestRepository is an in-memory double so the handler tests exercise
 // the real service validation without a database.
 type englishTestRepository struct {
-	lessons  map[string]*englishdomain.Lesson
-	attempts []englishdomain.PracticeAttempt
+	lessons                map[string]*englishdomain.Lesson
+	attempts               []englishdomain.PracticeAttempt
+	omitContentOnListQuery bool
 }
 
 func newEnglishTestRepository() *englishTestRepository {
@@ -36,7 +37,12 @@ func (r *englishTestRepository) ListLessons(
 		if ageTier != "" && lesson.AgeTier != ageTier {
 			continue
 		}
-		result = append(result, *lesson)
+		lessonCopy := *lesson
+		if r.omitContentOnListQuery {
+			lessonCopy.Words = nil
+			lessonCopy.Sentence = nil
+		}
+		result = append(result, lessonCopy)
 	}
 	return result, nil
 }
@@ -96,6 +102,37 @@ func newEnglishHandlerForTest(t *testing.T) (englishHandler, *englishTestReposit
 		t.Fatalf("create english service: %v", err)
 	}
 	return englishHandler{service: service}, repository
+}
+
+type englishTestBindingService struct {
+	sessionDeviceID string
+	err             error
+}
+
+func (service englishTestBindingService) VerifyDeviceSession(
+	_ context.Context,
+	_ string,
+) (string, error) {
+	if service.err != nil {
+		return "", service.err
+	}
+	return service.sessionDeviceID, nil
+}
+
+type englishTestRuntimeService struct {
+	familyID string
+	err      error
+}
+
+func (service englishTestRuntimeService) ResolveDeviceFamily(
+	_ context.Context,
+	_ string,
+	_ string,
+) (string, error) {
+	if service.err != nil {
+		return "", service.err
+	}
+	return service.familyID, nil
 }
 
 type englishTestClock struct{}
@@ -227,6 +264,93 @@ func TestEnglishGetLessonNotFound(t *testing.T) {
 	handler.getLesson(recorder, request)
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
+	}
+}
+
+func TestDeviceEnglishLessonCatalogReturnsFullContent(t *testing.T) {
+	handler, repository := newEnglishHandlerForTest(t)
+	repository.omitContentOnListQuery = true
+	repository.lessons["lesson_fruit"] = &englishdomain.Lesson{
+		LessonID: "lesson_fruit",
+		AgeTier:  englishdomain.AgeTier3To4,
+		Title:    "水果",
+		Status:   englishdomain.LessonStatusPublished,
+		Words: []englishdomain.Word{
+			{ID: "word-apple", Position: 1, Term: "apple", Translation: "苹果"},
+		},
+		Sentence: []englishdomain.Sentence{
+			{
+				ID:          "sent-like",
+				Position:    1,
+				Pattern:     "I like ___.  ",
+				Prompt:      "说一句你喜欢的水果",
+				ModelAnswer: "I like apples.",
+			},
+		},
+	}
+	deviceHandler := deviceEnglishHandler{
+		englishHandler: &handler,
+		bindingService: englishTestBindingService{
+			sessionDeviceID: "sprout_device_001",
+		},
+		runtimeService: englishTestRuntimeService{familyID: "family-001"},
+	}
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/devices/sprout_device_001/english/lessons?age_tier=age_3_4",
+		nil,
+	)
+	request.SetPathValue("device_id", "sprout_device_001")
+	request.Header.Set("Authorization", "Bearer device-session-token")
+	recorder := httptest.NewRecorder()
+	deviceHandler.listLessons(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s",
+			recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Lessons []struct {
+				LessonID  string           `json:"lesson_id"`
+				Words     []map[string]any `json:"words"`
+				Sentences []map[string]any `json:"sentences"`
+			} `json:"lessons"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(envelope.Data.Lessons) != 1 ||
+		envelope.Data.Lessons[0].LessonID != "lesson_fruit" {
+		t.Fatalf("unexpected lesson catalog: %s", recorder.Body.String())
+	}
+	if len(envelope.Data.Lessons[0].Words) != 1 ||
+		len(envelope.Data.Lessons[0].Sentences) != 1 {
+		t.Fatalf("catalog did not include full lesson content: %s", recorder.Body.String())
+	}
+}
+
+func TestDeviceEnglishLessonCatalogRejectsSessionDeviceMismatch(t *testing.T) {
+	handler, _ := newEnglishHandlerForTest(t)
+	deviceHandler := deviceEnglishHandler{
+		englishHandler: &handler,
+		bindingService: englishTestBindingService{
+			sessionDeviceID: "sprout_device_other",
+		},
+		runtimeService: englishTestRuntimeService{familyID: "family-001"},
+	}
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/devices/sprout_device_001/english/lessons",
+		nil,
+	)
+	request.SetPathValue("device_id", "sprout_device_001")
+	request.Header.Set("Authorization", "Bearer device-session-token")
+	recorder := httptest.NewRecorder()
+	deviceHandler.listLessons(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d: %s",
+			recorder.Code, http.StatusUnauthorized, recorder.Body.String())
 	}
 }
 

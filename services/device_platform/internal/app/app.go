@@ -426,6 +426,10 @@ func Run() error {
 			databaseStore.Pool(),
 			"SELECT 1 FROM english_lessons LIMIT 1",
 		),
+		"alarm_reminder": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM alarm_reminders LIMIT 1",
+		),
 		"companionship": nonzeroRowProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM companionship_growth_records LIMIT 1",

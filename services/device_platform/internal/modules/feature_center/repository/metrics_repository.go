@@ -256,15 +256,24 @@ func (r *MetricsRepository) FeatureMetrics(
 			"english_course_count",
 			"english_practice_count",
 		)
-	case "companionship":
+	case "alarm_reminder":
 		return r.triad(ctx,
 			`SELECT
+				(SELECT COUNT(*) FROM alarm_reminders),
+				(SELECT COUNT(*) FROM alarm_reminders WHERE enabled = true),
+				(SELECT COUNT(*) FROM alarm_reminder_events
+				 WHERE reported_at >= NOW() - INTERVAL '7 days')`,
+			"alarm_reminder_count",
+			"alarm_reminder_enabled_count",
+			"alarm_reminder_event_count",
+		)
+	case "companionship":
+		return r.pair(ctx,
+			`SELECT
 				(SELECT COUNT(*) FROM companionship_growth_records),
-				(SELECT COUNT(*) FROM companionship_habit_reminders),
-				(SELECT COUNT(*) FROM alarm_reminders)`,
+				(SELECT COUNT(*) FROM companionship_habit_reminders)`,
 			"companionship_record_count",
 			"habit_reminder_count",
-			"alarm_reminder_count",
 		)
 	case "local_command":
 		return r.scalar(ctx,

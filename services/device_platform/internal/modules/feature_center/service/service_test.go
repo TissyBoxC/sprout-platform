@@ -317,6 +317,7 @@ func TestDefaultRegistryCoversRequiredFeatures(t *testing.T) {
 		"learning_visualization",
 		"image_privacy",
 		"english_learning",
+		"alarm_reminder",
 		"companionship",
 		"local_command",
 		"offline_content",

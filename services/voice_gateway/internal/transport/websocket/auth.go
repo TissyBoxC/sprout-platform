@@ -3,6 +3,7 @@ package websocket
 import (
 	"net/http"
 	"strings"
+	"time"
 )
 
 const (
@@ -15,6 +16,10 @@ const (
 type DeviceIdentity struct {
 	DeviceID string
 	TokenID  string
+	// ExpiresAt is the exact expiry carried in the signed token. It lets the
+	// disconnect path revoke the token and later prune that revocation once
+	// the token would have expired anyway. It is zero when unknown.
+	ExpiresAt time.Time
 }
 
 // TokenVerifier validates one short-lived device token.

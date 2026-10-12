@@ -138,6 +138,63 @@ func TestRevokedDeviceTokenExpiresFromRevocationSet(t *testing.T) {
 	}
 }
 
+// The revocation set must shrink once the revoked token's own signed expiry has
+// passed, otherwise a long-running gateway leaks one entry per closed session.
+func TestRevokedDeviceTokenIsPrunedAfterExpiry(t *testing.T) {
+	now := time.Now().UTC()
+	verifier, err := NewHMACDeviceTokenVerifier(testTokenSecret, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewHMACDeviceTokenVerifier() error = %v", err)
+	}
+	token, err := verifier.IssueDeviceToken("device_a", "token_prune", time.Minute)
+	if err != nil {
+		t.Fatalf("IssueDeviceToken() error = %v", err)
+	}
+	identity, err := verifier.VerifyDeviceToken(token)
+	if err != nil {
+		t.Fatalf("VerifyDeviceToken() error = %v", err)
+	}
+	verifier.RevokeIdentity(identity)
+	if got := verifier.revokedCount(); got != 1 {
+		t.Fatalf("revokedCount() = %d, want 1 after revocation", got)
+	}
+
+	// Still within the signed validity window (plus leeway): the entry stays.
+	now = now.Add(30 * time.Second)
+	if got := verifier.revokedCount(); got != 1 {
+		t.Fatalf("revokedCount() = %d, want 1 before expiry", got)
+	}
+
+	// Past expiry plus leeway: the set must be pruned back to empty.
+	now = now.Add(2 * time.Minute)
+	if got := verifier.revokedCount(); got != 0 {
+		t.Fatalf("revokedCount() = %d, want 0 after expiry", got)
+	}
+}
+
+// Revoking the same identifier twice must not grow the set, and a later
+// RevokeTokenUntil with a real expiry must supersede an unknown-expiry entry.
+func TestRevokeTokenUntilSupersedesUnknownExpiry(t *testing.T) {
+	now := time.Now().UTC()
+	verifier, err := NewHMACDeviceTokenVerifier(testTokenSecret, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewHMACDeviceTokenVerifier() error = %v", err)
+	}
+	verifier.RevokeToken("token_upgrade")
+	verifier.RevokeToken("token_upgrade")
+	if got := verifier.revokedCount(); got != 1 {
+		t.Fatalf("revokedCount() = %d, want 1 after duplicate revocation", got)
+	}
+
+	// An unknown-expiry entry is retained forever, so upgrading it with a real
+	// expiry lets pruning reclaim it later.
+	verifier.RevokeTokenUntil("token_upgrade", now.Add(time.Minute))
+	now = now.Add(2 * time.Minute)
+	if got := verifier.revokedCount(); got != 0 {
+		t.Fatalf("revokedCount() = %d, want 0 after upgraded expiry passed", got)
+	}
+}
+
 func TestVerifyDeviceTokenRejectsMissingTokenID(t *testing.T) {
 	verifier, err := NewHMACDeviceTokenVerifier(testTokenSecret, nil)
 	if err != nil {

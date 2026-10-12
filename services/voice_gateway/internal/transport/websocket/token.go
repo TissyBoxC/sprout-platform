@@ -27,8 +27,12 @@ type HMACDeviceTokenVerifier struct {
 	// leeway tolerates small clock differences between the platform issuer and
 	// the gateway without widening the accepted validity window materially.
 	leeway time.Duration
-	// revoked maps token identifiers to their expiry so a closed conversation
-	// cannot be replayed before the signed token would have expired anyway.
+	// revoked maps token identifiers to their signed expiry so a closed
+	// conversation cannot be replayed before the signed token would have
+	// expired anyway. Entries are pruned once their own expiry (plus leeway)
+	// has passed so the set stays bounded by the number of live tokens. A
+	// zero expiry means "unknown" and is retained, which happens only for
+	// tokens revoked without a parsed payload.
 	//
 	// This is process-local state. A deployment with more than one gateway
 	// replica must move revocation to shared state, such as Redis or the
@@ -87,20 +91,36 @@ func (v *HMACDeviceTokenVerifier) VerifyDeviceToken(token string) (DeviceIdentit
 	if err != nil {
 		return DeviceIdentity{}, err
 	}
-	if v.isRevoked(payload.TokenID, payload.ExpiresAt) {
+	if v.isRevoked(payload.TokenID) {
 		return DeviceIdentity{}, &AuthError{Reason: "device token has been revoked"}
 	}
-	return DeviceIdentity{DeviceID: payload.DeviceID, TokenID: payload.TokenID}, nil
+	return DeviceIdentity{
+		DeviceID:  payload.DeviceID,
+		TokenID:   payload.TokenID,
+		ExpiresAt: time.Unix(payload.ExpiresAt, 0).UTC(),
+	}, nil
 }
 
-// RevokeToken invalidates one issued token in this verifier until its signed
-// expiry. An empty identifier is rejected earlier during verification, so
-// every accepted connection can be revoked at disconnect.
+// RevokeToken invalidates one issued token in this verifier without a known
+// expiry. The entry is retained for the process lifetime, so prefer
+// RevokeTokenUntil when the signed expiry is available. An empty identifier is
+// ignored; verification already rejects empty identifiers.
 //
 // The revocation set is process-local. Single-replica deployments get full
 // disconnect revocation; multi-replica deployments need shared revocation
 // state before this guarantee holds across instances.
 func (v *HMACDeviceTokenVerifier) RevokeToken(tokenID string) {
+	v.revoke(tokenID, time.Time{})
+}
+
+// RevokeTokenUntil invalidates one issued token until the given expiry. The
+// entry is pruned automatically once expiry (plus leeway) has passed, keeping
+// the revocation set bounded by the number of live tokens.
+func (v *HMACDeviceTokenVerifier) RevokeTokenUntil(tokenID string, expiresAt time.Time) {
+	v.revoke(tokenID, expiresAt)
+}
+
+func (v *HMACDeviceTokenVerifier) revoke(tokenID string, expiresAt time.Time) {
 	if v == nil {
 		return
 	}
@@ -108,36 +128,57 @@ func (v *HMACDeviceTokenVerifier) RevokeToken(tokenID string) {
 	if tokenID == "" {
 		return
 	}
+	expiresAt = expiresAt.UTC()
 	v.revokedMutex.Lock()
 	defer v.revokedMutex.Unlock()
-	v.revoked[tokenID] = time.Unix(0, 0)
+	if existing, ok := v.revoked[tokenID]; !ok || expiresAt.After(existing) {
+		v.revoked[tokenID] = expiresAt
+	}
 }
 
 // RevokeIdentity invalidates the token identity bound to one authenticated
-// WebSocket connection. It is called from the connection cleanup path.
+// WebSocket connection. It is called from the connection cleanup path and uses
+// the token's signed expiry so the revocation entry can be pruned later.
 func (v *HMACDeviceTokenVerifier) RevokeIdentity(identity DeviceIdentity) {
 	if v == nil {
 		return
 	}
-	v.RevokeToken(identity.TokenID)
+	v.revoke(identity.TokenID, identity.ExpiresAt)
 }
 
-func (v *HMACDeviceTokenVerifier) isRevoked(tokenID string, expiresAt int64) bool {
+func (v *HMACDeviceTokenVerifier) isRevoked(tokenID string) bool {
 	tokenID = strings.TrimSpace(tokenID)
 	if tokenID == "" {
 		return false
 	}
-	now := v.now().UTC()
 	v.revokedMutex.Lock()
 	defer v.revokedMutex.Unlock()
-	for identifier, revokedAt := range v.revoked {
-		expiry := time.Unix(expiresAt, 0)
-		if now.After(expiry.Add(v.leeway)) || (!revokedAt.IsZero() && now.After(expiry.Add(v.leeway))) {
+	v.pruneLocked(v.now().UTC())
+	_, revoked := v.revoked[tokenID]
+	return revoked
+}
+
+// pruneLocked drops revocations whose token has expired (its own signed expiry
+// plus leeway) so the set stays bounded by the number of live tokens. Unknown
+// expiries are retained. The caller must hold revokedMutex.
+func (v *HMACDeviceTokenVerifier) pruneLocked(now time.Time) {
+	for identifier, expiry := range v.revoked {
+		if !expiry.IsZero() && now.After(expiry.Add(v.leeway)) {
 			delete(v.revoked, identifier)
 		}
 	}
-	_, revoked := v.revoked[tokenID]
-	return revoked
+}
+
+// revokedCount reports the number of retained revocation entries after
+// pruning. It exists so tests can assert the set is pruned and stays bounded.
+func (v *HMACDeviceTokenVerifier) revokedCount() int {
+	if v == nil {
+		return 0
+	}
+	v.revokedMutex.Lock()
+	defer v.revokedMutex.Unlock()
+	v.pruneLocked(v.now().UTC())
+	return len(v.revoked)
 }
 
 // IssueDeviceToken signs a short-lived token for a device. The platform's

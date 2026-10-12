@@ -115,5 +115,9 @@ func decodeSafetyPolicy(raw []byte) (SafetyPolicy, error) {
 	// Crisis handling is a non-negotiable child-safety guarantee. The stored
 	// value is reported for visibility, but the effective policy is always on.
 	document.Safety.CrisisInterventionEnabled = true
+	// Minor mode is the same kind of platform invariant: every new account
+	// starts on the protected path, so a stale or tampered settings document
+	// must not be able to turn the default off.
+	document.Safety.MinorModeDefault = true
 	return document.Safety, nil
 }

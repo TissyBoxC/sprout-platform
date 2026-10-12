@@ -186,16 +186,13 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
           <p>所有选项默认采用保护儿童安全的严格策略。</p>
         </div>
         <div class="toggle-list">
-          <label class="toggle-row">
+          <div class="toggle-row readonly-row">
             <span>
               <strong>新账号默认开启未成年人模式</strong>
-              <small>家长可以在自己的账号中调整可用范围。</small>
+              <small>平台安全基线固定启用；家长仍可在自己的账号中调整可用范围。</small>
             </span>
-            <input
-              v-model="store.settings.minorModeDefaultEnabled"
-              type="checkbox"
-            />
-          </label>
+            <span class="readonly-value">固定开启</span>
+          </div>
           <label class="toggle-row">
             <span>
               <strong>回复发送前进行内容审核</strong>

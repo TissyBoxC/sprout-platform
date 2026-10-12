@@ -220,6 +220,32 @@ func TestUpdateSettingsRejectsOutOfRangeVoiceIdleWindow(t *testing.T) {
 	}
 }
 
+// Minor mode is a platform safety invariant, not an operator preference. A
+// request that tries to turn it off must be persisted as enabled so the
+// console can never display a disabled protection that is actually mandatory.
+func TestUpdateSettingsForcesMinorModeDefaultOn(t *testing.T) {
+	repository := &fakeSettingsRepository{currentVersion: 3}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	settings := validSettings()
+	settings.Safety.MinorModeDefault = false
+
+	saved, _, err := service.UpdateSettings(
+		context.Background(),
+		settings,
+		"actor-id",
+		3,
+	)
+	if err != nil {
+		t.Fatalf("update settings: %v", err)
+	}
+	if !saved.Safety.MinorModeDefault {
+		t.Fatal("minor mode default was persisted as disabled")
+	}
+}
+
 // A client that does not pin a channel must be served the operator-configured
 // default channel, not an unconditional "stable" fallback that ignores the
 // console setting.

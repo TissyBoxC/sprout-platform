@@ -325,7 +325,9 @@ function toPayload(settings: SystemSettings): Record<string, unknown> {
       email_login_enabled: settings.emailLoginEnabled,
     },
     safety: {
-      minor_mode_default: settings.minorModeDefaultEnabled,
+      // 平台不变量：后端会强制写回 true。前端固定发送 true，避免旧页面
+      // 或手工请求把未成年人模式伪装成可关闭的运营开关。
+      minor_mode_default: true,
       output_moderation_enabled: settings.outputModerationEnabled,
       crisis_intervention_enabled: settings.crisisInterventionEnabled,
       // P0 约束要求儿童音视频默认不上传。开启前必须实现逐项监护人授权流程。

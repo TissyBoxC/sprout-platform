@@ -20,7 +20,23 @@ func TestSafetyPolicyAlwaysEnablesCrisisIntervention(t *testing.T) {
 		t.Fatal("crisis intervention = false, want the mandatory true value")
 	}
 	if !policy.MinorModeDefault {
-		t.Fatal("minor mode default = false, want the stored true value")
+		t.Fatal("minor mode default = false, want the enforced true value")
+	}
+}
+
+func TestSafetyPolicyAlwaysEnablesMinorMode(t *testing.T) {
+	policy, err := decodeSafetyPolicy([]byte(`{
+		"safety": {
+			"minor_mode_default": false,
+			"output_moderation_enabled": true,
+			"crisis_intervention_enabled": false
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("decodeSafetyPolicy() error = %v", err)
+	}
+	if !policy.MinorModeDefault {
+		t.Fatal("minor mode default = false, want the enforced true value")
 	}
 }
 

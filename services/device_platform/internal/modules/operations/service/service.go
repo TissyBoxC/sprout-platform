@@ -389,6 +389,11 @@ func (s *Service) DeleteRelease(
 }
 
 func validateSettings(settings *domain.Settings) error {
+	// Minor mode is the platform's baseline child-safety contract: every
+	// account, child profile, and device starts from the protected path. The
+	// stored value stays visible for audit, but an API caller must not be able
+	// to disable it through a settings update.
+	settings.Safety.MinorModeDefault = true
 	if settings.AI.DefaultBalanceUSD < 0 ||
 		settings.AI.DefaultConcurrency < 1 ||
 		settings.AI.DefaultConcurrency > 100 {

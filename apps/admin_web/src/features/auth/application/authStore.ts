@@ -11,6 +11,7 @@ export interface AdminAccount {
   email: string
   displayName: string
   role: string
+  permissions: string[]
 }
 
 /// Owns administrator login, session restoration, and logout.
@@ -24,6 +25,9 @@ export const useAuthStore = defineStore('admin-auth', () => {
 
   const isSignedIn = computed(() => account.value !== null)
   const isMFARequired = computed(() => mfaChallengeToken.value !== null)
+  const canManageFeatureCenter = computed(() =>
+    hasPermission(account.value, 'feature_center.manage'),
+  )
 
   async function restoreSession(): Promise<void> {
     isRestoring.value = true
@@ -130,6 +134,7 @@ export const useAuthStore = defineStore('admin-auth', () => {
 
   return {
     account,
+    canManageFeatureCenter,
     error,
     isRestoring,
     isSignedIn,
@@ -148,11 +153,29 @@ function toAccount(value: {
   email: string
   display_name: string
   role: string
+  admin_permissions?: unknown
 }): AdminAccount {
   return {
     id: value.id,
     email: value.email,
     displayName: value.display_name,
     role: value.role,
+    permissions: stringList(value.admin_permissions),
   }
+}
+
+function hasPermission(account: AdminAccount | null, permission: string): boolean {
+  if (account === null) {
+    return false
+  }
+  return account.permissions.includes('*') || account.permissions.includes(permission)
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : []
 }

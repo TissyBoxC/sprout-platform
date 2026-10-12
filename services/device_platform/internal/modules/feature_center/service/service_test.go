@@ -397,6 +397,20 @@ func TestValidateHealthProbeCoverageRejectsActiveFeatureWithoutProbe(t *testing.
 	}
 }
 
+func TestDefaultRegistryIncludesRuntimeWiredFeatures(t *testing.T) {
+	active := make(map[string]bool)
+	for _, definition := range DefaultRegistry() {
+		if definition.Feature.Status == domain.FeatureStatusActive {
+			active[definition.Feature.ID] = true
+		}
+	}
+	for _, featureID := range []string{"app_update", "voice_conversation"} {
+		if !active[featureID] {
+			t.Fatalf("runtime-wired feature %q is missing from the active registry", featureID)
+		}
+	}
+}
+
 func TestUpdateConfigRejectsStaleVersion(t *testing.T) {
 	service, _ := newTestService(t)
 	if _, err := service.UpdateConfig(

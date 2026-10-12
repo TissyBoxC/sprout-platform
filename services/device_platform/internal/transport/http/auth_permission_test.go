@@ -176,6 +176,26 @@ func TestFeatureCenterPermissionSplitsReadAndWrite(t *testing.T) {
 	}
 }
 
+func TestAccountResponseIncludesAdminPermissions(t *testing.T) {
+	response := accountResponse(&authdomain.ParentAccount{
+		ID:               "admin-1",
+		Email:            "admin@sprout.local",
+		Role:             authdomain.RoleAdmin,
+		Status:           "active",
+		AdminPermissions: []string{authdomain.AdminPermissionFeatureCenterRead},
+	}, nil)
+
+	account, ok := response["account"].(map[string]any)
+	if !ok {
+		t.Fatalf("account response = %#v", response["account"])
+	}
+	permissions, ok := account["admin_permissions"].([]string)
+	if !ok || len(permissions) != 1 ||
+		permissions[0] != authdomain.AdminPermissionFeatureCenterRead {
+		t.Fatalf("admin_permissions = %#v", account["admin_permissions"])
+	}
+}
+
 func TestOTAPermissionSplitsReadAndWrite(t *testing.T) {
 	readRequest := httptest.NewRequest(http.MethodGet, "/api/v1/admin/ota/releases", nil)
 	if got := otaPermission(readRequest); got != authdomain.AdminPermissionOTARead {

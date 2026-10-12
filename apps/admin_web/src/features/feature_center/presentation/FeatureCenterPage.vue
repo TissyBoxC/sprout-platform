@@ -102,6 +102,10 @@ function metricValue(value: string): string {
   return normalized === '' || normalized === '暂无' ? '暂未接入' : value
 }
 
+function reloadFeatureList(): void {
+  void store.load()
+}
+
 function plannedReason(feature: FeatureCenterFeature): string {
   return (
     feature.readOnlyReason ||
@@ -172,7 +176,7 @@ function plannedReason(feature: FeatureCenterFeature): string {
         <button
           v-if="(store.error || store.detailError)?.retryable"
           type="button"
-          @click="store.load"
+          @click="reloadFeatureList"
         >
           重新加载
         </button>
@@ -332,7 +336,7 @@ function plannedReason(feature: FeatureCenterFeature): string {
                   <button
                     type="button"
                     class="secondary compact"
-                    :disabled="store.isCheckingHealth"
+                    :disabled="store.isCheckingHealth || !store.canCheckHealth"
                     @click="store.checkHealth()"
                   >
                     {{ store.isCheckingHealth ? '正在检查…' : '检查健康' }}
@@ -373,6 +377,9 @@ function plannedReason(feature: FeatureCenterFeature): string {
                     <p v-else-if="selectedFeature.readOnlyReason">
                       {{ selectedFeature.readOnlyReason }}
                     </p>
+                    <p v-else-if="!store.canEdit">
+                      你有查看权限，但没有修改这项功能的权限。
+                    </p>
                     <p v-else>保存后会立即更新该功能的运行参数。</p>
                   </div>
                   <span v-if="selectedFeature.status === 'planned'" class="planned-badge">
@@ -402,7 +409,9 @@ function plannedReason(feature: FeatureCenterFeature): string {
                     :secret-configured="
                       store.selectedFeature?.secretConfigured[field.key] ?? false
                     "
-                    :locked="selectedFeature.status === 'planned'"
+                    :locked="
+                      selectedFeature.status === 'planned' || !store.canEdit
+                    "
                     @update-value="updateConfigValue(field.key, $event)"
                     @update-secret="store.setSecretDraft(field.key, $event)"
                   />

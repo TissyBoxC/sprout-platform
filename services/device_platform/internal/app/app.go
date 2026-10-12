@@ -377,6 +377,22 @@ func Run() error {
 				return featureCenterDomain.HealthHealthy, nil
 			},
 		),
+		"app_update": featureCenterService.HealthProbeFunc(
+			func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+				if _, _, err := operations.Settings(ctx); err != nil {
+					return featureCenterDomain.HealthUnavailable, nil
+				}
+				return featureCenterDomain.HealthHealthy, nil
+			},
+		),
+		"voice_conversation": featureCenterService.HealthProbeFunc(
+			func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+				if _, err := operations.VoiceDefaults(ctx); err != nil {
+					return featureCenterDomain.HealthUnavailable, nil
+				}
+				return featureCenterDomain.HealthHealthy, nil
+			},
+		),
 		"voice_gateway": featureCenterService.HealthProbeFunc(
 			func(_ context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
 				if strings.TrimSpace(cfg.VoiceGateway.WebSocketURL) == "" ||

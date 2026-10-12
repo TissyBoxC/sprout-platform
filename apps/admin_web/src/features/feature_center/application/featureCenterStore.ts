@@ -12,6 +12,7 @@ import {
 } from '@/api/adminFeatureCenter'
 import { mapApiError, type ApiError } from '@/api/apiError'
 import { createHttpClient } from '@/api/httpClient'
+import { useAuthStore } from '@/features/auth/application/authStore'
 
 export interface FeatureCenterFilters {
   category: string
@@ -49,6 +50,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
   const client: AdminFeatureCenterClient = createAdminFeatureCenterClient(
     createHttpClient(),
   )
+  const authStore = useAuthStore()
 
   const features = ref<FeatureCenterFeature[]>([])
   const filters = ref<FeatureCenterFilters>({
@@ -63,6 +65,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
 
   const isLoading = ref(false)
   const isDetailLoading = ref(false)
+  const isDetailReady = ref(false)
   const isSaving = ref(false)
   const isCheckingHealth = ref(false)
   const isRefreshing = ref(false)
@@ -149,10 +152,20 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
 
   const canEdit = computed(
     () =>
+      authStore.canManageFeatureCenter &&
+      isDetailReady.value &&
       selectedFeature.value !== null &&
       selectedFeature.value.status !== 'planned' &&
       selectedFeature.value.readOnlyReason === '' &&
       selectedFeature.value.configSchema.some((field) => field.editable),
+  )
+
+  const canCheckHealth = computed(
+    () =>
+      authStore.canManageFeatureCenter &&
+      isDetailReady.value &&
+      selectedFeature.value !== null &&
+      selectedFeature.value.status !== 'planned',
   )
 
   const isDirty = computed(() => {
@@ -174,7 +187,9 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
       !isSaving.value,
   )
 
-  async function load(): Promise<void> {
+  async function load(
+    options: { preserveSelectedDraft?: boolean } = {},
+  ): Promise<boolean> {
     isLoading.value = true
     error.value = null
     try {
@@ -186,7 +201,17 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
           (feature) => feature.id === selectedFeatureId.value,
         )
         if (selected !== undefined) {
-          applyFeatureToEditor(selected)
+          if (options.preserveSelectedDraft && selectedFeature.value !== null) {
+            const preservedConfig = cloneConfig(draftConfig.value)
+            const preservedSecretDrafts = { ...secretDrafts.value }
+            selectedFeature.value = cloneFeature(selected)
+            draftConfig.value = preservedConfig
+            draftVersion.value = selected.version
+            secretDrafts.value = preservedSecretDrafts
+          } else {
+            applyFeatureToEditor(selected)
+          }
+          isDetailReady.value = true
         } else if (nextFeatures.length > 0) {
           await selectFeature(nextFeatures[0]?.id ?? '')
         } else {
@@ -195,22 +220,31 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
       } else if (nextFeatures.length > 0) {
         await selectFeature(nextFeatures[0]?.id ?? '')
       }
+      return true
     } catch (caught: unknown) {
       error.value = mapApiError(caught)
       features.value = []
-      clearSelection()
+      if (!options.preserveSelectedDraft) {
+        clearSelection()
+      }
+      return false
     } finally {
       isLoading.value = false
     }
   }
 
   async function refresh(): Promise<void> {
+    const hadUnsavedChanges = isDirty.value
     isRefreshing.value = true
     lastMessage.value = ''
-    conflictMessage.value = ''
     try {
-      await load()
-      lastMessage.value = '功能配置已刷新。'
+      const succeeded = await load({ preserveSelectedDraft: true })
+      if (succeeded) {
+        conflictMessage.value = ''
+        lastMessage.value = hadUnsavedChanges
+          ? '已读取最新版本，未保存的修改仍保留。'
+          : '功能配置已刷新。'
+      }
     } finally {
       isRefreshing.value = false
     }
@@ -237,11 +271,13 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
     detailError.value = null
     conflictMessage.value = ''
     lastMessage.value = ''
+    isDetailReady.value = false
     isDetailLoading.value = true
     try {
       const detail = await client.getFeature(normalizedId)
       upsertFeature(detail)
       applyFeatureToEditor(detail)
+      isDetailReady.value = true
     } catch (caught: unknown) {
       detailError.value = mapApiError(caught)
     } finally {
@@ -329,7 +365,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
 
   async function checkHealth(featureId = selectedFeatureId.value): Promise<boolean> {
     const normalizedId = featureId.trim()
-    if (!normalizedId) {
+    if (!normalizedId || !authStore.canManageFeatureCenter) {
       return false
     }
 
@@ -361,7 +397,6 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
   function clearMessages(): void {
     error.value = null
     detailError.value = null
-    conflictMessage.value = ''
     lastMessage.value = ''
   }
 
@@ -390,11 +425,13 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
     draftConfig.value = {}
     draftVersion.value = 0
     secretDrafts.value = {}
+    isDetailReady.value = false
     detailError.value = null
     conflictMessage.value = ''
   }
 
   return {
+    canCheckHealth,
     canSave,
     canEdit,
     categories,
@@ -413,6 +450,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
     groupedFeatures,
     isCheckingHealth,
     isDetailLoading,
+    isDetailReady,
     isDirty,
     isLoading,
     isRefreshing,

@@ -53,7 +53,10 @@ interface MockFeature {
   updated_at: string
 }
 
-async function useAdminSession(page: Page): Promise<void> {
+async function useAdminSession(
+  page: Page,
+  permissions: string[] = ['*'],
+): Promise<void> {
   await page.addInitScript(() => {
     globalThis.sessionStorage.setItem('sprout.admin.accessToken', 'test-access-token')
     globalThis.sessionStorage.setItem('sprout.admin.refreshToken', 'test-refresh-token')
@@ -68,6 +71,7 @@ async function useAdminSession(page: Page): Promise<void> {
             email: 'admin@sprout.local',
             display_name: '管理员',
             role: 'admin',
+            admin_permissions: permissions,
           },
         },
       }),
@@ -319,6 +323,28 @@ test('shows a merge-and-reload message when the feature configuration version co
   ).toBeVisible()
   await expect(page.getByRole('button', { name: '重新加载' })).toBeVisible()
   await expect(page.getByText('语音对话 的配置已保存。')).toHaveCount(0)
+
+  await page.getByLabel('最长回复时长').fill('36')
+  await page.getByRole('button', { name: '重新加载' }).click()
+
+  await expect(page.getByText('已读取最新版本，未保存的修改仍保留。')).toBeVisible()
+  await expect(page.getByLabel('最长回复时长')).toHaveValue('36')
+})
+
+test('keeps feature configuration read-only without manage permission', async ({
+  page,
+}) => {
+  await useAdminSession(page, ['feature_center.read'])
+  await setupFeatureCenterRoutes(page)
+
+  await page.goto('/feature-center')
+
+  await expect(
+    page.getByText('你有查看权限，但没有修改这项功能的权限。'),
+  ).toBeVisible()
+  await expect(page.getByLabel('启用语音对话')).toBeDisabled()
+  await expect(page.getByRole('button', { name: '保存配置' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '检查健康' })).toBeDisabled()
 })
 
 test('runs a feature health check and updates the visible health result', async ({

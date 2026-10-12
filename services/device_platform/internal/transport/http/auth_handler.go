@@ -162,6 +162,7 @@ func (handler authHandler) startAdminLogin(
 			"child_birthday":       account.ChildBirthday,
 			"role":                 account.Role,
 			"status":               account.Status,
+			"admin_permissions":    account.AdminPermissions,
 		},
 	})
 }
@@ -553,6 +554,7 @@ func accountResponse(
 			"child_birthday":       account.ChildBirthday,
 			"role":                 account.Role,
 			"status":               account.Status,
+			"admin_permissions":    account.AdminPermissions,
 		},
 		"ai_account": nil,
 	}

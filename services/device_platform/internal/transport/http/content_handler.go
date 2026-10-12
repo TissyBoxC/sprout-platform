@@ -863,6 +863,31 @@ func (handler deviceContentHandler) listPlayHistory(
 	})
 }
 
+// listFavorites returns the guardian's bookmarks for the path device's family
+// so the device can mirror the parent app's quick-play list. The family is
+// resolved from the device session, so a device can never read another
+// family's favourites.
+func (handler deviceContentHandler) listFavorites(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	familyID, ok := handler.verifyDeviceFamily(response, request)
+	if !ok {
+		return
+	}
+	favorites, err := handler.contentHandler.service.ListFavorites(
+		request.Context(),
+		familyID,
+	)
+	if err != nil {
+		writeContentError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"favorites": favorites,
+	})
+}
+
 func writeContentError(
 	response http.ResponseWriter,
 	request *http.Request,

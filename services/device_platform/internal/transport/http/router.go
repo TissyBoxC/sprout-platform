@@ -2149,6 +2149,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				"GET /api/v1/devices/{device_id}/content/playback",
 				deviceHandler.listPlayHistory,
 			)
+			mux.HandleFunc(
+				"GET /api/v1/devices/{device_id}/content/favorites",
+				deviceHandler.listFavorites,
+			)
 		}
 	}
 

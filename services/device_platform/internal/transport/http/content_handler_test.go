@@ -693,14 +693,79 @@ func TestDevicePlaybackRequiresMatchingDeviceSession(t *testing.T) {
 	}
 	for _, path := range []string{
 		"/api/v1/devices/sprout_device_001/content/playback",
+		"/api/v1/devices/sprout_device_001/content/favorites",
 	} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		request.SetPathValue("device_id", "sprout_device_002")
 		recorder := httptest.NewRecorder()
-		handler.listPlayHistory(recorder, request)
+		if strings.HasSuffix(path, "/favorites") {
+			handler.listFavorites(recorder, request)
+		} else {
+			handler.listPlayHistory(recorder, request)
+		}
 		if recorder.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusUnauthorized, recorder.Body.String())
 		}
+	}
+}
+
+func TestDeviceFavoritesMirrorGuardianListForOwningFamily(t *testing.T) {
+	repository := newContentTestRepository()
+	repository.versions[contentTestKey("content_story_001", 1)] = &contentdomain.PackageVersion{
+		PackageID:      "content_story_001",
+		PackageVersion: 1,
+		Title:          "月亮晚安故事",
+		Category:       contentdomain.CategoryStory,
+		AgeTiers:       []contentdomain.AgeTier{contentdomain.AgeTier3To4},
+		Status:         contentdomain.StatusPublished,
+	}
+	service, err := contentservice.New(contentservice.Options{
+		Repository:  repository,
+		AssetReader: contentTestAssetReader{},
+	})
+	if err != nil {
+		t.Fatalf("create content service: %v", err)
+	}
+	if _, err := service.AddFavorite(
+		context.Background(),
+		"family-001",
+		"content_story_001",
+	); err != nil {
+		t.Fatalf("seed guardian favorite: %v", err)
+	}
+	handler := deviceContentHandler{
+		contentHandler: contentHandler{service: service},
+		bindingService: contentTestBindingService{sessionDeviceID: "sprout_device_001"},
+		runtimeService: contentTestRuntimeService{familyID: "family-001"},
+	}
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/devices/sprout_device_001/content/favorites",
+		nil,
+	)
+	request.SetPathValue("device_id", "sprout_device_001")
+	request.Header.Set("Authorization", "Bearer device-session-token")
+	recorder := httptest.NewRecorder()
+	handler.listFavorites(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Favorites []struct {
+				PackageID string `json:"package_id"`
+				Title     string `json:"title"`
+				Available bool   `json:"available"`
+			} `json:"favorites"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode favorites response: %v", err)
+	}
+	if len(envelope.Data.Favorites) != 1 ||
+		envelope.Data.Favorites[0].PackageID != "content_story_001" ||
+		!envelope.Data.Favorites[0].Available {
+		t.Fatalf("unexpected favorite list: %s", recorder.Body.String())
 	}
 }
 

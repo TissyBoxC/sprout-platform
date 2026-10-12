@@ -80,6 +80,32 @@ export interface FamilyMutationResult {
   refreshError: ApiError | null
 }
 
+export interface AdminFamilyAiUsageModel {
+  model: string
+  requests: number
+  inputTokens: number
+  outputTokens: number
+  cacheCreationTokens: number
+  cacheReadTokens: number
+  totalTokens: number
+  costUsd: number
+  actualCostUsd: number
+}
+
+export interface AdminFamilyAiUsage {
+  providerAccountId: string
+  startTime: string
+  endTime: string
+  requests: number
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  costUsd: number
+  actualCostUsd: number
+  averageDurationMs: number
+  models: AdminFamilyAiUsageModel[]
+}
+
 // 管理端以家长账号为主，AI 服务、资料与设备都归属于该账号。
 export const useFamilyAccountStore = defineStore('admin-families', () => {
   const httpClient = createHttpClient()
@@ -89,6 +115,9 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   const devicesByFamily = ref<Record<string, AdminFamilyDevice[]>>({})
   const deviceErrorsByFamily = ref<Record<string, ApiError | null>>({})
   const deviceLoadingFamilyId = ref('')
+  const aiUsageByFamily = ref<Record<string, AdminFamilyAiUsage>>({})
+  const aiUsageErrorsByFamily = ref<Record<string, ApiError | null>>({})
+  const aiUsageLoadingFamilyId = ref('')
   const isLoading = ref(false)
   const isLoadingModels = ref(false)
   const isSubmitting = ref(false)
@@ -272,6 +301,34 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
     }
   }
 
+  async function loadFamilyAIUsage(
+    parentAccountId: string,
+  ): Promise<ApiError | null> {
+    aiUsageLoadingFamilyId.value = parentAccountId
+    setAIUsageError(parentAccountId, null)
+    try {
+      const response = await httpClient.get(
+        `/api/v1/admin/families/${encodeURIComponent(parentAccountId)}/ai-usage`,
+      )
+      const usage = toAiUsage(response.data?.data)
+      if (usage !== null) {
+        aiUsageByFamily.value = {
+          ...aiUsageByFamily.value,
+          [parentAccountId]: usage,
+        }
+      }
+      return null
+    } catch (caught: unknown) {
+      const mapped = mapApiError(caught)
+      setAIUsageError(parentAccountId, mapped)
+      return mapped
+    } finally {
+      if (aiUsageLoadingFamilyId.value === parentAccountId) {
+        aiUsageLoadingFamilyId.value = ''
+      }
+    }
+  }
+
   async function loadFamilies(reportError: boolean): Promise<ApiError | null> {
     if (reportError) {
       error.value = null
@@ -366,7 +423,31 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
     return deviceLoadingFamilyId.value === parentAccountId
   }
 
+  function setAIUsageError(
+    parentAccountId: string,
+    value: ApiError | null,
+  ): void {
+    aiUsageErrorsByFamily.value = {
+      ...aiUsageErrorsByFamily.value,
+      [parentAccountId]: value,
+    }
+  }
+
+  function aiUsageFor(parentAccountId: string): AdminFamilyAiUsage | null {
+    return aiUsageByFamily.value[parentAccountId] ?? null
+  }
+
+  function aiUsageErrorFor(parentAccountId: string): ApiError | null {
+    return aiUsageErrorsByFamily.value[parentAccountId] ?? null
+  }
+
+  function isFamilyAIUsageLoading(parentAccountId: string): boolean {
+    return aiUsageLoadingFamilyId.value === parentAccountId
+  }
+
   return {
+    aiUsageErrorFor,
+    aiUsageFor,
     create,
     deviceErrorFor,
     devicesFor,
@@ -374,6 +455,7 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
     families,
     isLoading,
     isLoadingModels,
+    isFamilyAIUsageLoading,
     isFamilyDevicesLoading,
     isResettingPassword,
     isSubmitting,
@@ -381,6 +463,7 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
     isUpdatingProfile,
     lastMessage,
     load,
+    loadFamilyAIUsage,
     loadFamilyDevices,
     loadModels,
     modelError,
@@ -500,6 +583,64 @@ function toFamilyDevice(value: unknown): AdminFamilyDevice | null {
     runtime: isRecord(value.runtime)
       ? toFamilyDeviceRuntime(value.runtime)
       : null,
+  }
+}
+
+function toAiUsage(value: unknown): AdminFamilyAiUsage | null {
+  const record = recordValue(value)
+  const totals = recordValue(record.totals)
+  const providerAccountId = stringValue(
+    record.provider_account_id ?? record.providerAccountId,
+  )
+  if (!providerAccountId) {
+    return null
+  }
+  const models = Array.isArray(record.models)
+    ? record.models
+        .map(toAiUsageModel)
+        .filter((model): model is AdminFamilyAiUsageModel => model !== null)
+    : []
+  return {
+    providerAccountId,
+    startTime: stringValue(record.start_time ?? record.startTime),
+    endTime: stringValue(record.end_time ?? record.endTime),
+    requests: numberValue(totals.requests),
+    inputTokens: numberValue(totals.input_tokens ?? totals.inputTokens),
+    outputTokens: numberValue(totals.output_tokens ?? totals.outputTokens),
+    totalTokens: numberValue(totals.total_tokens ?? totals.totalTokens),
+    costUsd: numberValue(totals.cost_usd ?? totals.costUsd),
+    actualCostUsd: numberValue(
+      totals.actual_cost_usd ?? totals.actualCostUsd,
+    ),
+    averageDurationMs: numberValue(
+      totals.average_duration_ms ?? totals.averageDurationMs,
+    ),
+    models,
+  }
+}
+
+function toAiUsageModel(value: unknown): AdminFamilyAiUsageModel | null {
+  const record = recordValue(value)
+  const model = stringValue(record.model)
+  if (!model) {
+    return null
+  }
+  return {
+    model,
+    requests: numberValue(record.requests),
+    inputTokens: numberValue(record.input_tokens ?? record.inputTokens),
+    outputTokens: numberValue(record.output_tokens ?? record.outputTokens),
+    cacheCreationTokens: numberValue(
+      record.cache_creation_tokens ?? record.cacheCreationTokens,
+    ),
+    cacheReadTokens: numberValue(
+      record.cache_read_tokens ?? record.cacheReadTokens,
+    ),
+    totalTokens: numberValue(record.total_tokens ?? record.totalTokens),
+    costUsd: numberValue(record.cost_usd ?? record.costUsd),
+    actualCostUsd: numberValue(
+      record.actual_cost_usd ?? record.actualCostUsd,
+    ),
   }
 }
 

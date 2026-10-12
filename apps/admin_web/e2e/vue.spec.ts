@@ -228,6 +228,42 @@ test('manages a family AI account, profile, password, and bound devices', async 
       }),
     })
   })
+  await page.route('**/api/v1/admin/families/parent-1/ai-usage', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          provider_account_id: 'provider-1',
+          start_time: '2026-10-02T10:00:00Z',
+          end_time: '2026-10-03T10:00:00Z',
+          totals: {
+            requests: 12,
+            input_tokens: 1000,
+            output_tokens: 2000,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            total_tokens: 3000,
+            cost_usd: 0.5,
+            actual_cost_usd: 0.45,
+            average_duration_ms: 250,
+          },
+          models: [
+            {
+              model: 'fast-model',
+              requests: 12,
+              input_tokens: 1000,
+              output_tokens: 2000,
+              cache_creation_tokens: 0,
+              cache_read_tokens: 0,
+              total_tokens: 3000,
+              cost_usd: 0.5,
+              actual_cost_usd: 0.45,
+            },
+          ],
+        },
+      }),
+    })
+  })
   await page.route('**/api/v1/admin/families/parent-1/profile', async (route) => {
     const request = route.request()
     expect(request.method()).toBe('PUT')
@@ -261,9 +297,12 @@ test('manages a family AI account, profile, password, and bound devices', async 
   await expect(page.getByRole('dialog', { name: '王' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '家长资料' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'AI 服务' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'AI 用量核对' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '绑定设备' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '账号安全' })).toBeVisible()
   await expect(page.getByText('默认最快')).toBeVisible()
+  await expect(page.getByText('12 次')).toBeVisible()
+  await expect(page.getByText('$0.4500').first()).toBeVisible()
   await expect(page.getByText('初芽一号')).toBeVisible()
   await expect(page.getByText('在线', { exact: true })).toBeVisible()
 

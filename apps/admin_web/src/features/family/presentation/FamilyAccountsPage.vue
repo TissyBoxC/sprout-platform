@@ -65,6 +65,21 @@ const deviceError = computed(
 const availableModels = computed(() =>
   modelOptionsForAccount(store.modelOptions, aiForm.availableModels),
 )
+const aiUsage = computed(() =>
+  selectedFamily.value === null
+    ? null
+    : store.aiUsageFor(selectedFamily.value.parentAccountId),
+)
+const isAIUsageLoading = computed(
+  () =>
+    selectedFamily.value !== null &&
+    store.isFamilyAIUsageLoading(selectedFamily.value.parentAccountId),
+)
+const aiUsageError = computed(() =>
+  selectedFamily.value === null
+    ? null
+    : store.aiUsageErrorFor(selectedFamily.value.parentAccountId),
+)
 
 onMounted(() => {
   void store.load()
@@ -114,7 +129,12 @@ async function openFamily(family: AdminFamily): Promise<void> {
     })
   }
   clearSectionFeedback()
-  await store.loadFamilyDevices(family.parentAccountId)
+  await Promise.all([
+    store.loadFamilyDevices(family.parentAccountId),
+    family.aiAccount === null
+      ? Promise.resolve(null)
+      : store.loadFamilyAIUsage(family.parentAccountId),
+  ])
 }
 
 function closeFamily(): void {
@@ -222,6 +242,13 @@ async function reloadDevices(): Promise<void> {
     return
   }
   await store.loadFamilyDevices(selectedFamily.value.parentAccountId)
+}
+
+async function reloadAIUsage(): Promise<void> {
+  if (selectedFamily.value === null) {
+    return
+  }
+  await store.loadFamilyAIUsage(selectedFamily.value.parentAccountId)
 }
 
 function toggleModel(model: AIModelOption): void {
@@ -377,6 +404,27 @@ function formatTime(value: string): string {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function formatCount(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '0'
+  }
+  return value.toLocaleString('zh-CN')
+}
+
+function formatUsd(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '$0.0000'
+  }
+  return `$${value.toFixed(4)}`
+}
+
+function formatDurationMs(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '暂无数据'
+  }
+  return `${Math.round(value)} ms`
 }
 
 function deviceStatusLabel(isOnline: boolean | null): string {
@@ -866,6 +914,95 @@ function emptySectionFeedback(): {
                   {{ feedbackBySection.ai.error.message }}
                 </p>
               </div>
+            </section>
+
+            <section v-if="selectedFamily.aiAccount" class="detail-card">
+              <div class="section-heading">
+                <div>
+                  <h3>AI 用量核对</h3>
+                  <p>与网关用量对账，默认显示最近 24 小时的请求与费用。</p>
+                </div>
+                <button
+                  type="button"
+                  class="text-button"
+                  :disabled="isAIUsageLoading"
+                  @click="reloadAIUsage"
+                >
+                  {{ isAIUsageLoading ? '正在读取…' : '更新用量' }}
+                </button>
+              </div>
+
+              <div v-if="isAIUsageLoading" class="inline-state">
+                正在读取 AI 用量…
+              </div>
+              <div v-else-if="aiUsageError" class="inline-state error">
+                {{ aiUsageError.message }}
+                <button
+                  type="button"
+                  class="text-button"
+                  @click="reloadAIUsage"
+                >
+                  重新加载用量
+                </button>
+              </div>
+              <div v-else-if="!aiUsage" class="empty-section">
+                <p>还没有读取到用量数据。点击“更新用量”重新核对。</p>
+              </div>
+              <template v-else>
+                <div class="usage-window">
+                  <span>{{ formatTime(aiUsage.startTime) }}</span>
+                  <span aria-hidden="true">→</span>
+                  <span>{{ formatTime(aiUsage.endTime) }}</span>
+                </div>
+                <dl class="usage-totals">
+                  <div>
+                    <dt>请求数</dt>
+                    <dd>{{ formatCount(aiUsage.requests) }}</dd>
+                  </div>
+                  <div>
+                    <dt>输入 Token</dt>
+                    <dd>{{ formatCount(aiUsage.inputTokens) }}</dd>
+                  </div>
+                  <div>
+                    <dt>输出 Token</dt>
+                    <dd>{{ formatCount(aiUsage.outputTokens) }}</dd>
+                  </div>
+                  <div>
+                    <dt>合计 Token</dt>
+                    <dd>{{ formatCount(aiUsage.totalTokens) }}</dd>
+                  </div>
+                  <div>
+                    <dt>预估费用</dt>
+                    <dd>{{ formatUsd(aiUsage.costUsd) }}</dd>
+                  </div>
+                  <div>
+                    <dt>实际费用</dt>
+                    <dd>{{ formatUsd(aiUsage.actualCostUsd) }}</dd>
+                  </div>
+                  <div>
+                    <dt>平均耗时</dt>
+                    <dd>{{ formatDurationMs(aiUsage.averageDurationMs) }}</dd>
+                  </div>
+                </dl>
+
+                <ul v-if="aiUsage.models.length" class="usage-model-list">
+                  <li
+                    v-for="model in aiUsage.models"
+                    :key="model.model"
+                  >
+                    <div class="usage-model-header">
+                      <strong>{{ model.model }}</strong>
+                      <span>{{ formatCount(model.requests) }} 次</span>
+                    </div>
+                    <p class="usage-model-meta">
+                      Token {{ formatCount(model.totalTokens) }} ·
+                      预估 {{ formatUsd(model.costUsd) }} ·
+                      实际 {{ formatUsd(model.actualCostUsd) }}
+                    </p>
+                  </li>
+                </ul>
+                <p v-else class="field-hint">这段时间没有按模型的调用记录。</p>
+              </template>
             </section>
 
             <section class="detail-card">
@@ -1552,6 +1689,84 @@ tbody tr:hover {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.usage-window {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--sprout-text-muted);
+  font-size: 13px;
+}
+
+.usage-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.usage-totals > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #f7d9e2;
+  border-radius: 14px;
+  background: #fffbfc;
+}
+
+.usage-totals dt {
+  color: var(--sprout-text-muted);
+  font-size: 12px;
+}
+
+.usage-totals dd {
+  margin: 0;
+  color: var(--sprout-text);
+  font-size: 16px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.usage-model-list {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.usage-model-list li {
+  display: grid;
+  gap: 3px;
+  padding: 12px 14px;
+  border: 1px solid #f7d9e2;
+  border-radius: 14px;
+  background: #fffbfc;
+}
+
+.usage-model-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.usage-model-header strong {
+  overflow-wrap: anywhere;
+}
+
+.usage-model-header span {
+  color: var(--sprout-text-muted);
+  font-size: 13px;
+}
+
+.usage-model-meta {
+  margin: 0;
+  color: #6b4f5a;
+  font-size: 13px;
 }
 
 .security-row {

@@ -41,6 +41,8 @@ func (reader featureCenterMetricsReader) FeatureMetrics(
 	switch featureID {
 	case "service_version":
 		merged = reader.withOutdatedServiceCount(ctx, merged)
+	case "deployment_infrastructure":
+		merged = reader.withRunningServiceCount(ctx, merged)
 	case "download_server":
 		merged = reader.withDownloadFileCount(ctx, merged)
 	case "notification":
@@ -91,6 +93,37 @@ func (reader featureCenterMetricsReader) withOutdatedServiceCount(
 		}
 	}
 	return mergeMetric(values, "outdated_service_count", outdated)
+}
+
+// withRunningServiceCount reports how many managed services the worker has
+// confirmed are running a known image. Only current and outdated services
+// count: unknown services have not been observed, updating services are
+// mid-swap, and a failed upgrade leaves the running image ambiguous. Without a
+// worker-written snapshot the count stays unreported so the console never
+// claims services are running when the state has never been read.
+func (reader featureCenterMetricsReader) withRunningServiceCount(
+	ctx context.Context,
+	values map[string]any,
+) map[string]any {
+	if reader.serviceVersions == nil {
+		return values
+	}
+	result, err := reader.serviceVersions.SnapshotResult(ctx)
+	if err != nil {
+		return values
+	}
+	if result.StateSource != "worker" {
+		return values
+	}
+	running := 0
+	for _, service := range result.Services {
+		switch service.Status {
+		case serviceVersionDomain.ServiceStatusCurrent,
+			serviceVersionDomain.ServiceStatusOutdated:
+			running++
+		}
+	}
+	return mergeMetric(values, "running_service_count", running)
 }
 
 // withDownloadFileCount reports how many canonical release files are published

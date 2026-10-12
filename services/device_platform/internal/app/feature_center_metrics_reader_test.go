@@ -110,6 +110,78 @@ func TestFeatureCenterMetricsReaderLeavesOutdatedUnreportedWithoutWorkerState(
 	}
 }
 
+func TestFeatureCenterMetricsReaderReportsRunningServiceCount(t *testing.T) {
+	stateDir := t.TempDir()
+	snapshot := `{
+		"generated_at": "2026-10-12T17:18:32Z",
+		"services": [
+			{"id": "device_platform", "status": "current"},
+			{"id": "voice_gateway", "status": "outdated"},
+			{"id": "admin_web", "status": "unknown"},
+			{"id": "upgrade_worker", "status": "updating"},
+			{"id": "postgres", "status": "failed"}
+		]
+	}`
+	if err := os.WriteFile(
+		filepath.Join(stateDir, "status.json"),
+		[]byte(snapshot),
+		0o600,
+	); err != nil {
+		t.Fatalf("write status snapshot: %v", err)
+	}
+	serviceVersions, err := serviceVersionService.New(serviceVersionService.Options{
+		Repository: serviceVersionRepository.NewFileRepository(stateDir),
+	})
+	if err != nil {
+		t.Fatalf("create service version service: %v", err)
+	}
+	reader := featureCenterMetricsReader{
+		repository:      stubMetricsRepository{},
+		serviceVersions: serviceVersions,
+	}
+	values, err := reader.FeatureMetrics(
+		context.Background(),
+		"deployment_infrastructure",
+	)
+	if err != nil {
+		t.Fatalf("read deployment_infrastructure metrics: %v", err)
+	}
+	if values["running_service_count"] != 2 {
+		t.Fatalf(
+			"running_service_count = %#v, want 2",
+			values["running_service_count"],
+		)
+	}
+}
+
+func TestFeatureCenterMetricsReaderLeavesRunningServicesUnreportedWithoutWorkerState(
+	t *testing.T,
+) {
+	serviceVersions, err := serviceVersionService.New(serviceVersionService.Options{
+		Repository: serviceVersionRepository.NewFileRepository(t.TempDir()),
+	})
+	if err != nil {
+		t.Fatalf("create service version service: %v", err)
+	}
+	reader := featureCenterMetricsReader{
+		repository:      stubMetricsRepository{},
+		serviceVersions: serviceVersions,
+	}
+	values, err := reader.FeatureMetrics(
+		context.Background(),
+		"deployment_infrastructure",
+	)
+	if err != nil {
+		t.Fatalf("read deployment_infrastructure metrics: %v", err)
+	}
+	if _, ok := values["running_service_count"]; ok {
+		t.Fatalf(
+			"running_service_count must stay unreported, got %#v",
+			values["running_service_count"],
+		)
+	}
+}
+
 func TestFeatureCenterMetricsReaderMergesDownloadFileCount(t *testing.T) {
 	reader := featureCenterMetricsReader{
 		repository: stubMetricsRepository{},

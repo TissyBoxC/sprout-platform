@@ -5,7 +5,9 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 
 	runtimedomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
@@ -38,12 +40,33 @@ type auditRecorder interface {
 	) error
 }
 
+// DeliverySender delivers one notification through a configured external
+// channel such as push, SMS, or email.
+type DeliverySender interface {
+	Send(
+		ctx context.Context,
+		notification *domain.Notification,
+		delivery *domain.Delivery,
+	) error
+}
+
+// DeliveryBatch summarizes one worker pass for observability.
+type DeliveryBatch struct {
+	Channel   string
+	Scanned   int
+	Delivered int
+	Retired   int
+	Retried   int
+}
+
 // Service owns notification lifecycle and delivery state.
 type Service struct {
 	repository repository.Repository
 	commander  DeviceCommander
 	audit      auditRecorder
 	timeSource clock.Clock
+	sendersMu  sync.RWMutex
+	senders    map[string]DeliverySender
 }
 
 // Options contains notification service dependencies.
@@ -68,7 +91,217 @@ func New(options Options) (*Service, error) {
 		commander:  options.Commander,
 		audit:      options.Audit,
 		timeSource: timeSource,
+		senders:    map[string]DeliverySender{},
 	}, nil
+}
+
+// SetDeliverySender registers or removes the sender for one channel.
+// Pass nil to disable a channel. The worker then retires pending rows with
+// channel_not_configured instead of retrying forever.
+func (s *Service) SetDeliverySender(channel string, sender DeliverySender) {
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	if !domain.ChannelIsValid(channel) ||
+		channel == domain.ChannelInApp ||
+		channel == domain.ChannelDevice {
+		return
+	}
+	s.sendersMu.Lock()
+	defer s.sendersMu.Unlock()
+	if s.senders == nil {
+		s.senders = map[string]DeliverySender{}
+	}
+	if sender == nil {
+		delete(s.senders, channel)
+		return
+	}
+	s.senders[channel] = sender
+}
+
+// DeliverySenderConfigured reports whether a channel has a live sender.
+// It is used by health checks so an unconfigured optional channel is visible
+// to operators instead of silently accumulating deliveries.
+func (s *Service) DeliverySenderConfigured(channel string) bool {
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	if !domain.ChannelIsValid(channel) ||
+		channel == domain.ChannelInApp ||
+		channel == domain.ChannelDevice {
+		return false
+	}
+	s.sendersMu.RLock()
+	defer s.sendersMu.RUnlock()
+	return s.senders[channel] != nil
+}
+
+// DeliveryChannels returns the channel senders in stable order.
+func (s *Service) DeliveryChannels() []string {
+	s.sendersMu.RLock()
+	defer s.sendersMu.RUnlock()
+	channels := make([]string, 0, len(s.senders))
+	for _, channel := range []string{
+		domain.ChannelPush,
+		domain.ChannelSMS,
+		domain.ChannelEmail,
+	} {
+		if s.senders[channel] != nil {
+			channels = append(channels, channel)
+		}
+	}
+	return channels
+}
+
+// ProcessPendingDeliveries drains one bounded batch for a channel.
+//
+// A delivery is marked delivered on success. Provider errors leave a failed
+// row that the repository can retry until its bound is reached. A channel
+// without a sender is retired immediately with channel_not_configured so the
+// queue and operator counters reflect real configuration state.
+func (s *Service) ProcessPendingDeliveries(
+	ctx context.Context,
+	channel string,
+	limit int,
+) (DeliveryBatch, error) {
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	batch := DeliveryBatch{Channel: channel}
+	if !domain.ChannelIsValid(channel) ||
+		channel == domain.ChannelInApp ||
+		channel == domain.ChannelDevice {
+		return batch, domain.ErrInvalidNotification
+	}
+	if limit <= 0 {
+		return batch, nil
+	}
+	deliveries, err := s.repository.PendingDeliveries(ctx, channel, limit)
+	if err != nil {
+		return batch, err
+	}
+	batch.Scanned = len(deliveries)
+	if len(deliveries) == 0 {
+		return batch, nil
+	}
+
+	s.sendersMu.RLock()
+	sender := s.senders[channel]
+	s.sendersMu.RUnlock()
+	now := s.timeSource.Now().UTC()
+	var batchErr error
+	for _, delivery := range deliveries {
+		if delivery == nil {
+			continue
+		}
+		if sender == nil {
+			if err := s.repository.RetireDelivery(
+				ctx,
+				delivery.NotificationID,
+				delivery.ParentAccountID,
+				delivery.Channel,
+				domain.DeliveryStatusExpired,
+				domain.DeliveryFailureChannelNotConfigured,
+				now,
+			); err != nil {
+				batchErr = errors.Join(batchErr, err)
+				continue
+			}
+			delivery.Status = domain.DeliveryStatusExpired
+			delivery.FailureCode = domain.DeliveryFailureChannelNotConfigured
+			batch.Retired++
+			continue
+		}
+
+		notification, err := s.repository.Get(ctx, delivery.NotificationID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				if retireErr := s.repository.RetireDelivery(
+					ctx,
+					delivery.NotificationID,
+					delivery.ParentAccountID,
+					delivery.Channel,
+					domain.DeliveryStatusExpired,
+					domain.DeliveryFailureNotificationUnavailable,
+					now,
+				); retireErr != nil {
+					batchErr = errors.Join(batchErr, retireErr)
+					continue
+				}
+				batch.Retired++
+				continue
+			}
+			batchErr = errors.Join(batchErr, err)
+			continue
+		}
+
+		if notification.ExpiresAt != nil && !notification.ExpiresAt.After(now) {
+			if err := s.repository.RetireDelivery(
+				ctx,
+				delivery.NotificationID,
+				delivery.ParentAccountID,
+				delivery.Channel,
+				domain.DeliveryStatusExpired,
+				domain.DeliveryFailureNotificationExpired,
+				now,
+			); err != nil {
+				batchErr = errors.Join(batchErr, err)
+				continue
+			}
+			batch.Retired++
+			continue
+		}
+
+		if err := sender.Send(ctx, notification, delivery); err != nil {
+			if updateErr := s.repository.UpdateDeliveryStatus(
+				ctx,
+				delivery.NotificationID,
+				delivery.ParentAccountID,
+				delivery.Channel,
+				domain.DeliveryStatusFailed,
+				domain.DeliveryFailureProviderError,
+				now,
+			); updateErr != nil {
+				batchErr = errors.Join(batchErr, updateErr)
+				continue
+			}
+			delivery.Status = domain.DeliveryStatusFailed
+			delivery.FailureCode = domain.DeliveryFailureProviderError
+			batch.Retried++
+			continue
+		}
+
+		if err := s.repository.UpdateDeliveryStatus(
+			ctx,
+			delivery.NotificationID,
+			delivery.ParentAccountID,
+			delivery.Channel,
+			domain.DeliveryStatusDelivered,
+			"",
+			now,
+		); err != nil {
+			batchErr = errors.Join(batchErr, err)
+			continue
+		}
+		delivery.Status = domain.DeliveryStatusDelivered
+		delivery.FailureCode = ""
+		batch.Delivered++
+	}
+	return batch, batchErr
+}
+
+// ValidateDeliveryWorkerConfig rejects duplicate or unsupported channel
+// wiring before the worker starts.
+func (s *Service) ValidateDeliveryWorkerConfig(channels []string) error {
+	seen := make(map[string]struct{}, len(channels))
+	for _, channel := range channels {
+		channel = strings.ToLower(strings.TrimSpace(channel))
+		if channel == domain.ChannelInApp || channel == domain.ChannelDevice {
+			return fmt.Errorf("notification delivery worker cannot own channel %q", channel)
+		}
+		if !domain.ChannelIsValid(channel) {
+			return fmt.Errorf("notification delivery worker channel %q is invalid", channel)
+		}
+		if _, ok := seen[channel]; ok {
+			return fmt.Errorf("notification delivery worker channel %q is duplicated", channel)
+		}
+		seen[channel] = struct{}{}
+	}
+	return nil
 }
 
 // Inbox returns one bounded page of the guardian's visible notifications.

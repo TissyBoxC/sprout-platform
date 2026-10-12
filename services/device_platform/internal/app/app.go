@@ -61,6 +61,7 @@ import (
 	localCommandService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
 	motionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/repository"
 	motionRuntimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
+	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
 	notificationRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/repository"
 	notificationService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
 	operationsRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/repository"
@@ -727,6 +728,16 @@ func Run() error {
 	defer workerCancel()
 	go runDeletionWorker(workerCtx, logger, privacy)
 	go runRetentionWorker(workerCtx, logger, privacy, vision)
+	go runNotificationDeliveryWorker(
+		workerCtx,
+		logger,
+		notifications,
+		[]string{
+			notificationDomain.ChannelPush,
+			notificationDomain.ChannelSMS,
+			notificationDomain.ChannelEmail,
+		},
+	)
 
 	stopCh := make(chan os.Signal, 1)
 	signal.Notify(stopCh, os.Interrupt, syscall.SIGTERM)
@@ -810,6 +821,65 @@ func runRetentionWorker(
 					"vision retention worker pruned data",
 					"expired_tasks", expiredTasks,
 					"deleted_results", deletedResults,
+				)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// runNotificationDeliveryWorker processes external notification channels.
+//
+// The first pass runs immediately so a restart drains rows left by an earlier
+// process. A channel with no registered sender is retired by the service as
+// channel_not_configured; this keeps pending counters honest and prevents
+// unbounded queue growth.
+func runNotificationDeliveryWorker(
+	ctx context.Context,
+	logger *slog.Logger,
+	notifications *notificationService.Service,
+	channels []string,
+) {
+	if notifications == nil {
+		return
+	}
+	if err := notifications.ValidateDeliveryWorkerConfig(channels); err != nil {
+		logger.Error("notification delivery worker config invalid", "error", err)
+		return
+	}
+	const (
+		interval   = 30 * time.Second
+		batchLimit = 50
+	)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		for _, channel := range channels {
+			batch, err := notifications.ProcessPendingDeliveries(
+				ctx,
+				channel,
+				batchLimit,
+			)
+			if err != nil {
+				logger.Error(
+					"notification delivery worker failed",
+					"channel", channel,
+					"error", err,
+				)
+				continue
+			}
+			if batch.Delivered > 0 || batch.Retired > 0 || batch.Retried > 0 {
+				logger.Info(
+					"notification delivery worker processed batch",
+					"channel", channel,
+					"scanned", batch.Scanned,
+					"delivered", batch.Delivered,
+					"retired", batch.Retired,
+					"retried", batch.Retried,
 				)
 			}
 		}

@@ -62,6 +62,18 @@ type Repository interface {
 		failureCode string,
 		now time.Time,
 	) error
+	// RetireDelivery moves a delivery to a terminal state without consuming a
+	// retry slot. It is used when a channel has no configured provider or a
+	// notification has expired.
+	RetireDelivery(
+		ctx context.Context,
+		notificationID string,
+		parentAccountID string,
+		channel string,
+		status string,
+		failureCode string,
+		now time.Time,
+	) error
 	// PendingDeliveries returns queued or failed deliveries for one channel.
 	PendingDeliveries(
 		ctx context.Context,
@@ -571,12 +583,46 @@ func (r *PostgresRepository) UpdateDeliveryStatus(
 	return nil
 }
 
+// RetireDelivery moves a delivery to a terminal state without consuming a
+// retry slot, so an unconfigured channel does not leave notifications pending
+// forever.
+func (r *PostgresRepository) RetireDelivery(
+	ctx context.Context,
+	notificationID string,
+	parentAccountID string,
+	channel string,
+	status string,
+	failureCode string,
+	now time.Time,
+) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE notification_deliveries
+		SET status = $4,
+		    failure_code = $5,
+		    delivered_at = CASE
+		      WHEN $4 = 'delivered' THEN COALESCE(delivered_at, $6)
+		      ELSE delivered_at
+		    END,
+		    updated_at = $6
+		WHERE notification_id = $1
+		  AND parent_account_id = $2
+		  AND channel = $3
+	`, notificationID, parentAccountID, channel, status, failureCode, now)
+	if err != nil {
+		return fmt.Errorf("retire delivery: %w", err)
+	}
+	return nil
+}
+
 // PendingDeliveries returns queued or failed deliveries for one channel.
 func (r *PostgresRepository) PendingDeliveries(
 	ctx context.Context,
 	channel string,
 	limit int,
 ) ([]*domain.Delivery, error) {
+	if limit <= 0 {
+		return []*domain.Delivery{}, nil
+	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT
 			id,
@@ -593,7 +639,10 @@ func (r *PostgresRepository) PendingDeliveries(
 			updated_at
 		FROM notification_deliveries
 		WHERE channel = $1
-		  AND status IN ('pending', 'failed')
+		  AND (
+		    status = 'pending'
+		    OR (status = 'failed' AND failure_code = 'delivery_failed')
+		  )
 		  AND retry_count < 20
 		ORDER BY created_at ASC
 		LIMIT $2

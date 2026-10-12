@@ -232,6 +232,30 @@ func (m *memoryRepository) UpdateDeliveryStatus(
 			delivery.Channel == channel {
 			delivery.Status = status
 			delivery.FailureCode = failureCode
+			if status == domain.DeliveryStatusFailed {
+				delivery.RetryCount++
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *memoryRepository) RetireDelivery(
+	_ context.Context,
+	notificationID string,
+	parentAccountID string,
+	channel string,
+	status string,
+	failureCode string,
+	_ time.Time,
+) error {
+	for _, delivery := range m.deliveries {
+		if delivery.NotificationID == notificationID &&
+			delivery.ParentAccountID == parentAccountID &&
+			delivery.Channel == channel {
+			delivery.Status = status
+			delivery.FailureCode = failureCode
 			return nil
 		}
 	}
@@ -245,7 +269,11 @@ func (m *memoryRepository) PendingDeliveries(
 ) ([]*domain.Delivery, error) {
 	result := make([]*domain.Delivery, 0)
 	for _, delivery := range m.deliveries {
-		if delivery.Channel == channel && delivery.Status == domain.DeliveryStatusPending {
+		if delivery.Channel == channel &&
+			(delivery.Status == domain.DeliveryStatusPending ||
+				(delivery.Status == domain.DeliveryStatusFailed &&
+					delivery.FailureCode == domain.DeliveryFailureProviderError)) &&
+			delivery.RetryCount < 20 {
 			result = append(result, delivery)
 		}
 	}
@@ -253,6 +281,23 @@ func (m *memoryRepository) PendingDeliveries(
 		result = result[:limit]
 	}
 	return result, nil
+}
+
+type fakeDeliverySender struct {
+	sent int
+	err  error
+}
+
+func (f *fakeDeliverySender) Send(
+	_ context.Context,
+	_ *domain.Notification,
+	_ *domain.Delivery,
+) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.sent++
+	return nil
 }
 
 type fakeCommander struct {
@@ -479,5 +524,122 @@ func TestAdminStatsCountsBroadcastAndFailures(t *testing.T) {
 	}
 	if stats.PendingDeliveryCount != 1 {
 		t.Fatalf("expected 1 pending push delivery, got %d", stats.PendingDeliveryCount)
+	}
+}
+
+func TestProcessPendingDeliveriesRetiresUnconfiguredChannel(t *testing.T) {
+	repo := newMemoryRepository()
+	service := newTestService(t, repo, &fakeCommander{})
+	if _, err := service.CreateAdministratorNotice(context.Background(), "", domain.AdministratorInput{
+		Category:        domain.CategorySystemAnnouncement,
+		Title:           "未配置通道",
+		Body:            "内容",
+		Audience:        domain.AudienceParent,
+		Channels:        []string{domain.ChannelPush},
+		ParentAccountID: testParentID,
+	}); err != nil {
+		t.Fatalf("seed notice: %v", err)
+	}
+
+	batch, err := service.ProcessPendingDeliveries(
+		context.Background(),
+		domain.ChannelPush,
+		10,
+	)
+	if err != nil {
+		t.Fatalf("process pending deliveries: %v", err)
+	}
+	if batch.Retired != 1 || batch.Delivered != 0 || batch.Retried != 0 {
+		t.Fatalf("unexpected batch %#v", batch)
+	}
+	for _, delivery := range repo.deliveries {
+		if delivery.Channel != domain.ChannelPush {
+			continue
+		}
+		if delivery.Status != domain.DeliveryStatusExpired ||
+			delivery.FailureCode != domain.DeliveryFailureChannelNotConfigured {
+			t.Fatalf("unexpected retired delivery %#v", delivery)
+		}
+	}
+}
+
+func TestProcessPendingDeliveriesMarksProviderSuccess(t *testing.T) {
+	repo := newMemoryRepository()
+	service := newTestService(t, repo, &fakeCommander{})
+	sender := &fakeDeliverySender{}
+	service.SetDeliverySender(domain.ChannelEmail, sender)
+	if _, err := service.CreateAdministratorNotice(context.Background(), "", domain.AdministratorInput{
+		Category:        domain.CategorySystemAnnouncement,
+		Title:           "邮件",
+		Body:            "内容",
+		Audience:        domain.AudienceParent,
+		Channels:        []string{domain.ChannelEmail},
+		ParentAccountID: testParentID,
+	}); err != nil {
+		t.Fatalf("seed notice: %v", err)
+	}
+
+	batch, err := service.ProcessPendingDeliveries(
+		context.Background(),
+		domain.ChannelEmail,
+		10,
+	)
+	if err != nil {
+		t.Fatalf("process pending deliveries: %v", err)
+	}
+	if sender.sent != 1 || batch.Delivered != 1 {
+		t.Fatalf("expected one delivery, sender=%d batch=%#v", sender.sent, batch)
+	}
+	if !service.DeliverySenderConfigured(domain.ChannelEmail) {
+		t.Fatalf("expected email sender to be reported as configured")
+	}
+}
+
+func TestProcessPendingDeliveriesRetriesProviderFailure(t *testing.T) {
+	repo := newMemoryRepository()
+	service := newTestService(t, repo, &fakeCommander{})
+	service.SetDeliverySender(domain.ChannelSMS, &fakeDeliverySender{err: errors.New("provider down")})
+	if _, err := service.CreateAdministratorNotice(context.Background(), "", domain.AdministratorInput{
+		Category:        domain.CategorySystemAnnouncement,
+		Title:           "短信",
+		Body:            "内容",
+		Audience:        domain.AudienceParent,
+		Channels:        []string{domain.ChannelSMS},
+		ParentAccountID: testParentID,
+	}); err != nil {
+		t.Fatalf("seed notice: %v", err)
+	}
+
+	batch, err := service.ProcessPendingDeliveries(
+		context.Background(),
+		domain.ChannelSMS,
+		10,
+	)
+	if err != nil {
+		t.Fatalf("process pending deliveries: %v", err)
+	}
+	if batch.Retried != 1 {
+		t.Fatalf("expected one retry, got %#v", batch)
+	}
+	for _, delivery := range repo.deliveries {
+		if delivery.Channel != domain.ChannelSMS {
+			continue
+		}
+		if delivery.Status != domain.DeliveryStatusFailed ||
+			delivery.FailureCode != domain.DeliveryFailureProviderError ||
+			delivery.RetryCount != 1 {
+			t.Fatalf("unexpected failed delivery %#v", delivery)
+		}
+	}
+}
+
+func TestProcessPendingDeliveriesRejectsWorkerOwnedChannel(t *testing.T) {
+	service := newTestService(t, newMemoryRepository(), &fakeCommander{})
+	if _, err := service.ProcessPendingDeliveries(
+		context.Background(),
+		domain.ChannelDevice,
+		10,
+	); !errors.Is(err, domain.ErrInvalidNotification) {
+		t.Fatalf("expected ErrInvalidNotification, got %v", err)
 	}
 }

@@ -77,6 +77,20 @@ const (
 )
 
 const (
+	// DeliveryFailureChannelNotConfigured retires a delivery when no provider
+	// is wired for the channel.
+	DeliveryFailureChannelNotConfigured = "channel_not_configured"
+	// DeliveryFailureNotificationUnavailable retires a delivery whose
+	// notification row no longer exists.
+	DeliveryFailureNotificationUnavailable = "notification_unavailable"
+	// DeliveryFailureNotificationExpired retires a delivery whose retention
+	// window has passed before an external provider accepted it.
+	DeliveryFailureNotificationExpired = "notification_expired"
+	// DeliveryFailureProviderError records a retryable provider failure.
+	DeliveryFailureProviderError = "delivery_failed"
+)
+
+const (
 	// DefaultPageSize is the guardian inbox page size.
 	DefaultPageSize = 20
 	// MaxPageSize bounds one guardian inbox page.

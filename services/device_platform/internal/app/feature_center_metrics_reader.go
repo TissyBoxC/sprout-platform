@@ -22,6 +22,9 @@ type featureCenterMetricsReader struct {
 	releaseStore    interface {
 		IndexStatus(ctx context.Context) (releaseStoreDomain.IndexStatus, error)
 	}
+	notifications interface {
+		DeliveryChannels() []string
+	}
 }
 
 // FeatureMetrics returns the metric values for one feature. Keys with no
@@ -40,8 +43,25 @@ func (reader featureCenterMetricsReader) FeatureMetrics(
 		merged = reader.withOutdatedServiceCount(ctx, merged)
 	case "download_server":
 		merged = reader.withDownloadFileCount(ctx, merged)
+	case "notification":
+		merged = reader.withConfiguredNotificationChannelCount(merged)
 	}
 	return merged, nil
+}
+
+// withConfiguredNotificationChannelCount reports how many external senders are
+// actually wired. In-app delivery is built in and intentionally excluded.
+func (reader featureCenterMetricsReader) withConfiguredNotificationChannelCount(
+	values map[string]any,
+) map[string]any {
+	if reader.notifications == nil {
+		return values
+	}
+	return mergeMetric(
+		values,
+		"notification_configured_channel_count",
+		len(reader.notifications.DeliveryChannels()),
+	)
 }
 
 // withOutdatedServiceCount merges the upgrade worker's live view. The worker

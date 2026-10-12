@@ -33,6 +33,14 @@ func (stub stubReleaseStore) IndexStatus(
 	return stub.status, stub.err
 }
 
+type stubNotificationChannels struct {
+	channels []string
+}
+
+func (stub stubNotificationChannels) DeliveryChannels() []string {
+	return append([]string(nil), stub.channels...)
+}
+
 func TestFeatureCenterMetricsReaderMergesOutdatedServices(t *testing.T) {
 	stateDir := t.TempDir()
 	snapshot := `{
@@ -137,6 +145,44 @@ func TestFeatureCenterMetricsReaderLeavesDownloadCountUnreportedWithoutIndex(
 		t.Fatalf(
 			"download_file_count must stay unreported, got %#v",
 			values["download_file_count"],
+		)
+	}
+}
+
+func TestFeatureCenterMetricsReaderReportsConfiguredNotificationChannels(
+	t *testing.T,
+) {
+	reader := featureCenterMetricsReader{
+		repository: stubMetricsRepository{},
+		notifications: stubNotificationChannels{
+			channels: []string{"push", "email"},
+		},
+	}
+	values, err := reader.FeatureMetrics(context.Background(), "notification")
+	if err != nil {
+		t.Fatalf("read notification metrics: %v", err)
+	}
+	if values["notification_configured_channel_count"] != 2 {
+		t.Fatalf(
+			"notification_configured_channel_count = %#v, want 2",
+			values["notification_configured_channel_count"],
+		)
+	}
+}
+
+func TestFeatureCenterMetricsReaderNotificationChannelsUnwired(t *testing.T) {
+	reader := featureCenterMetricsReader{
+		repository:    stubMetricsRepository{},
+		notifications: stubNotificationChannels{},
+	}
+	values, err := reader.FeatureMetrics(context.Background(), "notification")
+	if err != nil {
+		t.Fatalf("read notification metrics: %v", err)
+	}
+	if values["notification_configured_channel_count"] != 0 {
+		t.Fatalf(
+			"notification_configured_channel_count = %#v, want 0",
+			values["notification_configured_channel_count"],
 		)
 	}
 }

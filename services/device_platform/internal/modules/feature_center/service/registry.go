@@ -98,12 +98,13 @@ func DefaultRegistry() []Definition {
 				boundedIntegerField("retention_days", "数据保留天数", 365, 1, 3650, true, "天"),
 			),
 			metrics("reported_usage_days", "已上报天数", "天")),
-		featureDef("notification", "消息通知", "家长站内通知、远程留言、短信与消息触达。", "platform", "平台运维", false,
-			nil,
+		readOnlyFeatureDef("notification", "消息通知", "家长站内通知、远程留言、短信与消息触达。", "platform", "平台运维",
+			"站内通知始终可用；推送、短信和邮件由部署侧发送器配置管理，功能中心只展示真实配置状态和投递指标。",
 			metrics(
 				"notification_total", "通知总数", "条",
 				"notification_pending_delivery", "待投递", "条",
 				"notification_failed_delivery", "投递失败", "条",
+				"notification_configured_channel_count", "已配置外部通道", "个",
 			)),
 		featureDef("platform_security", "平台安全", "管理员权限、审计与安全策略。", "security", "安全团队", true,
 			configFields(

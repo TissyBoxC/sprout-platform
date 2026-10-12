@@ -659,8 +659,32 @@ func TestDefaultRegistryMarksUITextAsActive(t *testing.T) {
 	if notification.Status != domain.FeatureStatusActive {
 		t.Fatalf("notification status = %q, want active", notification.Status)
 	}
+	if notification.ReadOnlyReason == "" {
+		t.Fatalf("notification should explain why external channel config is read-only")
+	}
 	if len(notification.ReadOnlyMetrics) == 0 {
 		t.Fatalf("notification should expose read-only delivery metrics")
+	}
+}
+
+func TestNotificationRegistryKeepsExternalChannelsReadOnly(t *testing.T) {
+	service, err := New(Options{
+		Repository:  newMemoryRepository(),
+		Definitions: DefaultRegistry(),
+		Clock:       fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create default feature center service: %v", err)
+	}
+	feature, err := service.Get(context.Background(), "notification")
+	if err != nil {
+		t.Fatalf("get notification feature: %v", err)
+	}
+	if len(feature.ConfigSchema) != 0 {
+		t.Fatalf("notification config schema should stay empty until senders exist")
+	}
+	if feature.Values["push_configured"] != nil {
+		t.Fatalf("notification must not fabricate push configuration state")
 	}
 }
 

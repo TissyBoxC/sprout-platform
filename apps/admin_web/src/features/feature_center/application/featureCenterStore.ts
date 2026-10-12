@@ -162,7 +162,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
 
   const canCheckHealth = computed(
     () =>
-      authStore.canManageFeatureCenter &&
+      authStore.canReadFeatureCenter &&
       isDetailReady.value &&
       selectedFeature.value !== null &&
       selectedFeature.value.status !== 'planned',
@@ -365,7 +365,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
 
   async function checkHealth(featureId = selectedFeatureId.value): Promise<boolean> {
     const normalizedId = featureId.trim()
-    if (!normalizedId || !authStore.canManageFeatureCenter) {
+    if (!normalizedId || !authStore.canReadFeatureCenter) {
       return false
     }
 

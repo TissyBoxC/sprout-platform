@@ -25,6 +25,9 @@ export const useAuthStore = defineStore('admin-auth', () => {
 
   const isSignedIn = computed(() => account.value !== null)
   const isMFARequired = computed(() => mfaChallengeToken.value !== null)
+  const canReadFeatureCenter = computed(() =>
+    hasPermission(account.value, 'feature_center.read'),
+  )
   const canManageFeatureCenter = computed(() =>
     hasPermission(account.value, 'feature_center.manage'),
   )
@@ -134,6 +137,7 @@ export const useAuthStore = defineStore('admin-auth', () => {
 
   return {
     account,
+    canReadFeatureCenter,
     canManageFeatureCenter,
     error,
     isRestoring,

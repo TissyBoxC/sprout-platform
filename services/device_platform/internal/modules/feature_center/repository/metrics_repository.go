@@ -263,6 +263,42 @@ func (r *MetricsRepository) FeatureMetrics(
 			"SELECT COUNT(*) FROM content_offline_policy",
 			"offline_policy_device_count",
 		)
+	case "content_engagement":
+		return r.pair(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM content_favorites),
+				(SELECT COUNT(*) FROM content_play_history)`,
+			"content_favorite_count",
+			"content_play_history_count",
+		)
+	case "content_theme_pack":
+		return r.scalar(ctx,
+			"SELECT COUNT(*) FROM content_theme_packs WHERE status = 'published'",
+			"content_theme_pack_count",
+		)
+	case "playback":
+		return r.triad(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM playback_requests),
+				(SELECT COUNT(*) FROM playback_requests WHERE status IN ('pending', 'acknowledged')),
+				(SELECT COUNT(*) FROM playback_requests WHERE status = 'failed')`,
+			"playback_request_count",
+			"playback_pending_count",
+			"playback_failed_count",
+		)
+	case "recommendation":
+		return r.scalar(ctx,
+			"SELECT COUNT(*) FROM content_package_versions WHERE status = 'published'",
+			"recommendation_candidate_count",
+		)
+	case "privacy_lifecycle":
+		return r.pair(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM parent_consent_events),
+				(SELECT COUNT(*) FROM parent_deletion_requests WHERE status = 'pending')`,
+			"consent_event_count",
+			"pending_deletion_count",
+		)
 	default:
 		return nil, nil
 	}

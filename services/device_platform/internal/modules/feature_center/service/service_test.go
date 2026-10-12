@@ -319,6 +319,11 @@ func TestDefaultRegistryCoversRequiredFeatures(t *testing.T) {
 		"companionship",
 		"local_command",
 		"offline_content",
+		"content_engagement",
+		"content_theme_pack",
+		"playback",
+		"recommendation",
+		"privacy_lifecycle",
 		"deployment_infrastructure",
 	}
 	definitions := DefaultRegistry()

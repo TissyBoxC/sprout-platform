@@ -423,6 +423,26 @@ func Run() error {
 			databaseStore.Pool(),
 			"SELECT 1 FROM content_offline_policy LIMIT 1",
 		),
+		"content_engagement": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM content_favorites LIMIT 1",
+		),
+		"content_theme_pack": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM content_theme_packs LIMIT 1",
+		),
+		"playback": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM playback_requests LIMIT 1",
+		),
+		"recommendation": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM content_play_history LIMIT 1",
+		),
+		"privacy_lifecycle": nonzeroRowProbe(
+			databaseStore.Pool(),
+			"SELECT 1 FROM parent_consent_events LIMIT 1",
+		),
 		"deployment_infrastructure": featureCenterService.HealthProbeFunc(
 			func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
 				if err := databaseStore.Pool().Ping(ctx); err != nil {

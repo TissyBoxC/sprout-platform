@@ -225,6 +225,35 @@ func DefaultRegistry() []Definition {
 			metrics(
 				"offline_policy_device_count", "启用设备", "台",
 			)),
+		readOnlyFeatureDef("content_engagement", "内容收藏与历史", "家长端内容收藏与播放记录。", "content", "内容平台",
+			"收藏与播放历史由家长端按家庭维护，功能中心只提供能力状态和统计。",
+			metrics(
+				"content_favorite_count", "收藏数", "条",
+				"content_play_history_count", "播放记录", "条",
+			)),
+		readOnlyFeatureDef("content_theme_pack", "主题内容包", "按主题编排的内容包与批量下载。", "content", "内容平台",
+			"主题包在内容库页面编辑与发布，功能中心只提供能力状态和统计。",
+			metrics(
+				"content_theme_pack_count", "已发布主题包", "个",
+			)),
+		readOnlyFeatureDef("playback", "家长点播", "家长发起的按需播放请求闭环。", "content", "内容平台",
+			"点播请求由家长端发起、设备确认并回传结果，功能中心只提供能力状态和统计。",
+			metrics(
+				"playback_request_count", "点播请求", "次",
+				"playback_pending_count", "待处理", "次",
+				"playback_failed_count", "失败", "次",
+			)),
+		readOnlyFeatureDef("recommendation", "内容推荐", "按年龄层与播放信号的内容推荐。", "content", "内容平台",
+			"推荐由平台基于已发布内容与播放信号生成，功能中心只提供能力状态和统计。",
+			metrics(
+				"recommendation_candidate_count", "推荐内容", "个",
+			)),
+		readOnlyFeatureDef("privacy_lifecycle", "隐私与数据生命周期", "监护人授权、导出与账号注销清理。", "security", "安全团队",
+			"授权、导出和注销清理由监护人自助执行并留下审计，功能中心只提供能力状态和统计。",
+			metrics(
+				"consent_event_count", "授权变更", "次",
+				"pending_deletion_count", "待注销清理", "个",
+			)),
 		featureDef("deployment_infrastructure", "部署基础设施", "容器、数据库、缓存和消息服务。", "platform", "平台运维", false,
 			nil,
 			metrics("running_service_count", "运行服务", "个")),

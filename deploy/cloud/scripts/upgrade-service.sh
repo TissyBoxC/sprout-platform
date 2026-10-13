@@ -17,6 +17,7 @@ sub2api_repository="${SPROUT_UPGRADE_SUB2API_REPOSITORY:-TissyBoxC/sprout-sub2ap
 github_api_base="${SPROUT_UPGRADE_GITHUB_API_BASE_URL:-https://api.github.com}"
 github_token="${GITHUB_TOKEN:-${SPROUT_UPGRADE_GITHUB_TOKEN:-}}"
 health_timeout="${SPROUT_UPGRADE_HEALTH_TIMEOUT_SECONDS:-180}"
+platform_git_remote="${SPROUT_UPGRADE_PLATFORM_GIT_REMOTE:-origin}"
 
 upgrade_order="sub2api device_platform voice_gateway admin_web"
 previous_platform_version=""
@@ -348,6 +349,43 @@ assert_git_clean() {
   fi
 }
 
+# Fetch the immutable platform release tag before swapping images. The cloud
+# checkout is the source of truth for Compose files, migrations, and worker
+# scripts, so it must be advanced to the same release as the image being
+# deployed. Only Git metadata is fetched here; runtime files such as .env,
+# migration-data/, and mosquitto/certs/ are never overwritten.
+sync_platform_checkout() {
+  target_version="$1"
+  repository_root="$cloud_dir/../.."
+  release_tag="v${target_version}"
+
+  if ! git -C "$repository_root" remote get-url "$platform_git_remote" >/dev/null 2>&1; then
+    echo "云端部署仓库缺少 Git remote: ${platform_git_remote}" >&2
+    return 1
+  fi
+
+  if ! git -C "$repository_root" fetch \
+    --force \
+    --tags \
+    "$platform_git_remote" \
+    "refs/tags/${release_tag}:refs/tags/${release_tag}"; then
+    echo "无法获取平台发布标签 ${release_tag}，升级已停止。" >&2
+    return 1
+  fi
+
+  if ! git -C "$repository_root" rev-parse --verify --quiet "refs/tags/${release_tag}^{commit}" >/dev/null; then
+    echo "获取后仍缺少平台发布标签 ${release_tag}，升级已停止。" >&2
+    return 1
+  fi
+
+  # A detached checkout is intentional for deployments: it pins the running
+  # stack to the release commit instead of following a mutable branch.
+  if ! git -C "$repository_root" checkout --detach "$release_tag"; then
+    echo "无法切换到平台发布标签 ${release_tag}，升级已停止。" >&2
+    return 1
+  fi
+}
+
 # Platform images and the cloud Compose checkout are one release contract.
 # Refuse to swap a platform image onto an older checkout because that leaves
 # the running containers ahead of their Compose file, worker scripts, and
@@ -607,8 +645,6 @@ upgrade_services() {
   fi
 
   assert_git_clean
-  "$cloud_dir/scripts/validate-cloud-env.sh" "$env_file"
-  assert_compose_config
 
   for service in $requested_services; do
     target_version_arg=""
@@ -619,8 +655,12 @@ upgrade_services() {
   done
 
   if [ "$requested_service" != "sub2api" ]; then
+    sync_platform_checkout "$target_platform_version"
     assert_platform_checkout_version "$target_platform_version"
   fi
+
+  "$cloud_dir/scripts/validate-cloud-env.sh" "$env_file"
+  assert_compose_config
 
   services_to_upgrade=""
   for service in $requested_services; do

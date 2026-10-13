@@ -45,6 +45,27 @@ if ! grep -Eq '^assert_platform_checkout_version\(\)' "$upgrade_script"; then
   exit 1
 fi
 
+if ! grep -Eq '^sync_platform_checkout\(\)' "$upgrade_script"; then
+  echo "upgrade-service.sh 缺少发布源码同步。" >&2
+  exit 1
+fi
+
+sync_block="$(
+  sed -n '/^sync_platform_checkout()/,/^}/p' "$upgrade_script"
+)"
+if ! printf '%s\n' "$sync_block" | grep -Fq 'git -C "$repository_root" fetch'; then
+  echo "发布源码同步未拉取目标标签。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$sync_block" | grep -Fq 'git -C "$repository_root" checkout --detach "$release_tag"'; then
+  echo "发布源码同步未原子切换到目标标签。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$sync_block" | grep -Fq 'refs/tags/${release_tag}:refs/tags/${release_tag}'; then
+  echo "发布源码同步未使用不可变标签引用。" >&2
+  exit 1
+fi
+
 version_guard_block="$(
   sed -n '/^assert_platform_checkout_version()/,/^}/p' "$upgrade_script"
 )"
@@ -75,6 +96,18 @@ guard_call_block="$(
 if ! printf '%s\n' "$guard_call_block" |
   grep -Fq 'assert_platform_checkout_version "$target_platform_version"'; then
   echo "平台服务升级未调用部署源码版本门禁。" >&2
+  exit 1
+fi
+
+sync_call_line="$(grep -n 'sync_platform_checkout "$target_platform_version"' "$upgrade_script" | head -n 1 | cut -d: -f1)"
+guard_call_line="$(grep -n 'assert_platform_checkout_version "$target_platform_version"' "$upgrade_script" | head -n 1 | cut -d: -f1)"
+compose_check_line="$(grep -n '^  assert_compose_config$' "$upgrade_script" | head -n 1 | cut -d: -f1)"
+if [ -z "$sync_call_line" ] || [ -z "$guard_call_line" ] || [ -z "$compose_check_line" ]; then
+  echo "无法确认发布同步、版本门禁与 Compose 校验的调用顺序。" >&2
+  exit 1
+fi
+if [ "$sync_call_line" -gt "$guard_call_line" ] || [ "$guard_call_line" -gt "$compose_check_line" ]; then
+  echo "发布同步必须早于版本门禁，版本门禁必须早于 Compose 校验。" >&2
   exit 1
 fi
 
@@ -115,6 +148,41 @@ git -C "$guard_repo" checkout -q v1.2.3
   cloud_dir="$guard_repo/deploy/cloud"
   assert_platform_checkout_version "1.2.3"
 )
+
+# sync_platform_checkout must advance HEAD to an immutable release tag while
+# leaving runtime-only files untouched.
+sync_origin="$guard_root/origin"
+sync_repo="$guard_root/sync-repo"
+git clone -q "$guard_repo" "$sync_origin"
+git -C "$sync_origin" config user.name "upgrade sync origin"
+git -C "$sync_origin" config user.email "upgrade-sync@example.invalid"
+printf '%s\n' "1.2.4" > "$sync_origin/VERSION"
+git -C "$sync_origin" add VERSION
+git -C "$sync_origin" commit -qm "sync release"
+git -C "$sync_origin" tag v1.2.4
+
+git clone -q "$sync_origin" "$sync_repo"
+mkdir -p "$sync_repo/deploy/cloud/migration-data" "$sync_repo/deploy/cloud/mosquitto/certs"
+printf '%s\n' "runtime-only" > "$sync_repo/deploy/cloud/migration-data/keep.dump"
+printf '%s\n' "runtime-cert" > "$sync_repo/deploy/cloud/mosquitto/certs/keep.crt"
+printf '%s\n' "runtime-env" > "$sync_repo/deploy/cloud/.env"
+
+(
+  source "$upgrade_script"
+  cloud_dir="$sync_repo/deploy/cloud"
+  sync_platform_checkout "1.2.4"
+)
+
+if [ "$(git -C "$sync_repo" describe --tags --exact-match HEAD 2>/dev/null)" != "v1.2.4" ]; then
+  echo "发布源码同步未切换到目标标签。" >&2
+  exit 1
+fi
+if [ "$(cat "$sync_repo/deploy/cloud/migration-data/keep.dump")" != "runtime-only" ] ||
+  [ "$(cat "$sync_repo/deploy/cloud/mosquitto/certs/keep.crt")" != "runtime-cert" ] ||
+  [ "$(cat "$sync_repo/deploy/cloud/.env")" != "runtime-env" ]; then
+  echo "发布源码同步破坏了运行时文件。" >&2
+  exit 1
+fi
 
 validate_service_block="$(
   sed -n '/^validate_service()/,/^}/p' "$worker_script"

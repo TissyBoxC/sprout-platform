@@ -1575,6 +1575,164 @@ paths:
                 $ref: "#/components/schemas/ResponseEnvelope"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/display/policy:
+    get:
+      summary: Read the authenticated family's eye-care display policy
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Display policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisplayPolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Publish the authenticated family's eye-care display policy
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DisplayPolicyRequest"
+      responses:
+        "200":
+          description: Updated display policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisplayPolicyEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/display/devices:
+    get:
+      summary: List the authenticated family's latest display statuses
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Display statuses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisplayDevicesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/display/capability:
+    get:
+      summary: Read one family device's display capability
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Display capability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisplayCapabilityEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/display/status:
+    post:
+      summary: Report one bound device's display status
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DisplayStatusReportRequest"
+      responses:
+        "200":
+          description: Display status recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisplayStatusRecordedEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/display/policy:
+    get:
+      summary: Read the family eye-care policy from a bound device session
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Display policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisplayPolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/display/stats:
+    get:
+      summary: Read the fleet-wide eye-care display summary
+      security:
+        - userToken: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        "200":
+          description: Display statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisplayAdminStatsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -3942,3 +4100,303 @@ components:
                   type: array
                   items:
                     $ref: "#/components/schemas/UsageReport"
+    DisplayPolicyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - brightness_percent
+        - color_temperature_kelvin
+        - min_view_distance_cm
+        - daily_limit_minutes
+        - break_interval_minutes
+        - dim_after_seconds
+        - auto_brightness
+        - night_light
+        - distance_reminder
+      properties:
+        brightness_percent:
+          type: integer
+          minimum: 5
+          maximum: 100
+        color_temperature_kelvin:
+          type: integer
+          minimum: 2700
+          maximum: 6500
+        min_view_distance_cm:
+          type: integer
+          minimum: 20
+          maximum: 120
+        daily_limit_minutes:
+          type: integer
+          minimum: 5
+          maximum: 600
+        break_interval_minutes:
+          type: integer
+          minimum: 5
+          maximum: 240
+        dim_after_seconds:
+          type: integer
+          minimum: 10
+          maximum: 600
+        auto_brightness:
+          type: boolean
+        night_light:
+          type: boolean
+        distance_reminder:
+          type: boolean
+    DisplayPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - brightness_percent
+        - color_temperature_kelvin
+        - min_view_distance_cm
+        - daily_limit_minutes
+        - break_interval_minutes
+        - dim_after_seconds
+        - auto_brightness
+        - night_light
+        - distance_reminder
+        - revision
+      properties:
+        schema_version:
+          type: integer
+          minimum: 1
+        brightness_percent:
+          type: integer
+          minimum: 5
+          maximum: 100
+        color_temperature_kelvin:
+          type: integer
+          minimum: 2700
+          maximum: 6500
+        min_view_distance_cm:
+          type: integer
+          minimum: 20
+          maximum: 120
+        daily_limit_minutes:
+          type: integer
+          minimum: 5
+          maximum: 600
+        break_interval_minutes:
+          type: integer
+          minimum: 5
+          maximum: 240
+        dim_after_seconds:
+          type: integer
+          minimum: 10
+          maximum: 600
+        auto_brightness:
+          type: boolean
+        night_light:
+          type: boolean
+        distance_reminder:
+          type: boolean
+        revision:
+          type: integer
+          minimum: 0
+    DisplayPolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/DisplayPolicy"
+    DisplayDeviceStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - family_id
+        - brightness_percent
+        - screen_width
+        - screen_height
+        - touch_supported
+        - up_to_date
+        - reported_at
+      properties:
+        device_id:
+          type: string
+        family_id:
+          type: string
+        brightness_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        screen_width:
+          type: integer
+          minimum: 0
+          maximum: 8192
+        screen_height:
+          type: integer
+          minimum: 0
+          maximum: 8192
+        touch_supported:
+          type: boolean
+        up_to_date:
+          type: boolean
+        reported_at:
+          type: string
+          format: date-time
+    DisplayDevicesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - devices
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/DisplayDeviceStatus"
+    DisplayCapability:
+      type: object
+      additionalProperties: false
+      required:
+        - supported
+        - touch_supported
+        - screen_width
+        - screen_height
+        - schema_version
+        - policy_revision
+        - applied_revision
+        - up_to_date
+      properties:
+        supported:
+          type: boolean
+        touch_supported:
+          type: boolean
+        screen_width:
+          type: integer
+          minimum: 0
+          maximum: 8192
+        screen_height:
+          type: integer
+          minimum: 0
+          maximum: 8192
+        schema_version:
+          type: integer
+          minimum: 1
+        policy_revision:
+          type: integer
+          minimum: 0
+        applied_revision:
+          type: integer
+          minimum: 0
+        up_to_date:
+          type: boolean
+    DisplayCapabilityEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/DisplayCapability"
+    DisplayStatusReportRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - brightness_percent
+        - screen_width
+        - screen_height
+        - touch_supported
+        - policy_revision
+      properties:
+        brightness_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        screen_width:
+          type: integer
+          minimum: 0
+          maximum: 8192
+        screen_height:
+          type: integer
+          minimum: 0
+          maximum: 8192
+        touch_supported:
+          type: boolean
+        policy_revision:
+          type: integer
+          minimum: 0
+    DisplayStatusRecordedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - policy_revision
+                - recorded
+              properties:
+                device_id:
+                  type: string
+                policy_revision:
+                  type: integer
+                  minimum: 0
+                recorded:
+                  type: boolean
+                  const: true
+    DisplayScreenSizeBucket:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - count
+      properties:
+        label:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+    DisplayAdminStats:
+      type: object
+      additionalProperties: false
+      required:
+        - window_days
+        - device_count
+        - touch_device_count
+        - outdated_count
+        - average_brightness
+        - screen_size_buckets
+        - generated_at
+      properties:
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        device_count:
+          type: integer
+          minimum: 0
+        touch_device_count:
+          type: integer
+          minimum: 0
+        outdated_count:
+          type: integer
+          minimum: 0
+        average_brightness:
+          type: integer
+          minimum: 0
+          maximum: 100
+        screen_size_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/DisplayScreenSizeBucket"
+        generated_at:
+          type: string
+          format: date-time
+    DisplayAdminStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/DisplayAdminStats"

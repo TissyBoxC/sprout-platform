@@ -681,6 +681,7 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create notification service: %w", err)
 	}
+	deviceRuntimeService.SetCommandAcknowledgementSink(notifications)
 	featureCenter.SetMetricsReader(featureCenterMetricsReader{
 		repository: featureCenterRepository.NewMetricsRepository(
 			databaseStore.Pool(),

@@ -38,24 +38,37 @@ type DiagnosticReader interface {
 	RecentCrashCount(ctx context.Context, deviceID string) (uint64, error)
 }
 
+// CommandAcknowledgementSink receives a successful device command
+// acknowledgement. It is optional so runtime command delivery remains usable
+// when notification delivery is not assembled.
+type CommandAcknowledgementSink interface {
+	MarkDeliveryDeliveredByCommand(
+		ctx context.Context,
+		commandID string,
+		deviceID string,
+	) error
+}
+
 // Service validates, stores, and exposes device runtime state.
 type Service struct {
-	repository       repository.Repository
-	bindingReader    BindingReader
-	diagnosticReader DiagnosticReader
-	timeSource       clock.Clock
-	offlineThreshold time.Duration
-	commandTTL       time.Duration
+	repository          repository.Repository
+	bindingReader       BindingReader
+	diagnosticReader    DiagnosticReader
+	acknowledgementSink CommandAcknowledgementSink
+	timeSource          clock.Clock
+	offlineThreshold    time.Duration
+	commandTTL          time.Duration
 }
 
 // Options contains runtime service dependencies and policy.
 type Options struct {
-	Repository       repository.Repository
-	BindingService   BindingReader
-	DiagnosticReader DiagnosticReader
-	Clock            clock.Clock
-	OfflineThreshold time.Duration
-	CommandTTL       time.Duration
+	Repository          repository.Repository
+	BindingService      BindingReader
+	DiagnosticReader    DiagnosticReader
+	AcknowledgementSink CommandAcknowledgementSink
+	Clock               clock.Clock
+	OfflineThreshold    time.Duration
+	CommandTTL          time.Duration
 }
 
 // New creates the device runtime service.
@@ -79,13 +92,22 @@ func New(options Options) (*Service, error) {
 		commandTTL = 15 * time.Minute
 	}
 	return &Service{
-		repository:       options.Repository,
-		bindingReader:    options.BindingService,
-		diagnosticReader: options.DiagnosticReader,
-		timeSource:       timeSource,
-		offlineThreshold: offlineThreshold,
-		commandTTL:       commandTTL,
+		repository:          options.Repository,
+		bindingReader:       options.BindingService,
+		diagnosticReader:    options.DiagnosticReader,
+		acknowledgementSink: options.AcknowledgementSink,
+		timeSource:          timeSource,
+		offlineThreshold:    offlineThreshold,
+		commandTTL:          commandTTL,
 	}, nil
+}
+
+// SetCommandAcknowledgementSink wires the optional notification-delivery
+// acknowledgement consumer after both services have been constructed.
+func (s *Service) SetCommandAcknowledgementSink(
+	sink CommandAcknowledgementSink,
+) {
+	s.acknowledgementSink = sink
 }
 
 // RecordHeartbeat validates and persists one authenticated runtime snapshot.
@@ -409,13 +431,26 @@ func (s *Service) AcknowledgeCommand(
 	if strings.TrimSpace(pathDeviceID) != deviceID {
 		return bindingdomain.ErrInvalidDeviceProof
 	}
-	return s.repository.AcknowledgeCommand(
+	if err := s.repository.AcknowledgeCommand(
 		ctx,
 		commandID,
 		deviceID,
 		status,
 		strings.TrimSpace(resultCode),
-	)
+	); err != nil {
+		return err
+	}
+	if s.acknowledgementSink != nil {
+		// Notification bookkeeping is secondary to the command result. A
+		// transient notification-store failure must not make the device retry
+		// an already acknowledged command.
+		_ = s.acknowledgementSink.MarkDeliveryDeliveredByCommand(
+			ctx,
+			commandID,
+			deviceID,
+		)
+	}
+	return nil
 }
 
 // ResolveDeviceFamily verifies that the path device id belongs to the

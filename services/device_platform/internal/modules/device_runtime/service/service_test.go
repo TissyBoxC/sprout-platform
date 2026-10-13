@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -179,6 +180,95 @@ func TestCommandLifecycleIsAcknowledgedOnce(t *testing.T) {
 		"ok",
 	); err != domain.ErrCommandNotFound {
 		t.Fatalf("expected duplicate acknowledgement to be rejected, got %v", err)
+	}
+}
+
+func TestCommandAcknowledgementNotifiesDeliverySink(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
+	repository := newMemoryRepository()
+	sink := &recordingAcknowledgementSink{}
+	service, err := New(Options{
+		Repository: repository,
+		BindingService: &memoryBindingReader{
+			deviceID: "device_test_001",
+		},
+		Clock:               fixedClock{now: now},
+		AcknowledgementSink: sink,
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+	command, err := service.CreateCommand(
+		context.Background(),
+		"device_test_001",
+		domain.CommandDisplayMessage,
+		"parent_test_001",
+		map[string]any{"notification_id": "notification_test_001"},
+	)
+	if err != nil {
+		t.Fatalf("create command: %v", err)
+	}
+	if err := service.AcknowledgeCommand(
+		context.Background(),
+		"session",
+		"device_test_001",
+		command.ID,
+		domain.CommandStatusAcknowledged,
+		"ok",
+	); err != nil {
+		t.Fatalf("acknowledge command: %v", err)
+	}
+	if sink.commandID != command.ID || sink.deviceID != "device_test_001" {
+		t.Fatalf(
+			"expected sink call for command %q and device %q, got %q and %q",
+			command.ID,
+			"device_test_001",
+			sink.commandID,
+			sink.deviceID,
+		)
+	}
+}
+
+func TestCommandAcknowledgementIgnoresSecondarySinkFailure(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
+	repository := newMemoryRepository()
+	service, err := New(Options{
+		Repository: repository,
+		BindingService: &memoryBindingReader{
+			deviceID: "device_test_001",
+		},
+		Clock: fixedClock{now: now},
+		AcknowledgementSink: &failingAcknowledgementSink{
+			err: errors.New("notification store unavailable"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+	command, err := service.CreateCommand(
+		context.Background(),
+		"device_test_001",
+		domain.CommandDisplayMessage,
+		"parent_test_001",
+		map[string]any{"notification_id": "notification_test_001"},
+	)
+	if err != nil {
+		t.Fatalf("create command: %v", err)
+	}
+	if err := service.AcknowledgeCommand(
+		context.Background(),
+		"session",
+		"device_test_001",
+		command.ID,
+		domain.CommandStatusAcknowledged,
+		"ok",
+	); err != nil {
+		t.Fatalf("acknowledge command should ignore sink failure, got %v", err)
+	}
+	if repository.commands[command.ID].Status != domain.CommandStatusAcknowledged {
+		t.Fatal("expected the command to remain acknowledged")
 	}
 }
 
@@ -498,6 +588,33 @@ func (repository *memoryRepository) AcknowledgeCommand(
 	command.ResultCode = resultCode
 	repository.commands[commandID] = command
 	return nil
+}
+
+type recordingAcknowledgementSink struct {
+	commandID string
+	deviceID  string
+}
+
+func (sink *recordingAcknowledgementSink) MarkDeliveryDeliveredByCommand(
+	_ context.Context,
+	commandID string,
+	deviceID string,
+) error {
+	sink.commandID = commandID
+	sink.deviceID = deviceID
+	return nil
+}
+
+type failingAcknowledgementSink struct {
+	err error
+}
+
+func (sink *failingAcknowledgementSink) MarkDeliveryDeliveredByCommand(
+	_ context.Context,
+	_ string,
+	_ string,
+) error {
+	return sink.err
 }
 
 func validHeartbeatInput(now time.Time) domain.HeartbeatInput {

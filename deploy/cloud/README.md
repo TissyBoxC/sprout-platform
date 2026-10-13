@@ -269,6 +269,21 @@ location ^~ /api/v1/release-publication/ {
 只覆盖发布接口前缀，其余路径仍由面板生成的反向代理处理。保存后执行
 `nginx -t && nginx -s reload`；此配置不改变鉴权规则。
 
+1Panel 生成的 `proxy/root.conf` 会在 `location` 内写入
+`add_header X-Cache`。Nginx 的 `add_header` 不会继承到已经声明了同名指令的
+子上下文，这会让站点 `server` 级 HSTS 在正常代理响应中消失。部署仓库提供
+只读检查和幂等修复：
+
+```bash
+./scripts/audit-1panel-proxy-headers.sh
+./scripts/audit-1panel-proxy-headers.sh --apply
+```
+
+第二条命令会先备份到 `/opt/1panel/www/.codex-backups/`，补齐 HSTS 并把
+`X-Cache` 改为 `always`，然后调用当前 OpenResty 容器执行 `openresty -t`
+和 reload；任何一步失败都会自动回滚。修复后应重新验证 API、管理端、下载、
+Sub2API 和语音站点的响应头，而不是只依赖 `nginx -t`。
+
 设备 MQTT 使用独立域名（待确认），在 1Panel 或云防火墙中放行
 `8883/tcp`。不要对公网放行 `1883/tcp`。
 

@@ -92,6 +92,7 @@ jobs:
           (cd services/device_platform && go test ./... && go build -o ../../dist/device-platform ./cmd/device-platform)
           (cd services/voice_gateway && go test ./... && go build -o ../../dist/voice-gateway ./cmd/voice-gateway)
           bash deploy/cloud/scripts/test-service-upgrade-worker.sh
+          bash deploy/cloud/scripts/test-audit-1panel-proxy-headers.sh
           bash deploy/cloud/scripts/test-audit-service-image-override.sh
 
           tar -czf "dist/stage/sprout-contracts-${{ steps.detect.outputs.tag }}.tar.gz" packages/contracts

@@ -37,6 +37,85 @@ if ! grep -Eq '^platform_repository=' "$worker_script" ||
   exit 1
 fi
 
+upgrade_script="$script_dir/upgrade-service.sh"
+bash -n "$upgrade_script"
+
+if ! grep -Eq '^assert_platform_checkout_version\(\)' "$upgrade_script"; then
+  echo "upgrade-service.sh 缺少部署源码版本门禁。" >&2
+  exit 1
+fi
+
+version_guard_block="$(
+  sed -n '/^assert_platform_checkout_version()/,/^}/p' "$upgrade_script"
+)"
+if ! printf '%s\n' "$version_guard_block" | grep -Fq 'version_file="$repository_root/VERSION"'; then
+  echo "部署源码版本门禁未读取云端 checkout 的 VERSION。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$version_guard_block" | grep -Fq 'repository_root="$cloud_dir/../.."'; then
+  echo "部署源码版本门禁的仓库根目录路径不正确。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$version_guard_block" | grep -Fq 'if [ "$checkout_version" != "$target_version" ]; then'; then
+  echo "部署源码版本门禁未拒绝版本不一致。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$version_guard_block" | grep -Fq 'refs/tags/${release_tag}'; then
+  echo "部署源码版本门禁未校验目标发布标签。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$version_guard_block" | grep -Fq 'if [ "$checkout_head" != "$release_head" ]; then'; then
+  echo "部署源码版本门禁未校验 checkout 与发布标签是否一致。" >&2
+  exit 1
+fi
+
+guard_call_block="$(
+  sed -n '/if \[ "$requested_service" != "sub2api" \]; then/,/fi/p' "$upgrade_script"
+)"
+if ! printf '%s\n' "$guard_call_block" |
+  grep -Fq 'assert_platform_checkout_version "$target_platform_version"'; then
+  echo "平台服务升级未调用部署源码版本门禁。" >&2
+  exit 1
+fi
+
+guard_root="$(mktemp -d)"
+trap 'rm -rf "$guard_root"' EXIT
+guard_repo="$guard_root/repo"
+mkdir -p "$guard_repo/deploy/cloud"
+printf '%s\n' "1.2.3" > "$guard_repo/VERSION"
+git -C "$guard_repo" init -q
+git -C "$guard_repo" config user.name "upgrade guard test"
+git -C "$guard_repo" config user.email "upgrade-guard@example.invalid"
+git -C "$guard_repo" add VERSION
+git -C "$guard_repo" commit -qm "test release"
+git -C "$guard_repo" tag v1.2.3
+
+(
+  # shellcheck source=deploy/cloud/scripts/upgrade-service.sh
+  source "$upgrade_script"
+  cloud_dir="$guard_repo/deploy/cloud"
+  assert_platform_checkout_version "1.2.3"
+)
+
+printf '%s\n' "1.2.4" > "$guard_repo/VERSION"
+git -C "$guard_repo" add VERSION
+git -C "$guard_repo" commit -qm "newer release"
+if (
+  source "$upgrade_script"
+  cloud_dir="$guard_repo/deploy/cloud"
+  assert_platform_checkout_version "1.2.3"
+) >/dev/null 2>&1; then
+  echo "部署源码版本门禁未拒绝版本不一致。" >&2
+  exit 1
+fi
+
+git -C "$guard_repo" checkout -q v1.2.3
+(
+  source "$upgrade_script"
+  cloud_dir="$guard_repo/deploy/cloud"
+  assert_platform_checkout_version "1.2.3"
+)
+
 validate_service_block="$(
   sed -n '/^validate_service()/,/^}/p' "$worker_script"
 )"

@@ -348,6 +348,45 @@ assert_git_clean() {
   fi
 }
 
+# Platform images and the cloud Compose checkout are one release contract.
+# Refuse to swap a platform image onto an older checkout because that leaves
+# the running containers ahead of their Compose file, worker scripts, and
+# release metadata even though every individual container still looks healthy.
+assert_platform_checkout_version() {
+  target_version="$1"
+  repository_root="$cloud_dir/../.."
+  version_file="$repository_root/VERSION"
+
+  if [ ! -f "$version_file" ]; then
+    echo "云端部署目录缺少 VERSION 文件，无法确认源码版本，拒绝升级。" >&2
+    exit 1
+  fi
+
+  checkout_version="$(tr -d '[:space:]' < "$version_file")"
+  if ! validate_version "$checkout_version"; then
+    echo "云端部署目录的 VERSION 文件格式无效，拒绝升级。" >&2
+    exit 1
+  fi
+
+  if [ "$checkout_version" != "$target_version" ]; then
+    echo "云端部署源码版本 ${checkout_version} 与目标镜像版本 ${target_version} 不一致。" >&2
+    echo "请先同步部署 checkout 到对应发布标签，再执行升级。" >&2
+    exit 1
+  fi
+
+  release_tag="v${target_version}"
+  if ! git -C "$repository_root" rev-parse --verify --quiet "refs/tags/${release_tag}" >/dev/null; then
+    echo "云端部署 checkout 缺少目标发布标签 ${release_tag}，拒绝升级。" >&2
+    exit 1
+  fi
+  checkout_head="$(git -C "$repository_root" rev-parse HEAD)"
+  release_head="$(git -C "$repository_root" rev-parse "refs/tags/${release_tag}^{commit}")"
+  if [ "$checkout_head" != "$release_head" ]; then
+    echo "云端部署 checkout 的 HEAD 不是发布标签 ${release_tag}，拒绝升级。" >&2
+    exit 1
+  fi
+}
+
 assert_compose_config() {
   require_command docker
   if ! compose config >/dev/null; then
@@ -579,6 +618,10 @@ upgrade_services() {
     resolve_target_for_service "$service" "$target_version_arg"
   done
 
+  if [ "$requested_service" != "sub2api" ]; then
+    assert_platform_checkout_version "$target_platform_version"
+  fi
+
   services_to_upgrade=""
   for service in $requested_services; do
     current_version="$(read_running_image_version "$service")"
@@ -685,4 +728,6 @@ main() {
   esac
 }
 
-main "$@"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi

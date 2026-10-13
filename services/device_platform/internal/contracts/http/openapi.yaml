@@ -5436,6 +5436,157 @@ paths:
           $ref: "#/components/responses/DeviceUnprocessable"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/english/lessons:
+    get:
+      summary: List published English lessons for an age tier
+      security:
+        - userToken: []
+      parameters:
+        - name: age_tier
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/EnglishAgeTier"
+      responses:
+        "200":
+          description: English lesson summaries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnglishLessonSummariesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/english/lessons/{lesson_id}:
+    get:
+      summary: Read one published English lesson
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/EnglishLessonId"
+      responses:
+        "200":
+          description: English lesson detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnglishLessonEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Lesson not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/english/progress:
+    get:
+      summary: Read the authenticated family's English practice progress
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/EnglishChildId"
+        - $ref: "#/components/parameters/EnglishLessonIdQuery"
+        - $ref: "#/components/parameters/EnglishListLimit"
+      responses:
+        "200":
+          description: English lesson and item progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnglishProgressEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/english/attempts:
+    get:
+      summary: List the authenticated family's English practice attempts
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/EnglishChildId"
+        - $ref: "#/components/parameters/EnglishLessonIdQuery"
+        - $ref: "#/components/parameters/EnglishListLimit"
+      responses:
+        "200":
+          description: English practice attempts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnglishAttemptsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/english/attempts:
+    post:
+      summary: Report one practice attempt from a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnglishPracticeAttemptRequest"
+      responses:
+        "201":
+          description: Practice attempt recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnglishAttemptEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/english/lessons:
+    get:
+      summary: Read the full English lesson catalog for a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: age_tier
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/EnglishAgeTier"
+      responses:
+        "200":
+          description: English lesson catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnglishLessonsEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -5530,6 +5681,34 @@ components:
         type: string
         minLength: 1
         maxLength: 128
+    EnglishLessonId:
+      name: lesson_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z][a-z0-9]*(?:_[a-z0-9]+){1,7}$"
+    EnglishChildId:
+      name: child_id
+      in: query
+      required: false
+      schema:
+        type: string
+        maxLength: 128
+    EnglishLessonIdQuery:
+      name: lesson_id
+      in: query
+      required: false
+      schema:
+        type: string
+        pattern: "^[a-z][a-z0-9]*(?:_[a-z0-9]+){1,7}$"
+    EnglishListLimit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
   responses:
     Unauthorized:
       description: Authentication missing, expired, or invalid
@@ -13792,3 +13971,372 @@ components:
       properties:
         outcome:
           $ref: "#/components/schemas/PlaybackOutcome"
+    EnglishAgeTier:
+      type: string
+      enum:
+        - age_3_4
+        - age_5_6
+        - age_7_8
+    EnglishLessonStatus:
+      type: string
+      enum:
+        - draft
+        - published
+        - withdrawn
+    EnglishItemType:
+      type: string
+      enum:
+        - word
+        - sentence
+    EnglishLessonSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - lesson_id
+        - age_tier
+        - title
+        - summary
+        - sequence
+        - word_count
+        - sentence_count
+      properties:
+        lesson_id:
+          type: string
+        age_tier:
+          $ref: "#/components/schemas/EnglishAgeTier"
+        title:
+          type: string
+          maxLength: 80
+        summary:
+          type: string
+          maxLength: 200
+        sequence:
+          type: integer
+          minimum: 0
+        word_count:
+          type: integer
+          minimum: 0
+        sentence_count:
+          type: integer
+          minimum: 0
+    EnglishLessonWord:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - position
+        - term
+        - phonetic
+        - translation
+        - example
+      properties:
+        id:
+          type: string
+        position:
+          type: integer
+          minimum: 0
+        term:
+          type: string
+          maxLength: 40
+        phonetic:
+          type: string
+          maxLength: 40
+        translation:
+          type: string
+          maxLength: 60
+        example:
+          type: string
+          maxLength: 160
+    EnglishLessonSentence:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - position
+        - pattern
+        - prompt
+        - model_answer
+      properties:
+        id:
+          type: string
+        position:
+          type: integer
+          minimum: 0
+        pattern:
+          type: string
+          maxLength: 120
+        prompt:
+          type: string
+          maxLength: 120
+        model_answer:
+          type: string
+          maxLength: 160
+    EnglishLesson:
+      type: object
+      additionalProperties: false
+      required:
+        - lesson_id
+        - age_tier
+        - title
+        - summary
+        - sequence
+        - status
+        - words
+        - sentences
+      properties:
+        lesson_id:
+          type: string
+        age_tier:
+          $ref: "#/components/schemas/EnglishAgeTier"
+        title:
+          type: string
+          maxLength: 80
+        summary:
+          type: string
+          maxLength: 200
+        sequence:
+          type: integer
+          minimum: 0
+        status:
+          $ref: "#/components/schemas/EnglishLessonStatus"
+        words:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnglishLessonWord"
+        sentences:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnglishLessonSentence"
+    EnglishLessonSummariesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - lessons
+              properties:
+                lessons:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/EnglishLessonSummary"
+    EnglishLessonsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - lessons
+              properties:
+                lessons:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/EnglishLesson"
+    EnglishLessonEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - lesson
+              properties:
+                lesson:
+                  $ref: "#/components/schemas/EnglishLesson"
+    EnglishPracticeAttemptRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - child_id
+        - lesson_id
+        - item_id
+        - item_type
+        - target_text
+        - recognized_text
+        - score
+      properties:
+        child_id:
+          type: string
+          maxLength: 128
+        lesson_id:
+          type: string
+          pattern: "^[a-z][a-z0-9]*(?:_[a-z0-9]+){1,7}$"
+        item_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        item_type:
+          $ref: "#/components/schemas/EnglishItemType"
+        target_text:
+          type: string
+          minLength: 1
+          maxLength: 160
+        recognized_text:
+          type: string
+          maxLength: 200
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+    EnglishPracticeAttempt:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - child_id
+        - lesson_id
+        - item_id
+        - item_type
+        - target_text
+        - recognized_text
+        - score
+        - passed
+        - practiced_at
+      properties:
+        id:
+          type: string
+        child_id:
+          type: string
+        lesson_id:
+          type: string
+        item_id:
+          type: string
+        item_type:
+          $ref: "#/components/schemas/EnglishItemType"
+        target_text:
+          type: string
+          maxLength: 160
+        recognized_text:
+          type: string
+          maxLength: 200
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        passed:
+          type: boolean
+        practiced_at:
+          type: string
+          format: date-time
+    EnglishAttemptEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - attempt
+              properties:
+                attempt:
+                  $ref: "#/components/schemas/EnglishPracticeAttempt"
+    EnglishAttemptsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - attempts
+              properties:
+                attempts:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/EnglishPracticeAttempt"
+    EnglishLessonProgress:
+      type: object
+      additionalProperties: false
+      required:
+        - lesson_id
+        - attempts
+        - passed_items
+        - total_items
+        - best_score
+        - average_score
+      properties:
+        lesson_id:
+          type: string
+        attempts:
+          type: integer
+          minimum: 0
+        passed_items:
+          type: integer
+          minimum: 0
+        total_items:
+          type: integer
+          minimum: 0
+        best_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        average_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        last_practiced:
+          type: string
+          format: date-time
+    EnglishProgressItem:
+      type: object
+      additionalProperties: false
+      required:
+        - lesson_id
+        - item_id
+        - item_type
+        - target_text
+        - best_score
+        - attempts
+        - passed
+        - last_at
+      properties:
+        lesson_id:
+          type: string
+        item_id:
+          type: string
+        item_type:
+          $ref: "#/components/schemas/EnglishItemType"
+        target_text:
+          type: string
+          maxLength: 160
+        best_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        attempts:
+          type: integer
+          minimum: 0
+        passed:
+          type: boolean
+        last_at:
+          type: string
+          format: date-time
+    EnglishProgressEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - lesson_progress
+                - item_progress
+              properties:
+                lesson_progress:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/EnglishLessonProgress"
+                item_progress:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/EnglishProgressItem"

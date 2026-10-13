@@ -346,7 +346,9 @@ function selectableVersion(
   releases: ServiceVersionRelease[],
   service: AdminServiceVersion,
 ): string {
-  const latestRelease = releases.find((release) => release.isLatest)
+  const latestRelease = releases.find(
+    (release) => release.isLatest && release.version !== service.currentVersion,
+  )
   if (latestRelease !== undefined) {
     return latestRelease.version
   }
@@ -356,7 +358,11 @@ function selectableVersion(
     return newestRelease.version
   }
 
-  return releases[0]?.version ?? service.latestVersion
+  if (releases.length === 0 && service.latestVersion !== service.currentVersion) {
+    return service.latestVersion
+  }
+
+  return ''
 }
 
 async function waitForCheckedSnapshot(

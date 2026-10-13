@@ -46,6 +46,27 @@ export function mapApiError(error: unknown): ApiError {
     if (code === 'invalid_request') {
       return { kind: 'validation', message: '请检查填写的内容', retryable: false }
     }
+    if (code === 'service_not_upgradable') {
+      return {
+        kind: 'validation',
+        message: '这个服务当前已是最新版本，无需升级',
+        retryable: false,
+      }
+    }
+    if (code === 'already_current') {
+      return {
+        kind: 'validation',
+        message: '所有服务都已是最新版本，无需升级',
+        retryable: false,
+      }
+    }
+    if (code === 'upgrade_in_progress') {
+      return {
+        kind: 'validation',
+        message: '已有升级任务正在进行，请等待完成',
+        retryable: false,
+      }
+    }
     if (status === 401) {
       return { kind: 'unauthenticated', message: '登录已过期，请重新登录', retryable: false }
     }

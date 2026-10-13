@@ -93,11 +93,36 @@ function serviceReleaseState(serviceId: string) {
 
 function targetVersion(service: AdminServiceVersion): string {
   const state = serviceReleaseState(service.id)
-  return state.selectedVersion || service.latestVersion
+  return state.selectedVersion
 }
 
 function canSelectVersion(service: AdminServiceVersion): boolean {
   return isUpgradeableService(service)
+}
+
+function selectableVersions(service: AdminServiceVersion): string[] {
+  const state = serviceReleaseState(service.id)
+  const releaseVersions = state.releases
+    .filter((release) => release.version !== service.currentVersion)
+    .map((release) => release.version)
+  if (releaseVersions.length > 0) {
+    return releaseVersions
+  }
+  if (state.selectedVersion !== '' && state.selectedVersion !== service.currentVersion) {
+    return [state.selectedVersion]
+  }
+  if (
+    state.releases.length === 0 &&
+    service.latestVersion !== '' &&
+    service.latestVersion !== service.currentVersion
+  ) {
+    return [service.latestVersion]
+  }
+  return []
+}
+
+function hasSelectableVersion(service: AdminServiceVersion): boolean {
+  return selectableVersions(service).length > 0
 }
 
 function canStartUpgrade(service: AdminServiceVersion): boolean {
@@ -247,6 +272,11 @@ function operationLog(operation: AdminServiceVersionOperation | null): string {
         {{ store.error.message }}
       </p>
     </Transition>
+    <Transition name="toast">
+      <p v-if="store.snapshot?.allUpToDate" class="up-to-date-message" role="status">
+        所有受管服务均已是最新版本，目前没有可执行的升级。
+      </p>
+    </Transition>
 
     <Transition name="page" mode="out-in">
       <div
@@ -349,6 +379,7 @@ function operationLog(operation: AdminServiceVersionOperation | null): string {
                         {{ service.displayName || service.id }}版本
                       </label>
                       <select
+                        v-if="hasSelectableVersion(service)"
                         :id="`service-version-${service.id}`"
                         :value="targetVersion(service)"
                         :disabled="
@@ -359,19 +390,23 @@ function operationLog(operation: AdminServiceVersionOperation | null): string {
                         @change="changeServiceVersion(service.id, $event)"
                       >
                         <option
-                          v-for="release in serviceReleaseState(service.id).releases"
-                          :key="release.version"
-                          :value="release.version"
+                          v-for="version in selectableVersions(service)"
+                          :key="version"
+                          :value="version"
                         >
-                          {{ versionOptionLabel(service, release.version) }}
-                        </option>
-                        <option
-                          v-if="serviceReleaseState(service.id).releases.length === 0"
-                          :value="targetVersion(service)"
-                        >
-                          {{ versionOptionLabel(service, targetVersion(service)) }}
+                          {{ versionOptionLabel(service, version) }}
                         </option>
                       </select>
+                      <small
+                        v-else-if="
+                          service.latestVersion !== '' &&
+                          service.latestVersion === service.currentVersion
+                        "
+                        class="current-copy"
+                      >
+                        当前已是最新版本，无需升级
+                      </small>
+                      <small v-else class="read-only-copy">暂未找到可升级版本</small>
                       <small v-if="serviceReleaseState(service.id).isLoading"
                         >正在读取可选版本…</small
                       >
@@ -397,6 +432,7 @@ function operationLog(operation: AdminServiceVersionOperation | null): string {
                   <div class="row-action">
                     <template v-if="canSelectVersion(service)">
                       <button
+                        v-if="hasSelectableVersion(service)"
                         type="button"
                         class="upgrade-button"
                         :disabled="!canStartUpgrade(service)"
@@ -408,6 +444,16 @@ function operationLog(operation: AdminServiceVersionOperation | null): string {
                             : `升级到 ${targetVersion(service) || '所选版本'}`
                         }}
                       </button>
+                      <small
+                        v-else-if="
+                          service.latestVersion !== '' &&
+                          service.latestVersion === service.currentVersion
+                        "
+                        class="current-copy"
+                      >
+                        当前已是最新版本，无需升级
+                      </small>
+                      <small v-else class="read-only-copy">暂无可升级版本</small>
                     </template>
                     <small v-else class="read-only-copy">不需要升级操作</small>
                     <small class="checked-at">
@@ -654,12 +700,17 @@ button:disabled {
 }
 
 .success-message,
-.error-message {
+.error-message,
+.up-to-date-message {
   margin: 14px 0 0;
 }
 
 .success-message {
   color: #1d6b3f;
+}
+
+.up-to-date-message {
+  color: #27627f;
 }
 
 .error-message {
@@ -942,6 +993,14 @@ code {
 .read-only-copy {
   margin: 0;
   color: var(--sprout-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.current-copy {
+  margin: 0;
+  color: #27627f;
+  font-family: inherit;
   font-size: 12px;
   line-height: 1.5;
 }

@@ -754,6 +754,156 @@ test('distinguishes a release catalog that is still preparing from a real failur
   expect(releaseRequests).toBe(2)
 })
 
+test('shows an explicit no-upgrade state when all managed services are current', async ({
+  page,
+}) => {
+  await useAdminSession(page)
+
+  await page.route('**/api/v1/admin/service-versions', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          services: [
+            {
+              id: 'admin_web',
+              display_name: '品牌管理端',
+              role: '平台服务',
+              image: 'ghcr.io/tissyboxc/sprout-admin-web:0.22.0',
+              current_version: '0.22.0',
+              latest_version: '0.22.0',
+              status: 'current',
+              release_url: '',
+              is_self: true,
+              upgrade_supported: true,
+              can_upgrade: false,
+              last_checked_at: '2026-10-14T10:00:00Z',
+              updated_at: '2026-10-14T10:00:00Z',
+            },
+          ],
+          checked_at: '2026-10-14T10:00:00Z',
+          all_up_to_date: true,
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/service-versions/*/releases**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          service: 'admin_web',
+          releases: [
+            {
+              version: '0.22.0',
+              release_url: '',
+              published_at: '2026-10-14T10:00:00Z',
+              is_current: true,
+              is_latest: true,
+            },
+          ],
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/service-version-operations', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { operations: [] } }),
+    })
+  })
+
+  await page.goto('/services')
+
+  await expect(
+    page.getByText('所有受管服务均已是最新版本，目前没有可执行的升级。'),
+  ).toBeVisible()
+  await expect(page.getByText('当前已是最新版本，无需升级').first()).toBeVisible()
+  await expect(page.getByRole('button', { name: /^升级到/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '全部升级' })).toBeDisabled()
+  await expect(page.getByLabel('品牌管理端版本')).toHaveCount(0)
+})
+
+test('explains when the backend reports that an upgrade is not needed', async ({ page }) => {
+  await useAdminSession(page)
+
+  await page.route('**/api/v1/admin/service-versions', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          services: [
+            {
+              id: 'admin_web',
+              display_name: '品牌管理端',
+              role: '平台服务',
+              image: 'ghcr.io/tissyboxc/sprout-admin-web:0.22.0',
+              current_version: '0.22.0',
+              latest_version: '0.22.1',
+              status: 'outdated',
+              release_url: '',
+              is_self: true,
+              upgrade_supported: true,
+              can_upgrade: true,
+              last_checked_at: '2026-10-14T10:00:00Z',
+              updated_at: '2026-10-14T10:00:00Z',
+            },
+          ],
+          checked_at: '2026-10-14T10:00:00Z',
+          all_up_to_date: false,
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/service-versions/*/releases**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          service: 'admin_web',
+          releases: [
+            {
+              version: '0.22.1',
+              release_url: '',
+              published_at: '2026-10-14T10:00:00Z',
+              is_current: false,
+              is_latest: true,
+            },
+          ],
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/service-versions/admin_web/upgrade', async (route) => {
+    await route.fulfill({
+      status: 422,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        schema_version: '1.0.0',
+        request_id: 'test-service-not-upgradable',
+        data: null,
+        error: {
+          code: 'service_not_upgradable',
+          message: '这个服务当前不需要升级',
+          retryable: false,
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/service-version-operations', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { operations: [] } }),
+    })
+  })
+
+  await page.goto('/services')
+  await page.getByRole('button', { name: '升级到 0.22.1' }).click()
+
+  await expect(page.getByText('这个服务当前已是最新版本，无需升级')).toBeVisible()
+  await expect(page.getByText('请检查填写的内容')).toHaveCount(0)
+})
+
 test('lists download files and manages uploads, deletion, and the release index', async ({ page }) => {
   await useAdminSession(page)
 

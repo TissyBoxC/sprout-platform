@@ -680,6 +680,10 @@ func TestOTAContractDocumentsDeviceUpdateAndEventEndpoints(t *testing.T) {
 	for _, path := range []string{
 		"/api/v1/devices/{device_id}/ota:",
 		"/api/v1/devices/{device_id}/ota/events:",
+		"/api/v1/devices/{device_id}/ota/install:",
+		"/api/v1/devices/{device_id}/ota/status:",
+		"/api/v1/devices/{device_id}/ota/retry:",
+		"/api/v1/devices/{device_id}/ota/rollback:",
 	} {
 		if !bytes.Contains(contract, []byte(path)) {
 			t.Fatalf("expected OTA path %s in internal API contract", path)
@@ -693,6 +697,7 @@ func TestOTAContractDocumentsDeviceUpdateAndEventEndpoints(t *testing.T) {
 		"DeviceUpdateEnvelope:",
 		"OTADeviceEventRequest:",
 		"OTADeviceEventResultEnvelope:",
+		"OTAGuardianInstallRequest:",
 	} {
 		if !bytes.Contains(contract, []byte(schema)) {
 			t.Fatalf("expected OTA schema %s in internal API contract", schema)

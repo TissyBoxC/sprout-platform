@@ -3992,6 +3992,132 @@ paths:
           $ref: "#/components/responses/DeviceUnprocessable"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/ota/install:
+    post:
+      summary: Start the current firmware update for a guardian-owned device
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OTAGuardianInstallRequest"
+      responses:
+        "200":
+          description: Firmware update assigned to the device
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceUpdateEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Device or update not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: No update is available or the state changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/ota/status:
+    get:
+      summary: Read the current firmware update for a guardian-owned device
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Current device update state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceUpdateEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Device or update not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/ota/retry:
+    post:
+      summary: Retry the latest failed firmware deployment
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Failed firmware deployment retried
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceUpdateEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Device or deployment not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: The deployment is not retryable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/ota/rollback:
+    post:
+      summary: Roll back the current firmware deployment
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Firmware deployment rolled back
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceUpdateEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Device or deployment not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Rollback is not allowed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
   /api/v1/content/offline-policy:
     get:
       summary: Read the platform content offline download policy
@@ -16746,3 +16872,10 @@ components:
                   const: true
                 duplicate:
                   type: boolean
+    OTAGuardianInstallRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        deployment_id:
+          type: string
+          maxLength: 128

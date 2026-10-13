@@ -375,6 +375,36 @@ func TestScreenContractDocumentsPolicyDictionaryAndPlaybackEndpoints(t *testing.
 	}
 }
 
+func TestTouchContractDocumentsConfigAndStatusEndpoints(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/touch/config:",
+		"/api/v1/touch/devices:",
+		"/api/v1/devices/{device_id}/touch/capability:",
+		"/api/v1/devices/{device_id}/touch/status:",
+		"/api/v1/devices/{device_id}/touch/policy:",
+		"/api/v1/admin/touch/stats:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected touch path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"TouchConfigRequest:",
+		"TouchConfig:",
+		"TouchCapability:",
+		"TouchStatusReportRequest:",
+		"TouchAdminStats:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected touch schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

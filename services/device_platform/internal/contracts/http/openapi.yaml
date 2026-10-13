@@ -2021,6 +2021,164 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/touch/config:
+    get:
+      summary: Read the authenticated family's touch configuration
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Touch configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TouchConfigEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Publish the authenticated family's touch configuration
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TouchConfigRequest"
+      responses:
+        "200":
+          description: Updated touch configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TouchConfigEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/touch/devices:
+    get:
+      summary: List the authenticated family's latest touch statuses
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Touch statuses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TouchDevicesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/touch/capability:
+    get:
+      summary: Read one family device's touch capability
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Touch capability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TouchCapabilityEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/touch/status:
+    post:
+      summary: Report one bound device's touch status
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TouchStatusReportRequest"
+      responses:
+        "200":
+          description: Touch status recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TouchStatusRecordedEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/touch/policy:
+    get:
+      summary: Read the family touch configuration from a bound device session
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Touch configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TouchConfigEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/touch/stats:
+    get:
+      summary: Read the fleet-wide touch summary
+      security:
+        - userToken: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        "200":
+          description: Touch statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TouchAdminStatsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -5129,3 +5287,301 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/ScreenAdminStats"
+    TouchConfigRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - tap_enabled
+        - swipe_enabled
+        - long_press_enabled
+        - haptic_enabled
+        - sensitivity
+        - rotation_degrees
+        - long_press_ms
+        - double_tap_ms
+        - swipe_distance_px
+      properties:
+        enabled:
+          type: boolean
+        tap_enabled:
+          type: boolean
+        swipe_enabled:
+          type: boolean
+        long_press_enabled:
+          type: boolean
+        haptic_enabled:
+          type: boolean
+        sensitivity:
+          type: integer
+          minimum: 10
+          maximum: 100
+        rotation_degrees:
+          type: integer
+          enum:
+            - 0
+            - 90
+            - 180
+            - 270
+        long_press_ms:
+          type: integer
+          minimum: 250
+          maximum: 3000
+        double_tap_ms:
+          type: integer
+          minimum: 120
+          maximum: 600
+        swipe_distance_px:
+          type: integer
+          minimum: 16
+          maximum: 480
+    TouchConfig:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - enabled
+        - tap_enabled
+        - swipe_enabled
+        - long_press_enabled
+        - haptic_enabled
+        - sensitivity
+        - rotation_degrees
+        - long_press_ms
+        - double_tap_ms
+        - swipe_distance_px
+        - revision
+      properties:
+        schema_version:
+          type: integer
+          minimum: 1
+        enabled:
+          type: boolean
+        tap_enabled:
+          type: boolean
+        swipe_enabled:
+          type: boolean
+        long_press_enabled:
+          type: boolean
+        haptic_enabled:
+          type: boolean
+        sensitivity:
+          type: integer
+          minimum: 10
+          maximum: 100
+        rotation_degrees:
+          type: integer
+          enum:
+            - 0
+            - 90
+            - 180
+            - 270
+        long_press_ms:
+          type: integer
+          minimum: 250
+          maximum: 3000
+        double_tap_ms:
+          type: integer
+          minimum: 120
+          maximum: 600
+        swipe_distance_px:
+          type: integer
+          minimum: 16
+          maximum: 480
+        revision:
+          type: integer
+          minimum: 0
+    TouchConfigEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TouchConfig"
+    TouchDeviceStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - family_id
+        - touch_supported
+        - haptic_supported
+        - gesture_count
+        - up_to_date
+        - reported_at
+      properties:
+        device_id:
+          type: string
+        family_id:
+          type: string
+        touch_supported:
+          type: boolean
+        haptic_supported:
+          type: boolean
+        gesture_count:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        up_to_date:
+          type: boolean
+        reported_at:
+          type: string
+          format: date-time
+    TouchDevicesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - devices
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/TouchDeviceStatus"
+    TouchCapability:
+      type: object
+      additionalProperties: false
+      required:
+        - supported
+        - haptic_supported
+        - gesture_count
+        - schema_version
+        - policy_revision
+        - applied_revision
+        - up_to_date
+      properties:
+        supported:
+          type: boolean
+        haptic_supported:
+          type: boolean
+        gesture_count:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        schema_version:
+          type: integer
+          minimum: 1
+        policy_revision:
+          type: integer
+          minimum: 0
+        applied_revision:
+          type: integer
+          minimum: 0
+        up_to_date:
+          type: boolean
+    TouchCapabilityEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TouchCapability"
+    TouchStatusReportRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - touch_supported
+        - haptic_supported
+        - gesture_count
+        - policy_revision
+      properties:
+        touch_supported:
+          type: boolean
+        haptic_supported:
+          type: boolean
+        gesture_count:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        policy_revision:
+          type: integer
+          minimum: 0
+    TouchStatusRecordedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - policy_revision
+                - recorded
+              properties:
+                device_id:
+                  type: string
+                policy_revision:
+                  type: integer
+                  minimum: 0
+                recorded:
+                  type: boolean
+                  const: true
+    TouchPresetCount:
+      type: object
+      additionalProperties: false
+      required:
+        - preset
+        - count
+      properties:
+        preset:
+          type: string
+          enum:
+            - tap
+            - double_tap
+            - long_press
+            - swipe
+        count:
+          type: integer
+          minimum: 0
+    TouchAdminStats:
+      type: object
+      additionalProperties: false
+      required:
+        - window_days
+        - device_count
+        - touch_device_count
+        - haptic_device_count
+        - outdated_count
+        - average_sensitivity
+        - preset_coverage
+        - generated_at
+      properties:
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        device_count:
+          type: integer
+          minimum: 0
+        touch_device_count:
+          type: integer
+          minimum: 0
+        haptic_device_count:
+          type: integer
+          minimum: 0
+        outdated_count:
+          type: integer
+          minimum: 0
+        average_sensitivity:
+          type: integer
+          minimum: 0
+          maximum: 100
+        preset_coverage:
+          type: array
+          items:
+            $ref: "#/components/schemas/TouchPresetCount"
+        generated_at:
+          type: string
+          format: date-time
+    TouchAdminStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TouchAdminStats"

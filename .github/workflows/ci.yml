@@ -15,6 +15,31 @@ jobs:
       - name: Validate release failure isolation
         run: python3 tools/test_release_workflow.py
 
+  workspace-lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # The lock file points at two independently released repositories.
+      # Fetch the exact remote branches so the verifier can prove every
+      # revision exists on its declared published branch.
+      - name: Fetch external repository branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          firmware_url="https://github.com/TissyBoxC/sprout-firmware.git"
+          sub2api_url="https://github.com/TissyBoxC/sprout-sub2api-fork.git"
+          git init -q firmware
+          git -C firmware remote add origin "$firmware_url"
+          git -C firmware fetch -q --depth=1 origin main
+          git init -q services/sub2api_fork
+          git -C services/sub2api_fork remote add origin "$sub2api_url"
+          git -C services/sub2api_fork fetch -q --depth=1 origin main
+
+      - name: Verify workspace lock revisions
+        shell: pwsh
+        run: ./tools/verify-workspace-lock.ps1
+
   local-deployment:
     runs-on: ubuntu-latest
     steps:

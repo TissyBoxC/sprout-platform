@@ -385,14 +385,23 @@ resolve_latest_release() {
   cache_stamp="$release_cache_dir/${cache_key}.stamp"
   cache_now="$(date +%s)"
 
+  cached_version=""
+  cached_url=""
+  if [ -s "$cache_file" ]; then
+    cached_version="$(jq -r '.version // empty' "$cache_file" 2>/dev/null || true)"
+    cached_url="$(jq -r '.release_url // empty' "$cache_file" 2>/dev/null || true)"
+    if ! validate_version "$cached_version"; then
+      cached_version=""
+      cached_url=""
+    fi
+  fi
+
   if [ "$force_refresh" != "1" ] &&
     [ -s "$cache_file" ] &&
     [ -f "$cache_stamp" ]; then
     cache_age="$((cache_now - $(cat "$cache_stamp" 2>/dev/null || printf '%s' 0)))"
     if [ "$cache_age" -ge 0 ] && [ "$cache_age" -lt "$release_cache_ttl" ]; then
-      cached_version="$(jq -r '.version // empty' "$cache_file" 2>/dev/null || true)"
-      cached_url="$(jq -r '.release_url // empty' "$cache_file" 2>/dev/null || true)"
-      if validate_version "$cached_version"; then
+      if [ -n "$cached_version" ]; then
         resolved_release_version="$cached_version"
         resolved_release_url="$cached_url"
         return 0
@@ -418,6 +427,11 @@ resolve_latest_release() {
     "https://api.github.com/repos/${repository}/releases/latest" \
     --output "$response_file"; then
     rm -f "$response_file"
+    if [ -n "$cached_version" ]; then
+      resolved_release_version="$cached_version"
+      resolved_release_url="$cached_url"
+      return 0
+    fi
     return 1
   fi
 
@@ -426,6 +440,11 @@ resolve_latest_release() {
   rm -f "$response_file"
   resolved_release_version="${release_tag#v}"
   if ! validate_version "$resolved_release_version"; then
+    if [ -n "$cached_version" ]; then
+      resolved_release_version="$cached_version"
+      resolved_release_url="$cached_url"
+      return 0
+    fi
     resolved_release_version=""
     resolved_release_url=""
     return 1

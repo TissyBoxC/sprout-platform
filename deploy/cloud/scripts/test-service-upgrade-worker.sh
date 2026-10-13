@@ -23,6 +23,14 @@ if ! grep -Eq '^refresh_release_catalog\(\)' "$worker_script"; then
   exit 1
 fi
 
+resolve_latest_block="$(
+  sed -n '/^resolve_latest_release()/,/^}/p' "$worker_script"
+)"
+if ! printf '%s\n' "$resolve_latest_block" | grep -Eq 'cached_version'; then
+  echo "resolve_latest_release 缺少 GitHub 失败时的缓存回退。" >&2
+  exit 1
+fi
+
 if ! grep -Eq '^platform_repository=' "$worker_script" ||
   ! grep -Eq '^sub2api_repository=' "$worker_script"; then
   echo "service-upgrade-worker.sh 缺少发布仓库配置。" >&2

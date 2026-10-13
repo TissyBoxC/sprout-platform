@@ -250,6 +250,7 @@ func (m *memoryRepository) MarkDeliveryDeliveredByCommand(
 			if delivery.DeliveredAt == nil {
 				delivery.DeliveredAt = &now
 			}
+			delivery.FailureCode = ""
 			delivery.UpdatedAt = now
 			return nil
 		}
@@ -775,6 +776,48 @@ func TestMarkDeliveryDeliveredByCommandIgnoresUnknownCommand(t *testing.T) {
 		testDeviceID,
 	); err != nil {
 		t.Fatalf("unknown command should be ignored, got %v", err)
+	}
+}
+
+func TestMarkDeliveryDeliveredByCommandClearsFailureCode(t *testing.T) {
+	repo := newMemoryRepository()
+	now := time.Date(2026, time.October, 14, 8, 0, 0, 0, time.UTC)
+	repo.notifications["notification-1"] = &domain.Notification{
+		ID:              "notification-1",
+		Category:        domain.CategoryFamilyMessage,
+		Severity:        domain.SeverityInfo,
+		Title:           "留言",
+		Body:            "测试",
+		Audience:        domain.AudienceFamilyDevices,
+		ParentAccountID: testParentID,
+		DeviceID:        testDeviceID,
+		PublishAt:       now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	repo.deliveries = append(repo.deliveries, &domain.Delivery{
+		ID:              "delivery-1",
+		NotificationID:  "notification-1",
+		ParentAccountID: testParentID,
+		Channel:         domain.ChannelDevice,
+		Status:          domain.DeliveryStatusFailed,
+		FailureCode:     "device_unavailable",
+		CommandID:       "command-1",
+	})
+	service := newTestService(t, repo, &fakeCommander{})
+
+	if err := service.MarkDeliveryDeliveredByCommand(
+		context.Background(),
+		"command-1",
+		testDeviceID,
+	); err != nil {
+		t.Fatalf("mark delivery delivered: %v", err)
+	}
+	if repo.deliveries[0].Status != domain.DeliveryStatusDelivered {
+		t.Fatalf("expected delivered status, got %q", repo.deliveries[0].Status)
+	}
+	if repo.deliveries[0].FailureCode != "" {
+		t.Fatalf("expected failure code cleared, got %q", repo.deliveries[0].FailureCode)
 	}
 }
 

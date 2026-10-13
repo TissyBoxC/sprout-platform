@@ -565,6 +565,7 @@ func (r *PostgresRepository) MarkDeliveryDeliveredByCommand(
 		UPDATE notification_deliveries AS d
 		SET status = 'delivered',
 		    delivered_at = COALESCE(d.delivered_at, $3),
+		    failure_code = '',
 		    updated_at = $3
 		FROM notifications AS n
 		WHERE d.notification_id = n.id

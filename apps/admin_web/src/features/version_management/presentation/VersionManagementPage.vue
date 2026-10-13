@@ -250,11 +250,26 @@ function operationLog(operation: AdminServiceVersionOperation | null): string {
 
     <Transition name="page" mode="out-in">
       <div
-        :key="store.isLoading ? 'loading' : store.services.length === 0 ? 'empty' : 'content'"
+        :key="
+          store.isLoading
+            ? 'loading'
+            : store.services.length === 0 && store.error
+              ? 'error'
+              : store.services.length === 0
+                ? 'empty'
+                : 'content'
+        "
       >
         <div v-if="store.isLoading" class="state-panel">
           <span class="state-spinner" aria-hidden="true"></span>
           正在读取服务版本…
+        </div>
+        <div
+          v-else-if="store.services.length === 0 && store.error"
+          class="state-panel state-error"
+        >
+          <p>{{ store.error.message }}</p>
+          <button type="button" class="primary" @click="store.load">重新加载</button>
         </div>
         <div v-else-if="store.services.length === 0" class="state-panel">
           <span class="state-icon" aria-hidden="true">☆</span>
@@ -1045,6 +1060,18 @@ code {
   color: var(--sprout-text-muted);
   text-align: center;
   box-shadow: 0 10px 28px rgb(194 91 128 / 6%);
+}
+
+.state-error {
+  flex-direction: column;
+}
+
+.state-error p {
+  margin: 0;
+}
+
+.state-error button {
+  min-height: 40px;
 }
 
 .state-spinner {

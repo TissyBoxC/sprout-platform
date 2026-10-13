@@ -336,6 +336,14 @@ function formatTime(value: string): string {
         <span class="state-spinner" aria-hidden="true"></span>
         正在读取设备…
       </div>
+      <div
+        v-else-if="store.devices.length === 0 && store.error"
+        key="error"
+        class="state-panel state-error"
+      >
+        <p>{{ store.error.message }}</p>
+        <button type="button" class="primary" @click="store.load">重新加载</button>
+      </div>
       <div v-else-if="store.devices.length === 0" key="empty" class="state-panel">
         <span class="state-icon" aria-hidden="true">☆</span>
         还没有绑定设备。家长完成设备连接后，设备会显示在这里。
@@ -653,6 +661,26 @@ function formatTime(value: string): string {
   border-radius: var(--sprout-radius-card);
   background: #ffffff;
   box-shadow: 0 10px 28px rgb(194 91 128 / 6%);
+}
+
+.state-error {
+  flex-direction: column;
+}
+
+.state-error p {
+  margin: 0;
+}
+
+.state-error button {
+  min-height: 38px;
+  padding: 0 16px;
+  border: 1px solid #d94f83;
+  border-radius: var(--sprout-radius-control);
+  background: #d94f83;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 table {

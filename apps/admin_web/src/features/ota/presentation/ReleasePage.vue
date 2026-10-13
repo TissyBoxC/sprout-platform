@@ -181,6 +181,14 @@ function formatTime(value: string): string {
         <span class="state-spinner" aria-hidden="true"></span>
         正在读取更新记录…
       </div>
+      <div
+        v-else-if="store.releases.length === 0 && store.error"
+        key="error"
+        class="state-panel state-error"
+      >
+        <p>{{ store.error.message }}</p>
+        <button type="button" class="primary" @click="store.load">重新加载</button>
+      </div>
       <div v-else-if="store.releases.length === 0" key="empty" class="state-panel">
         <span class="state-icon" aria-hidden="true">☆</span>
         <span>还没有更新记录。登记新版本后，会显示在这里。</span>
@@ -480,6 +488,18 @@ button:disabled {
   border-radius: var(--sprout-radius-card);
   background: #ffffff;
   box-shadow: 0 10px 28px rgb(194 91 128 / 6%);
+}
+
+.state-error {
+  flex-direction: column;
+}
+
+.state-error p {
+  margin: 0;
+}
+
+.state-error button {
+  min-height: 38px;
 }
 
 table {

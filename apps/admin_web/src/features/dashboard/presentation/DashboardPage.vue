@@ -73,11 +73,23 @@ function releaseStatusLabel(value: string): string {
 
     <Transition name="page" mode="out-in">
       <div
-        :key="store.isLoading && overview === null ? 'loading' : overview === null ? 'empty' : 'content'"
+        :key="
+          store.isLoading && overview === null
+            ? 'loading'
+            : overview === null && store.error
+              ? 'error'
+              : overview === null
+                ? 'empty'
+                : 'content'
+        "
       >
         <div v-if="store.isLoading && overview === null" class="state-panel">
           <span class="state-spinner" aria-hidden="true"></span>
           正在汇总平台数据…
+        </div>
+        <div v-else-if="overview === null && store.error" class="state-panel state-error">
+          <p>{{ store.error.message }}</p>
+          <button type="button" class="primary" @click="store.load">重新加载</button>
         </div>
         <div v-else-if="overview === null" class="state-panel">
           <span class="state-icon" aria-hidden="true">☆</span>
@@ -225,6 +237,26 @@ h1 {
   color: var(--sprout-text-muted);
   text-align: center;
   box-shadow: 0 10px 28px rgb(194 91 128 / 6%);
+}
+
+.state-error {
+  flex-direction: column;
+}
+
+.state-error p {
+  margin: 0;
+}
+
+.state-error button {
+  min-height: 38px;
+  padding: 0 16px;
+  border: 1px solid #d94f83;
+  border-radius: var(--sprout-radius-control);
+  background: #d94f83;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .state-spinner {

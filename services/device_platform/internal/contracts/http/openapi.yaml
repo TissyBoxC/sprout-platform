@@ -3819,6 +3819,133 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/content/offline-policy:
+    get:
+      summary: Read the platform content offline download policy as an administrator
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Content offline download policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentOfflinePolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Publish the platform content offline download policy as an administrator
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContentOfflinePolicyRequest"
+      responses:
+        "200":
+          description: Updated content offline download policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentOfflinePolicyEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/content/offline-policy/acknowledgements:
+    get:
+      summary: List one family's offline policy acknowledgements as an administrator
+      security:
+        - userToken: []
+      parameters:
+        - name: family_id
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        "200":
+          description: Offline policy acknowledgements by device
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentOfflinePolicyAdminAcknowledgementsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/content/offline-policy:
+    get:
+      summary: Read the content offline download policy from a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Content offline download policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentOfflinePolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/content/offline-policy/acknowledgement:
+    post:
+      summary: Acknowledge an applied content offline policy revision
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContentOfflinePolicyAcknowledgementRequest"
+      responses:
+        "200":
+          description: Offline policy revision recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentOfflinePolicyAcknowledgementEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
   /api/v1/device-mesh/groups:
     get:
       summary: List the authenticated family's device groups
@@ -12517,6 +12644,51 @@ components:
                   type: array
                   items:
                     $ref: "#/components/schemas/ContentOfflinePolicyAcknowledgement"
+    ContentOfflinePolicyAdminAcknowledgementsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - family_id
+                - devices
+              properties:
+                family_id:
+                  type: string
+                  minLength: 1
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ContentOfflinePolicyAcknowledgement"
+    ContentOfflinePolicyAcknowledgementRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - revision
+      properties:
+        revision:
+          type: integer
+          minimum: 0
+    ContentOfflinePolicyAcknowledgementEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - revision
+              properties:
+                device_id:
+                  $ref: "#/components/schemas/DeviceIdParameter"
+                revision:
+                  type: integer
+                  minimum: 0
     DeviceMeshGroupScope:
       type: string
       enum:

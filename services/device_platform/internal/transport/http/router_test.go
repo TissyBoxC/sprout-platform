@@ -637,6 +637,10 @@ func TestContentContractDocumentsCatalogFavoritesHistoryAndPolicies(t *testing.T
 		"/api/v1/content/recommendations:",
 		"/api/v1/content/offline-policy:",
 		"/api/v1/content/offline-policy/acknowledgements:",
+		"/api/v1/admin/content/offline-policy:",
+		"/api/v1/admin/content/offline-policy/acknowledgements:",
+		"/api/v1/devices/{device_id}/content/offline-policy:",
+		"/api/v1/devices/{device_id}/content/offline-policy/acknowledgement:",
 	} {
 		if !bytes.Contains(contract, []byte(path)) {
 			t.Fatalf("expected content path %s in internal API contract", path)
@@ -651,6 +655,9 @@ func TestContentContractDocumentsCatalogFavoritesHistoryAndPolicies(t *testing.T
 		"ContentRecommendation:",
 		"ContentOfflinePolicy:",
 		"ContentOfflinePolicyAcknowledgement:",
+		"ContentOfflinePolicyAdminAcknowledgementsEnvelope:",
+		"ContentOfflinePolicyAcknowledgementRequest:",
+		"ContentOfflinePolicyAcknowledgementEnvelope:",
 	} {
 		if !bytes.Contains(contract, []byte(schema)) {
 			t.Fatalf("expected content schema %s in internal API contract", schema)

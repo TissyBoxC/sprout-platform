@@ -17,6 +17,8 @@ import '../../features/device/presentation/device_provisioning_page.dart';
 import '../../features/device/presentation/device_qr_scan_page.dart';
 import '../../features/english/presentation/english_page.dart';
 import '../../features/family/presentation/family_home_page.dart';
+import '../../features/family/presentation/family_invite_accept_page.dart';
+import '../../features/family/presentation/family_members_page.dart';
 import '../../features/image_privacy/presentation/image_privacy_page.dart';
 import '../../features/learning_visualization/presentation/learning_visualization_page.dart';
 import '../../features/local_command/presentation/local_command_page.dart';
@@ -75,6 +77,25 @@ GoRouter createAppRouter(ProviderContainer container) {
         builder: (context, state) => const RegisterPage(),
       ),
       GoRoute(path: '/family', redirect: (context, state) => '/home'),
+      GoRoute(
+        path: '/me/family',
+        builder: (context, state) => const FamilyMembersPage(),
+      ),
+      GoRoute(
+        path: '/family-invite',
+        builder: (context, state) {
+          final familyId = state.uri.queryParameters['family_id']?.trim() ?? '';
+          final invitationId =
+              state.uri.queryParameters['invitation_id']?.trim() ?? '';
+          if (familyId.isEmpty || invitationId.isEmpty) {
+            return const _RouteNotFoundPage();
+          }
+          return FamilyInviteAcceptPage(
+            familyId: familyId,
+            invitationId: invitationId,
+          );
+        },
+      ),
       GoRoute(
         path: '/account/email',
         builder: (context, state) => const BindEmailPage(),

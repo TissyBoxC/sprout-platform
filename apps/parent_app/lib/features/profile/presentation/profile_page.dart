@@ -73,6 +73,7 @@ class ProfilePage extends ConsumerWidget {
                   child: _SettingsCard(
                     account: account,
                     onChildren: () => context.push('/me/children'),
+                    onFamilyMembers: () => context.push('/me/family'),
                     onCompanionship: () => context.push('/me/companionship'),
                     onAlarmReminders: () => context.push('/me/alarm-reminders'),
                     onBluetoothAudio: () => context.push('/me/bluetooth-audio'),
@@ -424,6 +425,7 @@ class _SettingsCard extends StatelessWidget {
   const _SettingsCard({
     required this.account,
     required this.onChildren,
+    required this.onFamilyMembers,
     required this.onCompanionship,
     required this.onAlarmReminders,
     required this.onBluetoothAudio,
@@ -453,6 +455,7 @@ class _SettingsCard extends StatelessWidget {
 
   final ParentAccount account;
   final VoidCallback onChildren;
+  final VoidCallback onFamilyMembers;
   final VoidCallback onCompanionship;
   final VoidCallback onAlarmReminders;
   final VoidCallback onBluetoothAudio;
@@ -492,6 +495,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('管理宝贝资料、兴趣和使用边界'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onChildren,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.family_restroom_rounded),
+            title: const Text('家庭成员'),
+            subtitle: const Text('邀请家人，管理成员角色和查看权限'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onFamilyMembers,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

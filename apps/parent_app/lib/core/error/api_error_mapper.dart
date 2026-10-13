@@ -74,6 +74,54 @@ AppException mapApiError(Object error) {
         cause: error,
       );
     }
+    if (errorCode == 'member_exists') {
+      return AppException(
+        kind: AppErrorKind.conflict,
+        message: '该账号已经是家庭成员',
+        retryable: false,
+        cause: error,
+      );
+    }
+    if (errorCode == 'last_owner') {
+      return AppException(
+        kind: AppErrorKind.conflict,
+        message: '家庭必须保留一位所有者',
+        retryable: false,
+        cause: error,
+      );
+    }
+    if (errorCode == 'invitation_state') {
+      return AppException(
+        kind: AppErrorKind.conflict,
+        message: '该邀请已处理或已存在待处理邀请',
+        retryable: false,
+        cause: error,
+      );
+    }
+    if (errorCode == 'invitation_expired' || errorCode == 'invalid_invitation') {
+      return AppException(
+        kind: AppErrorKind.validation,
+        message: '邀请无效或已过期，请让家人重新邀请',
+        retryable: false,
+        cause: error,
+      );
+    }
+    if (errorCode == 'invalid_member') {
+      return AppException(
+        kind: AppErrorKind.insufficientPermission,
+        message: '当前角色没有执行该操作的权限',
+        retryable: false,
+        cause: error,
+      );
+    }
+    if (errorCode == 'family_not_found') {
+      return AppException(
+        kind: AppErrorKind.notFound,
+        message: '没有找到这个成员或邀请',
+        retryable: false,
+        cause: error,
+      );
+    }
     if (status == 401) {
       return AppException(
         kind: AppErrorKind.unauthenticated,

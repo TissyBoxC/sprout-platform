@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -85,6 +86,18 @@ func voiceGatewayReadinessProbe(
 			if response.StatusCode < http.StatusOK ||
 				response.StatusCode >= http.StatusMultipleChoices {
 				return featureCenterDomain.HealthUnavailable, nil
+			}
+			// The gateway only exposes the child voice session when the
+			// realtime endpoint is explicitly enabled. A reachable process with
+			// that endpoint disabled must degrade rather than report healthy,
+			// otherwise the console would claim a capability devices cannot use.
+			var probe struct {
+				RealtimeEnabled *bool `json:"realtime_enabled"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&probe); err == nil &&
+				probe.RealtimeEnabled != nil &&
+				!*probe.RealtimeEnabled {
+				return featureCenterDomain.HealthDegraded, nil
 			}
 			return featureCenterDomain.HealthHealthy, nil
 		},

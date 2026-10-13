@@ -32,6 +32,37 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestReadyEndpointReportsRealtimeCapability(t *testing.T) {
+	for _, testCase := range []struct {
+		name            string
+		realtimeEnabled bool
+		want            string
+	}{
+		{name: "disabled", realtimeEnabled: false, want: `"realtime_enabled":false`},
+		{name: "enabled", realtimeEnabled: true, want: `"realtime_enabled":true`},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			options := newTestRouterOptions()
+			options.RealtimeEnabled = testCase.realtimeEnabled
+
+			request := httptest.NewRequest(stdhttp.MethodGet, "/readyz", nil)
+			recorder := httptest.NewRecorder()
+			NewRouter(options).ServeHTTP(recorder, request)
+
+			if recorder.Code != stdhttp.StatusOK {
+				t.Fatalf("expected status %d, got %d", stdhttp.StatusOK, recorder.Code)
+			}
+			if !strings.Contains(recorder.Body.String(), testCase.want) {
+				t.Fatalf(
+					"ready response %s does not contain %s",
+					recorder.Body.String(),
+					testCase.want,
+				)
+			}
+		})
+	}
+}
+
 func TestInternalAPIIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(stdhttp.MethodGet, "/internal/v1/runtime", nil)
 	recorder := httptest.NewRecorder()

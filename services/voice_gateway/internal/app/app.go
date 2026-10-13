@@ -91,6 +91,7 @@ func Run() error {
 		InternalAPIConfig: cfg.Internal,
 		UsageRecorder:     usageRecorder,
 		SessionMetrics:    realtimeManager,
+		RealtimeEnabled:   realtimeHandler != nil,
 	}
 	if cfg.Vision.Enabled {
 		visionService, err := vision.New(vision.Options{

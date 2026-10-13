@@ -31,6 +31,11 @@ type RouterOptions struct {
 	SessionMetrics interface {
 		QualitySnapshots() []session.QualitySnapshot
 	}
+	// RealtimeEnabled reports whether the device realtime WebSocket endpoint is
+	// mounted. Readiness must distinguish "process is up" from "child voice is
+	// actually available", otherwise the feature center can show a healthy
+	// voice gateway while device audio is unreachable.
+	RealtimeEnabled bool
 	// VisionService enables the internal camera/vision endpoints. It accepts
 	// bounded symbolic task metadata and returns short-lived labels; image
 	// bytes never pass through this transport.
@@ -46,7 +51,12 @@ func NewRouter(options RouterOptions) http.Handler {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthHandler)
-	mux.HandleFunc("GET /readyz", readyHandler)
+	mux.HandleFunc("GET /readyz", func(response http.ResponseWriter, _ *http.Request) {
+		writeJSON(response, http.StatusOK, map[string]any{
+			"status":           "ready",
+			"realtime_enabled": options.RealtimeEnabled,
+		})
+	})
 
 	if options.RealtimeHandler != nil && options.RealtimePath != "" {
 		mux.Handle(options.RealtimePath, options.RealtimeHandler)
@@ -202,12 +212,6 @@ func healthHandler(response http.ResponseWriter, _ *http.Request) {
 		"status":  "ok",
 		"service": "voice-gateway",
 		"time":    time.Now().UTC(),
-	})
-}
-
-func readyHandler(response http.ResponseWriter, _ *http.Request) {
-	writeJSON(response, http.StatusOK, map[string]any{
-		"status": "ready",
 	})
 }
 

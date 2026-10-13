@@ -102,6 +102,46 @@ func TestVoiceGatewayReadinessProbeChecksRemoteReadyz(t *testing.T) {
 	}
 }
 
+func TestVoiceGatewayReadinessProbeDegradesWhenRealtimeDisabled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(
+		func(response http.ResponseWriter, _ *http.Request) {
+			response.Header().Set("Content-Type", "application/json")
+			response.WriteHeader(http.StatusOK)
+			_, _ = response.Write([]byte(`{"status":"ready","realtime_enabled":false}`))
+		},
+	))
+	defer server.Close()
+
+	probe := voiceGatewayReadinessProbe(server.URL+"/v1/voice", true, server.Client())
+	status, err := probe.Check(context.Background(), "voice_gateway")
+	if err != nil {
+		t.Fatalf("check probe: %v", err)
+	}
+	if status != featureCenterDomain.HealthDegraded {
+		t.Fatalf("status = %q, want degraded", status)
+	}
+}
+
+func TestVoiceGatewayReadinessProbeTreatsLegacyReadyzAsHealthy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(
+		func(response http.ResponseWriter, _ *http.Request) {
+			response.Header().Set("Content-Type", "application/json")
+			response.WriteHeader(http.StatusOK)
+			_, _ = response.Write([]byte(`{"status":"ready"}`))
+		},
+	))
+	defer server.Close()
+
+	probe := voiceGatewayReadinessProbe(server.URL+"/v1/voice", true, server.Client())
+	status, err := probe.Check(context.Background(), "voice_gateway")
+	if err != nil {
+		t.Fatalf("check probe: %v", err)
+	}
+	if status != featureCenterDomain.HealthHealthy {
+		t.Fatalf("status = %q, want healthy", status)
+	}
+}
+
 func TestVoiceGatewayReadinessProbeMapsRemoteFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(
 		func(response http.ResponseWriter, _ *http.Request) {

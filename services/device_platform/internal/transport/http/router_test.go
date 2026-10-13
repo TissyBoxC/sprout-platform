@@ -1077,6 +1077,45 @@ func TestImagePrivacyContractDocumentsPolicyDevicesAndStatus(t *testing.T) {
 	}
 }
 
+func TestVisionContractDocumentsTasksResultsAndDeviceEndpoints(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/devices/{device_id}/vision/capability:",
+		"/api/v1/devices/{device_id}/vision/tasks:",
+		"/api/v1/devices/{device_id}/vision/tasks/{task_id}/cancel:",
+		"/api/v1/devices/{device_id}/vision/results:",
+		"/api/v1/devices/{device_id}/vision/results/{task_id}:",
+		"/api/v1/admin/vision/stats:",
+		"/api/v1/devices/{device_id}/vision/tasks/pending:",
+		"/api/v1/devices/{device_id}/vision/tasks/{task_id}/acknowledge:",
+		"/api/v1/devices/{device_id}/vision/tasks/{task_id}/status:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected vision path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"VisionTaskType:",
+		"VisionTaskStatus:",
+		"VisionFailureCode:",
+		"VisionCapability:",
+		"VisionCreateTaskRequest:",
+		"VisionTask:",
+		"VisionTaskStatusRequest:",
+		"VisionResultLabel:",
+		"VisionResultRequest:",
+		"VisionResult:",
+		"VisionAdminStats:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected vision schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

@@ -6637,6 +6637,329 @@ paths:
           $ref: "#/components/responses/DeviceUnprocessable"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/vision/capability:
+    get:
+      summary: Read one family device's camera and vision capability
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Guardian-facing camera and vision capability state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisionCapabilityEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/vision/tasks:
+    get:
+      summary: List recent camera and vision tasks for a guardian-owned device
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Recent vision tasks for the device
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisionTasksEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Create a guardian-requested camera and vision task
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VisionCreateTaskRequest"
+      responses:
+        "201":
+          description: Vision task created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisionTaskEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Guardian image-upload consent has not been granted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/vision/tasks/{task_id}/cancel:
+    post:
+      summary: Cancel a pending or dispatched camera and vision task
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/VisionTaskId"
+      responses:
+        "200":
+          description: Vision task cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisionTaskEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Vision task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/vision/results:
+    get:
+      summary: List short-lived camera and vision results for a guardian-owned device
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Short-lived vision results for the device
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisionResultsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Report one bounded camera and vision result from a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VisionResultRequest"
+      responses:
+        "201":
+          description: Vision result recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisionResultEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "404":
+          description: Vision task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/vision/results/{task_id}:
+    get:
+      summary: Read one short-lived camera and vision result
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/VisionTaskId"
+      responses:
+        "200":
+          description: Vision result for the task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisionResultEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Vision result not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/vision/stats:
+    get:
+      summary: Read the fleet-wide camera and vision summary
+      security:
+        - userToken: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        "200":
+          description: Vision fleet statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisionAdminStatsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/vision/tasks/pending:
+    get:
+      summary: List pending camera and vision tasks for a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Pending vision tasks for the bound device
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisionDeviceTasksEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/vision/tasks/{task_id}/acknowledge:
+    post:
+      summary: Acknowledge and dispatch a pending camera and vision task
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/VisionTaskId"
+      responses:
+        "200":
+          description: Vision task dispatched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisionDeviceTaskEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "403":
+          description: Guardian image-upload consent has been revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "404":
+          description: Vision task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/vision/tasks/{task_id}/status:
+    post:
+      summary: Report a bounded failure status for a camera and vision task
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/VisionTaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VisionTaskStatusRequest"
+      responses:
+        "200":
+          description: Vision task failure recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisionDeviceTaskEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "404":
+          description: Vision task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -6761,6 +7084,14 @@ components:
         minimum: 1
     LocalCommandId:
       name: command_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    VisionTaskId:
+      name: task_id
       in: path
       required: true
       schema:
@@ -15909,6 +16240,364 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/VideoSessionAdminStats"
+    VisionTaskType:
+      type: string
+      enum:
+        - object_recognition
+        - picture_book_recognition
+        - photo_qa
+        - capture
+    VisionTaskStatus:
+      type: string
+      enum:
+        - pending
+        - dispatched
+        - completed
+        - failed
+        - cancelled
+        - expired
+    VisionFailureCode:
+      type: string
+      enum:
+        - consent_revoked
+        - timeout
+        - model_rejected
+        - capture_failed
+        - invalid_frame
+        - unsupported
+    VisionCapability:
+      type: object
+      additionalProperties: false
+      required:
+        - supported
+        - consent_granted
+        - reconsent_path
+        - retention_hours
+      properties:
+        supported:
+          type: boolean
+        consent_granted:
+          type: boolean
+        reconsent_path:
+          type: string
+        retention_hours:
+          type: integer
+          minimum: 0
+    VisionCapabilityEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/VisionCapability"
+    VisionCreateTaskRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - task_type
+      properties:
+        task_type:
+          $ref: "#/components/schemas/VisionTaskType"
+        prompt:
+          type: string
+          maxLength: 500
+    VisionTask:
+      type: object
+      additionalProperties: false
+      required:
+        - task_id
+        - device_id
+        - task_type
+        - status
+        - prompt
+        - frame_width
+        - frame_height
+        - frame_bytes
+        - failure_code
+        - created_at
+        - completed_at
+        - expires_at
+      properties:
+        task_id:
+          type: string
+        device_id:
+          type: string
+        task_type:
+          $ref: "#/components/schemas/VisionTaskType"
+        status:
+          $ref: "#/components/schemas/VisionTaskStatus"
+        prompt:
+          type: string
+        frame_width:
+          type: integer
+          minimum: 0
+        frame_height:
+          type: integer
+          minimum: 0
+        frame_bytes:
+          type: integer
+          minimum: 0
+        failure_code:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+    VisionTaskEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/VisionTask"
+    VisionTasksEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - tasks
+              properties:
+                tasks:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/VisionTask"
+    VisionDeviceTask:
+      type: object
+      additionalProperties: false
+      required:
+        - task_id
+        - device_id
+        - task_type
+        - status
+        - prompt
+        - failure_code
+        - created_at
+        - expires_at
+      properties:
+        task_id:
+          type: string
+        device_id:
+          type: string
+        task_type:
+          $ref: "#/components/schemas/VisionTaskType"
+        status:
+          $ref: "#/components/schemas/VisionTaskStatus"
+        prompt:
+          type: string
+        failure_code:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    VisionDeviceTaskEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/VisionDeviceTask"
+    VisionDeviceTasksEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - tasks
+              properties:
+                tasks:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/VisionDeviceTask"
+    VisionTaskStatusRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - failure_code
+      properties:
+        status:
+          type: string
+          const: failed
+        failure_code:
+          $ref: "#/components/schemas/VisionFailureCode"
+    VisionResultLabel:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - confidence
+      properties:
+        label:
+          type: string
+          maxLength: 64
+        confidence:
+          type: integer
+          minimum: 0
+          maximum: 10000
+    VisionResultRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - task_id
+        - frame_width
+        - frame_height
+        - frame_bytes
+        - labels
+      properties:
+        task_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        frame_width:
+          type: integer
+          minimum: 0
+          maximum: 4096
+        frame_height:
+          type: integer
+          minimum: 0
+          maximum: 4096
+        frame_bytes:
+          type: integer
+          minimum: 0
+          maximum: 8388608
+        summary:
+          type: string
+          maxLength: 500
+        labels:
+          type: array
+          maxItems: 16
+          items:
+            $ref: "#/components/schemas/VisionResultLabel"
+    VisionResult:
+      type: object
+      additionalProperties: false
+      required:
+        - task_id
+        - device_id
+        - task_type
+        - labels
+        - summary
+        - created_at
+        - expires_at
+      properties:
+        task_id:
+          type: string
+        device_id:
+          type: string
+        task_type:
+          $ref: "#/components/schemas/VisionTaskType"
+        labels:
+          type: array
+          items:
+            $ref: "#/components/schemas/VisionResultLabel"
+        summary:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    VisionResultEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/VisionResult"
+    VisionResultsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - results
+              properties:
+                results:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/VisionResult"
+    VisionTaskTypeCount:
+      type: object
+      additionalProperties: false
+      required:
+        - task_type
+        - count
+      properties:
+        task_type:
+          $ref: "#/components/schemas/VisionTaskType"
+        count:
+          type: integer
+          minimum: 0
+    VisionAdminStats:
+      type: object
+      additionalProperties: false
+      required:
+        - window_days
+        - task_count
+        - completed_count
+        - failed_count
+        - expired_count
+        - result_count
+        - active_device_count
+        - task_types
+        - generated_at
+      properties:
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        task_count:
+          type: integer
+          minimum: 0
+        completed_count:
+          type: integer
+          minimum: 0
+        failed_count:
+          type: integer
+          minimum: 0
+        expired_count:
+          type: integer
+          minimum: 0
+        result_count:
+          type: integer
+          minimum: 0
+        active_device_count:
+          type: integer
+          minimum: 0
+        task_types:
+          type: array
+          items:
+            $ref: "#/components/schemas/VisionTaskTypeCount"
+        generated_at:
+          type: string
+          format: date-time
+    VisionAdminStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/VisionAdminStats"
     LearningVisualizationFeedbackStyle:
       type: string
       enum:

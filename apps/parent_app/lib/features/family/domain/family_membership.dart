@@ -35,6 +35,7 @@ class FamilyMember {
 class FamilyInvitation {
   const FamilyInvitation({
     required this.id,
+    required this.familyId,
     required this.email,
     required this.role,
     required this.status,
@@ -44,6 +45,7 @@ class FamilyInvitation {
   });
 
   final String id;
+  final String familyId;
   final String email;
   final String role;
   final String status;
@@ -56,6 +58,7 @@ class FamilyInvitation {
   factory FamilyInvitation.fromJson(Map<String, Object?> json) {
     return FamilyInvitation(
       id: _string(json['id']),
+      familyId: _string(json['family_id']),
       email: _string(json['email']),
       role: _role(json['role']),
       status: _string(json['status']),

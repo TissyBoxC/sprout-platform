@@ -93,6 +93,7 @@ FamilyMember _member(String id, String userId, String role) {
 FamilyInvitation _invitation(String id, String email, String status) {
   return FamilyInvitation(
     id: id,
+    familyId: 'family-1',
     email: email,
     role: FamilyRole.guardian,
     status: status,
@@ -175,6 +176,14 @@ class _FakeFamilyApi implements FamilyApi {
 
   @override
   Future<void> revokeInvitation(String invitationId) async {}
+
+  @override
+  Future<List<FamilyInvitation>> fetchMyInvitations() async {
+    if (failLoad) {
+      throw Exception('network down');
+    }
+    return _invitations.where((item) => item.isPending).toList(growable: false);
+  }
 
   @override
   Future<FamilyMember> acceptInvitation({

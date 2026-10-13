@@ -149,3 +149,34 @@ final familyControllerProvider =
     AsyncNotifierProvider<FamilyController, FamilyMembershipState>(
       FamilyController.new,
     );
+
+/// Owns the pending invitations addressed to the signed-in account, used by an
+/// invitee that has no family membership yet.
+class MyInvitationsController extends AsyncNotifier<List<FamilyInvitation>> {
+  late final FamilyApi _api;
+
+  @override
+  Future<List<FamilyInvitation>> build() async {
+    _api = ref.read(familyApiProvider);
+    return _api.fetchMyInvitations();
+  }
+
+  Future<void> refresh() async {
+    state = await AsyncValue.guard(_api.fetchMyInvitations);
+  }
+
+  /// Accepts an invitation and refreshes the invitee's pending list.
+  Future<FamilyMember> accept(FamilyInvitation invitation) async {
+    final member = await _api.acceptInvitation(
+      familyId: invitation.familyId,
+      invitationId: invitation.id,
+    );
+    await refresh();
+    return member;
+  }
+}
+
+final myInvitationsControllerProvider =
+    AsyncNotifierProvider<MyInvitationsController, List<FamilyInvitation>>(
+      MyInvitationsController.new,
+    );

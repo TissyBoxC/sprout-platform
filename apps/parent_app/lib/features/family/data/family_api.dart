@@ -31,6 +31,10 @@ abstract interface class FamilyApi {
   /// Revokes one pending invitation.
   Future<void> revokeInvitation(String invitationId);
 
+  /// Lists the pending invitations addressed to the signed-in account's email,
+  /// so an invitee can accept one before it has a family id.
+  Future<List<FamilyInvitation>> fetchMyInvitations();
+
   /// Redeems the invitation that matches the signed-in account's email.
   Future<FamilyMember> acceptInvitation({
     required String familyId,
@@ -95,6 +99,12 @@ class HttpFamilyApi implements FamilyApi {
     await _apiClient.delete(
       '/api/v1/family/invitations/${Uri.encodeComponent(invitationId)}',
     );
+  }
+
+  @override
+  Future<List<FamilyInvitation>> fetchMyInvitations() async {
+    final response = await _apiClient.get('/api/v1/family/invitations/mine');
+    return _invitationList(response['data']);
   }
 
   @override

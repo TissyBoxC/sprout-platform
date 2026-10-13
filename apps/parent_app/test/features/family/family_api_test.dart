@@ -151,6 +151,33 @@ void main() {
     expect(member.role, FamilyRole.viewer);
   });
 
+  test('loads my pending invitations from the mine endpoint', () async {
+    final client = _FakeApiClient(
+      response: <String, Object?>{
+        'data': <String, Object?>{
+          'invitations': <Object?>[
+            <String, Object?>{
+              'id': 'inv-1',
+              'family_id': 'family-1',
+              'email': 'me@example.com',
+              'role': 'guardian',
+              'status': 'pending',
+              'expires_at': '2026-10-15T00:00:00Z',
+            },
+          ],
+        },
+      },
+    );
+    final api = HttpFamilyApi(client);
+
+    final invitations = await api.fetchMyInvitations();
+
+    expect(invitations, hasLength(1));
+    expect(invitations.single.familyId, 'family-1');
+    expect(invitations.single.id, 'inv-1');
+    expect(invitations.single.isPending, isTrue);
+  });
+
   test('rejects an unknown role instead of guessing', () {
     expect(
       () => FamilyMember.fromJson(<String, Object?>{

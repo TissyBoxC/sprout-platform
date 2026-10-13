@@ -18,6 +18,7 @@ import '../../features/device/presentation/device_qr_scan_page.dart';
 import '../../features/english/presentation/english_page.dart';
 import '../../features/family/presentation/family_home_page.dart';
 import '../../features/family/presentation/family_invite_accept_page.dart';
+import '../../features/family/presentation/family_invitations_page.dart';
 import '../../features/family/presentation/family_members_page.dart';
 import '../../features/image_privacy/presentation/image_privacy_page.dart';
 import '../../features/learning_visualization/presentation/learning_visualization_page.dart';
@@ -80,6 +81,10 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/family',
         builder: (context, state) => const FamilyMembersPage(),
+      ),
+      GoRoute(
+        path: '/me/family/invitations',
+        builder: (context, state) => const FamilyInvitationsPage(),
       ),
       GoRoute(
         path: '/family-invite',

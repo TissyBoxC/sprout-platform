@@ -222,6 +222,25 @@ func TestDisplayCapabilityIncludesReportedDevice(t *testing.T) {
 	}
 }
 
+func TestDisplayDevicePolicyRequiresSession(t *testing.T) {
+	handler := deviceDisplayHandler{
+		handler:        &displayHandler{service: &displayTestService{}},
+		bindingService: nil,
+		runtimeService: nil,
+	}
+	request := englishRequest(
+		http.MethodGet,
+		"/api/v1/devices/device-1/display/policy",
+		"",
+		"",
+	)
+	recorder := httptest.NewRecorder()
+	handler.devicePolicy(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+}
+
 type displayPolicyPayloadResult struct {
 	BrightnessPercent      int  `json:"brightness_percent"`
 	ColorTemperatureKelvin int  `json:"color_temperature_kelvin"`

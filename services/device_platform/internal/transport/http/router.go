@@ -474,6 +474,10 @@ func NewRouter(options RouterOptions) http.Handler {
 					"POST /api/v1/devices/{device_id}/display/status",
 					deviceDisplayHandler.reportStatus,
 				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/display/policy",
+					deviceDisplayHandler.devicePolicy,
+				)
 			}
 		}
 		if options.ScreenService != nil {

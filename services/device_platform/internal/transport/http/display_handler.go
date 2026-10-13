@@ -200,6 +200,25 @@ func (handler deviceDisplayHandler) reportStatus(
 	})
 }
 
+// devicePolicy returns the family eye-care policy to a bound device over its
+// device session token so the firmware can clamp and apply it, mirroring the
+// other device policy endpoints.
+func (handler deviceDisplayHandler) devicePolicy(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	_, familyID, ok := handler.verifyDevice(response, request)
+	if !ok {
+		return
+	}
+	policy, err := handler.handler.service.Current(request.Context(), familyID)
+	if err != nil {
+		writeDisplayError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, displayPolicyResponse(policy))
+}
+
 // adminStats returns the bounded fleet display summary.
 func (handler displayHandler) adminStats(
 	response http.ResponseWriter,

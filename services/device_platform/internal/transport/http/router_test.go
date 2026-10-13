@@ -405,6 +405,37 @@ func TestTouchContractDocumentsConfigAndStatusEndpoints(t *testing.T) {
 	}
 }
 
+func TestConnectivityContractDocumentsPolicyAndStatusEndpoints(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/connectivity/policy:",
+		"/api/v1/connectivity/devices:",
+		"/api/v1/devices/{device_id}/connectivity/capability:",
+		"/api/v1/devices/{device_id}/connectivity/status:",
+		"/api/v1/devices/{device_id}/connectivity/policy:",
+		"/api/v1/admin/connectivity/stats:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected connectivity path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"ConnectivityPolicyRequest:",
+		"ConnectivityPolicy:",
+		"ConnectivityDevicePolicy:",
+		"ConnectivityCapability:",
+		"ConnectivityStatusReportRequest:",
+		"ConnectivityAdminStats:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected connectivity schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

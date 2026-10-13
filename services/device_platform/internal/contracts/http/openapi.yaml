@@ -2179,6 +2179,164 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/connectivity/policy:
+    get:
+      summary: Read the authenticated family's cellular connectivity policy
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Connectivity policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectivityPolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Publish the authenticated family's cellular connectivity policy
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConnectivityPolicyRequest"
+      responses:
+        "200":
+          description: Updated connectivity policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectivityPolicyEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/connectivity/devices:
+    get:
+      summary: List the authenticated family's latest connectivity statuses
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Connectivity statuses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectivityDevicesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/connectivity/capability:
+    get:
+      summary: Read one family device's cellular capability
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Connectivity capability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectivityCapabilityEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/connectivity/status:
+    post:
+      summary: Report one bound device's cellular connectivity status
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConnectivityStatusReportRequest"
+      responses:
+        "200":
+          description: Connectivity status recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectivityStatusRecordedEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/connectivity/policy:
+    get:
+      summary: Read the family cellular policy from a bound device session
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Connectivity policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectivityDevicePolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/connectivity/stats:
+    get:
+      summary: Read the fleet-wide connectivity summary
+      security:
+        - userToken: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        "200":
+          description: Connectivity statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectivityAdminStatsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -5585,3 +5743,376 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/TouchAdminStats"
+    ConnectivityPreference:
+      type: string
+      enum:
+        - wifi_first
+        - cellular_first
+        - cellular_only
+    ConnectivityBearer:
+      type: string
+      enum:
+        - wifi
+        - cellular
+        - none
+    ConnectivityESIMState:
+      type: string
+      enum:
+        - absent
+        - installed
+        - active
+        - disabled
+    ConnectivityPolicyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - roaming_allowed
+        - remote_wake_enabled
+        - metered_upload_limit
+        - preference
+        - monthly_quota_mb
+        - low_quota_warn_percent
+        - keepalive_seconds
+      properties:
+        enabled:
+          type: boolean
+        roaming_allowed:
+          type: boolean
+        remote_wake_enabled:
+          type: boolean
+        metered_upload_limit:
+          type: boolean
+        preference:
+          $ref: "#/components/schemas/ConnectivityPreference"
+        monthly_quota_mb:
+          type: integer
+          minimum: 0
+          maximum: 512000
+        low_quota_warn_percent:
+          type: integer
+          minimum: 5
+          maximum: 100
+        keepalive_seconds:
+          type: integer
+          minimum: 30
+          maximum: 3600
+    ConnectivityPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - enabled
+        - roaming_allowed
+        - remote_wake_enabled
+        - metered_upload_limit
+        - preference
+        - monthly_quota_mb
+        - low_quota_warn_percent
+        - keepalive_seconds
+        - revision
+      properties:
+        schema_version:
+          type: integer
+          minimum: 1
+        enabled:
+          type: boolean
+        roaming_allowed:
+          type: boolean
+        remote_wake_enabled:
+          type: boolean
+        metered_upload_limit:
+          type: boolean
+        preference:
+          $ref: "#/components/schemas/ConnectivityPreference"
+        monthly_quota_mb:
+          type: integer
+          minimum: 0
+          maximum: 512000
+        low_quota_warn_percent:
+          type: integer
+          minimum: 5
+          maximum: 100
+        keepalive_seconds:
+          type: integer
+          minimum: 30
+          maximum: 3600
+        revision:
+          type: integer
+          minimum: 0
+    ConnectivityPolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ConnectivityPolicy"
+    ConnectivityDevicePolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - enabled
+        - roaming_allowed
+        - remote_wake_enabled
+        - metered_upload_limit
+        - preference
+        - monthly_quota_mb
+        - low_quota_warn_percent
+        - keepalive_seconds
+        - policy_revision
+      properties:
+        schema_version:
+          type: integer
+          minimum: 1
+        enabled:
+          type: boolean
+        roaming_allowed:
+          type: boolean
+        remote_wake_enabled:
+          type: boolean
+        metered_upload_limit:
+          type: boolean
+        preference:
+          $ref: "#/components/schemas/ConnectivityPreference"
+        monthly_quota_mb:
+          type: integer
+          minimum: 0
+          maximum: 512000
+        low_quota_warn_percent:
+          type: integer
+          minimum: 5
+          maximum: 100
+        keepalive_seconds:
+          type: integer
+          minimum: 30
+          maximum: 3600
+        policy_revision:
+          type: integer
+          minimum: 0
+    ConnectivityDevicePolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ConnectivityDevicePolicy"
+    ConnectivityDeviceStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - family_id
+        - bearer
+        - roaming
+        - esim_state
+        - signal_percent
+        - used_mb
+        - up_to_date
+        - reported_at
+      properties:
+        device_id:
+          type: string
+        family_id:
+          type: string
+        bearer:
+          $ref: "#/components/schemas/ConnectivityBearer"
+        roaming:
+          type: boolean
+        esim_state:
+          $ref: "#/components/schemas/ConnectivityESIMState"
+        signal_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        used_mb:
+          type: integer
+          minimum: 0
+          maximum: 512000
+        up_to_date:
+          type: boolean
+        reported_at:
+          type: string
+          format: date-time
+    ConnectivityDevicesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - devices
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ConnectivityDeviceStatus"
+    ConnectivityCapability:
+      type: object
+      additionalProperties: false
+      required:
+        - supported
+        - roaming
+        - esim_state
+        - signal_percent
+        - quota_mb
+        - used_mb
+        - quota_exhausted
+        - schema_version
+        - policy_revision
+        - applied_revision
+        - up_to_date
+      properties:
+        supported:
+          type: boolean
+        roaming:
+          type: boolean
+        esim_state:
+          $ref: "#/components/schemas/ConnectivityESIMState"
+        signal_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        quota_mb:
+          type: integer
+          minimum: 0
+          maximum: 512000
+        used_mb:
+          type: integer
+          minimum: 0
+          maximum: 512000
+        quota_exhausted:
+          type: boolean
+        schema_version:
+          type: integer
+          minimum: 1
+        policy_revision:
+          type: integer
+          minimum: 0
+        applied_revision:
+          type: integer
+          minimum: 0
+        up_to_date:
+          type: boolean
+    ConnectivityCapabilityEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ConnectivityCapability"
+    ConnectivityStatusReportRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - bearer
+        - roaming
+        - esim_state
+        - signal_percent
+        - used_mb
+        - policy_revision
+      properties:
+        bearer:
+          $ref: "#/components/schemas/ConnectivityBearer"
+        roaming:
+          type: boolean
+        esim_state:
+          $ref: "#/components/schemas/ConnectivityESIMState"
+        signal_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        used_mb:
+          type: integer
+          minimum: 0
+          maximum: 512000
+        policy_revision:
+          type: integer
+          minimum: 0
+    ConnectivityStatusRecordedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - policy_revision
+                - recorded
+              properties:
+                device_id:
+                  type: string
+                policy_revision:
+                  type: integer
+                  minimum: 0
+                recorded:
+                  type: boolean
+                  const: true
+    ConnectivityCount:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - count
+      properties:
+        label:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+    ConnectivityAdminStats:
+      type: object
+      additionalProperties: false
+      required:
+        - window_days
+        - device_count
+        - cellular_count
+        - roaming_count
+        - quota_exhausted_count
+        - average_signal
+        - bearer_buckets
+        - esim_buckets
+        - generated_at
+      properties:
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        device_count:
+          type: integer
+          minimum: 0
+        cellular_count:
+          type: integer
+          minimum: 0
+        roaming_count:
+          type: integer
+          minimum: 0
+        quota_exhausted_count:
+          type: integer
+          minimum: 0
+        average_signal:
+          type: integer
+          minimum: 0
+          maximum: 100
+        bearer_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConnectivityCount"
+        esim_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConnectivityCount"
+        generated_at:
+          type: string
+          format: date-time
+    ConnectivityAdminStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ConnectivityAdminStats"

@@ -523,6 +523,35 @@ func TestFormFactorContractDocumentsProfileEndpoints(t *testing.T) {
 	}
 }
 
+func TestAlarmReminderContractDocumentsAlarmAndEventEndpoints(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/alarm-reminders:",
+		"/api/v1/alarm-reminders/{alarm_id}:",
+		"/api/v1/alarm-reminders/events:",
+		"/api/v1/devices/{device_id}/alarm-reminders:",
+		"/api/v1/devices/{device_id}/alarm-reminders/{alarm_id}/events:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected alarm reminder path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"AlarmReminderRequest:",
+		"AlarmReminder:",
+		"AlarmEventRequest:",
+		"AlarmEvent:",
+		"DeviceAlarm:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected alarm reminder schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

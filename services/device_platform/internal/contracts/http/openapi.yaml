@@ -2748,6 +2748,192 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/alarm-reminders:
+    get:
+      summary: List the authenticated family's alarm reminders
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Alarm reminders
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlarmRemindersEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Create one alarm reminder
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AlarmReminderRequest"
+      responses:
+        "201":
+          description: Alarm reminder created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlarmReminderEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/alarm-reminders/{alarm_id}:
+    put:
+      summary: Replace one alarm reminder's editable fields
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/AlarmId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AlarmReminderRequest"
+      responses:
+        "200":
+          description: Alarm reminder updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlarmReminderEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Alarm reminder not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    delete:
+      summary: Delete one alarm reminder
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/AlarmId"
+      responses:
+        "200":
+          description: Alarm reminder deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlarmReminderDeletedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Alarm reminder not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/alarm-reminders/events:
+    get:
+      summary: List the authenticated family's recent alarm firing events
+      security:
+        - userToken: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Alarm firing events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlarmEventsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/alarm-reminders:
+    get:
+      summary: Read the enabled alarm schedule from a bound device session
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Device alarm schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceAlarmsEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/alarm-reminders/{alarm_id}/events:
+    post:
+      summary: Report one alarm firing event from a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/AlarmId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AlarmEventRequest"
+      responses:
+        "200":
+          description: Alarm event recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlarmEventRecordedEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "404":
+          description: Alarm reminder not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -2812,6 +2998,14 @@ components:
         pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
     CommandId:
       name: command_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    AlarmId:
+      name: alarm_id
       in: path
       required: true
       schema:
@@ -7367,3 +7561,249 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/FormFactorAdminStats"
+    AlarmState:
+      type: string
+      enum:
+        - ringing
+        - snoozed
+        - dismissed
+        - missed
+    AlarmReminderRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - child_id
+        - label
+        - prompt
+        - alarm_time
+        - weekdays
+        - enabled
+        - snooze_minutes
+      properties:
+        child_id:
+          type: string
+        label:
+          type: string
+          minLength: 1
+          maxLength: 48
+        prompt:
+          type: string
+          maxLength: 240
+        alarm_time:
+          type: string
+          pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+        weekdays:
+          type: array
+          maxItems: 7
+          items:
+            type: integer
+            minimum: 1
+            maximum: 7
+        enabled:
+          type: boolean
+        snooze_minutes:
+          type: integer
+          minimum: 1
+          maximum: 30
+    AlarmReminder:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - child_id
+        - label
+        - prompt
+        - alarm_time
+        - weekdays
+        - enabled
+        - snooze_minutes
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+        child_id:
+          type: string
+        label:
+          type: string
+        prompt:
+          type: string
+        alarm_time:
+          type: string
+        weekdays:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 7
+        enabled:
+          type: boolean
+        snooze_minutes:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    AlarmRemindersEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - alarms
+              properties:
+                alarms:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/AlarmReminder"
+    AlarmReminderEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - alarm
+              properties:
+                alarm:
+                  $ref: "#/components/schemas/AlarmReminder"
+    AlarmReminderDeletedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - alarm_id
+              properties:
+                alarm_id:
+                  type: string
+    AlarmEventRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - alarm_date
+        - state
+      properties:
+        alarm_date:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        state:
+          $ref: "#/components/schemas/AlarmState"
+    AlarmEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - alarm_id
+        - device_id
+        - alarm_date
+        - state
+        - reported_at
+      properties:
+        id:
+          type: string
+        alarm_id:
+          type: string
+        device_id:
+          type: string
+        alarm_date:
+          type: string
+        state:
+          $ref: "#/components/schemas/AlarmState"
+        reported_at:
+          type: string
+          format: date-time
+    AlarmEventsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - events
+              properties:
+                events:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/AlarmEvent"
+    DeviceAlarm:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - child_id
+        - label
+        - prompt
+        - alarm_time
+        - weekdays
+        - snooze_minutes
+        - updated_at
+      properties:
+        id:
+          type: string
+        child_id:
+          type: string
+        label:
+          type: string
+        prompt:
+          type: string
+        alarm_time:
+          type: string
+        weekdays:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 7
+        snooze_minutes:
+          type: integer
+        updated_at:
+          type: string
+          format: date-time
+    DeviceAlarmsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - alarms
+              properties:
+                alarms:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/DeviceAlarm"
+    AlarmEventRecordedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - alarm_id
+                - state
+                - recorded
+              properties:
+                alarm_id:
+                  type: string
+                state:
+                  $ref: "#/components/schemas/AlarmState"
+                recorded:
+                  type: boolean
+                  const: true

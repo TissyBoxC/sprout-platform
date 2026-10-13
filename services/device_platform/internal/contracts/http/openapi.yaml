@@ -8193,6 +8193,441 @@ paths:
                 $ref: "#/components/schemas/ResponseEnvelope"
         "500":
           $ref: "#/components/responses/AuthServiceError"
+  /api/v1/admin/releases:
+    get:
+      summary: List registered client and resource releases
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Registered releases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleasesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Register a new client or resource release
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCreateReleaseRequest"
+      responses:
+        "201":
+          description: Release registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleaseEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Release version already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid release version, URL, or checksum
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/releases/{version}/publish:
+    put:
+      summary: Publish one registered release
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ReleaseVersion"
+      responses:
+        "200":
+          description: Release published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleasePublishedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Release is already published or not publishable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/releases/{version}:
+    delete:
+      summary: Delete one registered release
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ReleaseVersion"
+      responses:
+        "200":
+          description: Release deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleaseDeletedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Release not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/release-artifacts/{version}:
+    get:
+      summary: Read one release artifact and its download metadata
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ReleaseVersion"
+        - $ref: "#/components/parameters/ReleaseArtifactKind"
+        - $ref: "#/components/parameters/ReleaseArtifactPlatform"
+      responses:
+        "200":
+          description: Release artifact metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleaseArtifactEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Release artifact not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/storage/files:
+    get:
+      summary: List files in the shared download store
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Download-store inventory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleaseInventoryEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/storage/files/upload:
+    post:
+      summary: Upload one file into the shared download store
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/AdminReleaseFileUploadRequest"
+      responses:
+        "201":
+          description: File uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleaseFileEnvelope"
+        "400":
+          description: Malformed multipart upload or missing file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: File already exists without overwrite
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "413":
+          description: Upload exceeds the configured file size limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Relative path or release metadata invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/storage/files/{path...}:
+    delete:
+      summary: Delete one file from the shared download store
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ReleaseFilePath"
+      responses:
+        "200":
+          description: File deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleaseDeletedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: File path invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/storage/index/status:
+    get:
+      summary: Read the public release index synchronization status
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Release index status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleaseIndexStatusEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/storage/index/refresh:
+    post:
+      summary: Refresh one release manifest or scan the full download store
+      security:
+        - userToken: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRefreshReleaseIndexRequest"
+      responses:
+        "200":
+          description: Release index refreshed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleaseIndexRefreshEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Release directory not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Release metadata invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/release-files:
+    get:
+      summary: List release files in the shared download store (legacy alias)
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Download-store inventory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleaseInventoryEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Upload one release file into the shared download store (legacy alias)
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/AdminReleaseFileUploadRequest"
+      responses:
+        "201":
+          description: File uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleaseFileEnvelope"
+        "400":
+          description: Malformed multipart upload or missing file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: File already exists without overwrite
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "413":
+          description: Upload exceeds the configured file size limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Relative path or release metadata invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    delete:
+      summary: Delete one release file by query path (legacy alias)
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ReleaseFilePathQuery"
+      responses:
+        "200":
+          description: File deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleaseDeletedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: File path invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/release-index/refresh:
+    post:
+      summary: Refresh one release manifest or scan the full download store (legacy alias)
+      security:
+        - userToken: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRefreshReleaseIndexRequest"
+      responses:
+        "200":
+          description: Release index refreshed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleaseIndexRefreshEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Release directory not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Release metadata invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -8263,6 +8698,45 @@ components:
       schema:
         type: string
         format: date-time
+    ReleaseVersion:
+      name: version
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$"
+    ReleaseArtifactKind:
+      name: kind
+      in: query
+      required: false
+      schema:
+        type: string
+        maxLength: 64
+    ReleaseArtifactPlatform:
+      name: platform
+      in: query
+      required: false
+      schema:
+        type: string
+        maxLength: 64
+    ReleaseFilePath:
+      name: path
+      in: path
+      required: true
+      style: simple
+      explode: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 1024
+    ReleaseFilePathQuery:
+      name: path
+      in: query
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 1024
     InvitationId:
       name: invitation_id
       in: path
@@ -10124,6 +10598,510 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/AIUsageReconciliation"
+    AdminRelease:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+        - channel
+        - kind
+        - platform
+        - download_url
+        - sha256
+        - release_notes
+        - is_mandatory
+        - min_supported_version
+        - status
+        - created_at
+        - updated_at
+        - published_at
+      properties:
+        version:
+          type: string
+          minLength: 1
+          maxLength: 64
+        channel:
+          type: string
+          minLength: 1
+          maxLength: 64
+        kind:
+          type: string
+          minLength: 1
+          maxLength: 32
+        platform:
+          type: string
+          minLength: 1
+          maxLength: 32
+        download_url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        sha256:
+          type: string
+          minLength: 64
+          maxLength: 64
+        release_notes:
+          type: string
+          maxLength: 4096
+        is_mandatory:
+          type: boolean
+        min_supported_version:
+          type: string
+          maxLength: 64
+        status:
+          type: string
+          enum:
+            - draft
+            - published
+            - withdrawn
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        published_at:
+          nullable: true
+          type: string
+          format: date-time
+    AdminReleasesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - releases
+              properties:
+                releases:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/AdminRelease"
+    AdminReleaseEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AdminRelease"
+    AdminCreateReleaseRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+        - channel
+        - kind
+        - platform
+        - download_url
+        - sha256
+        - release_notes
+        - is_mandatory
+        - min_supported_version
+      properties:
+        version:
+          type: string
+          minLength: 1
+          maxLength: 64
+        channel:
+          type: string
+          minLength: 1
+          maxLength: 64
+        kind:
+          type: string
+          minLength: 1
+          maxLength: 32
+        platform:
+          type: string
+          minLength: 1
+          maxLength: 32
+        download_url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        sha256:
+          type: string
+          minLength: 64
+          maxLength: 64
+        release_notes:
+          type: string
+          maxLength: 4096
+        is_mandatory:
+          type: boolean
+        min_supported_version:
+          type: string
+          maxLength: 64
+    AdminReleasePublishedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - published
+              properties:
+                published:
+                  type: boolean
+                  const: true
+    AdminReleaseDeletedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - deleted
+              properties:
+                deleted:
+                  type: boolean
+                  const: true
+    AdminReleaseArtifact:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+        - channel
+        - kind
+        - platform
+        - file_name
+        - relative_path
+        - sha256
+        - size_bytes
+        - url
+      properties:
+        version:
+          type: string
+          minLength: 1
+          maxLength: 64
+        channel:
+          type: string
+          minLength: 1
+          maxLength: 64
+        kind:
+          type: string
+          minLength: 1
+          maxLength: 32
+        platform:
+          type: string
+          minLength: 1
+          maxLength: 32
+        file_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        relative_path:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        sha256:
+          type: string
+          minLength: 64
+          maxLength: 64
+        size_bytes:
+          type: integer
+          minimum: 0
+        url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+    AdminReleaseArtifactEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - artifact
+              properties:
+                artifact:
+                  $ref: "#/components/schemas/AdminReleaseArtifact"
+    AdminReleaseFile:
+      type: object
+      additionalProperties: false
+      required:
+        - relative_path
+        - file_name
+        - name
+        - directory
+        - size_bytes
+        - modified_at
+        - sha256
+        - release
+        - download_url
+        - is_indexed
+      properties:
+        relative_path:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        file_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        name:
+          type: string
+          maxLength: 255
+        directory:
+          type: string
+          maxLength: 1024
+        size_bytes:
+          type: integer
+          minimum: 0
+        modified_at:
+          type: string
+          format: date-time
+        sha256:
+          type: string
+          maxLength: 64
+        release:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AdminReleaseFileRelease"
+        download_url:
+          type: string
+          maxLength: 2048
+        is_indexed:
+          type: boolean
+    AdminReleaseFileRelease:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+        - channel
+        - platform
+        - kind
+      properties:
+        version:
+          type: string
+          minLength: 1
+          maxLength: 64
+        channel:
+          type: string
+          minLength: 1
+          maxLength: 64
+        platform:
+          type: string
+          minLength: 1
+          maxLength: 32
+        kind:
+          type: string
+          minLength: 1
+          maxLength: 32
+    AdminReleaseInventory:
+      type: object
+      additionalProperties: false
+      required:
+        - root_dir
+        - public_base_url
+        - files
+        - generated_at
+      properties:
+        root_dir:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        public_base_url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminReleaseFile"
+        generated_at:
+          type: string
+          format: date-time
+    AdminReleaseInventoryEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AdminReleaseInventory"
+    AdminReleaseFileEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - file
+              properties:
+                file:
+                  $ref: "#/components/schemas/AdminReleaseFile"
+    AdminReleaseFileUploadRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - file
+        - relative_path
+      properties:
+        file:
+          type: string
+          format: binary
+        relative_path:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        path:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        overwrite:
+          type: boolean
+          default: false
+        filename:
+          type: string
+          maxLength: 255
+        file_name:
+          type: string
+          maxLength: 255
+        version:
+          type: string
+          maxLength: 64
+        channel:
+          type: string
+          maxLength: 64
+        platform:
+          type: string
+          maxLength: 32
+        kind:
+          type: string
+          maxLength: 32
+    AdminReleaseIndexStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - is_available
+        - refreshed_at
+        - indexed_file_count
+        - pending_file_count
+        - error_message
+      properties:
+        is_available:
+          type: boolean
+        refreshed_at:
+          type: string
+          format: date-time
+        indexed_file_count:
+          type: integer
+          minimum: 0
+        pending_file_count:
+          type: integer
+          minimum: 0
+        error_message:
+          type: string
+          maxLength: 1024
+    AdminReleaseIndexStatusEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AdminReleaseIndexStatus"
+    AdminRefreshReleaseIndexRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        version:
+          type: string
+          maxLength: 64
+        channel:
+          type: string
+          maxLength: 64
+        title:
+          type: string
+          maxLength: 256
+        published_at:
+          type: string
+          maxLength: 64
+    AdminReleaseIndexRefreshResult:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+        - channel
+        - artifact_count
+        - manifest_url
+        - generated_at
+      properties:
+        version:
+          type: string
+          minLength: 1
+          maxLength: 64
+        channel:
+          type: string
+          minLength: 1
+          maxLength: 64
+        artifact_count:
+          type: integer
+          minimum: 0
+        manifest_url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        generated_at:
+          type: string
+          format: date-time
+    AdminReleaseIndexRefreshSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - refreshed_at
+        - release_count
+        - artifact_count
+        - indexed_file_count
+        - pending_file_count
+        - versions
+        - channels
+      properties:
+        refreshed_at:
+          type: string
+          format: date-time
+        release_count:
+          type: integer
+          minimum: 0
+        artifact_count:
+          type: integer
+          minimum: 0
+        indexed_file_count:
+          type: integer
+          minimum: 0
+        pending_file_count:
+          type: integer
+          minimum: 0
+        versions:
+          type: array
+          items:
+            type: string
+        channels:
+          type: array
+          items:
+            type: string
+    AdminReleaseIndexRefreshEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              oneOf:
+                - $ref: "#/components/schemas/AdminReleaseIndexRefreshSummary"
+                - type: object
+                  additionalProperties: false
+                  required:
+                    - release
+                  properties:
+                    release:
+                      $ref: "#/components/schemas/AdminReleaseIndexRefreshResult"
     AccountEnvelope:
       allOf:
         - $ref: "#/components/schemas/ResponseEnvelope"

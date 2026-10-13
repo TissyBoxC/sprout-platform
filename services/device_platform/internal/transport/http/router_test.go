@@ -1257,6 +1257,47 @@ func TestAdminFamilyContractDocumentsFamiliesAndAIAccounts(t *testing.T) {
 	}
 }
 
+func TestAdminReleaseContractDocumentsPublishingAndStorage(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/admin/releases:",
+		"/api/v1/admin/releases/{version}:",
+		"/api/v1/admin/releases/{version}/publish:",
+		"/api/v1/admin/release-artifacts/{version}:",
+		"/api/v1/admin/storage/files:",
+		"/api/v1/admin/storage/files/upload:",
+		"/api/v1/admin/storage/files/{path...}:",
+		"/api/v1/admin/storage/index/status:",
+		"/api/v1/admin/storage/index/refresh:",
+		"/api/v1/admin/release-files:",
+		"/api/v1/admin/release-index/refresh:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected admin release path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"AdminReleasesEnvelope:",
+		"AdminReleaseEnvelope:",
+		"AdminCreateReleaseRequest:",
+		"AdminReleasePublishedEnvelope:",
+		"AdminReleaseDeletedEnvelope:",
+		"AdminReleaseArtifactEnvelope:",
+		"AdminReleaseInventoryEnvelope:",
+		"AdminReleaseFileEnvelope:",
+		"AdminReleaseFileUploadRequest:",
+		"AdminReleaseIndexStatusEnvelope:",
+		"AdminReleaseIndexRefreshEnvelope:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected admin release schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestAppUpdateContractDocumentsClientUpdateEndpoint(t *testing.T) {
 	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
 	if err != nil {

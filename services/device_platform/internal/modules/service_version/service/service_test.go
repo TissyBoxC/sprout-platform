@@ -514,6 +514,56 @@ func TestListReleasesMarksCurrentAndLatestAcrossPages(t *testing.T) {
 	}
 }
 
+// The worker catalogue is a credential-free cache of GitHub releases. Older
+// worker versions wrote false for both marker fields, so the service layer
+// must derive the markers from the live snapshot instead of trusting the file.
+func TestListReleasesOverridesStaleCatalogMarkers(t *testing.T) {
+	service, _ := newTestReleaseSource(
+		t,
+		`{
+			"generated_at": "2026-10-03T00:00:00Z",
+			"services": [
+				{
+					"id": "device_platform",
+					"current_version": "0.22.0",
+					"latest_version": "0.22.0",
+					"status": "current"
+				}
+			]
+		}`,
+		map[string][]domain.Release{
+			"device_platform": {
+				{
+					Version:    "0.22.0",
+					ReleaseURL: "https://example.test/v0.22.0",
+					IsCurrent:  false,
+					IsLatest:   false,
+				},
+				{
+					Version:    "0.21.0",
+					ReleaseURL: "https://example.test/v0.21.0",
+					IsCurrent:  false,
+					IsLatest:   false,
+				},
+			},
+		},
+	)
+
+	page, err := service.ListReleases(context.Background(), "device_platform", 1, 20)
+	if err != nil {
+		t.Fatalf("ListReleases() returned unexpected error: %v", err)
+	}
+	if len(page.Releases) != 2 {
+		t.Fatalf("expected 2 releases, got %d", len(page.Releases))
+	}
+	if !page.Releases[0].IsCurrent || !page.Releases[0].IsLatest {
+		t.Fatalf("expected running version to be current and latest: %+v", page.Releases[0])
+	}
+	if page.Releases[1].IsCurrent || page.Releases[1].IsLatest {
+		t.Fatalf("expected older version to remain unmarked: %+v", page.Releases[1])
+	}
+}
+
 func TestListReleasesRejectsInfrastructureService(t *testing.T) {
 	service, _ := newTestService(t, `{"generated_at":"2026-10-03T00:00:00Z","services":[]}`)
 

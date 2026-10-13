@@ -9,6 +9,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/repository"
 	childdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/domain"
+	familydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/domain"
 	operationsdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/security"
 	"golang.org/x/crypto/bcrypt"
@@ -95,6 +96,59 @@ func TestRegisterCreatesChildProfileWhenNicknameIsProvided(t *testing.T) {
 	}
 	if childProvisioner.createdProfiles != 1 {
 		t.Fatalf("expected one child profile, got %d", childProvisioner.createdProfiles)
+	}
+}
+
+func TestRegisterBootstrapsFamilyOwner(t *testing.T) {
+	repository := &memoryRepository{}
+	ownerProvisioner := &memoryOwnerProvisioner{}
+	service, err := New(Options{
+		Repository:    repository,
+		TokenIssuer:   mustTokenIssuer(t),
+		PhoneVerifier: noOpPhoneVerifier{},
+		AccessTTL:     time.Minute,
+		RefreshTTL:    time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("create authentication service: %v", err)
+	}
+	service.SetFamilyOwnerProvisioner(ownerProvisioner)
+	if _, _, _, err := service.Register(context.Background(), domain.RegisterInput{
+		Phone:                  "13800138000",
+		PhoneVerificationCode:  "000000",
+		Password:               "sprout123",
+		GuardianConsentVersion: defaultConsent,
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if ownerProvisioner.bootstrapped != 1 {
+		t.Fatalf("expected one owner bootstrap, got %d", ownerProvisioner.bootstrapped)
+	}
+}
+
+func TestRegisterRollsBackParentWhenOwnerBootstrapFails(t *testing.T) {
+	repository := &memoryRepository{}
+	service, err := New(Options{
+		Repository:    repository,
+		TokenIssuer:   mustTokenIssuer(t),
+		PhoneVerifier: noOpPhoneVerifier{},
+		AccessTTL:     time.Minute,
+		RefreshTTL:    time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("create authentication service: %v", err)
+	}
+	service.SetFamilyOwnerProvisioner(&memoryOwnerProvisioner{fail: true})
+	if _, _, _, err := service.Register(context.Background(), domain.RegisterInput{
+		Phone:                  "13800138000",
+		PhoneVerificationCode:  "000000",
+		Password:               "sprout123",
+		GuardianConsentVersion: defaultConsent,
+	}); err == nil {
+		t.Fatal("registration must fail when the owner cannot be bootstrapped")
+	}
+	if repository.account != nil {
+		t.Fatal("a failed owner bootstrap must delete the parent account")
 	}
 }
 
@@ -326,6 +380,27 @@ func (p *memoryChildProvisioner) SyncRegistrationProfile(
 	}
 	p.createdProfiles++
 	return &childdomain.Child{}, nil
+}
+
+// memoryOwnerProvisioner records owner bootstrapping during registration.
+type memoryOwnerProvisioner struct {
+	bootstrapped int
+	fail         bool
+}
+
+func (p *memoryOwnerProvisioner) BootstrapOwner(
+	_ context.Context,
+	familyID string,
+	userID string,
+) (familydomain.Member, error) {
+	if p.fail {
+		return familydomain.Member{}, errors.New("owner bootstrap failed")
+	}
+	if familyID != userID {
+		return familydomain.Member{}, errors.New("family must equal owner account")
+	}
+	p.bootstrapped++
+	return familydomain.Member{FamilyID: familyID, UserID: userID, Role: familydomain.RoleOwner}, nil
 }
 
 func (r *memoryRepository) GetParentAccountByEmail(

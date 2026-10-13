@@ -16,6 +16,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/repository"
 	childdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/domain"
+	familydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/domain"
 	operationsdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/security"
@@ -55,6 +56,7 @@ type Service struct {
 	tokenIssuer      security.TokenIssuer
 	aiProvisioner    AIAccountProvisioner
 	childProvisioner ChildAccountProvisioner
+	ownerProvisioner FamilyOwnerProvisioner
 	mfaCipher        MFACipher
 	phoneVerifier    PhoneVerifier
 	overviewReader   ParentOverviewReader
@@ -181,6 +183,24 @@ func (s *Service) SetChildProvisioner(provisioner ChildAccountProvisioner) {
 	s.childProvisioner = provisioner
 }
 
+// FamilyOwnerProvisioner makes a newly registered guardian the owner of its
+// family. It is deliberately narrow so authentication stays removable and does
+// not depend on the family repository.
+type FamilyOwnerProvisioner interface {
+	BootstrapOwner(
+		ctx context.Context,
+		familyID string,
+		userID string,
+	) (familydomain.Member, error)
+}
+
+// SetFamilyOwnerProvisioner wires the family module after construction. A
+// failure to create the owner is treated as a registration failure so a
+// guardian never ends up with a family that has no owner.
+func (s *Service) SetFamilyOwnerProvisioner(provisioner FamilyOwnerProvisioner) {
+	s.ownerProvisioner = provisioner
+}
+
 // ParentOverview returns the authenticated guardian's dashboard counters.
 func (s *Service) ParentOverview(
 	ctx context.Context,
@@ -260,6 +280,18 @@ func (s *Service) Register(
 	}
 	if err := s.repository.CreateParentAccount(ctx, account); err != nil {
 		return nil, nil, nil, err
+	}
+	if s.ownerProvisioner != nil {
+		if _, err := s.ownerProvisioner.BootstrapOwner(
+			ctx,
+			account.ID,
+			account.ID,
+		); err != nil {
+			// A family must always have an owner, so a bootstrap failure fails
+			// the registration instead of leaving an ownerless family behind.
+			_ = s.repository.DeleteParentAccount(ctx, account.ID)
+			return nil, nil, nil, err
+		}
 	}
 	if s.childProvisioner != nil && input.ChildNickname != "" {
 		if _, err := s.childProvisioner.SyncRegistrationProfile(

@@ -216,6 +216,7 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create family service: %w", err)
 	}
+	parentAuthService.SetFamilyOwnerProvisioner(familyMembershipService)
 	companionshipCompanionService, err := companionshipService.New(companionshipService.Options{
 		Repository: companionshipPersistence,
 	})

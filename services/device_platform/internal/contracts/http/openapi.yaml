@@ -5587,6 +5587,101 @@ paths:
           $ref: "#/components/responses/DeviceUnprocessable"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/local-commands:
+    get:
+      summary: Read the authenticated family's local command set
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Local command set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalCommandSetEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Replace the authenticated family's local command set
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocalCommandReplaceRequest"
+      responses:
+        "200":
+          description: Local command set replaced
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalCommandSetEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: Duplicate trigger phrase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/local-commands/{command_id}:
+    delete:
+      summary: Delete one local command
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/LocalCommandId"
+      responses:
+        "200":
+          description: Local command deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalCommandDeletedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Local command not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/local-commands:
+    get:
+      summary: Read the bound family's local command set from a device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Device local command set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalCommandSetEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -5709,6 +5804,14 @@ components:
       schema:
         type: integer
         minimum: 1
+    LocalCommandId:
+      name: command_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
   responses:
     Unauthorized:
       description: Authentication missing, expired, or invalid
@@ -14340,3 +14443,109 @@ components:
                   type: array
                   items:
                     $ref: "#/components/schemas/EnglishProgressItem"
+    LocalCommandAction:
+      type: string
+      enum:
+        - play_package
+        - pause
+        - resume
+        - stop
+        - set_volume
+        - sleep
+    LocalCommand:
+      type: object
+      additionalProperties: false
+      required:
+        - command_id
+        - phrase
+        - action
+        - argument
+        - enabled
+        - revision
+      properties:
+        command_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        phrase:
+          type: string
+          minLength: 1
+          maxLength: 48
+        action:
+          $ref: "#/components/schemas/LocalCommandAction"
+        argument:
+          type: string
+          maxLength: 80
+        enabled:
+          type: boolean
+        revision:
+          type: integer
+          minimum: 0
+    LocalCommandSetEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - revision
+                - commands
+              properties:
+                revision:
+                  type: integer
+                  minimum: 0
+                commands:
+                  type: array
+                  maxItems: 24
+                  items:
+                    $ref: "#/components/schemas/LocalCommand"
+    LocalCommandReplaceRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - commands
+      properties:
+        commands:
+          type: array
+          maxItems: 24
+          items:
+            $ref: "#/components/schemas/LocalCommandInput"
+    LocalCommandInput:
+      type: object
+      additionalProperties: false
+      required:
+        - command_id
+        - phrase
+        - action
+        - enabled
+      properties:
+        command_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        phrase:
+          type: string
+          minLength: 1
+          maxLength: 48
+        action:
+          $ref: "#/components/schemas/LocalCommandAction"
+        argument:
+          type: string
+          maxLength: 80
+        enabled:
+          type: boolean
+    LocalCommandDeletedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - command_id
+              properties:
+                command_id:
+                  type: string

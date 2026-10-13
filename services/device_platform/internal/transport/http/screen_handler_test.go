@@ -337,6 +337,25 @@ func TestScreenReportStatusRejectsUnknownExpression(t *testing.T) {
 	}
 }
 
+func TestScreenDevicePolicyRequiresSession(t *testing.T) {
+	handler := deviceScreenHandler{
+		handler:        &screenHandler{service: newScreenTestService()},
+		bindingService: nil,
+		runtimeService: nil,
+	}
+	request := englishRequest(
+		http.MethodGet,
+		"/api/v1/devices/device-1/screen/policy",
+		"",
+		"",
+	)
+	recorder := httptest.NewRecorder()
+	handler.devicePolicy(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestScreenAdminStats(t *testing.T) {
 	handler := screenHandler{service: newScreenTestService()}
 	request := englishRequest(

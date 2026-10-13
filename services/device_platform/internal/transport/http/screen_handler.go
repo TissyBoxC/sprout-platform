@@ -347,6 +347,25 @@ func (handler deviceScreenHandler) reportStatus(
 	})
 }
 
+// devicePolicy returns the family screen policy to a bound device over its
+// device session token so the firmware can clamp and apply it, mirroring the
+// other device policy endpoints.
+func (handler deviceScreenHandler) devicePolicy(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	_, familyID, ok := handler.verifyDevice(response, request)
+	if !ok {
+		return
+	}
+	policy, err := handler.handler.service.Current(request.Context(), familyID)
+	if err != nil {
+		writeScreenError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, screenPolicyResponse(policy))
+}
+
 // adminStats returns the bounded fleet screen summary.
 func (handler screenHandler) adminStats(
 	response http.ResponseWriter,

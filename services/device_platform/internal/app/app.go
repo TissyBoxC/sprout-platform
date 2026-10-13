@@ -463,7 +463,6 @@ func Run() error {
 			databaseStore.Pool(),
 			"SELECT 1 FROM playback_requests LIMIT 1",
 		),
-		"recommendation": recommendationReadinessProbe(nil),
 		"privacy_lifecycle": nonzeroRowProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM parent_consent_events LIMIT 1",
@@ -582,31 +581,7 @@ func Run() error {
 				return featureCenterDomain.HealthHealthy, nil
 			},
 		),
-		"notification": featureCenterService.HealthProbeFunc(
-			func(_ context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
-				// Replaced below once the notification service exists. The
-				// placeholder keeps startup coverage validation deterministic.
-				return featureCenterDomain.HealthUnknown, nil
-			},
-		),
 	}
-	if err := featureCenterService.ValidateHealthProbeCoverage(
-		featureCenterService.DefaultRegistry(),
-		featureCenterHealthProbes,
-	); err != nil {
-		return fmt.Errorf("validate feature center health coverage: %w", err)
-	}
-	featureCenter, err := featureCenterService.New(featureCenterService.Options{
-		Repository: featureCenterRepository.NewPostgresRepository(
-			databaseStore.Pool(),
-		),
-		HealthProbes: featureCenterHealthProbes,
-	})
-	if err != nil {
-		return fmt.Errorf("create feature center service: %w", err)
-	}
-	featureCenter.SetRuntimeSettingsReader(operations)
-	featureCenter.SetModelCatalogReader(aiModelCatalogReader{service: aiAccountService})
 	contentLibraryService, err := contentService.New(contentService.Options{
 		Repository:  contentRepository.NewPostgresRepository(databaseStore.Pool()),
 		AssetReader: contentAssetReader{store: releaseStore},
@@ -639,12 +614,9 @@ func Run() error {
 			},
 		},
 	)
-	if err := featureCenter.SetHealthProbe(
-		"recommendation",
-		recommendationReadinessProbe(contentRecommendations),
-	); err != nil {
-		return fmt.Errorf("wire recommendation health probe: %w", err)
-	}
+	featureCenterHealthProbes["recommendation"] = recommendationReadinessProbe(
+		contentRecommendations,
+	)
 	localCommands := localCommandService.New(localCommandService.Options{
 		Repository: localCommandRepository.NewPostgresRepository(databaseStore.Pool()),
 	})
@@ -685,6 +657,26 @@ func Run() error {
 		return fmt.Errorf("create notification service: %w", err)
 	}
 	deviceRuntimeService.SetCommandAcknowledgementSink(notifications)
+	featureCenterHealthProbes["notification"] = notificationReadinessProbe(
+		notifications,
+	)
+	if err := featureCenterService.ValidateHealthProbeCoverage(
+		featureCenterService.DefaultRegistry(),
+		featureCenterHealthProbes,
+	); err != nil {
+		return fmt.Errorf("validate feature center health coverage: %w", err)
+	}
+	featureCenter, err := featureCenterService.New(featureCenterService.Options{
+		Repository: featureCenterRepository.NewPostgresRepository(
+			databaseStore.Pool(),
+		),
+		HealthProbes: featureCenterHealthProbes,
+	})
+	if err != nil {
+		return fmt.Errorf("create feature center service: %w", err)
+	}
+	featureCenter.SetRuntimeSettingsReader(operations)
+	featureCenter.SetModelCatalogReader(aiModelCatalogReader{service: aiAccountService})
 	featureCenter.SetMetricsReader(featureCenterMetricsReader{
 		repository: featureCenterRepository.NewMetricsRepository(
 			databaseStore.Pool(),
@@ -694,12 +686,6 @@ func Run() error {
 		releaseStore:    releaseStore,
 		notifications:   notifications,
 	})
-	if err := featureCenter.SetHealthProbe(
-		"notification",
-		notificationReadinessProbe(notifications),
-	); err != nil {
-		return fmt.Errorf("wire notification health probe: %w", err)
-	}
 	uiTextVerifier, err := ui_textService.NewEd25519KeyringVerifier(
 		cfg.UIText.SignaturePublicKeys,
 	)

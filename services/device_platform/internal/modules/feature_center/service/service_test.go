@@ -689,49 +689,24 @@ func TestCheckHealthUsesInjectedProbe(t *testing.T) {
 	}
 }
 
-func TestSetHealthProbeReplacesRuntimeProbe(t *testing.T) {
-	service, _ := newTestService(t)
-	if err := service.SetHealthProbe(
-		"voice_gateway",
-		HealthProbeFunc(func(
-			_ context.Context,
-			_ string,
-		) (domain.HealthStatus, error) {
-			return domain.HealthDegraded, nil
-		}),
-	); err != nil {
-		t.Fatalf("set health probe: %v", err)
-	}
-
-	feature, err := service.CheckHealth(context.Background(), "voice_gateway")
-	if err != nil {
-		t.Fatalf("check health: %v", err)
-	}
-	if feature.Health != domain.HealthDegraded {
-		t.Fatalf("health = %q, want degraded", feature.Health)
-	}
-}
-
-func TestSetHealthProbeRejectsUnknownFeature(t *testing.T) {
-	service, _ := newTestService(t)
-	err := service.SetHealthProbe(
-		"missing_feature",
-		HealthProbeFunc(func(
-			_ context.Context,
-			_ string,
-		) (domain.HealthStatus, error) {
-			return domain.HealthHealthy, nil
-		}),
+func TestValidateHealthProbeCoverageRejectsMissingActiveProbe(t *testing.T) {
+	err := ValidateHealthProbeCoverage(
+		[]Definition{
+			featureDef(
+				"voice_gateway",
+				"语音网关",
+				"测试功能",
+				"voice",
+				"语音平台",
+				true,
+				nil,
+				nil,
+			),
+		},
+		nil,
 	)
-	if !errors.Is(err, domain.ErrFeatureNotFound) {
-		t.Fatalf("expected unknown feature error, got %v", err)
-	}
-}
-
-func TestSetHealthProbeRejectsNilProbe(t *testing.T) {
-	service, _ := newTestService(t)
-	if err := service.SetHealthProbe("voice_gateway", nil); err == nil {
-		t.Fatal("expected nil probe to be rejected")
+	if err == nil {
+		t.Fatal("expected active feature without health probe to be rejected")
 	}
 }
 

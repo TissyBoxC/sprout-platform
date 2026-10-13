@@ -8628,6 +8628,393 @@ paths:
                 $ref: "#/components/schemas/ResponseEnvelope"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ota/releases:
+    get:
+      summary: List firmware releases with operator filters
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/OTAReleaseStatus"
+        - $ref: "#/components/parameters/OTAChannelQuery"
+        - $ref: "#/components/parameters/OTAVersionQuery"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Firmware releases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OTAAdminReleasePageEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          description: Invalid pagination or filter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Create a firmware release draft
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OTAAdminReleaseMutation"
+      responses:
+        "201":
+          description: Firmware release draft created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OTAAdminReleaseEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Release already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid release, target, or signature
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ota/releases/{release_id}:
+    get:
+      summary: Read one firmware release, its version history, and rollback target
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/OTAReleaseId"
+      responses:
+        "200":
+          description: Firmware release detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OTAAdminReleaseDetailEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Firmware release not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Update one un-published firmware release draft
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/OTAReleaseId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OTAAdminReleaseMutation"
+      responses:
+        "200":
+          description: Firmware release draft updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OTAAdminReleaseEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Firmware release not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Release record version conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid release, target, or signature
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ota/releases/{release_id}/publish:
+    post:
+      summary: Publish one firmware release
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/OTAReleaseId"
+        - $ref: "#/components/parameters/OTAExpectedVersion"
+      responses:
+        "200":
+          description: Firmware release published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OTAAdminReleaseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Firmware release not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Release state or record version conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Release cannot be published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ota/releases/{release_id}/pause:
+    post:
+      summary: Pause one published firmware release
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/OTAReleaseId"
+        - $ref: "#/components/parameters/OTAExpectedVersion"
+      responses:
+        "200":
+          description: Firmware release paused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OTAAdminReleaseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Firmware release not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Release state or record version conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Release cannot be paused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ota/releases/{release_id}/withdraw:
+    post:
+      summary: Withdraw one published firmware release
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/OTAReleaseId"
+        - $ref: "#/components/parameters/OTAExpectedVersion"
+      responses:
+        "200":
+          description: Firmware release withdrawn
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OTAAdminReleaseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Firmware release not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Release state or record version conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Release cannot be withdrawn
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ota/releases/{release_id}/rollback:
+    post:
+      summary: Roll back one published firmware release
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/OTAReleaseId"
+        - $ref: "#/components/parameters/OTAExpectedVersion"
+      responses:
+        "200":
+          description: Firmware release rolled back
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OTAAdminReleaseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Firmware release not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Release state or record version conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Rollback target unavailable or disallowed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ota/releases/{release_id}/deployments:
+    get:
+      summary: List deployments for one firmware release
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/OTAReleaseId"
+        - $ref: "#/components/parameters/OTADeploymentStatus"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Firmware release deployments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OTAAdminDeploymentPageEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Firmware release not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid pagination or status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ota/deployments/{deployment_id}/retry:
+    post:
+      summary: Retry one failed firmware deployment
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/OTADeploymentId"
+      responses:
+        "202":
+          description: Deployment retry accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OTAAdminDeploymentEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Deployment not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Deployment state conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ota/statistics:
+    get:
+      summary: Read firmware rollout statistics
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Firmware rollout statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OTAAdminStatisticsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -8737,6 +9124,72 @@ components:
         type: string
         minLength: 1
         maxLength: 1024
+    OTAReleaseId:
+      name: release_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    OTADeploymentId:
+      name: deployment_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    OTAExpectedVersion:
+      name: expected_version
+      in: query
+      required: false
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    OTAReleaseStatus:
+      name: status
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/OTAReleaseStatus"
+    OTAChannelQuery:
+      name: channel
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/OTAChannel"
+    OTAVersionQuery:
+      name: version
+      in: query
+      required: false
+      schema:
+        type: string
+        maxLength: 64
+    OTADeploymentStatus:
+      name: status
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/OTADeploymentStatus"
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: page_size
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
     InvitationId:
       name: invitation_id
       in: path
@@ -20751,6 +21204,525 @@ components:
         - stable
         - beta
         - canary
+    OTAReleaseStatus:
+      type: string
+      enum:
+        - draft
+        - published
+        - paused
+        - withdrawn
+        - rolled_back
+    OTADeploymentStatus:
+      type: string
+      enum:
+        - queued
+        - offered
+        - downloading
+        - validating
+        - installing
+        - pending_verify
+        - succeeded
+        - failed
+        - cancelled
+        - rolled_back
+    OTATargetScope:
+      type: string
+      enum:
+        - all
+        - group
+        - device
+        - canary
+    OTAAdminReleaseTarget:
+      type: object
+      additionalProperties: false
+      required:
+        - target_type
+        - target_id
+        - canary_percent
+      properties:
+        target_type:
+          $ref: "#/components/schemas/OTATargetScope"
+        target_id:
+          type: string
+          maxLength: 128
+        canary_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+    OTAAdminReleaseMutation:
+      type: object
+      additionalProperties: false
+      required:
+        - firmware_version
+        - hardware_revision
+        - channel
+        - artifact_key
+        - artifact_url
+        - sha256
+        - size_bytes
+        - signature_key_id
+        - signature_algorithm
+        - signature
+        - rollback_allowed
+        - mandatory
+        - min_source_version
+        - release_notes
+        - target_type
+        - target_id
+        - canary_percent
+      properties:
+        firmware_version:
+          type: string
+          minLength: 1
+          maxLength: 64
+        hardware_revision:
+          type: string
+          minLength: 1
+          maxLength: 128
+        channel:
+          $ref: "#/components/schemas/OTAChannel"
+        artifact_key:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        artifact_url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        sha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+        signature_key_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        signature_algorithm:
+          type: string
+          minLength: 1
+          maxLength: 64
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        rollback_allowed:
+          type: boolean
+        mandatory:
+          type: boolean
+        min_source_version:
+          type: string
+          maxLength: 64
+        release_notes:
+          type: string
+          maxLength: 4096
+        target_type:
+          $ref: "#/components/schemas/OTATargetScope"
+        target_id:
+          type: string
+          maxLength: 128
+        canary_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        expected_version:
+          type: integer
+          format: int64
+          minimum: 1
+    OTAAdminRelease:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - release_id
+        - id
+        - firmware_version
+        - channel
+        - hardware_revision
+        - min_source_version
+        - artifact_url
+        - artifact_key
+        - sha256
+        - size_bytes
+        - signature_key_id
+        - signature_algorithm
+        - signature
+        - signature_status
+        - rollback_allowed
+        - mandatory
+        - release_notes
+        - status
+        - target_type
+        - target_id
+        - canary_percent
+        - record_version
+        - created_at
+        - updated_at
+      properties:
+        schema_version:
+          type: string
+          const: "1.0.0"
+        release_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        firmware_version:
+          type: string
+          minLength: 1
+          maxLength: 64
+        channel:
+          $ref: "#/components/schemas/OTAChannel"
+        hardware_revision:
+          type: string
+          minLength: 1
+          maxLength: 128
+        min_source_version:
+          type: string
+          maxLength: 64
+        artifact_url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        artifact_key:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        sha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+        signature_key_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        signature_algorithm:
+          type: string
+          minLength: 1
+          maxLength: 64
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        signature_status:
+          type: string
+          minLength: 1
+          maxLength: 64
+        signature_verified_at:
+          type: string
+          format: date-time
+        rollback_allowed:
+          type: boolean
+        mandatory:
+          type: boolean
+        release_notes:
+          type: string
+          maxLength: 4096
+        status:
+          $ref: "#/components/schemas/OTAReleaseStatus"
+        target_type:
+          $ref: "#/components/schemas/OTATargetScope"
+        target_id:
+          type: string
+          maxLength: 128
+        canary_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        record_version:
+          type: integer
+          format: int64
+          minimum: 1
+        rollback_release_id:
+          type: string
+          maxLength: 128
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        published_at:
+          type: string
+          format: date-time
+    OTAAdminReleaseEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OTAAdminRelease"
+    OTAAdminReleasePage:
+      type: object
+      additionalProperties: false
+      required:
+        - releases
+        - total
+        - page
+        - page_size
+      properties:
+        releases:
+          type: array
+          items:
+            $ref: "#/components/schemas/OTAAdminRelease"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        page:
+          type: integer
+          minimum: 1
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
+    OTAAdminReleasePageEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OTAAdminReleasePage"
+    OTAAdminReleaseRollback:
+      type: object
+      additionalProperties: false
+      required:
+        - allowed
+        - target_version
+      properties:
+        allowed:
+          type: boolean
+        target_version:
+          type: string
+          maxLength: 128
+    OTAAdminReleaseDetail:
+      type: object
+      additionalProperties: false
+      required:
+        - release
+        - versions
+        - rollback
+      properties:
+        release:
+          $ref: "#/components/schemas/OTAAdminRelease"
+        versions:
+          type: array
+          items:
+            $ref: "#/components/schemas/OTAAdminRelease"
+        rollback:
+          $ref: "#/components/schemas/OTAAdminReleaseRollback"
+    OTAAdminReleaseDetailEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OTAAdminReleaseDetail"
+    OTAAdminDeployment:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - release_id
+        - device_id
+        - status
+        - requested_by
+        - request_id
+        - progress_percent
+        - bytes_received
+        - bytes_total
+        - retry_count
+        - record_version
+        - last_event_sequence
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        release_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        rollback_release_id:
+          type: string
+          maxLength: 128
+        rollback_of_deployment_id:
+          type: string
+          maxLength: 128
+        device_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        group_id:
+          type: string
+          maxLength: 128
+        status:
+          $ref: "#/components/schemas/OTADeploymentStatus"
+        requested_by:
+          type: string
+          maxLength: 128
+        request_id:
+          type: string
+          maxLength: 128
+        progress_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        bytes_received:
+          type: integer
+          format: int64
+          minimum: 0
+        bytes_total:
+          type: integer
+          format: int64
+          minimum: 0
+        failure_code:
+          type: string
+          maxLength: 128
+        failure_message:
+          type: string
+          maxLength: 512
+        retry_count:
+          type: integer
+          minimum: 0
+        record_version:
+          type: integer
+          format: int64
+          minimum: 1
+        last_event_sequence:
+          type: integer
+          format: int64
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        offered_at:
+          type: string
+          format: date-time
+        download_started_at:
+          type: string
+          format: date-time
+        validated_at:
+          type: string
+          format: date-time
+        install_started_at:
+          type: string
+          format: date-time
+        verification_started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        failed_at:
+          type: string
+          format: date-time
+        rolled_back_at:
+          type: string
+          format: date-time
+    OTAAdminDeploymentPage:
+      type: object
+      additionalProperties: false
+      required:
+        - deployments
+        - total
+        - page
+        - page_size
+      properties:
+        deployments:
+          type: array
+          items:
+            $ref: "#/components/schemas/OTAAdminDeployment"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        page:
+          type: integer
+          minimum: 1
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
+    OTAAdminDeploymentPageEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OTAAdminDeploymentPage"
+    OTAAdminDeploymentEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OTAAdminDeployment"
+    OTAAdminStatistics:
+      type: object
+      additionalProperties: false
+      required:
+        - published_release_count
+        - canary_release_count
+        - active_deployment_count
+        - succeeded_deployment_count
+        - failed_deployment_count
+        - rollback_count
+        - failure_rate
+        - rollback_rate
+      properties:
+        published_release_count:
+          type: integer
+          format: int64
+          minimum: 0
+        canary_release_count:
+          type: integer
+          format: int64
+          minimum: 0
+        active_deployment_count:
+          type: integer
+          format: int64
+          minimum: 0
+        succeeded_deployment_count:
+          type: integer
+          format: int64
+          minimum: 0
+        failed_deployment_count:
+          type: integer
+          format: int64
+          minimum: 0
+        rollback_count:
+          type: integer
+          format: int64
+          minimum: 0
+        failure_rate:
+          type: number
+          minimum: 0
+          maximum: 1
+        rollback_rate:
+          type: number
+          minimum: 0
+          maximum: 1
+    OTAAdminStatisticsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OTAAdminStatistics"
     OTAEventType:
       type: string
       enum:

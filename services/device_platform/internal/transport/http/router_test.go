@@ -1298,6 +1298,43 @@ func TestAdminReleaseContractDocumentsPublishingAndStorage(t *testing.T) {
 	}
 }
 
+func TestAdminOTAContractDocumentsReleaseLifecycleAndRollout(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/admin/ota/releases:",
+		"/api/v1/admin/ota/releases/{release_id}:",
+		"/api/v1/admin/ota/releases/{release_id}/publish:",
+		"/api/v1/admin/ota/releases/{release_id}/pause:",
+		"/api/v1/admin/ota/releases/{release_id}/withdraw:",
+		"/api/v1/admin/ota/releases/{release_id}/rollback:",
+		"/api/v1/admin/ota/releases/{release_id}/deployments:",
+		"/api/v1/admin/ota/deployments/{deployment_id}/retry:",
+		"/api/v1/admin/ota/statistics:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected admin OTA path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"OTAAdminReleaseEnvelope:",
+		"OTAAdminReleasePageEnvelope:",
+		"OTAAdminReleaseDetailEnvelope:",
+		"OTAAdminDeploymentEnvelope:",
+		"OTAAdminDeploymentPageEnvelope:",
+		"OTAAdminStatisticsEnvelope:",
+		"OTAAdminReleaseMutation:",
+		"OTAReleaseStatus:",
+		"OTADeploymentStatus:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected admin OTA schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestAppUpdateContractDocumentsClientUpdateEndpoint(t *testing.T) {
 	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
 	if err != nil {

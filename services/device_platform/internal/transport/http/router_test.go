@@ -1424,6 +1424,41 @@ func TestDeviceOperationsContractDocumentsDiagnosticsAndProvisioning(t *testing.
 	}
 }
 
+func TestUITextContractDocumentsReviewLifecycle(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/admin/ui-text/packages:",
+		"/api/v1/admin/ui-text/packages/drafts:",
+		"/api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}:",
+		"/api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}/submit:",
+		"/api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}/approve:",
+		"/api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}/reject:",
+		"/api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}/publish:",
+		"/api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}/withdraw:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected ui-text path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"UITextPackageDetailEnvelope:",
+		"UITextVersionPageEnvelope:",
+		"UITextPackageEnvelope:",
+		"UITextDraftRequest:",
+		"UITextReviewRequest:",
+		"UITextPublishRequest:",
+		"UITextEntry:",
+		"UITextPackage:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected ui-text schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestAppUpdateContractDocumentsClientUpdateEndpoint(t *testing.T) {
 	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
 	if err != nil {

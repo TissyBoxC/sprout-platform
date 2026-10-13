@@ -9343,6 +9343,395 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ui-text/packages:
+    get:
+      summary: List UI text package versions for operations review
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/UITextPackageIdQuery"
+        - $ref: "#/components/parameters/UITextLanguageQuery"
+        - $ref: "#/components/parameters/UITextPlatformQuery"
+        - $ref: "#/components/parameters/UITextStatusQuery"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Paged UI text package versions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UITextVersionPageEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          description: Invalid paging or filter value
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}:
+    get:
+      summary: Read one UI text package version and its entries
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/UITextPackageId"
+        - $ref: "#/components/parameters/UITextLanguage"
+        - $ref: "#/components/parameters/UITextPlatform"
+        - $ref: "#/components/parameters/UITextPackageVersion"
+      responses:
+        "200":
+          description: UI text package detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UITextPackageDetailEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: UI text package version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid package version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Replace the editable contents of one UI text draft
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/UITextPackageId"
+        - $ref: "#/components/parameters/UITextLanguage"
+        - $ref: "#/components/parameters/UITextPlatform"
+        - $ref: "#/components/parameters/UITextPackageVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UITextDraftRequest"
+      responses:
+        "200":
+          description: UI text draft updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UITextPackageDetailEnvelope"
+        "400":
+          description: Malformed request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: UI text package version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Package is no longer an editable draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid UI text package or entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ui-text/packages/drafts:
+    post:
+      summary: Create a new UI text draft version
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UITextDraftRequest"
+      responses:
+        "201":
+          description: UI text draft created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UITextPackageDetailEnvelope"
+        "400":
+          description: Malformed request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Package version already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid UI text package or entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}/submit:
+    post:
+      summary: Submit a UI text draft for review
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/UITextPackageId"
+        - $ref: "#/components/parameters/UITextLanguage"
+        - $ref: "#/components/parameters/UITextPlatform"
+        - $ref: "#/components/parameters/UITextPackageVersion"
+      responses:
+        "200":
+          description: UI text package submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UITextPackageEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: UI text package version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Invalid lifecycle transition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid package version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}/approve:
+    post:
+      summary: Approve a UI text package under review
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/UITextPackageId"
+        - $ref: "#/components/parameters/UITextLanguage"
+        - $ref: "#/components/parameters/UITextPlatform"
+        - $ref: "#/components/parameters/UITextPackageVersion"
+      responses:
+        "200":
+          description: UI text package approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UITextPackageEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: UI text package version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Invalid lifecycle transition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid package version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}/reject:
+    post:
+      summary: Reject a UI text package under review
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/UITextPackageId"
+        - $ref: "#/components/parameters/UITextLanguage"
+        - $ref: "#/components/parameters/UITextPlatform"
+        - $ref: "#/components/parameters/UITextPackageVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UITextReviewRequest"
+      responses:
+        "200":
+          description: UI text package rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UITextPackageEnvelope"
+        "400":
+          description: Malformed request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: UI text package version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Invalid lifecycle transition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid package version or missing reason
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}/publish:
+    post:
+      summary: Publish an approved UI text package version
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/UITextPackageId"
+        - $ref: "#/components/parameters/UITextLanguage"
+        - $ref: "#/components/parameters/UITextPlatform"
+        - $ref: "#/components/parameters/UITextPackageVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UITextPublishRequest"
+      responses:
+        "200":
+          description: UI text package published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UITextPackageEnvelope"
+        "400":
+          description: Malformed request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: UI text package version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Review approval required or invalid lifecycle transition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid package version or signature
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/ui-text/packages/{package_id}/{language}/{platform}/{package_version}/withdraw:
+    post:
+      summary: Withdraw a published UI text package version
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/UITextPackageId"
+        - $ref: "#/components/parameters/UITextLanguage"
+        - $ref: "#/components/parameters/UITextPlatform"
+        - $ref: "#/components/parameters/UITextPackageVersion"
+      responses:
+        "200":
+          description: UI text package withdrawn
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UITextPackageEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: UI text package version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Invalid lifecycle transition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid package version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -9632,6 +10021,7 @@ components:
       schema:
         type: string
         pattern: "^[a-z0-9][a-z0-9_-]*$"
+        maxLength: 128
     UITextLanguage:
       name: language
       in: path
@@ -9639,12 +10029,48 @@ components:
       schema:
         type: string
         pattern: "^[a-z]{2,3}(-[A-Z]{2})?$"
+        maxLength: 16
     UITextPlatform:
       name: platform
       in: path
       required: true
       schema:
         $ref: "#/components/schemas/UITextPlatform"
+    UITextPackageVersion:
+      name: package_version
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    UITextPackageIdQuery:
+      name: package_id
+      in: query
+      required: false
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9_-]*$"
+        maxLength: 128
+    UITextLanguageQuery:
+      name: language
+      in: query
+      required: false
+      schema:
+        type: string
+        pattern: "^[a-z]{2,3}(-[A-Z]{2})?$"
+        maxLength: 16
+    UITextPlatformQuery:
+      name: platform
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/UITextPlatform"
+    UITextStatusQuery:
+      name: status
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/UITextStatus"
     ContentPackageId:
       name: package_id
       in: path
@@ -20665,7 +21091,7 @@ components:
       properties:
         ui_text_key:
           type: string
-          minLength: 1
+          pattern: "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
           maxLength: 128
         value:
           type: string
@@ -20678,7 +21104,7 @@ components:
           maxItems: 16
           items:
             type: string
-            minLength: 1
+            pattern: "^[a-z][a-z0-9_]*$"
             maxLength: 64
     UITextPackage:
       type: object
@@ -20696,15 +21122,20 @@ components:
       properties:
         package_id:
           type: string
+          pattern: "^[a-z0-9][a-z0-9_-]*$"
+          maxLength: 128
         package_version:
           type: integer
           minimum: 1
         language:
           type: string
+          pattern: "^[a-z]{2,3}(-[A-Z]{2})?$"
+          maxLength: 16
         platform:
           $ref: "#/components/schemas/UITextPlatform"
         min_client_version:
           type: string
+          maxLength: 32
         status:
           $ref: "#/components/schemas/UITextStatus"
         signature_key_id:
@@ -23486,3 +23917,119 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/AuditProvisioningSnapshot"
+    UITextDraftRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - package_id
+        - language
+        - platform
+        - min_client_version
+        - entries
+      properties:
+        package_id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]*$"
+          maxLength: 128
+        language:
+          type: string
+          pattern: "^[a-z]{2,3}(-[A-Z]{2})?$"
+          maxLength: 16
+        platform:
+          $ref: "#/components/schemas/UITextPlatform"
+        min_client_version:
+          type: string
+          maxLength: 32
+        entries:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          items:
+            $ref: "#/components/schemas/UITextEntry"
+    UITextReviewRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    UITextPublishRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - signature_key_id
+        - signature
+      properties:
+        signature_key_id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]*$"
+          maxLength: 128
+        signature:
+          type: string
+          pattern: "^[A-Za-z0-9+/]+={0,2}$"
+          maxLength: 8192
+    UITextPackageVersionSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - package
+        - entry_count
+        - is_published
+        - is_newest
+        - published_for
+      properties:
+        package:
+          $ref: "#/components/schemas/UITextPackage"
+        entry_count:
+          type: integer
+          minimum: 0
+        is_published:
+          type: boolean
+        is_newest:
+          type: boolean
+        published_for:
+          type: boolean
+    UITextPackageEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - package
+              properties:
+                package:
+                  $ref: "#/components/schemas/UITextPackage"
+    UITextVersionPageEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - versions
+                - page
+                - page_size
+                - total
+              properties:
+                versions:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/UITextPackageVersionSummary"
+                page:
+                  type: integer
+                  minimum: 1
+                page_size:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                total:
+                  type: integer
+                  minimum: 0

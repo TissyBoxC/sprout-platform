@@ -3819,6 +3819,293 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/device-mesh/groups:
+    get:
+      summary: List the authenticated family's device groups
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Device groups
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceMeshGroupsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Create a device group
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceMeshGroupRequest"
+      responses:
+        "201":
+          description: Device group created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceMeshGroupEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/device-mesh/groups/{group_id}:
+    delete:
+      summary: Delete one device group
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceMeshGroupId"
+      responses:
+        "200":
+          description: Device group deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceMeshDeletedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Device group not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/device-mesh/groups/{group_id}/members:
+    get:
+      summary: List one device group's members
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceMeshGroupId"
+      responses:
+        "200":
+          description: Device group members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceMeshMembersEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Device group not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Add a device to one group
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceMeshGroupId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceMeshMemberRequest"
+      responses:
+        "201":
+          description: Device group member added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceMeshMemberEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Device group not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/device-mesh/groups/{group_id}/members/{device_id}:
+    delete:
+      summary: Remove a device from one group
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceMeshGroupId"
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Device group member removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceMeshDeletedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Device group or member not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/device-mesh/messages:
+    get:
+      summary: List recent routed messages in the authenticated family
+      security:
+        - userToken: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Routed message history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceMeshMessagesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Route one message across the authenticated family
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceMeshMessageRequest"
+      responses:
+        "201":
+          description: Routed message stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceMeshMessageEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Message target group not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/device-mesh/content:
+    get:
+      summary: List the authenticated family's content sync states
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Content sync states
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceMeshContentStatesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Apply one content sync report
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceMeshSyncRequest"
+      responses:
+        "200":
+          description: Content sync state updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceMeshContentStateEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/device-mesh/stats:
+    get:
+      summary: Read the fleet-wide multi-device summary
+      security:
+        - userToken: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        "200":
+          description: Device mesh statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceMeshAdminStatsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -3883,6 +4170,14 @@ components:
         pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
     CommandId:
       name: command_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    DeviceMeshGroupId:
+      name: group_id
       in: path
       required: true
       schema:
@@ -10134,3 +10429,349 @@ components:
                   type: array
                   items:
                     $ref: "#/components/schemas/ContentOfflinePolicyAcknowledgement"
+    DeviceMeshGroupScope:
+      type: string
+      enum:
+        - group
+        - family
+    DeviceMeshMessageScope:
+      type: string
+      enum:
+        - device
+        - group
+        - family
+    DeviceMeshConflictStrategy:
+      type: string
+      enum:
+        - local_wins
+        - remote_wins
+        - defer
+    DeviceMeshSyncState:
+      type: string
+      enum:
+        - pending
+        - applied
+        - conflict
+        - failed
+    DeviceMeshGroupRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - route_scope
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        route_scope:
+          $ref: "#/components/schemas/DeviceMeshGroupScope"
+    DeviceMeshGroup:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - route_scope
+        - member_count
+        - created_at
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        route_scope:
+          $ref: "#/components/schemas/DeviceMeshGroupScope"
+        member_count:
+          type: integer
+          minimum: 0
+          maximum: 16
+        created_at:
+          type: string
+          format: date-time
+    DeviceMeshGroupEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/DeviceMeshGroup"
+    DeviceMeshGroupsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - groups
+              properties:
+                groups:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/DeviceMeshGroup"
+    DeviceMeshMemberRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+      properties:
+        device_id:
+          $ref: "#/components/schemas/DeviceIdParameter"
+    DeviceMeshMember:
+      type: object
+      additionalProperties: false
+      required:
+        - group_id
+        - device_id
+        - added_at
+      properties:
+        group_id:
+          type: string
+        device_id:
+          $ref: "#/components/schemas/DeviceIdParameter"
+        added_at:
+          type: string
+          format: date-time
+    DeviceMeshMemberEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/DeviceMeshMember"
+    DeviceMeshMembersEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - members
+              properties:
+                members:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/DeviceMeshMember"
+    DeviceMeshMessageRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - source_device
+        - scope
+        - target
+        - body
+      properties:
+        source_device:
+          $ref: "#/components/schemas/DeviceIdParameter"
+        scope:
+          $ref: "#/components/schemas/DeviceMeshMessageScope"
+        target:
+          type: string
+          maxLength: 128
+        body:
+          type: string
+          minLength: 1
+          maxLength: 2048
+    DeviceMeshMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - source_device
+        - scope
+        - target
+        - body
+        - created_at
+      properties:
+        id:
+          type: string
+        source_device:
+          $ref: "#/components/schemas/DeviceIdParameter"
+        scope:
+          $ref: "#/components/schemas/DeviceMeshMessageScope"
+        target:
+          type: string
+          maxLength: 128
+        body:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        created_at:
+          type: string
+          format: date-time
+    DeviceMeshMessageEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/DeviceMeshMessage"
+    DeviceMeshMessagesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - messages
+              properties:
+                messages:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/DeviceMeshMessage"
+    DeviceMeshSyncRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - content_key
+        - local_version
+        - remote_version
+        - strategy
+      properties:
+        content_key:
+          type: string
+          minLength: 1
+          maxLength: 128
+        local_version:
+          type: integer
+          format: int64
+          minimum: 0
+        remote_version:
+          type: integer
+          format: int64
+          minimum: 0
+        strategy:
+          $ref: "#/components/schemas/DeviceMeshConflictStrategy"
+    DeviceMeshContentState:
+      type: object
+      additionalProperties: false
+      required:
+        - content_key
+        - version
+        - conflict_count
+        - sync_state
+        - updated_at
+      properties:
+        content_key:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          format: int64
+          minimum: 0
+        conflict_count:
+          type: integer
+          minimum: 0
+        sync_state:
+          $ref: "#/components/schemas/DeviceMeshSyncState"
+        updated_at:
+          type: string
+          format: date-time
+    DeviceMeshContentStateEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/DeviceMeshContentState"
+    DeviceMeshContentStatesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - states
+              properties:
+                states:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/DeviceMeshContentState"
+    DeviceMeshCount:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - count
+      properties:
+        label:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+    DeviceMeshAdminStats:
+      type: object
+      additionalProperties: false
+      required:
+        - window_days
+        - group_count
+        - device_count
+        - message_count
+        - synced_content_count
+        - conflict_count
+        - scope_buckets
+        - state_buckets
+        - generated_at
+      properties:
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        group_count:
+          type: integer
+          minimum: 0
+        device_count:
+          type: integer
+          minimum: 0
+        message_count:
+          type: integer
+          minimum: 0
+        synced_content_count:
+          type: integer
+          minimum: 0
+        conflict_count:
+          type: integer
+          minimum: 0
+        scope_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceMeshCount"
+        state_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceMeshCount"
+        generated_at:
+          type: string
+          format: date-time
+    DeviceMeshAdminStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/DeviceMeshAdminStats"
+    DeviceMeshDeletedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - deleted
+              properties:
+                deleted:
+                  type: boolean
+                  const: true

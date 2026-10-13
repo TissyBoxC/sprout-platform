@@ -658,6 +658,38 @@ func TestContentContractDocumentsCatalogFavoritesHistoryAndPolicies(t *testing.T
 	}
 }
 
+func TestDeviceMeshContractDocumentsGroupsMessagesAndContentSync(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/device-mesh/groups:",
+		"/api/v1/device-mesh/groups/{group_id}:",
+		"/api/v1/device-mesh/groups/{group_id}/members:",
+		"/api/v1/device-mesh/groups/{group_id}/members/{device_id}:",
+		"/api/v1/device-mesh/messages:",
+		"/api/v1/device-mesh/content:",
+		"/api/v1/admin/device-mesh/stats:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected device-mesh path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"DeviceMeshGroupRequest:",
+		"DeviceMeshMemberRequest:",
+		"DeviceMeshMessageRequest:",
+		"DeviceMeshSyncRequest:",
+		"DeviceMeshContentState:",
+		"DeviceMeshAdminStats:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected device-mesh schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

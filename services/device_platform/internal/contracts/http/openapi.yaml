@@ -4417,6 +4417,219 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/companionship/growth-records:
+    get:
+      summary: List the authenticated family's growth records
+      security:
+        - userToken: []
+      parameters:
+        - name: child_id
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+        - name: category
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/CompanionshipGrowthCategory"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+        - name: before
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Growth records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionshipGrowthRecordsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Create a growth record
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanionshipGrowthRecordRequest"
+      responses:
+        "201":
+          description: Growth record created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionshipGrowthRecordEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/companionship/growth-records/{record_id}:
+    delete:
+      summary: Delete one growth record
+      security:
+        - userToken: []
+      parameters:
+        - name: record_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Growth record deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionshipGrowthRecordDeletedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Growth record not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/companionship/habit-reminders:
+    get:
+      summary: List the authenticated family's habit reminders
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Habit reminders
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionshipHabitRemindersEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Create a habit reminder
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanionshipHabitReminderRequest"
+      responses:
+        "201":
+          description: Habit reminder created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionshipHabitReminderEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/companionship/habit-reminders/{reminder_id}:
+    put:
+      summary: Update one habit reminder
+      security:
+        - userToken: []
+      parameters:
+        - name: reminder_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanionshipHabitReminderRequest"
+      responses:
+        "200":
+          description: Habit reminder updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionshipHabitReminderEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Habit reminder not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    delete:
+      summary: Delete one habit reminder
+      security:
+        - userToken: []
+      parameters:
+        - name: reminder_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Habit reminder deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionshipHabitReminderDeletedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Habit reminder not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -11488,3 +11701,217 @@ components:
                 deleted:
                   type: boolean
                   const: true
+    CompanionshipGrowthCategory:
+      type: string
+      enum:
+        - milestone
+        - encouragement
+        - habit
+        - emotion
+    CompanionshipGrowthRecordRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - child_id
+        - category
+        - title
+        - note
+      properties:
+        child_id:
+          type: string
+          maxLength: 128
+        category:
+          $ref: "#/components/schemas/CompanionshipGrowthCategory"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 80
+        note:
+          type: string
+          maxLength: 500
+    CompanionshipGrowthRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - child_id
+        - category
+        - title
+        - note
+        - recorded_at
+        - created_at
+      properties:
+        id:
+          type: string
+        child_id:
+          type: string
+        category:
+          $ref: "#/components/schemas/CompanionshipGrowthCategory"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 80
+        note:
+          type: string
+          maxLength: 500
+        recorded_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+    CompanionshipGrowthRecordEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - growth_record
+              properties:
+                growth_record:
+                  $ref: "#/components/schemas/CompanionshipGrowthRecord"
+    CompanionshipGrowthRecordsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - growth_records
+              properties:
+                growth_records:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/CompanionshipGrowthRecord"
+    CompanionshipGrowthRecordDeletedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - record_id
+              properties:
+                record_id:
+                  type: string
+    CompanionshipWeekday:
+      type: integer
+      minimum: 1
+      maximum: 7
+    CompanionshipReminderTime:
+      type: string
+      pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+    CompanionshipHabitReminderRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        child_id:
+          type: string
+          maxLength: 128
+        label:
+          type: string
+          minLength: 1
+          maxLength: 40
+        prompt:
+          type: string
+          maxLength: 200
+        reminder_time:
+          $ref: "#/components/schemas/CompanionshipReminderTime"
+        weekdays:
+          type: array
+          maxItems: 7
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/CompanionshipWeekday"
+        enabled:
+          type: boolean
+          default: true
+    CompanionshipHabitReminder:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - child_id
+        - label
+        - prompt
+        - reminder_time
+        - weekdays
+        - enabled
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+        child_id:
+          type: string
+        label:
+          type: string
+          minLength: 1
+          maxLength: 40
+        prompt:
+          type: string
+          maxLength: 200
+        reminder_time:
+          $ref: "#/components/schemas/CompanionshipReminderTime"
+        weekdays:
+          type: array
+          maxItems: 7
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/CompanionshipWeekday"
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CompanionshipHabitReminderEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - habit_reminder
+              properties:
+                habit_reminder:
+                  $ref: "#/components/schemas/CompanionshipHabitReminder"
+    CompanionshipHabitRemindersEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - habit_reminders
+              properties:
+                habit_reminders:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/CompanionshipHabitReminder"
+    CompanionshipHabitReminderDeletedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - reminder_id
+              properties:
+                reminder_id:
+                  type: string

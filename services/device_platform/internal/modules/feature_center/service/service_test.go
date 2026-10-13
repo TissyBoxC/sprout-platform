@@ -573,6 +573,43 @@ func TestValidateHealthProbeCoverageRejectsActiveFeatureWithoutProbe(t *testing.
 	}
 }
 
+type placeholderHealthProbe struct{}
+
+func (placeholderHealthProbe) Check(
+	context.Context,
+	string,
+) (domain.HealthStatus, error) {
+	return domain.HealthUnknown, nil
+}
+
+func (placeholderHealthProbe) HealthProbeReady() bool {
+	return false
+}
+
+func TestValidateHealthProbeCoverageRejectsPlaceholderProbe(t *testing.T) {
+	definitions := []Definition{
+		featureDef(
+			"voice_gateway",
+			"语音网关",
+			"测试功能",
+			"voice",
+			"语音平台",
+			false,
+			nil,
+			nil,
+		),
+	}
+	err := ValidateHealthProbeCoverage(
+		definitions,
+		map[string]HealthProbe{
+			"voice_gateway": placeholderHealthProbe{},
+		},
+	)
+	if err == nil {
+		t.Fatal("placeholder probe passed active feature coverage")
+	}
+}
+
 func TestDefaultRegistryIncludesRuntimeWiredFeatures(t *testing.T) {
 	active := make(map[string]bool)
 	for _, definition := range DefaultRegistry() {

@@ -581,6 +581,8 @@ func Run() error {
 				return featureCenterDomain.HealthHealthy, nil
 			},
 		),
+		"recommendation": placeholderHealthProbe{},
+		"notification":   placeholderHealthProbe{},
 	}
 	contentLibraryService, err := contentService.New(contentService.Options{
 		Repository:  contentRepository.NewPostgresRepository(databaseStore.Pool()),

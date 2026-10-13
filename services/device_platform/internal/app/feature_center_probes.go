@@ -16,6 +16,23 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// placeholderHealthProbe is used only during assembly for probes whose real
+// implementation is created later in application wiring. It deliberately
+// declares itself unready so ValidateHealthProbeCoverage rejects any that are
+// still present when the feature center is finally constructed.
+type placeholderHealthProbe struct{}
+
+func (placeholderHealthProbe) Check(
+	context.Context,
+	string,
+) (featureCenterDomain.HealthStatus, error) {
+	return featureCenterDomain.HealthUnknown, nil
+}
+
+func (placeholderHealthProbe) HealthProbeReady() bool {
+	return false
+}
+
 // nonzeroRowProbe treats an unprotected table read as the health signal for a
 // feature. It returns degraded rather than unavailable when the table is empty,
 // because "no rows yet" is a valid early-lifecycle state and never a failure.

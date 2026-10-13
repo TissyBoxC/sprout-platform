@@ -9,8 +9,29 @@ import (
 	"time"
 
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
+	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
 )
+
+func TestPlaceholderHealthProbeFailsCoverageValidation(t *testing.T) {
+	definitions := []featureCenterService.Definition{
+		{
+			Feature: featureCenterDomain.Feature{
+				ID:     "recommendation",
+				Status: featureCenterDomain.FeatureStatusActive,
+			},
+		},
+	}
+	err := featureCenterService.ValidateHealthProbeCoverage(
+		definitions,
+		map[string]featureCenterService.HealthProbe{
+			"recommendation": placeholderHealthProbe{},
+		},
+	)
+	if err == nil {
+		t.Fatal("placeholder probe passed coverage validation")
+	}
+}
 
 func TestVoiceGatewayReadinessURL(t *testing.T) {
 	tests := []struct {

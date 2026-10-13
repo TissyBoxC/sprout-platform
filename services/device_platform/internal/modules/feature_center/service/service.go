@@ -21,6 +21,14 @@ type HealthProbe interface {
 // HealthProbeFunc adapts a function to HealthProbe.
 type HealthProbeFunc func(ctx context.Context, featureID string) (domain.HealthStatus, error)
 
+// HealthProbeChecker is implemented by probes that can declare whether they
+// have a real runtime signal. A probe that explicitly reports false fails
+// coverage validation so a temporary placeholder cannot satisfy production
+// assembly.
+type HealthProbeChecker interface {
+	HealthProbeReady() bool
+}
+
 // Check implements HealthProbe.
 func (probe HealthProbeFunc) Check(
 	ctx context.Context,
@@ -62,7 +70,12 @@ func ValidateHealthProbeCoverage(
 		if definition.Feature.Status != domain.FeatureStatusActive {
 			continue
 		}
-		if probes[definition.Feature.ID] == nil {
+		probe := probes[definition.Feature.ID]
+		if probe == nil {
+			missing = append(missing, definition.Feature.ID)
+			continue
+		}
+		if checker, ok := probe.(HealthProbeChecker); ok && !checker.HealthProbeReady() {
 			missing = append(missing, definition.Feature.ID)
 		}
 	}

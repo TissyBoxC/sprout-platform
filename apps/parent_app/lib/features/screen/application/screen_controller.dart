@@ -105,6 +105,10 @@ class ScreenController extends AsyncNotifier<ScreenState> {
     );
   }
 
+  Future<VideoPlaybackPlan> fetchPlayback(String deviceId) {
+    return _api.fetchPlayback(deviceId);
+  }
+
   static String messageFor(Object error) {
     if (error is AppException) {
       return error.message;

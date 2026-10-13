@@ -50,6 +50,7 @@ class ScreenPage extends ConsumerWidget {
             onSavePolicy: (policy) => _savePolicy(context, ref, policy),
             onAddEntry: () => _addEntry(context, ref, value.catalog),
             onDeleteEntry: (id) => _deleteEntry(context, ref, id),
+            onFetchPlayback: () => _fetchPlayback(context, ref),
             onResolvePlayback: () => _resolvePlayback(context, ref, value),
           ),
         ),
@@ -147,6 +148,31 @@ class ScreenPage extends ConsumerWidget {
     }
   }
 
+  Future<void> _fetchPlayback(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final deviceId = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => const _DeviceDialog(),
+    );
+    if (deviceId == null || deviceId.isEmpty) {
+      return;
+    }
+    try {
+      final plan = await ref
+          .read(screenControllerProvider.notifier)
+          .fetchPlayback(deviceId);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('当前参数 ${plan.bitrateKbps} kbps · ${plan.fps} fps'),
+        ),
+      );
+    } catch (error) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(ScreenController.messageFor(error))),
+      );
+    }
+  }
+
   void _leave(BuildContext context) {
     if (context.canPop()) {
       context.pop();
@@ -162,6 +188,7 @@ class _ScreenBody extends StatefulWidget {
     required this.onSavePolicy,
     required this.onAddEntry,
     required this.onDeleteEntry,
+    required this.onFetchPlayback,
     required this.onResolvePlayback,
     super.key,
   });
@@ -170,6 +197,7 @@ class _ScreenBody extends StatefulWidget {
   final Future<void> Function(ScreenPolicy policy) onSavePolicy;
   final VoidCallback onAddEntry;
   final ValueChanged<String> onDeleteEntry;
+  final VoidCallback onFetchPlayback;
   final VoidCallback onResolvePlayback;
 
   @override
@@ -353,14 +381,26 @@ class _ScreenBodyState extends State<_ScreenBody> {
         AppReveal(
           delay: const Duration(milliseconds: 200),
           child: Card(
-            child: ListTile(
-              leading: const Icon(Icons.movie_outlined),
-              title: const Text('下发视频参数'),
-              subtitle: Text(
-                '按 ${_draft.videoMaxBitrateKbps} kbps · ${_draft.videoMaxFps} fps 下发到设备',
-              ),
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: widget.onResolvePlayback,
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.movie_outlined),
+                  title: const Text('读取当前视频参数'),
+                  subtitle: const Text('查看设备当前采用的码率和帧率'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: widget.onFetchPlayback,
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.tune_rounded),
+                  title: const Text('下发视频参数'),
+                  subtitle: Text(
+                    '按 ${_draft.videoMaxBitrateKbps} kbps · ${_draft.videoMaxFps} fps 下发到设备',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: widget.onResolvePlayback,
+                ),
+              ],
             ),
           ),
         ),

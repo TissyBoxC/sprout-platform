@@ -72,12 +72,42 @@ void main() {
     expect(api.putTerm, 'banana');
     expect(find.text('香蕉'), findsOneWidget);
   });
+
+  testWidgets('reads the current video playback plan for one device', (
+    tester,
+  ) async {
+    final api = _FakeScreenApi();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [screenApiProvider.overrideWithValue(api)],
+        child: const MaterialApp(home: ScreenPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final readTile = find.ancestor(
+      of: find.text('读取当前视频参数'),
+      matching: find.byType(ListTile),
+    );
+    await tester.scrollUntilVisible(readTile, 200);
+    await tester.ensureVisible(readTile);
+    await tester.pumpAndSettle();
+    await tester.tap(readTile);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'device-1');
+    await tester.tap(find.widgetWithText(FilledButton, '下发'));
+    await tester.pumpAndSettle();
+
+    expect(api.fetchedPlaybackDeviceId, 'device-1');
+    expect(find.text('当前参数 2000 kbps · 24 fps'), findsOneWidget);
+  });
 }
 
 class _FakeScreenApi implements ScreenApi {
   bool animationEnabled = true;
   ScreenPolicy? savedPolicy;
   String? putTerm;
+  String? fetchedPlaybackDeviceId;
   final List<PointReadEntry> _entries = <PointReadEntry>[
     const PointReadEntry(id: 'entry-1', term: 'apple', text: '苹果'),
   ];
@@ -153,6 +183,7 @@ class _FakeScreenApi implements ScreenApi {
 
   @override
   Future<VideoPlaybackPlan> fetchPlayback(String deviceId) async {
+    fetchedPlaybackDeviceId = deviceId;
     return const VideoPlaybackPlan(bitrateKbps: 2000, fps: 24);
   }
 

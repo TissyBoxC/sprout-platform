@@ -109,12 +109,297 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResponseEnvelope"
+  /api/v1/family/members:
+    get:
+      summary: List the members of the authenticated guardian's family
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Family members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilyMembersEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/FamilyNotFound"
+        "500":
+          $ref: "#/components/responses/FamilyServiceError"
+  /api/v1/family/members/{user_id}:
+    put:
+      summary: Change one family member's role
+      description: >
+        Only the family owner may change a member's role. A family must always
+        keep exactly one owner, so demoting the last owner is rejected.
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FamilyMemberRoleRequest"
+      responses:
+        "200":
+          description: Updated family member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilyMemberEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/FamilyNotFound"
+        "409":
+          $ref: "#/components/responses/FamilyConflict"
+        "422":
+          $ref: "#/components/responses/FamilyUnprocessable"
+        "500":
+          $ref: "#/components/responses/FamilyServiceError"
+    delete:
+      summary: Remove one member from the authenticated guardian's family
+      description: >
+        Only the family owner may remove another member. Removing the last
+        owner is rejected.
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: Member removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilyRemovedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/FamilyNotFound"
+        "409":
+          $ref: "#/components/responses/FamilyConflict"
+        "422":
+          $ref: "#/components/responses/FamilyUnprocessable"
+        "500":
+          $ref: "#/components/responses/FamilyServiceError"
+  /api/v1/family/invitations:
+    get:
+      summary: List every invitation belonging to the authenticated family
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Family invitations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilyInvitationsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/FamilyNotFound"
+        "500":
+          $ref: "#/components/responses/FamilyServiceError"
+    post:
+      summary: Invite one account into the authenticated family
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FamilyInvitationRequest"
+      responses:
+        "201":
+          description: Invitation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilyInvitationEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/FamilyNotFound"
+        "409":
+          $ref: "#/components/responses/FamilyConflict"
+        "422":
+          $ref: "#/components/responses/FamilyUnprocessable"
+        "500":
+          $ref: "#/components/responses/FamilyServiceError"
+  /api/v1/family/invitations/mine:
+    get:
+      summary: List pending invitations addressed to the authenticated account
+      description: >
+        Reachable by any signed-in account, including one that is not yet a
+        member of a family, so an invitee can discover and accept an invitation
+        without already knowing the family id.
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Pending invitations for the authenticated account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilyInvitationsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/FamilyUnprocessable"
+        "500":
+          $ref: "#/components/responses/FamilyServiceError"
+  /api/v1/family/invitations/{invitation_id}:
+    delete:
+      summary: Revoke a pending invitation
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/InvitationId"
+      responses:
+        "200":
+          description: Invitation revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilyRevokedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/FamilyNotFound"
+        "409":
+          $ref: "#/components/responses/FamilyConflict"
+        "422":
+          $ref: "#/components/responses/FamilyUnprocessable"
+        "500":
+          $ref: "#/components/responses/FamilyServiceError"
+  /api/v1/families/{family_id}/invitations/{invitation_id}/accept:
+    post:
+      summary: Accept a pending invitation addressed to the authenticated account
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/InvitationId"
+      responses:
+        "200":
+          description: Invitation accepted and membership created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilyMemberEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/FamilyNotFound"
+        "409":
+          $ref: "#/components/responses/FamilyConflict"
+        "422":
+          $ref: "#/components/responses/FamilyUnprocessable"
+        "500":
+          $ref: "#/components/responses/FamilyServiceError"
+  /api/v1/family/capability:
+    get:
+      summary: Read the authenticated family's membership summary
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Family membership summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilyCapabilityEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/FamilyNotFound"
+        "500":
+          $ref: "#/components/responses/FamilyServiceError"
 components:
   securitySchemes:
     serviceToken:
       type: http
       scheme: bearer
       bearerFormat: service-token
+    userToken:
+      type: http
+      scheme: bearer
+      bearerFormat: user-access-token
+  parameters:
+    UserId:
+      name: user_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    FamilyId:
+      name: family_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    InvitationId:
+      name: invitation_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+  responses:
+    Unauthorized:
+      description: Authentication missing, expired, or invalid
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    FamilyNotFound:
+      description: Family, member, or invitation not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    FamilyConflict:
+      description: >
+        Membership conflict: duplicate member, last owner, or invitation state
+        conflict.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    FamilyUnprocessable:
+      description: Invalid or expired invitation, missing permission, or invalid member
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    FamilyServiceError:
+      description: Family operation failed unexpectedly
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
   schemas:
     ResponseEnvelope:
       type: object
@@ -223,3 +508,232 @@ components:
           maxLength: 256
         retryable:
           type: boolean
+    FamilyRole:
+      type: string
+      enum:
+        - owner
+        - guardian
+        - viewer
+    FamilyInvitationRole:
+      type: string
+      enum:
+        - guardian
+        - viewer
+    FamilyMember:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - family_id
+        - user_id
+        - role
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        family_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        role:
+          $ref: "#/components/schemas/FamilyRole"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    FamilyInvitation:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - family_id
+        - email
+        - role
+        - status
+        - invited_by_user_id
+        - created_at
+        - expires_at
+        - accepted_at
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        family_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        role:
+          $ref: "#/components/schemas/FamilyInvitationRole"
+        status:
+          type: string
+          enum:
+            - pending
+            - accepted
+            - revoked
+        invited_by_user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        accepted_at:
+          type: string
+          format: date-time
+          nullable: true
+    FamilyMemberRoleRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - role
+      properties:
+        role:
+          $ref: "#/components/schemas/FamilyRole"
+    FamilyInvitationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+        - role
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        role:
+          $ref: "#/components/schemas/FamilyInvitationRole"
+    FamilyMembersEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - members
+              properties:
+                members:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/FamilyMember"
+    FamilyInvitationsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - invitations
+              properties:
+                invitations:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/FamilyInvitation"
+    FamilyMemberEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - member
+              properties:
+                member:
+                  $ref: "#/components/schemas/FamilyMember"
+    FamilyInvitationEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - invitation
+              properties:
+                invitation:
+                  $ref: "#/components/schemas/FamilyInvitation"
+    FamilyRemovedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - removed
+              properties:
+                removed:
+                  type: boolean
+                  const: true
+    FamilyRevokedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - revoked
+              properties:
+                revoked:
+                  type: boolean
+                  const: true
+    FamilyCapability:
+      type: object
+      additionalProperties: false
+      required:
+        - family_id
+        - owner_user_id
+        - member_count
+        - pending_invite_count
+        - schema_version
+      properties:
+        family_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        owner_user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        member_count:
+          type: integer
+          minimum: 1
+        pending_invite_count:
+          type: integer
+          minimum: 0
+        schema_version:
+          type: string
+          const: 1.0.0
+    FamilyCapabilityEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/FamilyCapability"

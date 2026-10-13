@@ -141,6 +141,38 @@ func TestInternalAPIContractDocumentsEffectiveParentPolicyEndpoint(t *testing.T)
 	}
 }
 
+func TestFamilyContractDocumentsMembershipEndpoints(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	expectedPaths := []string{
+		"/api/v1/family/members:",
+		"/api/v1/family/members/{user_id}:",
+		"/api/v1/family/invitations:",
+		"/api/v1/family/invitations/mine:",
+		"/api/v1/family/invitations/{invitation_id}:",
+		"/api/v1/families/{family_id}/invitations/{invitation_id}/accept:",
+		"/api/v1/family/capability:",
+	}
+	for _, path := range expectedPaths {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected family path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"FamilyMember:",
+		"FamilyInvitation:",
+		"FamilyMemberRoleRequest:",
+		"FamilyInvitationRequest:",
+		"FamilyCapability:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected family schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

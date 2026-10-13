@@ -6960,6 +6960,159 @@ paths:
           $ref: "#/components/responses/DeviceUnprocessable"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/ui-text/packages:
+    get:
+      summary: Pull published UI text packages newer than a client revision
+      security:
+        - userToken: []
+      parameters:
+        - name: since_revision
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Published UI text catalog page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UITextPublishedPageEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/ui-text/packages/{package_id}/{language}/{platform}:
+    get:
+      summary: Read one published UI text package with its entries
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/UITextPackageId"
+        - $ref: "#/components/parameters/UITextLanguage"
+        - $ref: "#/components/parameters/UITextPlatform"
+      responses:
+        "200":
+          description: Published UI text package and entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UITextPackageDetailEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Published UI text package not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/ui-text/packages:
+    get:
+      summary: Pull published UI text packages from a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: since_revision
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Published UI text catalog page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UITextPublishedPageEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/ui-text/packages/{package_id}/{language}/{platform}:
+    get:
+      summary: Read one published UI text package from a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/UITextPackageId"
+        - $ref: "#/components/parameters/UITextLanguage"
+        - $ref: "#/components/parameters/UITextPlatform"
+      responses:
+        "200":
+          description: Published UI text package and entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UITextPackageDetailEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "404":
+          description: Published UI text package not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/app/update:
+    get:
+      summary: Check the newest published update for a client application
+      parameters:
+        - name: platform
+          in: query
+          required: true
+          schema:
+            type: string
+            enum:
+              - android
+              - ios
+              - esp32_s3
+        - name: channel
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/OTAChannel"
+        - name: current_version
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 32
+      responses:
+        "200":
+          description: Newest available update for the client
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppUpdateEnvelope"
+        "204":
+          description: The client is already current or no update is available
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -7098,6 +7251,26 @@ components:
         type: string
         minLength: 1
         maxLength: 128
+    UITextPackageId:
+      name: package_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9_-]*$"
+    UITextLanguage:
+      name: language
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z]{2,3}(-[A-Z]{2})?$"
+    UITextPlatform:
+      name: platform
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/UITextPlatform"
   responses:
     Unauthorized:
       description: Authentication missing, expired, or invalid
@@ -16598,6 +16771,175 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/VisionAdminStats"
+    UITextStatus:
+      type: string
+      enum:
+        - draft
+        - in_review
+        - published
+        - withdrawn
+    UITextPlatform:
+      type: string
+      enum:
+        - parent_app
+        - admin_web
+        - device_firmware
+    UITextEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - ui_text_key
+        - value
+        - max_length
+        - variables
+      properties:
+        ui_text_key:
+          type: string
+          minLength: 1
+          maxLength: 128
+        value:
+          type: string
+        max_length:
+          type: integer
+          minimum: 1
+          maximum: 2000
+        variables:
+          type: array
+          maxItems: 16
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+    UITextPackage:
+      type: object
+      additionalProperties: false
+      required:
+        - package_id
+        - package_version
+        - language
+        - platform
+        - min_client_version
+        - status
+        - revision
+        - created_at
+        - updated_at
+      properties:
+        package_id:
+          type: string
+        package_version:
+          type: integer
+          minimum: 1
+        language:
+          type: string
+        platform:
+          $ref: "#/components/schemas/UITextPlatform"
+        min_client_version:
+          type: string
+        status:
+          $ref: "#/components/schemas/UITextStatus"
+        signature_key_id:
+          type: string
+        signature:
+          type: string
+        submitted_at:
+          type: string
+          format: date-time
+          nullable: true
+        approved_at:
+          type: string
+          format: date-time
+          nullable: true
+        approved_by:
+          type: string
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        published_by:
+          type: string
+        withdrawn_at:
+          type: string
+          format: date-time
+          nullable: true
+        revision:
+          type: integer
+          minimum: 0
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    UITextWithdrawnPackage:
+      type: object
+      additionalProperties: false
+      required:
+        - package_id
+        - language
+        - platform
+        - revision
+      properties:
+        package_id:
+          type: string
+        language:
+          type: string
+        platform:
+          $ref: "#/components/schemas/UITextPlatform"
+        revision:
+          type: integer
+          minimum: 0
+    UITextPublishedPage:
+      type: object
+      additionalProperties: false
+      required:
+        - revision
+        - packages
+        - withdrawn_packages
+      properties:
+        revision:
+          type: integer
+          minimum: 0
+        packages:
+          type: array
+          items:
+            $ref: "#/components/schemas/UITextPackage"
+        withdrawn_packages:
+          type: array
+          items:
+            $ref: "#/components/schemas/UITextWithdrawnPackage"
+        has_more:
+          type: boolean
+        next_cursor:
+          type: string
+    UITextPublishedPageEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/UITextPublishedPage"
+    UITextPackageDetail:
+      type: object
+      additionalProperties: false
+      required:
+        - package
+        - entries
+      properties:
+        package:
+          $ref: "#/components/schemas/UITextPackage"
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/UITextEntry"
+    UITextPackageDetailEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/UITextPackageDetail"
     LearningVisualizationFeedbackStyle:
       type: string
       enum:
@@ -17568,3 +17910,41 @@ components:
         deployment_id:
           type: string
           maxLength: 128
+    AppUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - version
+        - download_url
+        - sha256
+        - release_notes
+        - is_mandatory
+        - min_supported_version
+      properties:
+        kind:
+          type: string
+          enum:
+            - resource
+            - client
+            - firmware
+        version:
+          type: string
+        download_url:
+          type: string
+          format: uri
+        sha256:
+          type: string
+        release_notes:
+          type: string
+        is_mandatory:
+          type: boolean
+        min_supported_version:
+          type: string
+    AppUpdateEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AppUpdate"

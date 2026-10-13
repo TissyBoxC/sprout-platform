@@ -9015,6 +9015,162 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/feature-center:
+    get:
+      summary: List every registered feature and its current configuration
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Registered features
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeatureCenterListEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          description: Feature center service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/feature-center/{feature}:
+    get:
+      summary: Read one registered feature and its effective configuration
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FeatureId"
+      responses:
+        "200":
+          description: Feature detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeatureCenterEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Feature not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          description: Feature center service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/feature-center/{feature}/config:
+    put:
+      summary: Update one feature's configuration overlay
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FeatureId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeatureCenterConfigUpdateRequest"
+      responses:
+        "200":
+          description: Feature configuration updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeatureCenterEnvelope"
+        "400":
+          description: Malformed request body or missing config version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Feature not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Feature config version conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid, unknown, immutable, or read-only config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          description: Feature center service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/feature-center/{feature}/health-check:
+    post:
+      summary: Run one feature's health probe and return the refreshed state
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FeatureId"
+      responses:
+        "200":
+          description: Feature health refreshed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeatureCenterEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Feature not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "501":
+          description: Feature has no configured health probe
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "502":
+          description: Health probe failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          description: Feature center service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -9337,6 +9493,14 @@ components:
       required: true
       schema:
         $ref: "#/components/schemas/ContentPackageID"
+    FeatureId:
+      name: feature
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$"
+        maxLength: 64
   responses:
     Unauthorized:
       description: Authentication missing, expired, or invalid
@@ -21972,3 +22136,249 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/AppUpdate"
+    FeatureCenterHealthStatus:
+      type: string
+      enum:
+        - healthy
+        - degraded
+        - unavailable
+        - unknown
+    FeatureCenterHealthSource:
+      type: string
+      enum:
+        - service_runtime
+        - database_state
+        - not_configured
+    FeatureCenterStatus:
+      type: string
+      enum:
+        - active
+        - planned
+        - disabled
+    FeatureCenterConfigFieldType:
+      type: string
+      enum:
+        - boolean
+        - integer
+        - number
+        - string
+        - select
+        - multiselect
+        - secret
+        - duration
+        - url
+        - version
+        - object
+    FeatureCenterConfigValueSource:
+      type: string
+      enum:
+        - registry_default
+        - system
+        - database
+    FeatureCenterConfigOption:
+      type: object
+      additionalProperties: false
+      required:
+        - value
+        - label
+      properties:
+        value:
+          type: string
+        label:
+          type: string
+    FeatureCenterConfigField:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - label
+        - type
+        - required
+        - secret
+        - source
+        - editable
+        - allow_custom
+      properties:
+        key:
+          type: string
+          minLength: 1
+        label:
+          type: string
+        type:
+          $ref: "#/components/schemas/FeatureCenterConfigFieldType"
+        required:
+          type: boolean
+        default: {}
+        value: {}
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeatureCenterConfigOption"
+        min:
+          type: number
+        max:
+          type: number
+        unit:
+          type: string
+        help:
+          type: string
+        secret:
+          type: boolean
+        source:
+          $ref: "#/components/schemas/FeatureCenterConfigValueSource"
+        editable:
+          type: boolean
+        allow_custom:
+          type: boolean
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeatureCenterConfigField"
+    FeatureCenterMetric:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - label
+      properties:
+        key:
+          type: string
+          minLength: 1
+        label:
+          type: string
+        description:
+          type: string
+        unit:
+          type: string
+        value: {}
+    FeatureCenterHealthDetail:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - checked_at
+      properties:
+        status:
+          $ref: "#/components/schemas/FeatureCenterHealthStatus"
+        checked_at:
+          type: string
+          format: date-time
+        message:
+          type: string
+        latency_ms:
+          type: integer
+    FeatureCenterFeature:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - description
+        - category
+        - owner
+        - status
+        - health
+        - health_source
+        - config_version
+        - config_schema
+        - values
+        - read_only_metrics
+        - secret_configured
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$"
+          maxLength: 64
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        owner:
+          type: string
+        status:
+          $ref: "#/components/schemas/FeatureCenterStatus"
+        health:
+          $ref: "#/components/schemas/FeatureCenterHealthStatus"
+        health_detail:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/FeatureCenterHealthDetail"
+        health_source:
+          $ref: "#/components/schemas/FeatureCenterHealthSource"
+        config_version:
+          type: integer
+          format: int64
+          minimum: 0
+        config_schema:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeatureCenterConfigField"
+        values:
+          type: object
+          additionalProperties: true
+        read_only_metrics:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeatureCenterMetric"
+        read_only_reason:
+          type: string
+        secret_configured:
+          type: object
+          additionalProperties:
+            type: boolean
+        updated_at:
+          nullable: true
+          type: string
+          format: date-time
+    FeatureCenterListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - features
+              properties:
+                features:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/FeatureCenterFeature"
+    FeatureCenterEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - feature
+              properties:
+                feature:
+                  $ref: "#/components/schemas/FeatureCenterFeature"
+    FeatureCenterConfigUpdateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - values
+      anyOf:
+        - required:
+            - expected_version
+        - required:
+            - version
+      properties:
+        values:
+          type: object
+          additionalProperties: true
+        expected_version:
+          type: integer
+          format: int64
+          minimum: 0
+        version:
+          type: integer
+          format: int64
+          minimum: 0

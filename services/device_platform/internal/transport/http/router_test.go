@@ -1335,6 +1335,36 @@ func TestAdminOTAContractDocumentsReleaseLifecycleAndRollout(t *testing.T) {
 	}
 }
 
+func TestFeatureCenterContractDocumentsRegistryAndConfiguration(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/admin/feature-center:",
+		"/api/v1/admin/feature-center/{feature}:",
+		"/api/v1/admin/feature-center/{feature}/config:",
+		"/api/v1/admin/feature-center/{feature}/health-check:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected feature-center path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"FeatureId:",
+		"FeatureCenterListEnvelope:",
+		"FeatureCenterEnvelope:",
+		"FeatureCenterFeature:",
+		"FeatureCenterConfigUpdateRequest:",
+		"FeatureCenterConfigField:",
+		"FeatureCenterHealthDetail:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected feature-center schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestAppUpdateContractDocumentsClientUpdateEndpoint(t *testing.T) {
 	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
 	if err != nil {

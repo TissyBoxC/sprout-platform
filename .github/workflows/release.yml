@@ -95,6 +95,7 @@ jobs:
           bash deploy/cloud/scripts/test-audit-api-internal-access.sh
           bash deploy/cloud/scripts/test-audit-1panel-proxy-headers.sh
           bash deploy/cloud/scripts/test-audit-service-image-override.sh
+          bash deploy/cloud/scripts/test-audit-server-firewall.sh
 
           tar -czf "dist/stage/sprout-contracts-${{ steps.detect.outputs.tag }}.tar.gz" packages/contracts
           cp dist/device-platform dist/stage/device-platform

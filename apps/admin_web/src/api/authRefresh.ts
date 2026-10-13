@@ -40,7 +40,9 @@ export function createRefreshCoordinator(
         return session.accessToken
       })
       .catch((error: unknown) => {
-        sessionStore.clearSession()
+        if (isDefinitiveRefreshFailure(error)) {
+          sessionStore.clearSession()
+        }
         throw error
       })
       .finally(() => {
@@ -113,6 +115,21 @@ function isUnauthorizedResponse(error: unknown): error is UnauthorizedResponse {
     'response' in error &&
     (error as UnauthorizedResponse).response?.status === 401
   )
+}
+
+/// A refresh failure is definitive only when the server rejected the refresh
+/// token. Network outages and 5xx responses leave the stored token intact so
+/// the user can retry after the service recovers.
+function isDefinitiveRefreshFailure(error: unknown): boolean {
+  if (
+    typeof error !== 'object' ||
+    error === null ||
+    !('response' in error)
+  ) {
+    return false
+  }
+  const response = (error as UnauthorizedResponse).response
+  return response?.status === 401 || response?.status === 403
 }
 
 function isRetriedRequest(config: AxiosRequestConfig | undefined): boolean {

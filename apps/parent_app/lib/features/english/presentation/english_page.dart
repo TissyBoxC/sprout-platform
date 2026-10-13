@@ -42,7 +42,8 @@ class EnglishPage extends ConsumerWidget {
           error: (error, _) => _EnglishErrorState(
             key: const ValueKey<String>('english-error'),
             message: EnglishController.messageFor(error),
-            onRetry: () => ref.read(englishControllerProvider.notifier).refresh(),
+            onRetry: () =>
+                ref.read(englishControllerProvider.notifier).refresh(),
           ),
           data: (value) => _EnglishContent(
             key: ValueKey<String>(
@@ -293,6 +294,7 @@ class EnglishLessonPage extends ConsumerStatefulWidget {
 
 class _EnglishLessonPageState extends ConsumerState<EnglishLessonPage> {
   late Future<EnglishLesson> _lessonFuture;
+  late Future<List<EnglishPracticeAttempt>> _attemptsFuture;
 
   @override
   void initState() {
@@ -300,6 +302,9 @@ class _EnglishLessonPageState extends ConsumerState<EnglishLessonPage> {
     _lessonFuture = ref
         .read(englishControllerProvider.notifier)
         .loadLesson(widget.lessonId);
+    _attemptsFuture = ref
+        .read(englishControllerProvider.notifier)
+        .loadAttempts(widget.lessonId);
   }
 
   void _reload() {
@@ -307,6 +312,9 @@ class _EnglishLessonPageState extends ConsumerState<EnglishLessonPage> {
       _lessonFuture = ref
           .read(englishControllerProvider.notifier)
           .loadLesson(widget.lessonId);
+      _attemptsFuture = ref
+          .read(englishControllerProvider.notifier)
+          .loadAttempts(widget.lessonId);
     });
   }
 
@@ -316,7 +324,7 @@ class _EnglishLessonPageState extends ConsumerState<EnglishLessonPage> {
     final progress = progressState.value?.progress.forLesson(widget.lessonId);
     final itemProgress =
         progressState.value?.progress.itemsForLesson(widget.lessonId) ??
-            const <EnglishItemProgress>[];
+        const <EnglishItemProgress>[];
     return Scaffold(
       appBar: AppBar(title: const Text('课程详情')),
       body: FutureBuilder<EnglishLesson>(
@@ -368,10 +376,7 @@ class _EnglishLessonPageState extends ConsumerState<EnglishLessonPage> {
               Text('单词', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
               if (lesson.words.isEmpty)
-                const _EmptyCard(
-                  icon: Icons.abc_rounded,
-                  message: '这节课还没有单词。',
-                )
+                const _EmptyCard(icon: Icons.abc_rounded, message: '这节课还没有单词。')
               else
                 for (final word in lesson.words)
                   _WordTile(
@@ -392,9 +397,77 @@ class _EnglishLessonPageState extends ConsumerState<EnglishLessonPage> {
                     sentence: sentence,
                     progress: _itemProgress(itemProgress, sentence.id),
                   ),
+              const SizedBox(height: 24),
+              Text('最近练习', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              FutureBuilder<List<EnglishPracticeAttempt>>(
+                future: _attemptsFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 20),
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+                  if (snapshot.hasError) {
+                    return _EmptyCard(
+                      icon: Icons.history_rounded,
+                      message: EnglishController.messageFor(snapshot.error!),
+                    );
+                  }
+                  final attempts =
+                      snapshot.data ?? const <EnglishPracticeAttempt>[];
+                  if (attempts.isEmpty) {
+                    return const _EmptyCard(
+                      icon: Icons.history_rounded,
+                      message: '还没有练习记录。孩子完成发音练习后，会显示在这里。',
+                    );
+                  }
+                  return Column(
+                    children: [
+                      for (final attempt in attempts.take(5))
+                        _AttemptTile(attempt: attempt),
+                    ],
+                  );
+                },
+              ),
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _AttemptTile extends StatelessWidget {
+  const _AttemptTile({required this.attempt});
+
+  final EnglishPracticeAttempt attempt;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final color = attempt.passed ? colorScheme.primary : colorScheme.outline;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ListTile(
+        leading: Icon(
+          attempt.passed
+              ? Icons.check_circle_rounded
+              : Icons.radio_button_unchecked,
+          color: color,
+        ),
+        title: Text(attempt.targetText.isEmpty ? '发音练习' : attempt.targetText),
+        subtitle: Text(
+          '${_formatDateTime(attempt.practicedAt)}'
+          '${attempt.recognizedText.isEmpty ? '' : ' · 识别为 ${attempt.recognizedText}'}',
+        ),
+        trailing: Text(
+          '${attempt.score} 分',
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(color: color),
+        ),
       ),
     );
   }
@@ -414,10 +487,7 @@ class _WordTile extends StatelessWidget {
         isThreeLine: word.example.isNotEmpty,
         title: Row(
           children: [
-            Text(
-              word.term,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
+            Text(word.term, style: Theme.of(context).textTheme.titleMedium),
             if (word.phonetic.isNotEmpty) ...[
               const SizedBox(width: 8),
               Text(
@@ -433,10 +503,7 @@ class _WordTile extends StatelessWidget {
             if (word.translation.isNotEmpty) Text(word.translation),
             if (word.example.isNotEmpty) ...[
               const SizedBox(height: 4),
-              Text(
-                word.example,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+              Text(word.example, style: Theme.of(context).textTheme.bodySmall),
             ],
           ],
         ),
@@ -579,4 +646,13 @@ String _childName(List<ChildProfile> children, String childId) {
     }
   }
   return '宝贝';
+}
+
+String _formatDateTime(DateTime value) {
+  final local = value.toLocal();
+  final month = local.month.toString().padLeft(2, '0');
+  final day = local.day.toString().padLeft(2, '0');
+  final hour = local.hour.toString().padLeft(2, '0');
+  final minute = local.minute.toString().padLeft(2, '0');
+  return '$month-$day $hour:$minute';
 }

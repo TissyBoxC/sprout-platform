@@ -96,6 +96,22 @@ void main() {
     expect(api.lastLessonId, 'lesson_fruit');
   });
 
+  test('loads practice attempts for one lesson', () async {
+    final api = _FakeEnglishApi(lessons: const []);
+    final container = ProviderContainer(
+      overrides: [englishApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(englishControllerProvider.future);
+    final controller = container.read(englishControllerProvider.notifier);
+
+    final attempts = await controller.loadAttempts('lesson_fruit');
+
+    expect(attempts, isEmpty);
+    expect(api.lastAttemptLessonId, 'lesson_fruit');
+  });
+
   test('propagates a load failure as an error state', () async {
     final api = _FakeEnglishApi(lessons: const [], failLoad: true);
     final container = ProviderContainer(
@@ -103,10 +119,7 @@ void main() {
     );
     addTearDown(container.dispose);
 
-    final subscription = container.listen(
-      englishControllerProvider,
-      (_, _) {},
-    );
+    final subscription = container.listen(englishControllerProvider, (_, _) {});
     addTearDown(subscription.close);
     await Future<void>.delayed(Duration.zero);
     await Future<void>.delayed(Duration.zero);
@@ -170,6 +183,7 @@ class _FakeEnglishApi implements EnglishApi {
   String? lastAgeTier;
   String? lastChildFilter;
   String? lastLessonId;
+  String? lastAttemptLessonId;
 
   @override
   Future<List<EnglishLessonSummary>> fetchLessons({String? ageTier}) async {
@@ -213,7 +227,10 @@ class _FakeEnglishApi implements EnglishApi {
   }
 
   @override
-  Future<EnglishProgress> fetchProgress({String? childId, String? lessonId}) async {
+  Future<EnglishProgress> fetchProgress({
+    String? childId,
+    String? lessonId,
+  }) async {
     lastChildFilter = childId;
     if (failLoad) {
       throw Exception('network down');
@@ -233,6 +250,7 @@ class _FakeEnglishApi implements EnglishApi {
     String? childId,
     String? lessonId,
   }) async {
+    lastAttemptLessonId = lessonId;
     return const [];
   }
 }

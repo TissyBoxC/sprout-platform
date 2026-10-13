@@ -81,6 +81,11 @@ class EnglishController extends AsyncNotifier<EnglishLearningState> {
     return _api.fetchLesson(lessonId);
   }
 
+  /// Loads the latest practice attempts for one lesson.
+  Future<List<EnglishPracticeAttempt>> loadAttempts(String lessonId) {
+    return _api.fetchAttempts(lessonId: lessonId);
+  }
+
   Future<EnglishLearningState> _load() async {
     final lessons = await _api.fetchLessons(ageTier: _ageTier?.apiValue);
     final progress = await _api.fetchProgress(childId: _childFilter);

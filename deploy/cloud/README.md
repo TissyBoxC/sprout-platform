@@ -664,6 +664,28 @@ docker compose --env-file .env logs --tail=200 sub2api
 若输出 `device_platform`、`voice_gateway`、`admin_web` 或 `sub2api`，必须移除
 对应的本地 `image` 覆盖后再升级。
 
+生产上已经存在私有构建镜像时，先运行只读审计，确认它是否是正式镜像尚未
+包含的必要补丁：
+
+```bash
+./scripts/audit-service-image-override.sh
+```
+
+脚本会比较 override 中的本地镜像、当前运行镜像、`.env` 对应版本的 GHCR
+镜像，以及镜像内受管二进制的 SHA-256。它只读取数据，不会修改 Compose 文件。
+当输出结论为“必须保留 override”时，说明本地镜像包含正式发布镜像尚未包含
+的变更，不能直接删除 override；应先把补丁正规化到下一次正式发布。
+
+确认本地镜像与 GHCR 同版本镜像的二进制一致后，可以安全移除受管镜像覆盖：
+
+```bash
+./scripts/audit-service-image-override.sh --switch-to-registry
+```
+
+该命令会先备份当前 `docker-compose.override.yml` 到
+`deploy/cloud/.codex-backups/`，再移除受管服务的 `image` 覆盖，拉取 GHCR
+镜像并重建对应服务。发现任何二进制差异时命令会拒绝执行。
+
 执行单服务升级时，命令会再次校验 Git 工作区、`.env` 和 Compose 配置：
 
 ```bash

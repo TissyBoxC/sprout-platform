@@ -7506,6 +7506,178 @@ paths:
           $ref: "#/components/responses/DeviceUnprocessable"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/content/theme-packs:
+    get:
+      summary: List content theme packs for the management console
+      security:
+        - userToken: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ContentThemePackStatus"
+        - name: keyword
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        "200":
+          description: Content theme packs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentThemePacksEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/content/theme-packs/{theme_id}:
+    get:
+      summary: Read one content theme pack
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ContentThemeId"
+      responses:
+        "200":
+          description: Content theme pack detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentThemePackEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Content theme pack not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Create or replace one draft content theme pack
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ContentThemeId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContentThemePackRequest"
+      responses:
+        "200":
+          description: Content theme pack saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentThemePackEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    delete:
+      summary: Delete one non-published content theme pack
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ContentThemeId"
+      responses:
+        "200":
+          description: Content theme pack deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentThemePackDeletedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Content theme pack not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/content/theme-packs/{theme_id}/publish:
+    post:
+      summary: Publish one draft content theme pack
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ContentThemeId"
+      responses:
+        "200":
+          description: Content theme pack published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentThemePackEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Content theme pack not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/content/theme-packs/{theme_id}/withdraw:
+    post:
+      summary: Withdraw one published content theme pack
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ContentThemeId"
+      responses:
+        "200":
+          description: Content theme pack withdrawn
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentThemePackEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Content theme pack not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -14015,6 +14187,64 @@ components:
                   type: array
                   items:
                     $ref: "#/components/schemas/ContentThemePack"
+    ContentThemePackRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - theme_id
+        - title
+        - age_tiers
+        - package_ids
+      properties:
+        theme_id:
+          $ref: "#/components/schemas/ContentPackageID"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 64
+        summary:
+          type: string
+          maxLength: 200
+        age_tiers:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ContentAgeTier"
+        package_ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ContentPackageID"
+    ContentThemePackEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - theme_pack
+              properties:
+                theme_pack:
+                  $ref: "#/components/schemas/ContentThemePack"
+    ContentThemePackDeletedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - theme_id
+              properties:
+                theme_id:
+                  $ref: "#/components/schemas/ContentPackageID"
     ContentRecommendation:
       type: object
       additionalProperties: false

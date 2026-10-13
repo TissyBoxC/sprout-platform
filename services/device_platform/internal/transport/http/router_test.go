@@ -1181,6 +1181,32 @@ func TestContentAdminContractDocumentsPackageLifecycle(t *testing.T) {
 	}
 }
 
+func TestContentAdminContractDocumentsThemePackLifecycle(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/admin/content/theme-packs:",
+		"/api/v1/admin/content/theme-packs/{theme_id}:",
+		"/api/v1/admin/content/theme-packs/{theme_id}/publish:",
+		"/api/v1/admin/content/theme-packs/{theme_id}/withdraw:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected admin theme-pack path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"ContentThemePackRequest:",
+		"ContentThemePackEnvelope:",
+		"ContentThemePackDeletedEnvelope:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected admin theme-pack schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestAppUpdateContractDocumentsClientUpdateEndpoint(t *testing.T) {
 	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
 	if err != nil {

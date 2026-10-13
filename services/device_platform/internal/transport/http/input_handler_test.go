@@ -139,6 +139,25 @@ func TestInputCurrentRequiresAuthentication(t *testing.T) {
 	}
 }
 
+func TestInputDevicePolicyRequiresSession(t *testing.T) {
+	handler := deviceInputHandler{
+		handler:        &inputHandler{service: &inputTestService{}},
+		bindingService: nil,
+		runtimeService: nil,
+	}
+	request := englishRequest(
+		http.MethodGet,
+		"/api/v1/devices/device-1/touch/policy",
+		"",
+		"",
+	)
+	recorder := httptest.NewRecorder()
+	handler.devicePolicy(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestInputPublishAndReadBack(t *testing.T) {
 	handler := inputHandler{service: &inputTestService{}}
 	body := `{"enabled":true,"tap_enabled":true,"swipe_enabled":true,` +

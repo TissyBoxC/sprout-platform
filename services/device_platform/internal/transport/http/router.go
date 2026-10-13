@@ -510,6 +510,10 @@ func NewRouter(options RouterOptions) http.Handler {
 					"POST /api/v1/devices/{device_id}/touch/status",
 					deviceInputHandler.reportStatus,
 				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/touch/policy",
+					deviceInputHandler.devicePolicy,
+				)
 			}
 		}
 		if options.ConnectivityService != nil {

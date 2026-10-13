@@ -201,6 +201,25 @@ func (handler deviceInputHandler) reportStatus(
 	})
 }
 
+// devicePolicy returns the family touch configuration to a bound device over
+// its device session token so the firmware can clamp and apply it, mirroring
+// the other device policy endpoints.
+func (handler deviceInputHandler) devicePolicy(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	_, familyID, ok := handler.verifyDevice(response, request)
+	if !ok {
+		return
+	}
+	config, err := handler.handler.service.Current(request.Context(), familyID)
+	if err != nil {
+		writeInputError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, touchConfigResponse(config))
+}
+
 // adminStats returns the bounded fleet touch summary.
 func (handler inputHandler) adminStats(
 	response http.ResponseWriter,

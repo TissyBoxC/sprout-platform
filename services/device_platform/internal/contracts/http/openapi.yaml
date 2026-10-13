@@ -3758,6 +3758,185 @@ paths:
           $ref: "#/components/responses/DeviceUnprocessable"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/content/catalog:
+    get:
+      summary: Read the bound device's family-scoped incremental content catalog
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: since_revision
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+            default: 0
+        - name: age_tier
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ContentAgeTier"
+        - name: category
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ContentCategory"
+      responses:
+        "200":
+          description: Incremental family-scoped content catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentCatalogEnvelope"
+        "400":
+          description: Requested revision is ahead of the catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/content/packages/{package_id}/download:
+    get:
+      summary: Read a verified download descriptor for a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: package_id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/ContentPackageID"
+      responses:
+        "200":
+          description: Published package download descriptor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentDownloadEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "404":
+          description: Package or asset not found, or package is not in the device family catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Stored asset checksum changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/content/favorites:
+    get:
+      summary: List the bound device family's content favorites
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Family favorite content packages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentFavoritesEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/content/playback:
+    get:
+      summary: Read the bound device's bounded playback history
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 50
+      responses:
+        "200":
+          description: Bounded device playback history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentPlayHistoryEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Record one bounded playback event from a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContentPlaybackRecordRequest"
+      responses:
+        "201":
+          description: Playback event recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentPlaybackRecordEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "404":
+          description: Content package not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/content/theme-packs:
+    get:
+      summary: List published theme packs for a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Published theme packs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentThemePacksEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
   /api/v1/content/offline-policy:
     get:
       summary: Read the platform content offline download policy
@@ -12456,6 +12635,39 @@ components:
                   type: array
                   items:
                     $ref: "#/components/schemas/ContentPlayRecord"
+    ContentPlaybackRecordRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - package_id
+        - package_version
+        - outcome
+        - played_seconds
+      properties:
+        package_id:
+          $ref: "#/components/schemas/ContentPackageID"
+        package_version:
+          type: integer
+          minimum: 1
+        outcome:
+          $ref: "#/components/schemas/ContentPlayOutcome"
+        played_seconds:
+          type: integer
+          minimum: 0
+          maximum: 86400
+    ContentPlaybackRecordEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - record
+              properties:
+                record:
+                  $ref: "#/components/schemas/ContentPlayRecord"
     ContentThemePack:
       type: object
       additionalProperties: false

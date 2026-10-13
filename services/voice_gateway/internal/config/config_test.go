@@ -137,6 +137,7 @@ func TestLoadRejectsEnabledWebsiteSocketWithoutDatabase(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
 	t.Setenv("VOICE_GATEWAY_ASR_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "mock")
+	t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "")
 
 	if _, err := Load(); err == nil {
@@ -149,6 +150,7 @@ func TestLoadAcceptsEnabledWebsiteSocketWithDatabase(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
 	t.Setenv("VOICE_GATEWAY_ASR_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "mock")
+	t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
 
 	cfg, err := Load()
@@ -165,6 +167,7 @@ func TestLoadRejectsUnsafeSessionTokenTTL(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
 	t.Setenv("VOICE_GATEWAY_ASR_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "mock")
+	t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
 	t.Setenv("VOICE_GATEWAY_WS_SESSION_TOKEN_TTL_SECONDS", "3600")
 
@@ -186,6 +189,7 @@ func TestLoadReadsWebsiteSocketLimits(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
 	t.Setenv("VOICE_GATEWAY_ASR_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "mock")
+	t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
 	t.Setenv("VOICE_GATEWAY_WS_MAX_TOTAL_SESSIONS", "128")
 	t.Setenv("VOICE_GATEWAY_WS_MAX_FRAME_BYTES", "2048")
@@ -231,6 +235,7 @@ func TestContinuityWindowDefaultsAndBounds(t *testing.T) {
 			t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
 			t.Setenv("VOICE_GATEWAY_ASR_PROVIDER", "mock")
 			t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "mock")
+			t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "mock")
 			t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
 			t.Setenv("VOICE_GATEWAY_WS_CONTINUITY_WINDOW_SECONDS", testCase.value)
 			cfg, err := Load()
@@ -276,6 +281,7 @@ func TestAuthRecheckDefaultsAndBounds(t *testing.T) {
 			t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
 			t.Setenv("VOICE_GATEWAY_ASR_PROVIDER", "mock")
 			t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "mock")
+			t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "mock")
 			t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
 			t.Setenv("VOICE_GATEWAY_WS_AUTH_RECHECK_SECONDS", testCase.value)
 			if _, err := Load(); testCase.wantErr && err == nil {
@@ -290,6 +296,7 @@ func TestLoadRejectsEnabledWebsiteSocketWithoutASRProvider(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
 	t.Setenv("VOICE_GATEWAY_ASR_PROVIDER", "")
 	t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "mock")
+	t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
 
 	if _, err := Load(); err == nil {
@@ -302,9 +309,23 @@ func TestLoadRejectsEnabledWebsiteSocketWithoutTTSProvider(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
 	t.Setenv("VOICE_GATEWAY_ASR_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "")
+	t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected realtime endpoint without a TTS provider to be rejected")
+	}
+}
+
+func TestLoadRejectsEnabledWebsiteSocketWithoutLLMProvider(t *testing.T) {
+	t.Setenv("VOICE_GATEWAY_WS_ENABLED", "true")
+	t.Setenv("VOICE_GATEWAY_WS_TOKEN_SECRET", strings.Repeat("s", 40))
+	t.Setenv("VOICE_GATEWAY_ASR_PROVIDER", "mock")
+	t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "mock")
+	t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "")
+	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected realtime endpoint without an LLM provider to be rejected")
 	}
 }

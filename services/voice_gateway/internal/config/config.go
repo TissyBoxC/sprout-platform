@@ -336,14 +336,17 @@ func Load() (Config, error) {
 		if len(strings.TrimSpace(cfg.WebSocket.AuthTokenSecret)) < 32 {
 			return Config{}, fmt.Errorf("VOICE_GATEWAY_WS_TOKEN_SECRET must contain at least 32 characters when the realtime endpoint is enabled")
 		}
-		// Realtime conversation cannot serve a single usable turn without both
-		// speech input and speech output adapters. Reject missing providers at
-		// startup instead of failing on the first audio segment.
+		// Realtime conversation cannot serve a single usable turn without the
+		// whole ASR, LLM, and TTS pipeline. Reject missing providers at startup
+		// instead of exposing an endpoint that fails on the first audio segment.
 		if strings.TrimSpace(cfg.Audio.ASRProvider) == "" {
 			return Config{}, fmt.Errorf("VOICE_GATEWAY_ASR_PROVIDER must be set when the realtime endpoint is enabled")
 		}
 		if strings.TrimSpace(cfg.Audio.TTSProvider) == "" {
 			return Config{}, fmt.Errorf("VOICE_GATEWAY_TTS_PROVIDER must be set when the realtime endpoint is enabled")
+		}
+		if strings.TrimSpace(cfg.Audio.LLMProvider) == "" {
+			return Config{}, fmt.Errorf("VOICE_GATEWAY_LLM_PROVIDER must be set when the realtime endpoint is enabled")
 		}
 		// The realtime endpoint re-checks the guardian's consent against the
 		// platform database. Without the database the authorizer cannot be

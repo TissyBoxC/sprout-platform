@@ -93,13 +93,12 @@ type AudioConfig struct {
 	SegmentQueueDepth int
 	// IdleTimeoutSeconds ends a silent conversation on the gateway.
 	IdleTimeoutSeconds int
-	// ASRProvider, TTSProvider, RealtimeProvider, and LLMProvider select the
-	// pipeline adapters. Empty values leave that stage unconfigured instead of
-	// failing startup, so health and internal endpoints keep working.
-	ASRProvider      string
-	TTSProvider      string
-	RealtimeProvider string
-	LLMProvider      string
+	// ASRProvider, TTSProvider, and LLMProvider select the pipeline adapters.
+	// Empty values leave that stage unconfigured instead of failing startup, so
+	// health and internal endpoints keep working.
+	ASRProvider string
+	TTSProvider string
+	LLMProvider string
 	// LLMModel is the default conversation model; empty uses provider default.
 	LLMModel string
 	// ASRConfig, TTSConfig, and LLMConfig carry provider-specific credentials.
@@ -290,7 +289,6 @@ func Load() (Config, error) {
 			IdleTimeoutSeconds:      envInt("VOICE_GATEWAY_SESSION_IDLE_TIMEOUT_SECONDS", 60),
 			ASRProvider:             strings.ToLower(env("VOICE_GATEWAY_ASR_PROVIDER", "")),
 			TTSProvider:             strings.ToLower(env("VOICE_GATEWAY_TTS_PROVIDER", "")),
-			RealtimeProvider:        strings.ToLower(env("VOICE_GATEWAY_REALTIME_PROVIDER", "")),
 			LLMProvider:             strings.ToLower(env("VOICE_GATEWAY_LLM_PROVIDER", "")),
 			LLMModel:                env("VOICE_GATEWAY_LLM_MODEL", ""),
 			ASRConfig: ASRProviderConfig{
@@ -329,6 +327,13 @@ func Load() (Config, error) {
 
 	if cfg.Internal.Enabled && len(strings.TrimSpace(cfg.Internal.AuthToken)) < 32 {
 		return Config{}, fmt.Errorf("VOICE_GATEWAY_INTERNAL_API_TOKEN must contain at least 32 characters when the internal API is enabled")
+	}
+	// The OpenAI Realtime adapter was imported during early provider
+	// scaffolding but was never connected to the device transport. Reject the
+	// retired selector so a deployment cannot appear to enable a realtime
+	// provider while every turn still uses the ASR/LLM/TTS pipeline.
+	if provider := strings.TrimSpace(env("VOICE_GATEWAY_REALTIME_PROVIDER", "")); provider != "" {
+		return Config{}, fmt.Errorf("VOICE_GATEWAY_REALTIME_PROVIDER is not supported; configure ASR, LLM, and TTS providers instead")
 	}
 	if cfg.WebSocket.Enabled {
 		// The realtime endpoint must never accept unauthenticated device audio,

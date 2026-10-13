@@ -107,6 +107,14 @@ func TestLoadRejectsEnabledInternalAPIWithoutStrongToken(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsUnsupportedRealtimeProvider(t *testing.T) {
+	t.Setenv("VOICE_GATEWAY_REALTIME_PROVIDER", "openai_realtime")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected the retired realtime provider selector to be rejected")
+	}
+}
+
 func TestLoadKeepsWebsiteSocketDisabledByDefault(t *testing.T) {
 	cfg, err := Load()
 	if err != nil {

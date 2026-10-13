@@ -17,8 +17,6 @@ import (
 	asropenai "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/asr/openai"
 	asrtencent "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/asr/tencent"
 	asrvolcano "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/asr/volcano"
-	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/realtime"
-	realtimeopenai "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/realtime/openai_realtime"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/tts"
 	ttsaliyun "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/tts/aliyun"
 	ttspiper "github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/tts/local_piper"
@@ -33,14 +31,13 @@ import (
 // Supported provider identifiers. They are lower-case so configuration is
 // case-insensitive and matches the deployment docs.
 const (
-	ProviderOpenAI         = "openai"
-	ProviderLocalWhisper   = "local_whisper"
-	ProviderLocalPiper     = "local_piper"
-	ProviderAliyun         = "aliyun"
-	ProviderTencent        = "tencent"
-	ProviderVolcano        = "volcano"
-	ProviderOpenAIRealtime = "openai_realtime"
-	ProviderSub2API        = "sub2api"
+	ProviderOpenAI       = "openai"
+	ProviderLocalWhisper = "local_whisper"
+	ProviderLocalPiper   = "local_piper"
+	ProviderAliyun       = "aliyun"
+	ProviderTencent      = "tencent"
+	ProviderVolcano      = "volcano"
+	ProviderSub2API      = "sub2api"
 )
 
 // Adapters groups the optional provider clients built from configuration.
@@ -48,10 +45,9 @@ const (
 // A nil field means that stage is not configured and must not be called. The
 // composition root inspects these fields to decide which endpoints are exposed.
 type Adapters struct {
-	ASR      asr.Recognizer
-	TTS      tts.Synthesizer
-	Realtime realtime.Connector
-	LLM      llm.Client
+	ASR asr.Recognizer
+	TTS tts.Synthesizer
+	LLM llm.Client
 }
 
 // Build creates the adapters selected by cfg. A provider that is named but
@@ -72,13 +68,6 @@ func Build(cfg config.AudioConfig) (Adapters, error) {
 			return Adapters{}, err
 		}
 		adapters.TTS = synthesizer
-	}
-	if provider := strings.TrimSpace(cfg.RealtimeProvider); provider != "" {
-		connector, err := buildRealtime(provider, cfg.TTSConfig)
-		if err != nil {
-			return Adapters{}, err
-		}
-		adapters.Realtime = connector
 	}
 	if provider := strings.TrimSpace(cfg.LLMProvider); provider != "" {
 		client, err := buildLLM(provider, cfg.LLMConfig)
@@ -164,20 +153,6 @@ func buildTTS(provider string, providerConfig config.TTSProviderConfig) (tts.Syn
 		}), nil
 	default:
 		return nil, fmt.Errorf("unsupported tts provider: %q", provider)
-	}
-}
-
-func buildRealtime(provider string, providerConfig config.TTSProviderConfig) (realtime.Connector, error) {
-	switch provider {
-	case ProviderOpenAIRealtime:
-		return realtimeopenai.New(realtimeopenai.Config{
-			BaseURL: providerConfig.Endpoint,
-			APIKey:  providerConfig.APIKey,
-			Model:   providerConfig.Model,
-			Voice:   providerConfig.Voice,
-		}), nil
-	default:
-		return nil, fmt.Errorf("unsupported realtime provider: %q", provider)
 	}
 }
 

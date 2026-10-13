@@ -927,6 +927,40 @@ func TestLocalCommandContractDocumentsFamilyAndDeviceEndpoints(t *testing.T) {
 	}
 }
 
+func TestVideoSessionContractDocumentsPolicyDevicesAndStatus(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/video-session/policy:",
+		"/api/v1/video-session/devices:",
+		"/api/v1/devices/{device_id}/video-session/capability:",
+		"/api/v1/admin/video-session/stats:",
+		"/api/v1/devices/{device_id}/video-session/policy:",
+		"/api/v1/devices/{device_id}/video-session/status:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected video-session path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"VideoSessionQuality:",
+		"VideoSessionCallState:",
+		"VideoSessionEndReason:",
+		"VideoSessionPolicyRequest:",
+		"VideoSessionPolicy:",
+		"VideoSessionCapability:",
+		"VideoSessionDeviceStatus:",
+		"VideoSessionStatusRequest:",
+		"VideoSessionAdminStats:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected video-session schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

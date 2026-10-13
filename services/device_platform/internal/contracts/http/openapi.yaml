@@ -5682,6 +5682,162 @@ paths:
           $ref: "#/components/responses/DeviceSessionExpired"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/video-session/policy:
+    get:
+      summary: Read the authenticated family's video-session policy
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Video-session policy with catalog values
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoSessionPolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Publish a new guardian video-session policy
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VideoSessionPolicyRequest"
+      responses:
+        "200":
+          description: Video-session policy updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoSessionPolicyRecordEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/video-session/devices:
+    get:
+      summary: List the authenticated family's video-session device statuses
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Video-session device statuses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoSessionDevicesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/video-session/capability:
+    get:
+      summary: Read one family device's video-session capability
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Video-session capability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoSessionCapabilityEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/video-session/stats:
+    get:
+      summary: Read the fleet-wide video-session summary
+      security:
+        - userToken: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        "200":
+          description: Video-session fleet statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoSessionAdminStatsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/video-session/policy:
+    get:
+      summary: Read the family video-session policy from a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Device video-session policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoSessionPolicyRecordEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/video-session/status:
+    post:
+      summary: Report bounded video-session status from a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VideoSessionStatusRequest"
+      responses:
+        "200":
+          description: Video-session status recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoSessionStatusRecordedEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -14549,3 +14705,330 @@ components:
               properties:
                 command_id:
                   type: string
+    VideoSessionQuality:
+      type: string
+      enum:
+        - unknown
+        - good
+        - fair
+        - poor
+    VideoSessionCallState:
+      type: string
+      enum:
+        - idle
+        - ringing
+        - active
+        - ended
+        - rejected
+        - failed
+    VideoSessionEndReason:
+      type: string
+      enum:
+        - none
+        - hangup
+        - rejected
+        - timeout
+        - network
+        - permission_revoked
+    VideoSessionPolicyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - camera_allowed
+        - microphone_allowed
+        - require_child_consent
+        - quality_floor
+        - ring_timeout_seconds
+        - max_session_seconds
+      properties:
+        enabled:
+          type: boolean
+        camera_allowed:
+          type: boolean
+        microphone_allowed:
+          type: boolean
+        require_child_consent:
+          type: boolean
+        quality_floor:
+          $ref: "#/components/schemas/VideoSessionQuality"
+        ring_timeout_seconds:
+          type: integer
+          minimum: 5
+          maximum: 120
+        max_session_seconds:
+          type: integer
+          minimum: 60
+          maximum: 7200
+    VideoSessionPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - enabled
+        - camera_allowed
+        - microphone_allowed
+        - require_child_consent
+        - quality_floor
+        - ring_timeout_seconds
+        - max_session_seconds
+        - revision
+      properties:
+        schema_version:
+          type: integer
+          const: 1
+        enabled:
+          type: boolean
+        camera_allowed:
+          type: boolean
+        microphone_allowed:
+          type: boolean
+        require_child_consent:
+          type: boolean
+        quality_floor:
+          $ref: "#/components/schemas/VideoSessionQuality"
+        ring_timeout_seconds:
+          type: integer
+          minimum: 5
+          maximum: 120
+        max_session_seconds:
+          type: integer
+          minimum: 60
+          maximum: 7200
+        revision:
+          type: integer
+          minimum: 0
+    VideoSessionPolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - policy
+                - qualities
+                - states
+              properties:
+                policy:
+                  $ref: "#/components/schemas/VideoSessionPolicy"
+                qualities:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/VideoSessionQuality"
+                states:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/VideoSessionCallState"
+    VideoSessionPolicyRecordEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/VideoSessionPolicy"
+    VideoSessionCapability:
+      type: object
+      additionalProperties: false
+      required:
+        - supported
+        - camera_allowed
+        - microphone_allowed
+        - call_state
+        - quality
+        - schema_version
+        - policy_revision
+        - applied_revision
+        - up_to_date
+      properties:
+        supported:
+          type: boolean
+        camera_allowed:
+          type: boolean
+        microphone_allowed:
+          type: boolean
+        call_state:
+          $ref: "#/components/schemas/VideoSessionCallState"
+        quality:
+          $ref: "#/components/schemas/VideoSessionQuality"
+        schema_version:
+          type: integer
+          const: 1
+        policy_revision:
+          type: integer
+          minimum: 0
+        applied_revision:
+          type: integer
+          minimum: 0
+        up_to_date:
+          type: boolean
+    VideoSessionCapabilityEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/VideoSessionCapability"
+    VideoSessionDeviceStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - family_id
+        - session_supported
+        - camera_allowed
+        - microphone_allowed
+        - call_state
+        - quality
+        - last_end_reason
+        - up_to_date
+        - reported_at
+      properties:
+        device_id:
+          type: string
+        family_id:
+          type: string
+        session_supported:
+          type: boolean
+        camera_allowed:
+          type: boolean
+        microphone_allowed:
+          type: boolean
+        call_state:
+          $ref: "#/components/schemas/VideoSessionCallState"
+        quality:
+          $ref: "#/components/schemas/VideoSessionQuality"
+        last_end_reason:
+          $ref: "#/components/schemas/VideoSessionEndReason"
+        up_to_date:
+          type: boolean
+        reported_at:
+          type: string
+          format: date-time
+    VideoSessionDevicesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - devices
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/VideoSessionDeviceStatus"
+    VideoSessionStatusRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - session_supported
+        - camera_allowed
+        - microphone_allowed
+        - call_state
+        - quality
+        - last_end_reason
+        - policy_revision
+      properties:
+        session_supported:
+          type: boolean
+        camera_allowed:
+          type: boolean
+        microphone_allowed:
+          type: boolean
+        call_state:
+          $ref: "#/components/schemas/VideoSessionCallState"
+        quality:
+          $ref: "#/components/schemas/VideoSessionQuality"
+        last_end_reason:
+          $ref: "#/components/schemas/VideoSessionEndReason"
+        policy_revision:
+          type: integer
+          minimum: 0
+    VideoSessionStatusRecordedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - policy_revision
+                - recorded
+              properties:
+                device_id:
+                  type: string
+                policy_revision:
+                  type: integer
+                  minimum: 0
+                recorded:
+                  type: boolean
+                  const: true
+    VideoSessionCount:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - count
+      properties:
+        label:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+    VideoSessionAdminStats:
+      type: object
+      additionalProperties: false
+      required:
+        - window_days
+        - device_count
+        - supported_count
+        - capture_allowed_count
+        - outdated_count
+        - poor_quality_count
+        - state_buckets
+        - reason_buckets
+        - generated_at
+      properties:
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        device_count:
+          type: integer
+          minimum: 0
+        supported_count:
+          type: integer
+          minimum: 0
+        capture_allowed_count:
+          type: integer
+          minimum: 0
+        outdated_count:
+          type: integer
+          minimum: 0
+        poor_quality_count:
+          type: integer
+          minimum: 0
+        state_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/VideoSessionCount"
+        reason_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/VideoSessionCount"
+        generated_at:
+          type: string
+          format: date-time
+    VideoSessionAdminStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/VideoSessionAdminStats"

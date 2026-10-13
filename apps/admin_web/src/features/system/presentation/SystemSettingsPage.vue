@@ -70,7 +70,12 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
           这里的设置会作为新账号和新设备的默认规则。已经单独调整过的账号不会被覆盖。
         </p>
       </div>
-      <button type="button" class="primary" :disabled="store.isSaving" @click="store.save">
+      <button
+        type="button"
+        class="primary"
+        :disabled="!store.isLoaded || store.isSaving"
+        @click="store.save"
+      >
         {{ store.isSaving ? '正在保存…' : '保存系统设置' }}
       </button>
     </header>
@@ -79,7 +84,9 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
       <p v-if="store.lastMessage" class="success-message">{{ store.lastMessage }}</p>
     </Transition>
     <Transition name="toast">
-      <p v-if="store.error" class="error-message">{{ store.error.message }}</p>
+      <p v-if="store.error && store.isLoaded" class="error-message">
+        {{ store.error.message }}
+      </p>
     </Transition>
     <Transition name="toast">
       <p v-if="store.integrationNotice" class="notice-message">
@@ -92,7 +99,12 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
       正在读取系统设置…
     </div>
 
-    <form v-else class="settings-layout" @submit.prevent="store.save">
+    <div v-else-if="store.error && !store.isLoaded" class="state-panel state-error">
+      <p>{{ store.error.message }}</p>
+      <button type="button" class="primary" @click="store.load">重新加载</button>
+    </div>
+
+    <form v-else-if="store.isLoaded" class="settings-layout" @submit.prevent="store.save">
       <section class="settings-section">
         <div class="section-heading">
           <div>

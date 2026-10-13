@@ -68,6 +68,7 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
   const defaultBalanceSource = ref('')
   const integrationNotice = ref('')
   const isLoading = ref(false)
+  const isLoaded = ref(false)
   const isSaving = ref(false)
   const error = ref<ApiError | null>(null)
   const lastMessage = ref('')
@@ -80,6 +81,7 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
       const response = await httpClient.get('/api/v1/admin/settings')
       settings.value = toSettings(response.data.data?.settings ?? {})
       version.value = numberValue(response.data.data?.version, 0)
+      isLoaded.value = true
     } catch (caught: unknown) {
       error.value = mapApiError(caught)
     } finally {
@@ -90,6 +92,14 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
   }
 
   async function save(): Promise<boolean> {
+    if (!isLoaded.value) {
+      error.value = {
+        kind: 'service_unavailable',
+        message: '系统设置尚未成功加载，请先重新加载后再保存',
+        retryable: true,
+      }
+      return false
+    }
     isSaving.value = true
     error.value = null
     lastMessage.value = ''
@@ -134,6 +144,7 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
     isSaving,
     lastMessage,
     load,
+    isLoaded,
     modelOptions,
     reloadChildPolicy,
     save,

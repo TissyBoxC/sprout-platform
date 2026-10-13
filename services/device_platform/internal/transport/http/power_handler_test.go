@@ -141,6 +141,25 @@ func TestPowerCurrentRequiresAuthentication(t *testing.T) {
 	}
 }
 
+func TestPowerDevicePolicyRequiresSession(t *testing.T) {
+	handler := devicePowerHandler{
+		handler:        &powerHandler{service: &powerTestService{}},
+		bindingService: nil,
+		runtimeService: nil,
+	}
+	request := englishRequest(
+		http.MethodGet,
+		"/api/v1/devices/device-1/power/policy",
+		"",
+		"",
+	)
+	recorder := httptest.NewRecorder()
+	handler.devicePolicy(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestPowerPublishAndReadBack(t *testing.T) {
 	handler := powerHandler{service: &powerTestService{}}
 	body := `{"enabled":true,"low_power_enabled":true,` +

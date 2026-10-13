@@ -198,6 +198,25 @@ func (handler devicePowerHandler) reportStatus(
 	})
 }
 
+// devicePolicy returns the family power policy to a bound device over its
+// device session token so the firmware can clamp and apply it, mirroring the
+// other device policy endpoints.
+func (handler devicePowerHandler) devicePolicy(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	_, familyID, ok := handler.verifyDevice(response, request)
+	if !ok {
+		return
+	}
+	policy, err := handler.handler.service.Current(request.Context(), familyID)
+	if err != nil {
+		writePowerError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, powerPolicyResponse(policy))
+}
+
 // adminStats returns the bounded fleet power summary.
 func (handler powerHandler) adminStats(
 	response http.ResponseWriter,

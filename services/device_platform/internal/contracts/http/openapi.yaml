@@ -5994,6 +5994,162 @@ paths:
           $ref: "#/components/responses/DeviceUnprocessable"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/image-privacy/policy:
+    get:
+      summary: Read the authenticated family's image-privacy policy
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Image-privacy policy with catalog values
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImagePrivacyPolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Publish a new guardian image-privacy policy
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImagePrivacyPolicyRequest"
+      responses:
+        "200":
+          description: Image-privacy policy updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImagePrivacyPolicyRecordEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/image-privacy/devices:
+    get:
+      summary: List the family's latest image pipeline statuses
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Image pipeline device statuses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImagePrivacyDevicesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/image-privacy/capability:
+    get:
+      summary: Read one family device's image pipeline capability
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Image pipeline capability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImagePrivacyCapabilityEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/image-privacy/stats:
+    get:
+      summary: Read the fleet-wide image-privacy summary
+      security:
+        - userToken: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        "200":
+          description: Image-privacy fleet statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImagePrivacyAdminStatsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/image-privacy/policy:
+    get:
+      summary: Read the family image-privacy policy from a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Device image-privacy policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImagePrivacyPolicyRecordEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/image-privacy/status:
+    post:
+      summary: Report bounded image pipeline status from a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImagePrivacyStatusRequest"
+      responses:
+        "200":
+          description: Image pipeline status recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImagePrivacyStatusRecordedEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -15543,3 +15699,401 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/LearningVisualizationAdminStats"
+    ImagePrivacyProcessingMode:
+      type: string
+      enum:
+        - "off"
+        - metadata
+        - local_full
+    ImagePrivacyUploadScope:
+      type: string
+      enum:
+        - none
+        - thumbnails
+        - analysis
+    ImagePrivacyRedactionLevel:
+      type: string
+      enum:
+        - none
+        - standard
+        - strict
+    ImagePrivacyBlockReason:
+      type: string
+      enum:
+        - none
+        - disabled
+        - consent
+        - scope
+        - quota
+        - error
+    ImagePrivacyPolicyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - upload_allowed
+        - local_processing_only
+        - processing_mode
+        - upload_scope
+        - retention_days
+        - redaction_level
+        - require_child_consent
+      properties:
+        enabled:
+          type: boolean
+        upload_allowed:
+          type: boolean
+        local_processing_only:
+          type: boolean
+        processing_mode:
+          $ref: "#/components/schemas/ImagePrivacyProcessingMode"
+        upload_scope:
+          $ref: "#/components/schemas/ImagePrivacyUploadScope"
+        retention_days:
+          type: integer
+          minimum: 0
+          maximum: 30
+        redaction_level:
+          $ref: "#/components/schemas/ImagePrivacyRedactionLevel"
+        require_child_consent:
+          type: boolean
+    ImagePrivacyPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - enabled
+        - upload_allowed
+        - local_processing_only
+        - processing_mode
+        - upload_scope
+        - retention_days
+        - redaction_level
+        - require_child_consent
+        - revision
+      properties:
+        schema_version:
+          type: integer
+          const: 1
+        enabled:
+          type: boolean
+        upload_allowed:
+          type: boolean
+        local_processing_only:
+          type: boolean
+        processing_mode:
+          $ref: "#/components/schemas/ImagePrivacyProcessingMode"
+        upload_scope:
+          $ref: "#/components/schemas/ImagePrivacyUploadScope"
+        retention_days:
+          type: integer
+          minimum: 0
+          maximum: 30
+        redaction_level:
+          $ref: "#/components/schemas/ImagePrivacyRedactionLevel"
+        require_child_consent:
+          type: boolean
+        revision:
+          type: integer
+          minimum: 0
+    ImagePrivacyPolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - policy
+                - processing_modes
+                - upload_scopes
+                - redaction_levels
+                - block_reasons
+              properties:
+                policy:
+                  $ref: "#/components/schemas/ImagePrivacyPolicy"
+                processing_modes:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ImagePrivacyProcessingMode"
+                upload_scopes:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ImagePrivacyUploadScope"
+                redaction_levels:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ImagePrivacyRedactionLevel"
+                block_reasons:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ImagePrivacyBlockReason"
+    ImagePrivacyPolicyRecordEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ImagePrivacyPolicy"
+    ImagePrivacyCapability:
+      type: object
+      additionalProperties: false
+      required:
+        - supported
+        - local_processing
+        - upload_allowed
+        - processing_mode
+        - upload_scope
+        - redaction_level
+        - schema_version
+        - policy_revision
+        - applied_revision
+        - up_to_date
+      properties:
+        supported:
+          type: boolean
+        local_processing:
+          type: boolean
+        upload_allowed:
+          type: boolean
+        processing_mode:
+          $ref: "#/components/schemas/ImagePrivacyProcessingMode"
+        upload_scope:
+          $ref: "#/components/schemas/ImagePrivacyUploadScope"
+        redaction_level:
+          $ref: "#/components/schemas/ImagePrivacyRedactionLevel"
+        schema_version:
+          type: integer
+          const: 1
+        policy_revision:
+          type: integer
+          minimum: 0
+        applied_revision:
+          type: integer
+          minimum: 0
+        up_to_date:
+          type: boolean
+    ImagePrivacyCapabilityEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ImagePrivacyCapability"
+    ImagePrivacyDeviceStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - family_id
+        - camera_supported
+        - local_processing
+        - upload_allowed
+        - processing_mode
+        - upload_scope
+        - redaction_level
+        - processed_count
+        - uploaded_count
+        - blocked_count
+        - last_block_reason
+        - up_to_date
+        - reported_at
+      properties:
+        device_id:
+          type: string
+        family_id:
+          type: string
+        camera_supported:
+          type: boolean
+        local_processing:
+          type: boolean
+        upload_allowed:
+          type: boolean
+        processing_mode:
+          $ref: "#/components/schemas/ImagePrivacyProcessingMode"
+        upload_scope:
+          $ref: "#/components/schemas/ImagePrivacyUploadScope"
+        redaction_level:
+          $ref: "#/components/schemas/ImagePrivacyRedactionLevel"
+        processed_count:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        uploaded_count:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        blocked_count:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        last_block_reason:
+          $ref: "#/components/schemas/ImagePrivacyBlockReason"
+        up_to_date:
+          type: boolean
+        reported_at:
+          type: string
+          format: date-time
+    ImagePrivacyDevicesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - devices
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ImagePrivacyDeviceStatus"
+    ImagePrivacyStatusRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - camera_supported
+        - local_processing
+        - upload_allowed
+        - processing_mode
+        - upload_scope
+        - redaction_level
+        - processed_count
+        - uploaded_count
+        - blocked_count
+        - last_block_reason
+        - policy_revision
+      properties:
+        camera_supported:
+          type: boolean
+        local_processing:
+          type: boolean
+        upload_allowed:
+          type: boolean
+        processing_mode:
+          $ref: "#/components/schemas/ImagePrivacyProcessingMode"
+        upload_scope:
+          $ref: "#/components/schemas/ImagePrivacyUploadScope"
+        redaction_level:
+          $ref: "#/components/schemas/ImagePrivacyRedactionLevel"
+        processed_count:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        uploaded_count:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        blocked_count:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        last_block_reason:
+          $ref: "#/components/schemas/ImagePrivacyBlockReason"
+        policy_revision:
+          type: integer
+          minimum: 0
+    ImagePrivacyStatusRecordedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - processing_mode
+                - upload_scope
+                - policy_revision
+                - recorded
+              properties:
+                device_id:
+                  type: string
+                processing_mode:
+                  $ref: "#/components/schemas/ImagePrivacyProcessingMode"
+                upload_scope:
+                  $ref: "#/components/schemas/ImagePrivacyUploadScope"
+                policy_revision:
+                  type: integer
+                  minimum: 0
+                recorded:
+                  type: boolean
+                  const: true
+    ImagePrivacyCount:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - count
+      properties:
+        label:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+    ImagePrivacyAdminStats:
+      type: object
+      additionalProperties: false
+      required:
+        - window_days
+        - device_count
+        - camera_count
+        - local_only_count
+        - upload_allowed_count
+        - outdated_count
+        - processed_total
+        - uploaded_total
+        - blocked_total
+        - mode_buckets
+        - reason_buckets
+        - generated_at
+      properties:
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        device_count:
+          type: integer
+          minimum: 0
+        camera_count:
+          type: integer
+          minimum: 0
+        local_only_count:
+          type: integer
+          minimum: 0
+        upload_allowed_count:
+          type: integer
+          minimum: 0
+        outdated_count:
+          type: integer
+          minimum: 0
+        processed_total:
+          type: integer
+          minimum: 0
+        uploaded_total:
+          type: integer
+          minimum: 0
+        blocked_total:
+          type: integer
+          minimum: 0
+        mode_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/ImagePrivacyCount"
+        reason_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/ImagePrivacyCount"
+        generated_at:
+          type: string
+          format: date-time
+    ImagePrivacyAdminStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ImagePrivacyAdminStats"

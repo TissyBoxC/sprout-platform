@@ -5838,6 +5838,162 @@ paths:
           $ref: "#/components/responses/DeviceUnprocessable"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/learning-visualization/policy:
+    get:
+      summary: Read the authenticated family's learning-visualization policy
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Learning-visualization policy with catalog values
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LearningVisualizationPolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Publish a new guardian learning-visualization policy
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LearningVisualizationPolicyRequest"
+      responses:
+        "200":
+          description: Learning-visualization policy updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LearningVisualizationPolicyRecordEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/learning-visualization/devices:
+    get:
+      summary: List the family's latest learning-visualization statuses
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Learning-visualization device statuses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LearningVisualizationDevicesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/learning-visualization/capability:
+    get:
+      summary: Read one family device's learning-visualization capability
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Learning-visualization capability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LearningVisualizationCapabilityEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/learning-visualization/stats:
+    get:
+      summary: Read the fleet-wide learning-visualization summary
+      security:
+        - userToken: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        "200":
+          description: Learning-visualization fleet statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LearningVisualizationAdminStatsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/learning-visualization/policy:
+    get:
+      summary: Read the family learning-visualization policy from a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Device learning-visualization policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LearningVisualizationPolicyRecordEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/learning-visualization/status:
+    post:
+      summary: Report bounded learning-visualization status from a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LearningVisualizationStatusRequest"
+      responses:
+        "200":
+          description: Learning-visualization status recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LearningVisualizationStatusRecordedEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -15032,3 +15188,358 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/VideoSessionAdminStats"
+    LearningVisualizationFeedbackStyle:
+      type: string
+      enum:
+        - neutral
+        - encouraging
+        - playful
+        - celebration
+    LearningVisualizationAnimationLevel:
+      type: string
+      enum:
+        - off
+        - subtle
+        - full
+    LearningVisualizationState:
+      type: string
+      enum:
+        - idle
+        - lesson
+        - feedback
+        - reward
+        - paused
+        - error
+    LearningVisualizationPolicyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - feedback_style
+        - animation_level
+        - touch_feedback_enabled
+        - reward_effects_enabled
+        - lesson_linkage_enabled
+        - max_session_minutes
+      properties:
+        enabled:
+          type: boolean
+        feedback_style:
+          $ref: "#/components/schemas/LearningVisualizationFeedbackStyle"
+        animation_level:
+          $ref: "#/components/schemas/LearningVisualizationAnimationLevel"
+        touch_feedback_enabled:
+          type: boolean
+        reward_effects_enabled:
+          type: boolean
+        lesson_linkage_enabled:
+          type: boolean
+        max_session_minutes:
+          type: integer
+          minimum: 1
+          maximum: 60
+    LearningVisualizationPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - enabled
+        - feedback_style
+        - animation_level
+        - touch_feedback_enabled
+        - reward_effects_enabled
+        - lesson_linkage_enabled
+        - max_session_minutes
+        - revision
+      properties:
+        schema_version:
+          type: integer
+          const: 1
+        enabled:
+          type: boolean
+        feedback_style:
+          $ref: "#/components/schemas/LearningVisualizationFeedbackStyle"
+        animation_level:
+          $ref: "#/components/schemas/LearningVisualizationAnimationLevel"
+        touch_feedback_enabled:
+          type: boolean
+        reward_effects_enabled:
+          type: boolean
+        lesson_linkage_enabled:
+          type: boolean
+        max_session_minutes:
+          type: integer
+          minimum: 1
+          maximum: 60
+        revision:
+          type: integer
+          minimum: 0
+    LearningVisualizationPolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - policy
+                - feedback_styles
+                - animation_levels
+                - visual_states
+              properties:
+                policy:
+                  $ref: "#/components/schemas/LearningVisualizationPolicy"
+                feedback_styles:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/LearningVisualizationFeedbackStyle"
+                animation_levels:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/LearningVisualizationAnimationLevel"
+                visual_states:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/LearningVisualizationState"
+    LearningVisualizationPolicyRecordEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/LearningVisualizationPolicy"
+    LearningVisualizationCapability:
+      type: object
+      additionalProperties: false
+      required:
+        - supported
+        - touch_supported
+        - linked_lesson_id
+        - visual_state
+        - feedback_style
+        - animation_level
+        - schema_version
+        - policy_revision
+        - applied_revision
+        - up_to_date
+      properties:
+        supported:
+          type: boolean
+        touch_supported:
+          type: boolean
+        linked_lesson_id:
+          type: string
+          maxLength: 64
+        visual_state:
+          $ref: "#/components/schemas/LearningVisualizationState"
+        feedback_style:
+          $ref: "#/components/schemas/LearningVisualizationFeedbackStyle"
+        animation_level:
+          $ref: "#/components/schemas/LearningVisualizationAnimationLevel"
+        schema_version:
+          type: integer
+          const: 1
+        policy_revision:
+          type: integer
+          minimum: 0
+        applied_revision:
+          type: integer
+          minimum: 0
+        up_to_date:
+          type: boolean
+    LearningVisualizationCapabilityEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/LearningVisualizationCapability"
+    LearningVisualizationDeviceStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - family_id
+        - visualization_supported
+        - touch_supported
+        - linked_lesson_id
+        - visual_state
+        - feedback_style
+        - animation_level
+        - feedback_events
+        - session_minutes
+        - up_to_date
+        - reported_at
+      properties:
+        device_id:
+          type: string
+        family_id:
+          type: string
+        visualization_supported:
+          type: boolean
+        touch_supported:
+          type: boolean
+        linked_lesson_id:
+          type: string
+          maxLength: 64
+        visual_state:
+          $ref: "#/components/schemas/LearningVisualizationState"
+        feedback_style:
+          $ref: "#/components/schemas/LearningVisualizationFeedbackStyle"
+        animation_level:
+          $ref: "#/components/schemas/LearningVisualizationAnimationLevel"
+        feedback_events:
+          type: integer
+          minimum: 0
+          maximum: 100000
+        session_minutes:
+          type: integer
+          minimum: 0
+          maximum: 1440
+        up_to_date:
+          type: boolean
+        reported_at:
+          type: string
+          format: date-time
+    LearningVisualizationDevicesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - devices
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/LearningVisualizationDeviceStatus"
+    LearningVisualizationStatusRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - visualization_supported
+        - touch_supported
+        - linked_lesson_id
+        - visual_state
+        - feedback_style
+        - animation_level
+        - feedback_events
+        - session_minutes
+        - policy_revision
+      properties:
+        visualization_supported:
+          type: boolean
+        touch_supported:
+          type: boolean
+        linked_lesson_id:
+          type: string
+          maxLength: 64
+        visual_state:
+          $ref: "#/components/schemas/LearningVisualizationState"
+        feedback_style:
+          $ref: "#/components/schemas/LearningVisualizationFeedbackStyle"
+        animation_level:
+          $ref: "#/components/schemas/LearningVisualizationAnimationLevel"
+        feedback_events:
+          type: integer
+          minimum: 0
+          maximum: 100000
+        session_minutes:
+          type: integer
+          minimum: 0
+          maximum: 1440
+        policy_revision:
+          type: integer
+          minimum: 0
+    LearningVisualizationStatusRecordedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - policy_revision
+                - recorded
+              properties:
+                device_id:
+                  type: string
+                policy_revision:
+                  type: integer
+                  minimum: 0
+                recorded:
+                  type: boolean
+                  const: true
+    LearningVisualizationCount:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - count
+      properties:
+        label:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+    LearningVisualizationAdminStats:
+      type: object
+      additionalProperties: false
+      required:
+        - window_days
+        - device_count
+        - supported_count
+        - touch_count
+        - lesson_linked_count
+        - outdated_count
+        - feedback_events
+        - state_buckets
+        - style_buckets
+        - generated_at
+      properties:
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        device_count:
+          type: integer
+          minimum: 0
+        supported_count:
+          type: integer
+          minimum: 0
+        touch_count:
+          type: integer
+          minimum: 0
+        lesson_linked_count:
+          type: integer
+          minimum: 0
+        outdated_count:
+          type: integer
+          minimum: 0
+        feedback_events:
+          type: integer
+          minimum: 0
+        state_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/LearningVisualizationCount"
+        style_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/LearningVisualizationCount"
+        generated_at:
+          type: string
+          format: date-time
+    LearningVisualizationAdminStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/LearningVisualizationAdminStats"

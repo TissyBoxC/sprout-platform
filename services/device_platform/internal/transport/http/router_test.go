@@ -961,6 +961,40 @@ func TestVideoSessionContractDocumentsPolicyDevicesAndStatus(t *testing.T) {
 	}
 }
 
+func TestLearningVisualizationContractDocumentsPolicyDevicesAndStatus(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/learning-visualization/policy:",
+		"/api/v1/learning-visualization/devices:",
+		"/api/v1/devices/{device_id}/learning-visualization/capability:",
+		"/api/v1/admin/learning-visualization/stats:",
+		"/api/v1/devices/{device_id}/learning-visualization/policy:",
+		"/api/v1/devices/{device_id}/learning-visualization/status:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected learning-visualization path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"LearningVisualizationFeedbackStyle:",
+		"LearningVisualizationAnimationLevel:",
+		"LearningVisualizationState:",
+		"LearningVisualizationPolicyRequest:",
+		"LearningVisualizationPolicy:",
+		"LearningVisualizationCapability:",
+		"LearningVisualizationDeviceStatus:",
+		"LearningVisualizationStatusRequest:",
+		"LearningVisualizationAdminStats:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected learning-visualization schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

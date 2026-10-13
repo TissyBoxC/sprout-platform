@@ -274,6 +274,10 @@ func NewRouter(options RouterOptions) http.Handler {
 				authHandler.requireAuthentication(familyHandler.listInvitations),
 			)
 			mux.HandleFunc(
+				"GET /api/v1/family/invitations/mine",
+				authHandler.requireAuthentication(familyHandler.listMyInvitations),
+			)
+			mux.HandleFunc(
 				"POST /api/v1/family/invitations",
 				authHandler.requireAuthentication(familyHandler.createInvitation),
 			)

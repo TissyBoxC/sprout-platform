@@ -34,6 +34,11 @@ type familyService interface {
 		familyID string,
 		actorUserID string,
 	) ([]familydomain.Invitation, error)
+	PendingInvitationsForAccount(
+		ctx context.Context,
+		userID string,
+		email string,
+	) ([]familydomain.Invitation, error)
 	CreateInvitation(
 		ctx context.Context,
 		familyID string,
@@ -131,6 +136,42 @@ func (handler familyHandler) listInvitations(
 		request.Context(),
 		familyID,
 		userID,
+	)
+	if err != nil {
+		writeFamilyError(response, request, err)
+		return
+	}
+	result := make([]map[string]any, 0, len(invitations))
+	for index := range invitations {
+		result = append(result, familyInvitationResponse(&invitations[index]))
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"invitations": result,
+	})
+}
+
+// listMyInvitations returns the pending invitations addressed to the
+// authenticated account's email. It is reachable by any signed-in account,
+// including one with no membership yet, so an invitee can discover and accept
+// an invitation without already knowing a family id.
+func (handler familyHandler) listMyInvitations(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	userID, ok := authenticatedAccountID(request)
+	if !ok {
+		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
+		return
+	}
+	email, err := handler.accountEmail(request.Context(), userID)
+	if err != nil {
+		writeFamilyError(response, request, err)
+		return
+	}
+	invitations, err := handler.service.PendingInvitationsForAccount(
+		request.Context(),
+		userID,
+		email,
 	)
 	if err != nil {
 		writeFamilyError(response, request, err)

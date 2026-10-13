@@ -28,6 +28,10 @@ type Repository interface {
 		invitationID string,
 	) (domain.Invitation, bool, error)
 	Invitations(ctx context.Context, familyID string) ([]domain.Invitation, error)
+	PendingInvitationsByEmail(
+		ctx context.Context,
+		email string,
+	) ([]domain.Invitation, error)
 	UpdateInvitationState(
 		ctx context.Context,
 		familyID string,
@@ -289,6 +293,42 @@ func (r *PostgresRepository) Invitations(
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate family invitations: %w", err)
+	}
+	return invitations, nil
+}
+
+// PendingInvitationsByEmail lists every pending, unexpired invitation addressed
+// to one email across all families. It is scoped by the normalized address, so
+// an authenticated account can discover an invitation before it has any
+// membership and therefore no family id to query with.
+func (r *PostgresRepository) PendingInvitationsByEmail(
+	ctx context.Context,
+	email string,
+) ([]domain.Invitation, error) {
+	normalized := domain.NormalizeEmail(email)
+	if normalized == "" {
+		return nil, nil
+	}
+	rows, err := r.pool.Query(ctx, invitationSelect+`
+		WHERE lower(email) = $1
+		  AND status = 'pending'
+		  AND expires_at > NOW()
+		ORDER BY created_at DESC
+	`, normalized)
+	if err != nil {
+		return nil, fmt.Errorf("list pending family invitations by email: %w", err)
+	}
+	defer rows.Close()
+	invitations := make([]domain.Invitation, 0, 4)
+	for rows.Next() {
+		invitation, err := scanInvitation(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan pending family invitation: %w", err)
+		}
+		invitations = append(invitations, invitation)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pending family invitations: %w", err)
 	}
 	return invitations, nil
 }

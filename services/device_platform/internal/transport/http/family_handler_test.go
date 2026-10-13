@@ -86,6 +86,22 @@ func (s *familyTestService) Invitations(
 	return invitations, nil
 }
 
+func (s *familyTestService) PendingInvitationsForAccount(
+	_ context.Context,
+	userID string,
+	email string,
+) ([]familydomain.Invitation, error) {
+	normalized := familydomain.NormalizeEmail(email)
+	invitations := make([]familydomain.Invitation, 0, len(s.invitations))
+	for _, invitation := range s.invitations {
+		if familydomain.NormalizeEmail(invitation.Email) == normalized &&
+			invitation.Status == familydomain.InvitationPending {
+			invitations = append(invitations, invitation)
+		}
+	}
+	return invitations, nil
+}
+
 func (s *familyTestService) CreateInvitation(
 	_ context.Context,
 	familyID string,
@@ -349,6 +365,67 @@ func TestFamilyAcceptInvitationMatchesEmail(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d: %s",
 			recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+}
+
+func TestFamilyListMyInvitationsFindsPendingByEmail(t *testing.T) {
+	handler, service := newFamilyHandlerForTest()
+	service.invitations["invitation-1"] = familydomain.Invitation{
+		ID:       "invitation-1",
+		FamilyID: "family-1",
+		Email:    "Guardian@Example.com",
+		Role:     familydomain.RoleGuardian,
+		Status:   familydomain.InvitationPending,
+	}
+	service.invitations["invitation-2"] = familydomain.Invitation{
+		ID:       "invitation-2",
+		FamilyID: "family-1",
+		Email:    "someone-else@example.com",
+		Role:     familydomain.RoleViewer,
+		Status:   familydomain.InvitationPending,
+	}
+	handler.accountReader = familyTestAccountReader{
+		emails: map[string]string{"user-2": "guardian@example.com"},
+	}
+	request := englishRequest(
+		http.MethodGet,
+		"/api/v1/family/invitations/mine",
+		"",
+		"user-2",
+	)
+	recorder := httptest.NewRecorder()
+	handler.listMyInvitations(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s",
+			recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Invitations []familydomain.Invitation `json:"invitations"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(envelope.Data.Invitations) != 1 ||
+		envelope.Data.Invitations[0].ID != "invitation-1" {
+		t.Fatalf("unexpected invitations: %+v", envelope.Data.Invitations)
+	}
+}
+
+func TestFamilyListMyInvitationsRequiresAuthentication(t *testing.T) {
+	handler, _ := newFamilyHandlerForTest()
+	request := englishRequest(
+		http.MethodGet,
+		"/api/v1/family/invitations/mine",
+		"",
+		"",
+	)
+	recorder := httptest.NewRecorder()
+	handler.listMyInvitations(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d: %s",
+			recorder.Code, http.StatusUnauthorized, recorder.Body.String())
 	}
 }
 

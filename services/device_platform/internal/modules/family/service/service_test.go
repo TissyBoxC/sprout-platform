@@ -129,6 +129,21 @@ func (r *fakeRepository) Invitations(_ context.Context, familyID string) ([]doma
 	return invitations, nil
 }
 
+func (r *fakeRepository) PendingInvitationsByEmail(
+	_ context.Context,
+	email string,
+) ([]domain.Invitation, error) {
+	normalized := domain.NormalizeEmail(email)
+	invitations := make([]domain.Invitation, 0, 4)
+	for _, invitation := range r.invitations {
+		if domain.NormalizeEmail(invitation.Email) == normalized &&
+			invitation.Status == domain.InvitationPending {
+			invitations = append(invitations, invitation)
+		}
+	}
+	return invitations, nil
+}
+
 func (r *fakeRepository) UpdateInvitationState(
 	_ context.Context,
 	familyID string,
@@ -158,6 +173,59 @@ func newService(t *testing.T, repository *fakeRepository, now time.Time) *Servic
 		t.Fatalf("create service: %v", err)
 	}
 	return service
+}
+
+func TestPendingInvitationsForAccountMatchesNormalizedEmail(t *testing.T) {
+	repository := newFakeRepository()
+	now := time.Date(2026, time.October, 13, 9, 0, 0, 0, time.UTC)
+	service := newService(t, repository, now)
+	repository.members[memberKey("family-1", "owner-1")] = domain.Member{
+		ID:       "owner-1",
+		FamilyID: "family-1",
+		UserID:   "owner-1",
+		Role:     domain.RoleOwner,
+	}
+	if _, err := service.CreateInvitation(
+		context.Background(), "family-1", "owner-1",
+		"Guardian@Example.com", domain.RoleGuardian,
+	); err != nil {
+		t.Fatalf("create invitation: %v", err)
+	}
+
+	invitations, err := service.PendingInvitationsForAccount(
+		context.Background(),
+		"user-2",
+		"guardian@example.com",
+	)
+	if err != nil {
+		t.Fatalf("list pending invitations: %v", err)
+	}
+	if len(invitations) != 1 || invitations[0].Role != domain.RoleGuardian {
+		t.Fatalf("unexpected invitations: %+v", invitations)
+	}
+
+	other, err := service.PendingInvitationsForAccount(
+		context.Background(),
+		"user-3",
+		"nobody@example.com",
+	)
+	if err != nil {
+		t.Fatalf("list other invitations: %v", err)
+	}
+	if len(other) != 0 {
+		t.Fatalf("expected no invitations for another email, got %+v", other)
+	}
+}
+
+func TestPendingInvitationsForAccountRejectsInvalidEmail(t *testing.T) {
+	service := newService(t, newFakeRepository(), time.Now())
+	if _, err := service.PendingInvitationsForAccount(
+		context.Background(),
+		"user-2",
+		"not-an-email",
+	); !errors.Is(err, domain.ErrInvalidInvitation) {
+		t.Fatalf("err = %v, want ErrInvalidInvitation", err)
+	}
 }
 
 func TestBootstrapOwnerIsIdempotent(t *testing.T) {

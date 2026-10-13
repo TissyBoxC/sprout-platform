@@ -33,6 +33,10 @@ type Repository interface {
 		invitationID string,
 	) (domain.Invitation, bool, error)
 	Invitations(ctx context.Context, familyID string) ([]domain.Invitation, error)
+	PendingInvitationsByEmail(
+		ctx context.Context,
+		email string,
+	) ([]domain.Invitation, error)
 	UpdateInvitationState(
 		ctx context.Context,
 		familyID string,
@@ -139,6 +143,25 @@ func (s *Service) ResolveFamily(
 		return domain.Member{}, domain.ErrMemberNotFound
 	}
 	return member, nil
+}
+
+// PendingInvitationsForAccount lists the pending invitations addressed to the
+// authenticated account's email. It is how an invitee discovers an invitation
+// before joining, when it has no family id to scope a request with. The email
+// is normalized and only pending, unexpired rows are returned.
+func (s *Service) PendingInvitationsForAccount(
+	ctx context.Context,
+	userID string,
+	email string,
+) ([]domain.Invitation, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, domain.ErrInvalidMember
+	}
+	normalized := domain.NormalizeEmail(email)
+	if err := domain.ValidateInviteEmail(normalized); err != nil {
+		return nil, err
+	}
+	return s.repository.PendingInvitationsByEmail(ctx, normalized)
 }
 
 // Invitations lists a family's invitations. Any member may read them.

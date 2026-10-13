@@ -9280,6 +9280,69 @@ paths:
                 $ref: "#/components/schemas/ResponseEnvelope"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/devices/{device_id}/diagnostics:
+    get:
+      summary: Read bounded diagnostic history for one device
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/DiagnosticLimit"
+      responses:
+        "200":
+          description: Device diagnostic snapshot, including an empty unknown state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDeviceDiagnosticsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/devices/{device_id}/diagnostics/summary:
+    get:
+      summary: Read a bounded diagnostic aggregate for one device
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/DiagnosticWindowDays"
+      responses:
+        "200":
+          description: Device diagnostic summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDeviceDiagnosticsSummaryEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/devices/{device_id}/provisioning:
+    get:
+      summary: Read bounded provisioning history for one device
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/DiagnosticLimit"
+      responses:
+        "200":
+          description: Device provisioning snapshot, including an empty state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDeviceProvisioningEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -9614,6 +9677,26 @@ components:
       name: window_days
       in: query
       required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 90
+        default: 7
+    DiagnosticLimit:
+      name: limit
+      in: query
+      required: false
+      description: Values outside 1 to 100 fall back to the default of 20.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    DiagnosticWindowDays:
+      name: window_days
+      in: query
+      required: false
+      description: Values outside 1 to 90 fall back to the default of 7.
       schema:
         type: integer
         minimum: 1
@@ -22923,3 +23006,483 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/AdminTelemetrySummary"
+    AuditBootEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - event_type
+        - event_id
+        - sequence
+        - uptime_ms
+        - boot_count
+        - reset_reason
+        - firmware_version
+        - reported_at
+      properties:
+        event_type:
+          type: string
+          const: boot
+        event_id:
+          type: string
+          minLength: 1
+        sequence:
+          type: integer
+          format: int64
+          minimum: 0
+        uptime_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        boot_count:
+          type: integer
+          format: int64
+          minimum: 0
+        reset_reason:
+          type: string
+        firmware_version:
+          type: string
+        reported_at:
+          type: string
+          format: date-time
+    AuditModuleFailure:
+      type: object
+      additionalProperties: false
+      required:
+        - event_type
+        - event_id
+        - sequence
+        - module_name
+        - error_code
+        - failure_count
+        - firmware_version
+        - reported_at
+      properties:
+        event_type:
+          type: string
+          const: module_failure
+        event_id:
+          type: string
+          minLength: 1
+        sequence:
+          type: integer
+          format: int64
+          minimum: 0
+        module_name:
+          type: string
+          minLength: 1
+        error_code:
+          type: string
+          minLength: 1
+        failure_count:
+          type: integer
+          format: int64
+          minimum: 0
+        firmware_version:
+          type: string
+        reported_at:
+          type: string
+          format: date-time
+    AuditRecoveryEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - event_type
+        - event_id
+        - sequence
+        - module_name
+        - firmware_version
+        - reported_at
+      properties:
+        event_type:
+          type: string
+          const: module_recovered
+        event_id:
+          type: string
+          minLength: 1
+        sequence:
+          type: integer
+          format: int64
+          minimum: 0
+        module_name:
+          type: string
+          minLength: 1
+        firmware_version:
+          type: string
+        reported_at:
+          type: string
+          format: date-time
+    AuditInteractionEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - event_type
+        - event_id
+        - sequence
+        - detail_code
+        - duration_ms
+        - firmware_version
+        - reported_at
+      properties:
+        event_type:
+          type: string
+        event_id:
+          type: string
+          minLength: 1
+        sequence:
+          type: integer
+          format: int64
+          minimum: 0
+        detail_code:
+          type: string
+        duration_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        firmware_version:
+          type: string
+        reported_at:
+          type: string
+          format: date-time
+    AuditCrashEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - event_type
+        - event_id
+        - sequence
+        - cause
+        - fault_kind
+        - task_name
+        - program_counter
+        - frame_count
+        - core_id
+        - firmware_version
+        - reported_at
+      properties:
+        event_type:
+          type: string
+          const: crash
+        event_id:
+          type: string
+          minLength: 1
+        sequence:
+          type: integer
+          format: int64
+          minimum: 0
+        cause:
+          type: string
+          enum:
+            - panic
+            - watchdog
+            - task_watchdog
+            - interrupt_watchdog
+            - brownout
+            - stack_overflow
+            - heap_corruption
+            - assert
+            - unknown
+        fault_kind:
+          type: string
+          enum:
+            - exception
+            - watchdog
+            - power_loss
+            - memory
+            - software
+        task_name:
+          type: string
+        program_counter:
+          type: integer
+          format: int64
+          minimum: 0
+        frame_count:
+          type: integer
+          format: int64
+          minimum: 0
+        core_id:
+          type: integer
+          format: int64
+          minimum: 0
+        firmware_version:
+          type: string
+        reported_at:
+          type: string
+          format: date-time
+    AuditProvisioningEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - event_type
+        - event_id
+        - sequence
+        - detail_code
+        - duration_ms
+        - firmware_version
+        - reported_at
+      properties:
+        event_type:
+          type: string
+          enum:
+            - provisioning_started
+            - wifi_configured
+            - wifi_failed
+            - binding_completed
+            - binding_removed
+            - network_reconnected
+            - network_lost
+            - time_synced
+            - auth_revoked
+            - auth_restored
+            - binding_confirmed
+            - binding_pending
+        event_id:
+          type: string
+          minLength: 1
+        sequence:
+          type: integer
+          format: int64
+          minimum: 0
+        detail_code:
+          type: string
+        duration_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        firmware_version:
+          type: string
+        reported_at:
+          type: string
+          format: date-time
+    AuditDiagnosticsSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - boot_events
+        - failures
+        - recovery_events
+        - interaction_events
+        - crash_events
+        - latest_failure
+        - latest_crash
+        - error_count
+        - recovery_count
+        - crash_count
+        - updated_at
+        - health_state
+        - retention_boot_events
+        - retention_failures
+        - retention_recovery_events
+        - retention_interaction_events
+        - retention_crash_events
+      properties:
+        device_id:
+          $ref: "#/components/schemas/DeviceIdParameter"
+        boot_events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditBootEvent"
+        failures:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditModuleFailure"
+        recovery_events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditRecoveryEvent"
+        interaction_events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditInteractionEvent"
+        crash_events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditCrashEvent"
+        latest_failure:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AuditModuleFailure"
+        latest_crash:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AuditCrashEvent"
+        error_count:
+          type: integer
+          format: int64
+          minimum: 0
+        recovery_count:
+          type: integer
+          format: int64
+          minimum: 0
+        crash_count:
+          type: integer
+          format: int64
+          minimum: 0
+        updated_at:
+          type: string
+          format: date-time
+        health_state:
+          type: string
+          enum:
+            - healthy
+            - degraded
+            - faulted
+            - unknown
+        retention_boot_events:
+          type: integer
+          minimum: 0
+        retention_failures:
+          type: integer
+          minimum: 0
+        retention_recovery_events:
+          type: integer
+          minimum: 0
+        retention_interaction_events:
+          type: integer
+          minimum: 0
+        retention_crash_events:
+          type: integer
+          minimum: 0
+    AdminDeviceDiagnosticsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AuditDiagnosticsSnapshot"
+    AuditCrashCauseCount:
+      type: object
+      additionalProperties: false
+      required:
+        - cause
+        - count
+      properties:
+        cause:
+          type: string
+        count:
+          type: integer
+          format: int64
+          minimum: 0
+    AuditDiagnosticsSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - window_days
+        - boot_count
+        - failure_count
+        - recovery_count
+        - crash_count
+        - crash_causes
+        - health_state
+        - last_reported_at
+        - generated_at
+      properties:
+        device_id:
+          $ref: "#/components/schemas/DeviceIdParameter"
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        boot_count:
+          type: integer
+          format: int64
+          minimum: 0
+        failure_count:
+          type: integer
+          format: int64
+          minimum: 0
+        recovery_count:
+          type: integer
+          format: int64
+          minimum: 0
+        crash_count:
+          type: integer
+          format: int64
+          minimum: 0
+        crash_causes:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditCrashCauseCount"
+        health_state:
+          type: string
+          enum:
+            - healthy
+            - degraded
+            - faulted
+            - unknown
+        last_reported_at:
+          nullable: true
+          type: string
+          format: date-time
+        generated_at:
+          type: string
+          format: date-time
+    AdminDeviceDiagnosticsSummaryEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AuditDiagnosticsSummary"
+    AuditProvisioningSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - state
+        - wifi_configured
+        - session_state
+        - last_provisioned_at
+        - newest_sequence
+        - dropped_events
+        - events
+        - updated_at
+        - retention_provisioning_events
+      properties:
+        device_id:
+          $ref: "#/components/schemas/DeviceIdParameter"
+        state:
+          type: string
+          enum:
+            - unprovisioned
+            - provisioning
+            - provisioned
+        wifi_configured:
+          type: boolean
+        session_state:
+          type: string
+          enum:
+            - ready
+            - reauth_required
+            - revoked
+        last_provisioned_at:
+          nullable: true
+          type: string
+          format: date-time
+        newest_sequence:
+          type: integer
+          format: int64
+          minimum: 0
+        dropped_events:
+          type: integer
+          format: int64
+          minimum: 0
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditProvisioningEvent"
+        updated_at:
+          nullable: true
+          type: string
+          format: date-time
+        retention_provisioning_events:
+          type: integer
+          minimum: 0
+    AdminDeviceProvisioningEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AuditProvisioningSnapshot"

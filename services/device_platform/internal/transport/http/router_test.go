@@ -1395,6 +1395,35 @@ func TestOperationsContractDocumentsSettingsOverviewAndTelemetry(t *testing.T) {
 	}
 }
 
+func TestDeviceOperationsContractDocumentsDiagnosticsAndProvisioning(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/admin/devices/{device_id}/diagnostics:",
+		"/api/v1/admin/devices/{device_id}/diagnostics/summary:",
+		"/api/v1/admin/devices/{device_id}/provisioning:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected device operations path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"AdminDeviceDiagnosticsEnvelope:",
+		"AuditDiagnosticsSnapshot:",
+		"AdminDeviceDiagnosticsSummaryEnvelope:",
+		"AuditDiagnosticsSummary:",
+		"AdminDeviceProvisioningEnvelope:",
+		"AuditProvisioningSnapshot:",
+		"AuditProvisioningEvent:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected device operations schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestAppUpdateContractDocumentsClientUpdateEndpoint(t *testing.T) {
 	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
 	if err != nil {

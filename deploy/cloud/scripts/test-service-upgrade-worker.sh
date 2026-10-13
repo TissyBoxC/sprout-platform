@@ -54,8 +54,15 @@ for unsupported_service in \
   fi
 done
 
-if ! grep -Eq 'test -s .*status\.json' "$compose_file"; then
-  echo "upgrade_worker 缺少 status.json 健康检查。" >&2
+if ! grep -Eq 'status=.*status\.json' "$compose_file" ||
+  ! grep -Eq 'generated=.*jq .*generated_at' "$compose_file" ||
+  ! grep -Eq 'age.*-le 180' "$compose_file"; then
+  echo "upgrade_worker 缺少 status.json 新鲜度健康检查。" >&2
+  exit 1
+fi
+
+if grep -Eq 'python3' "$compose_file"; then
+  echo "upgrade_worker 健康检查依赖容器内不存在的 python3。" >&2
   exit 1
 fi
 

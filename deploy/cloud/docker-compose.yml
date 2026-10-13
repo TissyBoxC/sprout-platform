@@ -373,11 +373,11 @@ services:
       ]
     healthcheck:
       # A running process is not enough: the worker is healthy only after it
-      # publishes the status file the console reads.
+      # publishes a fresh status file the console can read.
       test:
         [
           "CMD-SHELL",
-          "test -s ${SPROUT_SERVICE_VERSION_STATE_DIR:-/var/lib/sprout-upgrades}/status.json",
+          "status=${SPROUT_SERVICE_VERSION_STATE_DIR:-/var/lib/sprout-upgrades}/status.json; generated=$$(jq -r 'try (.generated_at | fromdateiso8601) catch empty' \"$$status\" 2>/dev/null) || exit 1; case \"$$generated\" in ''|*[!0-9]*) exit 1 ;; esac; now=$$(date +%s); age=$$((now - generated)); [ \"$$age\" -ge 0 ] && [ \"$$age\" -le 180 ]",
         ]
       interval: 30s
       timeout: 5s

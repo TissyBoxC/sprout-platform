@@ -79,19 +79,28 @@ if ! grep -Eq '^assert_no_managed_image_override\(\)' "$upgrade_script"; then
   exit 1
 fi
 
+if ! grep -Eq '^check_managed_image_override\(\)' "$upgrade_script"; then
+  echo "upgrade-service.sh 缺少受管镜像覆盖只读检查。" >&2
+  exit 1
+fi
+
 override_guard_block="$(
   sed -n '/^assert_no_managed_image_override()/,/^}/p' "$upgrade_script"
 )"
-if ! printf '%s\n' "$override_guard_block" | grep -Fq 'docker-compose.override.yml'; then
-  echo "受管镜像覆盖门禁未读取 docker-compose.override.yml。" >&2
-  exit 1
-fi
-if ! printf '%s\n' "$override_guard_block" | grep -Fq 'device_platform|voice_gateway|admin_web|sub2api'; then
-  echo "受管镜像覆盖门禁未限定受管服务。" >&2
+if ! printf '%s\n' "$override_guard_block" | grep -Fq 'check_managed_image_override'; then
+  echo "受管镜像覆盖门禁未复用只读检查。" >&2
   exit 1
 fi
 if ! printf '%s\n' "$override_guard_block" | grep -Fq 'exit 1'; then
   echo "受管镜像覆盖门禁未拒绝覆盖。" >&2
+  exit 1
+fi
+
+override_check_block="$(
+  sed -n '/^check_managed_image_override()/,/^}/p' "$upgrade_script"
+)"
+if ! printf '%s\n' "$override_check_block" | grep -Fq 'device_platform|voice_gateway|admin_web|sub2api'; then
+  echo "受管镜像覆盖检查未限定受管服务。" >&2
   exit 1
 fi
 
@@ -206,6 +215,15 @@ trap 'rm -rf "$override_root"' EXIT
 mkdir -p "$override_root/deploy/cloud"
 cp "$upgrade_script" "$override_root/deploy/cloud/scripts-upgrade-service.sh"
 printf '%s\n' 'services:' '  device_platform:' '    image: sprout-device-platform:0.22.0' > "$override_root/deploy/cloud/docker-compose.override.yml"
+override_output="$(
+  source "$upgrade_script"
+  cloud_dir="$override_root/deploy/cloud"
+  check_managed_image_override
+)"
+if [ "$override_output" != "device_platform" ]; then
+  echo "受管镜像覆盖只读检查结果不正确: $override_output" >&2
+  exit 1
+fi
 if (
   source "$upgrade_script"
   cloud_dir="$override_root/deploy/cloud"
@@ -372,6 +390,21 @@ fi
 
 if grep -Eq 'python3' "$compose_file"; then
   echo "upgrade_worker 健康检查依赖容器内不存在的 python3。" >&2
+  exit 1
+fi
+
+check_stack_script="$script_dir/check-stack.sh"
+bash -n "$check_stack_script"
+if ! grep -Fq 'check-managed-image-override' "$check_stack_script"; then
+  echo "check-stack.sh 未检查本地受管镜像覆盖。" >&2
+  exit 1
+fi
+if ! grep -Fq 'status.json fresh' "$check_stack_script"; then
+  echo "check-stack.sh 未检查升级 worker 状态新鲜度。" >&2
+  exit 1
+fi
+if ! grep -Fq 'upgrade_worker' "$check_stack_script"; then
+  echo "check-stack.sh 未检查升级 worker 容器。" >&2
   exit 1
 fi
 

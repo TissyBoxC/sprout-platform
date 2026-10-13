@@ -42,6 +42,7 @@ usage() {
 用法:
   upgrade-service.sh <服务> [目标版本]
   upgrade-service.sh --check <服务>
+  upgrade-service.sh --check-managed-image-override
 
 服务:
   device_platform  设备平台
@@ -56,6 +57,7 @@ usage() {
   ./scripts/upgrade-service.sh sub2api
 
 --check 只读取 GitHub Releases，不修改 .env，也不会重启容器。
+--check-managed-image-override 只检查本地镜像覆盖，不修改任何文件。
 基础设施 postgres、redis、mqtt 和 download_* 不在自动升级范围内。
 EOF
 }
@@ -359,33 +361,35 @@ assert_git_clean() {
 }
 
 assert_no_managed_image_override() {
-  override_file="$cloud_dir/docker-compose.override.yml"
-  if [ ! -f "$override_file" ]; then
-    return 0
-  fi
-
   # A local override that pins a managed image can make the version switch
   # silently ineffective. Reject it instead of reporting a successful upgrade
   # while Compose keeps running the old image.
-  overridden_services="$(
-    awk '
-      /^[[:space:]]*[A-Za-z0-9_.-]+:[[:space:]]*$/ {
-        section = $1
-        sub(/:$/, "", section)
-        next
-      }
-      /^[[:space:]]+image:[[:space:]]*/ && section != "" {
-        print section
-      }
-    ' "$override_file" |
-      grep -E '^(device_platform|voice_gateway|admin_web|sub2api)$' || true
-  )"
+  overridden_services="$(check_managed_image_override)"
   if [ -n "$overridden_services" ]; then
     echo "检测到本地 docker-compose.override.yml 覆盖受管服务镜像，拒绝升级：" >&2
     printf '  %s\n' $overridden_services >&2
     echo "请移除对应 image 覆盖，或把变更提交到发布仓库后再升级。" >&2
     exit 1
   fi
+}
+
+check_managed_image_override() {
+  override_file="$cloud_dir/docker-compose.override.yml"
+  if [ ! -f "$override_file" ]; then
+    return 0
+  fi
+
+  awk '
+    /^[[:space:]]*[A-Za-z0-9_.-]+:[[:space:]]*$/ {
+      section = $1
+      sub(/:$/, "", section)
+      next
+    }
+    /^[[:space:]]+image:[[:space:]]*/ && section != "" {
+      print section
+    }
+  ' "$override_file" |
+    grep -E '^(device_platform|voice_gateway|admin_web|sub2api)$' || true
 }
 
 # Fetch the immutable platform release tag before swapping images. The cloud
@@ -777,6 +781,17 @@ upgrade_services() {
 }
 
 main() {
+  if [ "$#" -eq 1 ] && [ "$1" = "--check-managed-image-override" ]; then
+    overridden_services="$(check_managed_image_override)"
+    if [ -n "$overridden_services" ]; then
+      echo "检测到本地 docker-compose.override.yml 覆盖受管服务镜像：" >&2
+      printf '  %s\n' $overridden_services >&2
+      echo "请移除对应 image 覆盖，或把变更提交到发布仓库后再升级。" >&2
+      exit 1
+    fi
+    return 0
+  fi
+
   if [ "$#" -eq 2 ] && [ "$1" = "--check" ]; then
     validate_service "$2"
     check_services "$2"

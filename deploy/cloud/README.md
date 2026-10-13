@@ -655,6 +655,15 @@ docker compose --env-file .env logs --tail=200 sub2api
 ./scripts/upgrade-service.sh --check admin_web
 ```
 
+升级执行器会拒绝覆盖受管镜像的本地 Compose override。可以先单独检查：
+
+```bash
+./scripts/upgrade-service.sh --check-managed-image-override
+```
+
+若输出 `device_platform`、`voice_gateway`、`admin_web` 或 `sub2api`，必须移除
+对应的本地 `image` 覆盖后再升级。
+
 执行单服务升级时，命令会再次校验 Git 工作区、`.env` 和 Compose 配置：
 
 ```bash

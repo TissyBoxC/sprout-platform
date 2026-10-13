@@ -77,6 +77,7 @@ type ExpiredRecordPurge struct {
 	DeviceChallenges         int64 `json:"device_challenges"`
 	PhoneVerificationCodes   int64 `json:"phone_verification_codes"`
 	ExportReceipts           int64 `json:"export_receipts"`
+	FamilyInvitations        int64 `json:"family_invitations"`
 }
 
 // Total returns the number of rows removed across every table.
@@ -88,7 +89,8 @@ func (purge ExpiredRecordPurge) Total() int64 {
 		purge.DeviceRegistrationTokens +
 		purge.DeviceChallenges +
 		purge.PhoneVerificationCodes +
-		purge.ExportReceipts
+		purge.ExportReceipts +
+		purge.FamilyInvitations
 }
 
 // UsageReportPurge reports how many aggregated usage-ledger rows were removed
@@ -694,6 +696,8 @@ func (r *PostgresRepository) PurgeParentData(
 		{`DELETE FROM content_sync_states WHERE family_id = $1`, "content sync states"},
 		{`DELETE FROM video_calls WHERE family_id = $1`, "video calls"},
 		{`DELETE FROM video_contacts WHERE family_id = $1`, "video contacts"},
+	{`DELETE FROM family_invitations WHERE family_id = $1`, "family invitations"},
+	{`DELETE FROM family_members WHERE family_id = $1`, "family members"},
 		{`DELETE FROM video_session_policies WHERE family_id = $1`, "video session policies"},
 		{`DELETE FROM bluetooth_audio_policies WHERE family_id = $1`, "Bluetooth audio policies"},
 		{`DELETE FROM learning_visualization_policies WHERE family_id = $1`, "learning visualization policies"},
@@ -826,6 +830,12 @@ func (r *PostgresRepository) PurgeExpiredRecords(
 				WHERE expires_at <= $1`,
 			dest:  &purge.ExportReceipts,
 			label: "export receipts",
+		},
+		{
+			query: `DELETE FROM family_invitations
+				WHERE expires_at <= $1`,
+			dest:  &purge.FamilyInvitations,
+			label: "family invitations",
 		},
 	}
 	for _, statement := range statements {

@@ -200,6 +200,46 @@ func TestChildContractDocumentsProfileAndPolicyEndpoints(t *testing.T) {
 	}
 }
 
+func TestAuthContractDocumentsIdentityAndPermissionEndpoints(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/auth/register:",
+		"/api/v1/auth/login:",
+		"/api/v1/auth/phone-verification:",
+		"/api/v1/auth/refresh:",
+		"/api/v1/auth/logout:",
+		"/api/v1/auth/email:",
+		"/api/v1/auth/profile:",
+		"/api/v1/auth/overview:",
+		"/api/v1/auth/me:",
+		"/api/v1/auth/ai-models:",
+		"/api/v1/admin/auth/login:",
+		"/api/v1/admin/auth/mfa:",
+		"/api/v1/admin/permissions:",
+		"/api/v1/admin/permissions/{account_id}:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected identity path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"RegisterRequest:",
+		"LoginRequest:",
+		"AdminMFARequest:",
+		"UserAccount:",
+		"AIAccountSummary:",
+		"AuthSessionEnvelope:",
+		"AdminPermissionAccountEnvelope:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected identity schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

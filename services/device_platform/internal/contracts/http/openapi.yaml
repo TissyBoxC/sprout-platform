@@ -493,6 +493,461 @@ paths:
           $ref: "#/components/responses/ChildUnprocessable"
         "500":
           $ref: "#/components/responses/ChildServiceError"
+  /api/v1/auth/register:
+    post:
+      summary: Register a guardian account and bootstrap its family
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Guardian account and session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Phone or email already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/AuthUnprocessable"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/auth/login:
+    post:
+      summary: Sign a guardian in with phone or email and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Authenticated guardian session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "403":
+          description: Account or email login disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/auth/phone-verification:
+    post:
+      summary: Send a short-lived phone verification code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PhoneVerificationRequest"
+      responses:
+        "200":
+          description: Verification request accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhoneVerificationEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/AuthUnprocessable"
+        "503":
+          description: SMS verification provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/auth/refresh:
+    post:
+      summary: Rotate a refresh token and issue a new session pair
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "200":
+          description: Refreshed session pair
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionPairEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/auth/logout:
+    post:
+      summary: Revoke one refresh session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "200":
+          description: Session revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogoutEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/auth/email:
+    put:
+      summary: Bind a recovery email to the authenticated guardian account
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BindEmailRequest"
+      responses:
+        "200":
+          description: Updated guardian account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: Email already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/AuthUnprocessable"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/auth/profile:
+    put:
+      summary: Update guardian-editable profile fields
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: Updated guardian account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/AuthUnprocessable"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/auth/overview:
+    get:
+      summary: Read the authenticated guardian's home dashboard counters
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Guardian dashboard counters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentOverviewEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/auth/me:
+    get:
+      summary: Read the authenticated guardian account and AI account summary
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Authenticated guardian account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/auth/ai-models:
+    put:
+      summary: Select the guardian's allowed AI models
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAIModelsRequest"
+      responses:
+        "200":
+          description: Updated AI account summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIAccountEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: AI account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Selected model is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "502":
+          description: AI provider unavailable or rejected the request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/admin/auth/login:
+    post:
+      summary: Start an administrator login and require MFA
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminLoginRequest"
+      responses:
+        "200":
+          description: MFA challenge issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminLoginChallengeEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "403":
+          description: Account disabled or not an administrator
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          description: Administrator MFA is not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/admin/auth/mfa:
+    post:
+      summary: Complete an administrator login with an MFA code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminMFARequest"
+      responses:
+        "200":
+          description: Authenticated administrator session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          description: Invalid, expired, or consumed MFA challenge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/admin/permissions:
+    get:
+      summary: List administrators and the assignable permission catalog
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Administrator permission catalog and accounts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminPermissionCatalogEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          description: Permission service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/admin/permissions/{account_id}:
+    put:
+      summary: Replace one administrator's permission set
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/AccountId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminPermissionUpdateRequest"
+      responses:
+        "200":
+          description: Administrator permission set updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminPermissionAccountEnvelope"
+        "400":
+          description: Malformed request body or missing account id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Administrator account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Unknown administrator permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          description: Permission service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -530,6 +985,14 @@ components:
         maxLength: 128
     ChildId:
       name: child_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    AccountId:
+      name: account_id
       in: path
       required: true
       schema:
@@ -583,6 +1046,24 @@ components:
             $ref: "#/components/schemas/ResponseEnvelope"
     ChildServiceError:
       description: Child or parent policy operation failed unexpectedly
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    Forbidden:
+      description: Authenticated account lacks the required role or permission
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    AuthUnprocessable:
+      description: Invalid registration, profile, phone, or password value
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    AuthServiceError:
+      description: Identity operation failed unexpectedly
       content:
         application/json:
           schema:
@@ -1197,3 +1678,528 @@ components:
               properties:
                 policy:
                   $ref: "#/components/schemas/ParentPolicy"
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - phone
+        - phone_verification_code
+        - password
+        - guardian_family_name
+        - child_nickname
+        - child_birthday
+        - guardian_consent_version
+      properties:
+        phone:
+          type: string
+          pattern: "^1[0-9]{10}$"
+        phone_verification_code:
+          type: string
+          minLength: 4
+          maxLength: 12
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+        guardian_family_name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        child_nickname:
+          type: string
+          minLength: 1
+          maxLength: 40
+        child_birthday:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        guardian_consent_version:
+          type: string
+          minLength: 1
+          maxLength: 32
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - identifier
+        - password
+      properties:
+        identifier:
+          type: string
+          minLength: 1
+          maxLength: 254
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+    PhoneVerificationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - phone
+        - purpose
+      properties:
+        phone:
+          type: string
+          pattern: "^1[0-9]{10}$"
+        purpose:
+          type: string
+          enum:
+            - register
+            - login
+            - reset_password
+    RefreshTokenRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - refresh_token
+      properties:
+        refresh_token:
+          type: string
+          minLength: 1
+          maxLength: 4096
+    BindEmailRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+    UpdateProfileRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - display_name
+        - guardian_family_name
+        - child_nickname
+        - child_birthday
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        guardian_family_name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        child_nickname:
+          type: string
+          minLength: 1
+          maxLength: 40
+        child_birthday:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    UpdateAIModelsRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - selected_models
+      properties:
+        selected_models:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+    AdminLoginRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+    AdminMFARequest:
+      type: object
+      additionalProperties: false
+      required:
+        - challenge_token
+        - code
+      properties:
+        challenge_token:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        code:
+          type: string
+          minLength: 4
+          maxLength: 12
+    AdminPermissionUpdateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - permissions
+      properties:
+        permissions:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+    UserAccount:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - email
+        - phone
+        - display_name
+        - guardian_family_name
+        - child_nickname
+        - child_birthday
+        - role
+        - status
+        - admin_permissions
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        email:
+          type: string
+          maxLength: 254
+        phone:
+          type: string
+          maxLength: 32
+        display_name:
+          type: string
+          maxLength: 64
+        guardian_family_name:
+          type: string
+          maxLength: 40
+        child_nickname:
+          type: string
+          maxLength: 40
+        child_birthday:
+          type: string
+          maxLength: 10
+        role:
+          type: string
+          enum:
+            - parent
+            - admin
+        status:
+          type: string
+          enum:
+            - active
+            - locked
+            - disabled
+        admin_permissions:
+          type: array
+          nullable: true
+          items:
+            type: string
+            enum:
+              - "*"
+              - admins.read
+              - admins.manage
+              - devices.read
+              - devices.manage
+              - family.read
+              - family.manage
+              - ai_accounts.read
+              - ai_accounts.manage
+              - ota.read
+              - ota.manage
+              - storage.read
+              - storage.manage
+              - content.read
+              - content.review
+              - service.read
+              - service.upgrade
+              - feature_center.read
+              - feature_center.manage
+              - settings.read
+              - settings.manage
+              - notifications.read
+              - notifications.manage
+              - stats.read
+              - audit.read
+    AIAccountSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - balance_usd
+        - concurrency_limit
+        - available_models
+        - selected_models
+        - allowed_models
+        - provider_ready
+      properties:
+        status:
+          type: string
+          minLength: 1
+          maxLength: 64
+        balance_usd:
+          type: number
+        concurrency_limit:
+          type: integer
+          minimum: 0
+        available_models:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        selected_models:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        allowed_models:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        provider_ready:
+          type: boolean
+    AccountEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - account
+                - ai_account
+              properties:
+                account:
+                  $ref: "#/components/schemas/UserAccount"
+                ai_account:
+                  nullable: true
+                  allOf:
+                    - $ref: "#/components/schemas/AIAccountSummary"
+    AuthSessionEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - account
+                - ai_account
+                - access_token
+                - refresh_token
+                - expires_in
+              properties:
+                account:
+                  $ref: "#/components/schemas/UserAccount"
+                ai_account:
+                  nullable: true
+                  allOf:
+                    - $ref: "#/components/schemas/AIAccountSummary"
+                access_token:
+                  type: string
+                  minLength: 1
+                refresh_token:
+                  type: string
+                  minLength: 1
+                expires_in:
+                  type: integer
+                  minimum: 1
+    SessionPairEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - access_token
+                - refresh_token
+                - expires_in
+              properties:
+                access_token:
+                  type: string
+                  minLength: 1
+                refresh_token:
+                  type: string
+                  minLength: 1
+                expires_in:
+                  type: integer
+                  minimum: 1
+    PhoneVerificationEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - sent
+              properties:
+                sent:
+                  type: boolean
+                  const: true
+    LogoutEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - logged_out
+              properties:
+                logged_out:
+                  type: boolean
+                  const: true
+    ParentOverview:
+      type: object
+      additionalProperties: false
+      required:
+        - today_conversation_count
+        - today_spent_usd
+        - remaining_balance_usd
+        - balance_usd
+        - device_count
+        - online_device_count
+      properties:
+        today_conversation_count:
+          type: integer
+          minimum: 0
+        today_spent_usd:
+          type: number
+        remaining_balance_usd:
+          type: number
+        balance_usd:
+          type: number
+        device_count:
+          type: integer
+          minimum: 0
+        online_device_count:
+          type: integer
+          minimum: 0
+    ParentOverviewEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ParentOverview"
+    AIAccountEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - ai_account
+              properties:
+                ai_account:
+                  $ref: "#/components/schemas/AIAccountSummary"
+    AdminLoginChallengeEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - status
+                - challenge_token
+                - account
+              properties:
+                status:
+                  type: string
+                  const: mfa_required
+                challenge_token:
+                  type: string
+                  minLength: 1
+                account:
+                  $ref: "#/components/schemas/UserAccount"
+    AdminPermissionAccount:
+      type: object
+      additionalProperties: false
+      required:
+        - account_id
+        - email
+        - display_name
+        - status
+        - created_at
+        - permissions
+      properties:
+        account_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        email:
+          type: string
+          maxLength: 254
+        display_name:
+          type: string
+          maxLength: 64
+        status:
+          type: string
+          enum:
+            - active
+            - locked
+            - disabled
+        created_at:
+          type: string
+          format: date-time
+        permissions:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+    AdminPermissionCatalogEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - catalog
+                - accounts
+              properties:
+                catalog:
+                  type: array
+                  uniqueItems: true
+                  items:
+                    type: string
+                accounts:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/AdminPermissionAccount"
+    AdminPermissionAccountEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - account
+              properties:
+                account:
+                  $ref: "#/components/schemas/AdminPermissionAccount"

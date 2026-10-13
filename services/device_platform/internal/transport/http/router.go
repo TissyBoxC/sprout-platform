@@ -683,6 +683,10 @@ func NewRouter(options RouterOptions) http.Handler {
 					deviceWearableHandler.reportLocation,
 				)
 				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/wearable/policy",
+					deviceWearableHandler.devicePolicy,
+				)
+				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/wearable/sos",
 					deviceWearableHandler.reportSOS,
 				)

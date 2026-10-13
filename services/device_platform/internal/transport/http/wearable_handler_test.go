@@ -346,6 +346,25 @@ func TestWearableUpdatePolicyRejectsBadPrecision(t *testing.T) {
 	}
 }
 
+func TestWearableDevicePolicyRequiresSession(t *testing.T) {
+	handler := deviceWearableHandler{
+		handler:        &wearableHandler{service: newWearableTestService()},
+		bindingService: nil,
+		runtimeService: nil,
+	}
+	request := englishRequest(
+		http.MethodGet,
+		"/api/v1/devices/device-1/wearable/policy",
+		"",
+		"",
+	)
+	recorder := httptest.NewRecorder()
+	handler.devicePolicy(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestWearableCreateContact(t *testing.T) {
 	handler := wearableHandler{service: newWearableTestService()}
 	body := `{"display_name":"奶奶","phone":"13800000000","role":"guardian","priority":1,"enabled":true}`

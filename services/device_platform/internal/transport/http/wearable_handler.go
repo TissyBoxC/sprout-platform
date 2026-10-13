@@ -74,6 +74,16 @@ type deviceWearableHandler struct {
 	runtimeService *runtimeservice.Service
 }
 
+type deviceWearablePolicyResponse struct {
+	SchemaVersion         int    `json:"schema_version"`
+	Enabled               bool   `json:"enabled"`
+	PermissionGranted     bool   `json:"permission_granted"`
+	Precision             string `json:"precision"`
+	UploadIntervalSeconds int    `json:"upload_interval_seconds"`
+	RetentionDays         int    `json:"retention_days"`
+	GeofenceRadiusMeters  int    `json:"geofence_radius_meters"`
+}
+
 type wearablePolicyPayload struct {
 	Enabled               bool   `json:"enabled"`
 	PermissionGranted     bool   `json:"permission_granted"`
@@ -476,6 +486,32 @@ func (handler deviceWearableHandler) reportLocation(
 		"device_id":      status.DeviceID,
 		"geofence_state": status.GeofenceState,
 		"recorded":       true,
+	})
+}
+
+// devicePolicy returns the family location policy to a bound device that holds
+// a device session token, so sampling and upload honour the guardian choice.
+func (handler deviceWearableHandler) devicePolicy(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	_, familyID, ok := handler.verifyDevice(response, request)
+	if !ok {
+		return
+	}
+	policy, err := handler.handler.service.Policy(request.Context(), familyID)
+	if err != nil {
+		writeWearableError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, deviceWearablePolicyResponse{
+		SchemaVersion:         weardomain.SchemaVersion,
+		Enabled:               policy.Enabled,
+		PermissionGranted:     policy.PermissionGranted,
+		Precision:             policy.Precision,
+		UploadIntervalSeconds: policy.UploadIntervalSeconds,
+		RetentionDays:         policy.RetentionDays,
+		GeofenceRadiusMeters:  policy.GeofenceRadiusMeters,
 	})
 }
 

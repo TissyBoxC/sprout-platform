@@ -4630,6 +4630,343 @@ paths:
                 $ref: "#/components/schemas/ResponseEnvelope"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/notifications:
+    get:
+      summary: List the authenticated guardian's notification inbox
+      security:
+        - userToken: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+        - name: category
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/NotificationCategory"
+      responses:
+        "200":
+          description: Guardian notification inbox page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationInboxEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/notifications/unread-count:
+    get:
+      summary: Read the authenticated guardian's unread notification count
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Unread notification count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationUnreadCountEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/notifications/read-all:
+    post:
+      summary: Mark every unread notification for the guardian as read
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: All notifications marked read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationReadEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/notifications/{notification_id}/read:
+    post:
+      summary: Mark one guardian notification as read
+      security:
+        - userToken: []
+      parameters:
+        - name: notification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        "200":
+          description: Notification marked read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationReadEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Notification is not owned by the authenticated guardian
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/notifications/family-messages:
+    post:
+      summary: Send a guardian family message to a bound device
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationFamilyMessageRequest"
+      responses:
+        "201":
+          description: Family message created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationInboxItemEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Device is not owned by the authenticated guardian
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/notifications/devices/{device_id}/messages:
+    get:
+      summary: List pending display messages for one bound device
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 20
+      responses:
+        "200":
+          description: Pending device display messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationDeviceMessagesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Device is not owned by the authenticated guardian
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/notifications:
+    get:
+      summary: List operator notifications with delivery counters
+      security:
+        - userToken: []
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/NotificationCategory"
+        - name: audience
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/NotificationAudience"
+        - name: source
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/NotificationSource"
+        - name: query
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 2000
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 20
+      responses:
+        "200":
+          description: Operator notification page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationAdminPageEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Author and fan out one operator notification
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationAdministratorRequest"
+      responses:
+        "201":
+          description: Operator notification created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationAdminItemEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/notifications/stats:
+    get:
+      summary: Read operator notification counters
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Notification operator counters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationAdminStatsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/notifications/{notification_id}:
+    get:
+      summary: Read one operator notification
+      security:
+        - userToken: []
+      parameters:
+        - name: notification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        "200":
+          description: Operator notification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationAdminItemEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Notification not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    delete:
+      summary: Delete one operator notification
+      security:
+        - userToken: []
+      parameters:
+        - name: notification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        "204":
+          description: Notification deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Notification not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -11915,3 +12252,438 @@ components:
               properties:
                 reminder_id:
                   type: string
+    NotificationCategory:
+      type: string
+      enum:
+        - account_security
+        - device_status
+        - content_release
+        - service_update
+        - usage_report
+        - family_message
+        - system_announcement
+    NotificationSeverity:
+      type: string
+      enum:
+        - info
+        - success
+        - warning
+        - critical
+    NotificationAudience:
+      type: string
+      enum:
+        - parent
+        - all_parents
+        - family_devices
+    NotificationSource:
+      type: string
+      enum:
+        - administrator
+        - guardian
+        - system
+    NotificationChannel:
+      type: string
+      enum:
+        - in_app
+        - push
+        - sms
+        - email
+        - device
+    NotificationInboxItem:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - category
+        - severity
+        - title
+        - body
+        - channels
+        - read
+        - publish_at
+      properties:
+        id:
+          type: string
+        category:
+          $ref: "#/components/schemas/NotificationCategory"
+        severity:
+          $ref: "#/components/schemas/NotificationSeverity"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        body:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        action_path:
+          type: string
+          maxLength: 200
+        action_label:
+          type: string
+          maxLength: 24
+        device_id:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+        channels:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/NotificationChannel"
+        read:
+          type: boolean
+        read_at:
+          type: string
+          format: date-time
+        publish_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    NotificationInboxItemEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - notification
+              properties:
+                notification:
+                  $ref: "#/components/schemas/NotificationInboxItem"
+    NotificationInboxEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - items
+                - unread_count
+                - has_more
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/NotificationInboxItem"
+                unread_count:
+                  type: integer
+                  minimum: 0
+                  maximum: 9999
+                next_cursor:
+                  type: string
+                has_more:
+                  type: boolean
+    NotificationUnreadCountEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - unread_count
+              properties:
+                unread_count:
+                  type: integer
+                  minimum: 0
+                  maximum: 9999
+    NotificationReadEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - read
+              properties:
+                read:
+                  type: boolean
+                  const: true
+    NotificationFamilyMessageRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - body
+        - send_to_device
+      properties:
+        device_id:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+        body:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        display_duration_seconds:
+          type: integer
+          minimum: 0
+          maximum: 300
+          default: 30
+        send_to_device:
+          type: boolean
+    NotificationDeviceMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - title
+        - body
+        - severity
+        - duration_seconds
+        - category
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        body:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        severity:
+          $ref: "#/components/schemas/NotificationSeverity"
+        duration_seconds:
+          type: integer
+          minimum: 1
+          maximum: 300
+        category:
+          $ref: "#/components/schemas/NotificationCategory"
+    NotificationDeviceMessagesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - messages
+              properties:
+                messages:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/NotificationDeviceMessage"
+    NotificationAdministratorRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - category
+        - title
+        - body
+      properties:
+        category:
+          $ref: "#/components/schemas/NotificationCategory"
+        severity:
+          $ref: "#/components/schemas/NotificationSeverity"
+          default: info
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        body:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        action_path:
+          type: string
+          maxLength: 200
+        action_label:
+          type: string
+          maxLength: 24
+        audience:
+          $ref: "#/components/schemas/NotificationAudience"
+          default: parent
+        channels:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/NotificationChannel"
+        parent_account_id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+        display_duration_seconds:
+          type: integer
+          minimum: 0
+          maximum: 300
+          default: 30
+        expires_at:
+          type: string
+          format: date-time
+    NotificationAdminItem:
+      allOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - id
+            - category
+            - severity
+            - title
+            - body
+            - audience
+            - display_duration_seconds
+            - channels
+            - source
+            - publish_at
+            - created_at
+            - updated_at
+            - delivery_total
+            - delivery_pending
+            - delivery_delivered
+            - delivery_read
+            - delivery_failed
+          properties:
+            id:
+              type: string
+            category:
+              $ref: "#/components/schemas/NotificationCategory"
+            severity:
+              $ref: "#/components/schemas/NotificationSeverity"
+            title:
+              type: string
+              minLength: 1
+              maxLength: 120
+            body:
+              type: string
+              minLength: 1
+              maxLength: 2000
+            action_path:
+              type: string
+              maxLength: 200
+            action_label:
+              type: string
+              maxLength: 24
+            audience:
+              $ref: "#/components/schemas/NotificationAudience"
+            parent_account_id:
+              type: string
+              format: uuid
+            device_id:
+              type: string
+              pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+            display_duration_seconds:
+              type: integer
+              minimum: 0
+              maximum: 300
+            channels:
+              type: array
+              minItems: 1
+              uniqueItems: true
+              items:
+                $ref: "#/components/schemas/NotificationChannel"
+            source:
+              $ref: "#/components/schemas/NotificationSource"
+            created_by:
+              type: string
+            publish_at:
+              type: string
+              format: date-time
+            expires_at:
+              type: string
+              format: date-time
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+            delivery_total:
+              type: integer
+              minimum: 0
+            delivery_pending:
+              type: integer
+              minimum: 0
+            delivery_delivered:
+              type: integer
+              minimum: 0
+            delivery_read:
+              type: integer
+              minimum: 0
+            delivery_failed:
+              type: integer
+              minimum: 0
+    NotificationAdminItemEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - notification
+              properties:
+                notification:
+                  $ref: "#/components/schemas/NotificationAdminItem"
+    NotificationAdminPageEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - items
+                - total
+                - page
+                - page_size
+                - total_pages
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/NotificationAdminItem"
+                total:
+                  type: integer
+                  minimum: 0
+                page:
+                  type: integer
+                  minimum: 1
+                page_size:
+                  type: integer
+                  minimum: 1
+                  maximum: 200
+                total_pages:
+                  type: integer
+                  minimum: 0
+    NotificationAdminStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - total
+                - broadcast_count
+                - pending_delivery_count
+                - failed_delivery_count
+              properties:
+                total:
+                  type: integer
+                  minimum: 0
+                broadcast_count:
+                  type: integer
+                  minimum: 0
+                pending_delivery_count:
+                  type: integer
+                  minimum: 0
+                failed_delivery_count:
+                  type: integer
+                  minimum: 0

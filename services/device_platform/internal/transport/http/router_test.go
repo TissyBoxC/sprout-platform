@@ -752,6 +752,47 @@ func TestCompanionshipContractDocumentsGrowthRecordsAndHabitReminders(t *testing
 	}
 }
 
+func TestNotificationContractDocumentsInboxAndAdminEndpoints(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/notifications:",
+		"/api/v1/notifications/unread-count:",
+		"/api/v1/notifications/read-all:",
+		"/api/v1/notifications/{notification_id}/read:",
+		"/api/v1/notifications/family-messages:",
+		"/api/v1/notifications/devices/{device_id}/messages:",
+		"/api/v1/admin/notifications:",
+		"/api/v1/admin/notifications/stats:",
+		"/api/v1/admin/notifications/{notification_id}:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected notification path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"NotificationCategory:",
+		"NotificationSeverity:",
+		"NotificationInboxItem:",
+		"NotificationInboxEnvelope:",
+		"NotificationUnreadCountEnvelope:",
+		"NotificationReadEnvelope:",
+		"NotificationFamilyMessageRequest:",
+		"NotificationDeviceMessage:",
+		"NotificationDeviceMessagesEnvelope:",
+		"NotificationAdministratorRequest:",
+		"NotificationAdminItem:",
+		"NotificationAdminPageEnvelope:",
+		"NotificationAdminStatsEnvelope:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected notification schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

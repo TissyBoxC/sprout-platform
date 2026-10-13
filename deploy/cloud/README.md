@@ -269,6 +269,20 @@ location ^~ /api/v1/release-publication/ {
 只覆盖发布接口前缀，其余路径仍由面板生成的反向代理处理。保存后执行
 `nginx -t && nginx -s reload`；此配置不改变鉴权规则。
 
+API 站点的公网根代理会覆盖全部路径，但设备的 `/internal/` 接口只允许
+Compose 内网和历史受信调用使用。发布流水线需要调用的内部上传接口已经提供
+`/api/v1/release-publication/` 公网别名，因此公网入口必须显式拒绝
+`/internal/`。部署仓库提供只读检查和幂等修复：
+
+```bash
+./scripts/audit-api-internal-access.sh
+./scripts/audit-api-internal-access.sh --apply
+```
+
+第二条命令会先备份已有配置，再写入 `internal-access.conf`，并通过当前
+OpenResty 容器执行 `openresty -t` 和 reload；校验失败会自动回滚。修复后应
+确认公网 `/internal/` 返回 `404`，同时发布接口和正常业务接口仍可访问。
+
 1Panel 生成的 `proxy/root.conf` 会在 `location` 内写入
 `add_header X-Cache`。Nginx 的 `add_header` 不会继承到已经声明了同名指令的
 子上下文，这会让站点 `server` 级 HSTS 在正常代理响应中消失。部署仓库提供

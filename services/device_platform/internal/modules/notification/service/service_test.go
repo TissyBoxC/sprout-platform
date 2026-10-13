@@ -199,7 +199,9 @@ func (m *memoryRepository) ListDeviceMessages(
 	messages := make([]domain.DeviceMessage, 0)
 	for _, delivery := range m.deliveries {
 		if delivery.ParentAccountID != parentAccountID ||
-			delivery.Channel != domain.ChannelDevice {
+			delivery.Channel != domain.ChannelDevice ||
+			(delivery.Status != domain.DeliveryStatusPending &&
+				delivery.Status != domain.DeliveryStatusFailed) {
 			continue
 		}
 		notification, ok := m.notifications[delivery.NotificationID]
@@ -710,6 +712,67 @@ func TestDeviceMessagesAppliesLimit(t *testing.T) {
 	}
 	if len(messages) != 2 {
 		t.Fatalf("expected the limit to cap messages at 2, got %d", len(messages))
+	}
+}
+
+func TestDeviceMessagesExcludesDeliveredAndRead(t *testing.T) {
+	repo := newMemoryRepository()
+	now := time.Date(2026, time.October, 14, 8, 0, 0, 0, time.UTC)
+	repo.notifications["delivered-message"] = &domain.Notification{
+		ID:              "delivered-message",
+		Category:        domain.CategoryFamilyMessage,
+		Severity:        domain.SeverityInfo,
+		Title:           "已送达",
+		Body:            "不需要重复显示",
+		Audience:        domain.AudienceFamilyDevices,
+		ParentAccountID: testParentID,
+		DeviceID:        testDeviceID,
+		PublishAt:       now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	repo.notifications["read-message"] = &domain.Notification{
+		ID:              "read-message",
+		Category:        domain.CategoryFamilyMessage,
+		Severity:        domain.SeverityInfo,
+		Title:           "已读",
+		Body:            "不需要重复显示",
+		Audience:        domain.AudienceFamilyDevices,
+		ParentAccountID: testParentID,
+		DeviceID:        testDeviceID,
+		PublishAt:       now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	repo.deliveries = append(repo.deliveries,
+		&domain.Delivery{
+			ID:              "delivered-delivery",
+			NotificationID:  "delivered-message",
+			ParentAccountID: testParentID,
+			Channel:         domain.ChannelDevice,
+			Status:          domain.DeliveryStatusDelivered,
+		},
+		&domain.Delivery{
+			ID:              "read-delivery",
+			NotificationID:  "read-message",
+			ParentAccountID: testParentID,
+			Channel:         domain.ChannelDevice,
+			Status:          domain.DeliveryStatusRead,
+		},
+	)
+	service := newTestService(t, repo, &fakeCommander{})
+
+	messages, err := service.DeviceMessages(
+		context.Background(),
+		testParentID,
+		testDeviceID,
+		20,
+	)
+	if err != nil {
+		t.Fatalf("device messages: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("expected no pending messages, got %#v", messages)
 	}
 }
 

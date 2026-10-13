@@ -519,6 +519,7 @@ func (r *PostgresRepository) ListDeviceMessages(
 		JOIN notifications AS n ON n.id = d.notification_id
 		WHERE d.parent_account_id = $1
 		  AND d.channel = 'device'
+		  AND d.status IN ('pending', 'failed')
 		  AND n.device_id = $2
 		  AND n.publish_at <= $3
 		  AND (n.expires_at IS NULL OR n.expires_at > $3)

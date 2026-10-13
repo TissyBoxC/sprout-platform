@@ -404,7 +404,24 @@ func (s *Service) ListPendingCommands(
 	if err != nil {
 		return nil, err
 	}
-	return s.repository.ListPendingCommands(ctx, deviceID)
+	commands, err := s.repository.ListPendingCommands(ctx, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	commandIDs := make([]string, 0, len(commands))
+	deliveredAt := s.timeSource.Now().UTC()
+	for index := range commands {
+		if commands[index].Status != domain.CommandStatusPending {
+			continue
+		}
+		commandIDs = append(commandIDs, commands[index].ID)
+		commands[index].Status = domain.CommandStatusDelivered
+		commands[index].DeliveredAt = &deliveredAt
+	}
+	if err := s.repository.MarkCommandsDelivered(ctx, commandIDs, deviceID); err != nil {
+		return nil, err
+	}
+	return commands, nil
 }
 
 // AcknowledgeCommand records a device result exactly once.

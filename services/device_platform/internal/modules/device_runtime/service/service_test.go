@@ -183,6 +183,63 @@ func TestCommandLifecycleIsAcknowledgedOnce(t *testing.T) {
 	}
 }
 
+func TestListPendingCommandsMarksFirstDeliveryOnce(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
+	later := now.Add(time.Minute)
+	repository := newMemoryRepository()
+	repository.now = now
+	service, err := New(Options{
+		Repository: repository,
+		BindingService: &memoryBindingReader{
+			deviceID: "device_test_001",
+		},
+		Clock: fixedClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+	command, err := service.CreateCommand(
+		context.Background(),
+		"device_test_001",
+		domain.CommandReconnectNetwork,
+		"admin_test_001",
+		map[string]any{},
+	)
+	if err != nil {
+		t.Fatalf("create command: %v", err)
+	}
+
+	first, err := service.ListPendingCommands(context.Background(), "session")
+	if err != nil {
+		t.Fatalf("list pending commands: %v", err)
+	}
+	if len(first) != 1 || first[0].Status != domain.CommandStatusDelivered {
+		t.Fatalf("expected one delivered command, got %#v", first)
+	}
+	if first[0].DeliveredAt == nil || !first[0].DeliveredAt.Equal(now) {
+		t.Fatalf("expected delivered_at %v, got %v", now, first[0].DeliveredAt)
+	}
+	stored := repository.commands[command.ID]
+	if stored.Status != domain.CommandStatusDelivered ||
+		stored.DeliveredAt == nil ||
+		!stored.DeliveredAt.Equal(now) {
+		t.Fatalf("expected persisted delivery at %v, got %#v", now, stored)
+	}
+
+	repository.now = later
+	second, err := service.ListPendingCommands(context.Background(), "session")
+	if err != nil {
+		t.Fatalf("second list pending commands: %v", err)
+	}
+	if len(second) != 1 || second[0].Status != domain.CommandStatusDelivered {
+		t.Fatalf("expected the same delivered command, got %#v", second)
+	}
+	if second[0].DeliveredAt == nil || !second[0].DeliveredAt.Equal(now) {
+		t.Fatalf("expected delivery time to remain %v, got %v", now, second[0].DeliveredAt)
+	}
+}
+
 func TestCommandAcknowledgementNotifiesDeliverySink(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
@@ -460,6 +517,7 @@ type memoryRepository struct {
 	commands       map[string]domain.Command
 	saveCount      int
 	heartbeatCount int
+	now            time.Time
 }
 
 func newMemoryRepository() *memoryRepository {
@@ -569,6 +627,28 @@ func (repository *memoryRepository) ListPendingCommands(
 		}
 	}
 	return result, nil
+}
+
+func (repository *memoryRepository) MarkCommandsDelivered(
+	_ context.Context,
+	commandIDs []string,
+	deviceID string,
+) error {
+	for _, commandID := range commandIDs {
+		command, exists := repository.commands[commandID]
+		if !exists || command.DeviceID != deviceID ||
+			command.Status != domain.CommandStatusPending {
+			continue
+		}
+		deliveredAt := repository.now
+		if deliveredAt.IsZero() {
+			deliveredAt = time.Now().UTC()
+		}
+		command.Status = domain.CommandStatusDelivered
+		command.DeliveredAt = &deliveredAt
+		repository.commands[commandID] = command
+	}
+	return nil
 }
 
 func (repository *memoryRepository) AcknowledgeCommand(

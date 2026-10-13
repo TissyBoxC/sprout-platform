@@ -22,6 +22,7 @@ type Repository interface {
 	GetCommand(ctx context.Context, commandID string) (*domain.Command, error)
 	ListCommands(ctx context.Context, deviceID string) ([]domain.Command, error)
 	ListPendingCommands(ctx context.Context, deviceID string) ([]domain.Command, error)
+	MarkCommandsDelivered(ctx context.Context, commandIDs []string, deviceID string) error
 	AcknowledgeCommand(
 		ctx context.Context,
 		commandID string,
@@ -329,6 +330,31 @@ func (r *PostgresRepository) ListPendingCommands(
 		return nil, fmt.Errorf("iterate pending device runtime commands: %w", err)
 	}
 	return commands, nil
+}
+
+// MarkCommandsDelivered records the first successful poll that handed commands
+// to a device. It only advances pending rows and never overwrites a terminal
+// command state.
+func (r *PostgresRepository) MarkCommandsDelivered(
+	ctx context.Context,
+	commandIDs []string,
+	deviceID string,
+) error {
+	if len(commandIDs) == 0 {
+		return nil
+	}
+	_, err := r.pool.Exec(ctx, `
+		UPDATE device_runtime_commands
+		SET status = 'delivered',
+		    delivered_at = COALESCE(delivered_at, NOW())
+		WHERE device_id = $1
+		  AND id = ANY($2::uuid[])
+		  AND status = 'pending'
+	`, deviceID, commandIDs)
+	if err != nil {
+		return fmt.Errorf("mark runtime commands delivered: %w", err)
+	}
+	return nil
 }
 
 // AcknowledgeCommand records the device result once.

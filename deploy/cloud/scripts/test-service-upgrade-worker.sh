@@ -74,6 +74,35 @@ if ! grep -Eq '^assert_platform_checkout_version\(\)' "$upgrade_script"; then
   exit 1
 fi
 
+if ! grep -Eq '^assert_no_managed_image_override\(\)' "$upgrade_script"; then
+  echo "upgrade-service.sh 缺少受管镜像覆盖门禁。" >&2
+  exit 1
+fi
+
+override_guard_block="$(
+  sed -n '/^assert_no_managed_image_override()/,/^}/p' "$upgrade_script"
+)"
+if ! printf '%s\n' "$override_guard_block" | grep -Fq 'docker-compose.override.yml'; then
+  echo "受管镜像覆盖门禁未读取 docker-compose.override.yml。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$override_guard_block" | grep -Fq 'device_platform|voice_gateway|admin_web|sub2api'; then
+  echo "受管镜像覆盖门禁未限定受管服务。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$override_guard_block" | grep -Fq 'exit 1'; then
+  echo "受管镜像覆盖门禁未拒绝覆盖。" >&2
+  exit 1
+fi
+
+override_call_block="$(
+  sed -n '/^  assert_git_clean$/,/^  assert_no_managed_image_override$/p' "$upgrade_script"
+)"
+if ! printf '%s\n' "$override_call_block" | grep -Fq 'assert_no_managed_image_override'; then
+  echo "升级主流程未调用受管镜像覆盖门禁。" >&2
+  exit 1
+fi
+
 if ! grep -Eq '^prepare_upgrade_executor_runtime_copy\(\)' "$upgrade_script"; then
   echo "upgrade-service.sh 缺少运行时副本准备逻辑。" >&2
   exit 1
@@ -169,6 +198,62 @@ if [ -z "$sync_call_line" ] || [ -z "$guard_call_line" ] || [ -z "$compose_check
 fi
 if [ "$sync_call_line" -gt "$guard_call_line" ] || [ "$guard_call_line" -gt "$compose_check_line" ]; then
   echo "发布同步必须早于版本门禁，版本门禁必须早于 Compose 校验。" >&2
+  exit 1
+fi
+
+override_root="$(mktemp -d)"
+trap 'rm -rf "$override_root"' EXIT
+mkdir -p "$override_root/deploy/cloud"
+cp "$upgrade_script" "$override_root/deploy/cloud/scripts-upgrade-service.sh"
+printf '%s\n' 'services:' '  device_platform:' '    image: sprout-device-platform:0.22.0' > "$override_root/deploy/cloud/docker-compose.override.yml"
+if (
+  source "$upgrade_script"
+  cloud_dir="$override_root/deploy/cloud"
+  assert_no_managed_image_override
+) >/dev/null 2>&1; then
+  echo "受管镜像覆盖门禁未拒绝 device_platform 本地镜像覆盖。" >&2
+  exit 1
+fi
+
+printf '%s\n' 'services:' '  postgres:' '    image: local-postgres:16' > "$override_root/deploy/cloud/docker-compose.override.yml"
+(
+  source "$upgrade_script"
+  cloud_dir="$override_root/deploy/cloud"
+  assert_no_managed_image_override
+)
+
+# assert_git_clean must tolerate runtime artifacts while still rejecting real
+# source changes. Git reports paths relative to the repository root, so this
+# covers the deploy/cloud prefix used in production.
+clean_root="$(mktemp -d)"
+trap 'rm -rf "$override_root" "$clean_root"' EXIT
+clean_repo="$clean_root/repo"
+mkdir -p \
+  "$clean_repo/deploy/cloud/scripts" \
+  "$clean_repo/deploy/cloud/migration-data" \
+  "$clean_repo/deploy/cloud/mosquitto/certs" \
+  "$clean_repo/deploy/cloud/.codex-backups"
+cp "$upgrade_script" "$clean_repo/deploy/cloud/scripts/upgrade-service.sh"
+git -C "$clean_repo" init -q
+git -C "$clean_repo" config user.name "upgrade clean test"
+git -C "$clean_repo" config user.email "upgrade-clean@example.invalid"
+git -C "$clean_repo" add deploy/cloud/scripts/upgrade-service.sh
+git -C "$clean_repo" commit -qm "clean baseline"
+printf '%s\n' "runtime-data" > "$clean_repo/deploy/cloud/migration-data/keep.dump"
+printf '%s\n' "runtime-cert" > "$clean_repo/deploy/cloud/mosquitto/certs/keep.crt"
+printf '%s\n' "runtime-backup" > "$clean_repo/deploy/cloud/.codex-backups/keep.yml"
+(
+  source "$upgrade_script"
+  cloud_dir="$clean_repo/deploy/cloud"
+  assert_git_clean
+)
+printf '%s\n' "source-change" > "$clean_repo/deploy/cloud/source-change.txt"
+if (
+  source "$upgrade_script"
+  cloud_dir="$clean_repo/deploy/cloud"
+  assert_git_clean
+) >/dev/null 2>&1; then
+  echo "Git 清洁门禁未拒绝真实源码变更。" >&2
   exit 1
 fi
 

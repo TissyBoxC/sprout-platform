@@ -550,6 +550,12 @@ docker compose down -v
 只做状态检测，不会被自动升级。基础设施升级涉及数据兼容、停机窗口和证书，必须
 单独评审并执行完整备份流程。
 
+受管服务的镜像必须由发布标签和 `.env` 版本决定。若 `deploy/cloud/`
+存在 `docker-compose.override.yml` 并且覆盖了 `device_platform`、
+`voice_gateway`、`admin_web` 或 `sub2api` 的 `image`，升级脚本会直接拒绝，
+因为这种情况下重建容器可能仍然使用本地旧镜像。需要长期调整时，应把变更提交
+到发布仓库，而不是保留服务器上的本地覆盖。
+
 管理端把共享状态写入 `SPROUT_SERVICE_VERSION_STATE_DIR`，默认是命名卷
 `sprout_upgrade_data` 内的 `/var/lib/sprout-upgrades`。该目录同时挂载给
 `device_platform` 和独立容器 `upgrade_worker`。生产部署目录不是默认

@@ -342,16 +342,48 @@ assert_git_clean() {
     exit 1
   fi
 
-  # Generated migration data and certificates are runtime artifacts, not
-  # source changes. Everything else must be clean before a release image is
-  # allowed to replace a running container.
+  # Generated migration data, certificates, and operator backups are runtime
+  # artifacts, not source changes. Everything else must be clean before a
+  # release image is allowed to replace a running container.
+  # Git reports paths relative to the repository root even with -C cloud_dir.
+  # Accept both forms so the guard keeps working if the checkout layout changes.
   git_status="$(
     git -C "$cloud_dir" status --porcelain --untracked-files=all -- . |
-      grep -vE '^(\?\?|!!) (migration-data|mosquitto/certs)/' || true
+      grep -vE '^(\?\?|!!) (deploy/cloud/)?(migration-data|mosquitto/certs|\.codex-backups)/' || true
   )"
   if [ -n "$git_status" ]; then
     echo "云端部署目录存在未提交变更，拒绝升级。请先提交或清理：" >&2
     printf '%s\n' "$git_status" >&2
+    exit 1
+  fi
+}
+
+assert_no_managed_image_override() {
+  override_file="$cloud_dir/docker-compose.override.yml"
+  if [ ! -f "$override_file" ]; then
+    return 0
+  fi
+
+  # A local override that pins a managed image can make the version switch
+  # silently ineffective. Reject it instead of reporting a successful upgrade
+  # while Compose keeps running the old image.
+  overridden_services="$(
+    awk '
+      /^[[:space:]]*[A-Za-z0-9_.-]+:[[:space:]]*$/ {
+        section = $1
+        sub(/:$/, "", section)
+        next
+      }
+      /^[[:space:]]+image:[[:space:]]*/ && section != "" {
+        print section
+      }
+    ' "$override_file" |
+      grep -E '^(device_platform|voice_gateway|admin_web|sub2api)$' || true
+  )"
+  if [ -n "$overridden_services" ]; then
+    echo "检测到本地 docker-compose.override.yml 覆盖受管服务镜像，拒绝升级：" >&2
+    printf '  %s\n' $overridden_services >&2
+    echo "请移除对应 image 覆盖，或把变更提交到发布仓库后再升级。" >&2
     exit 1
   fi
 }
@@ -652,6 +684,7 @@ upgrade_services() {
   fi
 
   assert_git_clean
+  assert_no_managed_image_override
 
   for service in $requested_services; do
     target_version_arg=""

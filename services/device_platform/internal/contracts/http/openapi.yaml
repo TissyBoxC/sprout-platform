@@ -948,6 +948,278 @@ paths:
                 $ref: "#/components/schemas/ResponseEnvelope"
         "500":
           $ref: "#/components/responses/AuthServiceError"
+  /internal/v1/device-registration-tokens:
+    post:
+      summary: Issue a manufacturing registration token for one device
+      description: >
+        Operator-only endpoint protected by the internal service token. The
+        returned token authorizes exactly one device to register its public key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRegistrationTokenRequest"
+      responses:
+        "201":
+          description: Registration token created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistrationTokenEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/register:
+    post:
+      summary: Register one device credential with a manufacturing token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterDeviceRequest"
+      responses:
+        "201":
+          description: Device credential registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceCredentialEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "409":
+          $ref: "#/components/responses/DeviceBindingConflict"
+        "410":
+          $ref: "#/components/responses/DeviceBindingGone"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/auth/challenge:
+    post:
+      summary: Issue a short-lived authentication nonce to a registered device
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceAuthenticationChallengeRequest"
+      responses:
+        "200":
+          description: Device authentication challenge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceAuthenticationChallengeEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/auth/complete:
+    post:
+      summary: Verify a device signature and issue a device session token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceAuthenticationCompleteRequest"
+      responses:
+        "200":
+          description: Device session token issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceSessionTokenEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceAuthFailed"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/provisioning-token:
+    post:
+      summary: Create a single-use binding token for one authenticated device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "201":
+          description: Provisioning token created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceProvisioningTokenEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/binding-status:
+    get:
+      summary: Poll whether one authenticated device has been bound
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Device binding status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceBindingStatusEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/voice-token:
+    post:
+      summary: Issue a realtime voice credential for one bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Realtime voice credential
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceTokenEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "403":
+          description: Guardian AI interaction consent is missing or withdrawn
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "503":
+          description: Realtime voice or token signer unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/bind:
+    post:
+      summary: Bind a provisioned device to the authenticated guardian
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BindDeviceRequest"
+      responses:
+        "201":
+          description: Device bound
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceBindingEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "409":
+          $ref: "#/components/responses/DeviceBindingConflict"
+        "410":
+          $ref: "#/components/responses/DeviceBindingGone"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices:
+    get:
+      summary: List the authenticated guardian's bound devices
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Bound devices
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceBindingsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}:
+    delete:
+      summary: Unbind one device from the authenticated guardian
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Device unbound
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceRemovedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -958,6 +1230,10 @@ components:
       type: http
       scheme: bearer
       bearerFormat: user-access-token
+    deviceSessionToken:
+      type: http
+      scheme: bearer
+      bearerFormat: device-session-token
   parameters:
     UserId:
       name: user_id
@@ -999,6 +1275,13 @@ components:
         type: string
         minLength: 1
         maxLength: 128
+    DeviceId:
+      name: device_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
   responses:
     Unauthorized:
       description: Authentication missing, expired, or invalid
@@ -1064,6 +1347,48 @@ components:
             $ref: "#/components/schemas/ResponseEnvelope"
     AuthServiceError:
       description: Identity operation failed unexpectedly
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    DeviceBindingNotFound:
+      description: Device, binding token, or registration token not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    DeviceBindingConflict:
+      description: Device, binding token, or registration token already consumed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    DeviceBindingGone:
+      description: Device binding or registration token expired
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    DeviceAuthFailed:
+      description: Device proof, nonce, or session verification failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    DeviceSessionExpired:
+      description: Device session is missing, expired, or revoked
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    DeviceUnprocessable:
+      description: Device identity, capability, or measurement invalid
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    DeviceServiceError:
+      description: Device lifecycle operation failed unexpectedly
       content:
         application/json:
           schema:
@@ -2203,3 +2528,319 @@ components:
               properties:
                 account:
                   $ref: "#/components/schemas/AdminPermissionAccount"
+    DeviceCapability:
+      type: string
+      enum:
+        - audio_input
+        - audio_output
+        - wifi
+        - camera
+        - display
+        - touch
+        - led
+        - battery
+        - cellular_4g
+        - motion
+        - bluetooth_audio
+        - video_call
+        - location
+        - geofence
+        - sos
+        - multi_device
+    CreateRegistrationTokenRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+      properties:
+        device_id:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    RegisterDeviceRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - registration_token
+        - device_id
+        - hardware_model
+        - firmware_version
+        - capabilities
+        - public_key
+      properties:
+        registration_token:
+          type: string
+          minLength: 32
+          maxLength: 256
+        device_id:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+        hardware_model:
+          type: string
+          maxLength: 64
+        firmware_version:
+          type: string
+          maxLength: 64
+        capabilities:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/DeviceCapability"
+        public_key:
+          type: string
+          minLength: 1
+          maxLength: 4096
+    DeviceAuthenticationChallengeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+      properties:
+        device_id:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    DeviceAuthenticationCompleteRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - nonce
+        - signature
+      properties:
+        device_id:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+        nonce:
+          type: string
+          minLength: 1
+          maxLength: 256
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 4096
+    BindDeviceRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+        - device_name
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 256
+        device_name:
+          type: string
+          maxLength: 64
+    DeviceBinding:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - device_name
+        - hardware_model
+        - firmware_version
+        - capabilities
+        - bound_at
+        - updated_at
+      properties:
+        device_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        device_name:
+          type: string
+          maxLength: 64
+        hardware_model:
+          type: string
+          maxLength: 64
+        firmware_version:
+          type: string
+          maxLength: 64
+        capabilities:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/DeviceCapability"
+        bound_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    RegistrationTokenEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - registration_token
+                - device_id
+                - expires_at
+              properties:
+                registration_token:
+                  type: string
+                  minLength: 1
+                device_id:
+                  type: string
+                expires_at:
+                  type: string
+                  format: date-time
+    DeviceCredentialEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - hardware_model
+                - firmware_version
+                - capabilities
+                - registered_at
+              properties:
+                device_id:
+                  type: string
+                hardware_model:
+                  type: string
+                firmware_version:
+                  type: string
+                capabilities:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/DeviceCapability"
+                registered_at:
+                  type: string
+                  format: date-time
+    DeviceAuthenticationChallengeEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - nonce
+                - expires_at
+              properties:
+                nonce:
+                  type: string
+                  minLength: 1
+                expires_at:
+                  type: string
+                  format: date-time
+    DeviceSessionTokenEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_session_token
+              properties:
+                device_session_token:
+                  type: string
+                  minLength: 1
+    DeviceProvisioningTokenEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - token
+                - device_id
+                - expires_at
+              properties:
+                token:
+                  type: string
+                  minLength: 1
+                device_id:
+                  type: string
+                expires_at:
+                  type: string
+                  format: date-time
+    DeviceBindingStatusEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - is_bound
+              properties:
+                device_id:
+                  type: string
+                is_bound:
+                  type: boolean
+    VoiceTokenEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - websocket_url
+                - token
+                - expires_at
+              properties:
+                websocket_url:
+                  type: string
+                  minLength: 1
+                token:
+                  type: string
+                  minLength: 1
+                expires_at:
+                  type: string
+                  format: date-time
+    DeviceBindingEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/DeviceBinding"
+    DeviceBindingsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - devices
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/DeviceBinding"
+    DeviceRemovedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - removed
+              properties:
+                removed:
+                  type: boolean
+                  const: true

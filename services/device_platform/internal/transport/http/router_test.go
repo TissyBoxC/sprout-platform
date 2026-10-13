@@ -240,6 +240,40 @@ func TestAuthContractDocumentsIdentityAndPermissionEndpoints(t *testing.T) {
 	}
 }
 
+func TestDeviceBindingContractDocumentsLifecycleEndpoints(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/internal/v1/device-registration-tokens:",
+		"/api/v1/devices/register:",
+		"/api/v1/devices/auth/challenge:",
+		"/api/v1/devices/auth/complete:",
+		"/api/v1/devices/{device_id}/provisioning-token:",
+		"/api/v1/devices/{device_id}/binding-status:",
+		"/api/v1/devices/{device_id}/voice-token:",
+		"/api/v1/devices/bind:",
+		"/api/v1/devices:",
+		"/api/v1/devices/{device_id}:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected device binding path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"RegisterDeviceRequest:",
+		"DeviceAuthenticationCompleteRequest:",
+		"DeviceBinding:",
+		"DeviceCredentialEnvelope:",
+		"VoiceTokenEnvelope:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected device binding schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

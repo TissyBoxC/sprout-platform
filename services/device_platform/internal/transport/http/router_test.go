@@ -1459,6 +1459,40 @@ func TestUITextContractDocumentsReviewLifecycle(t *testing.T) {
 	}
 }
 
+func TestServiceVersionContractDocumentsInventoryAndUpgradeOperations(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/admin/service-versions:",
+		"/api/v1/admin/service-versions/check:",
+		"/api/v1/admin/service-versions/upgrade:",
+		"/api/v1/admin/service-versions/{service}/upgrade:",
+		"/api/v1/admin/service-versions/{service}/releases:",
+		"/api/v1/admin/service-version-operations:",
+		"/api/v1/admin/service-version-operations/{operation_id}:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected service-version path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"ServiceVersionSnapshotEnvelope:",
+		"ServiceVersion:",
+		"ServiceReleasePageEnvelope:",
+		"ServiceRelease:",
+		"ServiceUpgradeOperation:",
+		"ServiceUpgradeEnvelope:",
+		"ServiceUpgradeBatchEnvelope:",
+		"ServiceUpgradeOperationsEnvelope:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected service-version schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestAppUpdateContractDocumentsClientUpdateEndpoint(t *testing.T) {
 	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
 	if err != nil {

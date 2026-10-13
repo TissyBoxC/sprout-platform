@@ -9732,6 +9732,236 @@ paths:
                 $ref: "#/components/schemas/ResponseEnvelope"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/service-versions:
+    get:
+      summary: List managed service versions and upgrade status
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Current service version inventory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceVersionSnapshotEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/service-versions/check:
+    post:
+      summary: Request a service version catalog refresh
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Current snapshot while the refresh runs asynchronously
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceVersionSnapshotEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/service-versions/upgrade:
+    post:
+      summary: Queue upgrades for every outdated managed service
+      security:
+        - userToken: []
+      responses:
+        "202":
+          description: Upgrade operations accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceUpgradeBatchEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Service or release not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: No upgrade available or upgrade already in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Service is not upgradable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+        "502":
+          description: Release source unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          description: Release catalog not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+  /api/v1/admin/service-versions/{service}/upgrade:
+    post:
+      summary: Queue an upgrade for one managed service
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ServiceUpgradeRequest"
+      responses:
+        "202":
+          description: Upgrade operation accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceUpgradeEnvelope"
+        "400":
+          description: Malformed request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Service or release not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: No upgrade available or upgrade already in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Service is not upgradable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+        "502":
+          description: Release source unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          description: Release catalog not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+  /api/v1/admin/service-versions/{service}/releases:
+    get:
+      summary: List selectable releases for one managed service
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Newest-first page of selectable service releases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceReleasePageEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Service or release repository not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+        "502":
+          description: Release source unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          description: Release catalog not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+  /api/v1/admin/service-version-operations:
+    get:
+      summary: List service upgrade operations
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Upgrade operation history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceUpgradeOperationsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/service-version-operations/{operation_id}:
+    get:
+      summary: Read one service upgrade operation
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ServiceOperationId"
+      responses:
+        "200":
+          description: Upgrade operation detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceUpgradeEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Upgrade operation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -9907,6 +10137,22 @@ components:
         minimum: 1
         maximum: 100
         default: 20
+    ServiceId:
+      name: service
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z][a-z0-9_]*$"
+        maxLength: 64
+    ServiceOperationId:
+      name: operation_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
     InvitationId:
       name: invitation_id
       in: path
@@ -24033,3 +24279,271 @@ components:
                 total:
                   type: integer
                   minimum: 0
+    ServiceVersionStatus:
+      type: string
+      enum:
+        - current
+        - outdated
+        - unknown
+        - updating
+        - failed
+    ServiceUpgradeOperationStatus:
+      type: string
+      enum:
+        - queued
+        - running
+        - recovering
+        - succeeded
+        - failed
+    ServiceVersion:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - display_name
+        - role
+        - image
+        - current_version
+        - latest_version
+        - status
+        - release_url
+        - is_self
+        - upgrade_supported
+        - can_upgrade
+        - last_checked_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          minLength: 1
+        display_name:
+          type: string
+        role:
+          type: string
+        image:
+          type: string
+        current_version:
+          type: string
+        latest_version:
+          type: string
+        status:
+          $ref: "#/components/schemas/ServiceVersionStatus"
+        release_url:
+          type: string
+        is_self:
+          type: boolean
+        upgrade_supported:
+          type: boolean
+        can_upgrade:
+          type: boolean
+        last_checked_at:
+          nullable: true
+          type: string
+          format: date-time
+        updated_at:
+          nullable: true
+          type: string
+          format: date-time
+    ServiceVersionSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        - services
+        - checked_at
+        - all_up_to_date
+      properties:
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceVersion"
+        checked_at:
+          nullable: true
+          type: string
+          format: date-time
+        all_up_to_date:
+          type: boolean
+    ServiceVersionSnapshotEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ServiceVersionSnapshot"
+    ServiceRelease:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+        - release_url
+        - published_at
+        - is_current
+        - is_latest
+      properties:
+        version:
+          type: string
+          minLength: 1
+        release_url:
+          type: string
+        published_at:
+          nullable: true
+          type: string
+          format: date-time
+        is_current:
+          type: boolean
+        is_latest:
+          type: boolean
+    ServiceReleasePage:
+      type: object
+      additionalProperties: false
+      required:
+        - service
+        - releases
+        - page
+        - page_size
+        - has_more
+      properties:
+        service:
+          type: string
+          minLength: 1
+        releases:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceRelease"
+        page:
+          type: integer
+          minimum: 1
+        page_size:
+          type: integer
+          minimum: 1
+        has_more:
+          type: boolean
+    ServiceReleasePageEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ServiceReleasePage"
+    ServiceUpgradeOperation:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - target_service
+        - current_version
+        - target_version
+        - status
+        - message
+        - started_at
+        - finished_at
+        - log_tail
+      properties:
+        id:
+          type: string
+          minLength: 1
+        target_service:
+          type: string
+          minLength: 1
+        current_version:
+          type: string
+        target_version:
+          type: string
+        status:
+          $ref: "#/components/schemas/ServiceUpgradeOperationStatus"
+        message:
+          type: string
+        started_at:
+          nullable: true
+          type: string
+          format: date-time
+        finished_at:
+          nullable: true
+          type: string
+          format: date-time
+        log_tail:
+          type: string
+        requested_by:
+          type: string
+        requested_at:
+          nullable: true
+          type: string
+          format: date-time
+    ServiceUpgradeRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        target_version:
+          type: string
+          maxLength: 64
+    ServiceUpgradeConfirmation:
+      type: object
+      additionalProperties: false
+      required:
+        - service_id
+        - display_name
+        - current_version
+        - target_version
+        - is_self
+      properties:
+        service_id:
+          type: string
+          minLength: 1
+        display_name:
+          type: string
+        current_version:
+          type: string
+        target_version:
+          type: string
+        is_self:
+          type: boolean
+    ServiceUpgradeEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - operation
+                - confirmation
+              properties:
+                operation:
+                  $ref: "#/components/schemas/ServiceUpgradeOperation"
+                confirmation:
+                  $ref: "#/components/schemas/ServiceUpgradeConfirmation"
+    ServiceUpgradeBatchEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - operation
+                - operations
+              properties:
+                operation:
+                  nullable: true
+                  allOf:
+                    - $ref: "#/components/schemas/ServiceUpgradeOperation"
+                operations:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ServiceUpgradeOperation"
+    ServiceUpgradeOperationsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - operations
+              properties:
+                operations:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ServiceUpgradeOperation"

@@ -2653,6 +2653,101 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/form-factor/devices:
+    get:
+      summary: List the authenticated family's composed form-factor profiles
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Form-factor profiles
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FormFactorDevicesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/form-factor/capability:
+    get:
+      summary: Read one family device's composed form-factor capability
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Form-factor capability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FormFactorCapabilityEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/form-factor/report:
+    post:
+      summary: Report one bound device's composed form-factor profile
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FormFactorReportRequest"
+      responses:
+        "200":
+          description: Form-factor profile recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FormFactorRecordedEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/form-factor/stats:
+    get:
+      summary: Read the fleet-wide form-factor summary
+      security:
+        - userToken: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        "200":
+          description: Form-factor statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FormFactorAdminStatsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -7016,3 +7111,259 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/MotionAdminStats"
+    FormFactorCapabilityKey:
+      type: string
+      enum:
+        - display
+        - camera
+        - microphone
+        - speaker
+        - touch
+        - locomotion
+        - servo
+        - cellular
+        - battery
+        - wearable
+    FormFactorActionKey:
+      type: string
+      enum:
+        - expression
+        - video_display
+        - touch
+        - walk
+        - dance
+        - tail
+        - gesture
+        - voice
+        - video_call
+        - location
+    FormFactorCapability:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - name
+      properties:
+        key:
+          $ref: "#/components/schemas/FormFactorCapabilityKey"
+        name:
+          type: string
+    FormFactorAction:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - name
+      properties:
+        key:
+          $ref: "#/components/schemas/FormFactorActionKey"
+        name:
+          type: string
+    FormFactorProfile:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - family_id
+        - technical_name
+        - capability_mask
+        - action_mask
+        - capabilities
+        - actions
+        - schema_version
+        - reported_at
+      properties:
+        device_id:
+          type: string
+        family_id:
+          type: string
+        technical_name:
+          type: string
+          minLength: 1
+          maxLength: 23
+        capability_mask:
+          type: integer
+          minimum: 0
+          maximum: 1023
+        action_mask:
+          type: integer
+          minimum: 0
+          maximum: 1023
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/FormFactorCapability"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/FormFactorAction"
+        schema_version:
+          type: integer
+          minimum: 1
+        reported_at:
+          type: string
+          format: date-time
+    FormFactorDevicesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - devices
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/FormFactorProfile"
+    FormFactorCapabilitySummary:
+      type: object
+      additionalProperties: false
+      required:
+        - supported
+        - technical_name
+        - capability_mask
+        - action_mask
+        - capabilities
+        - actions
+        - schema_version
+      properties:
+        supported:
+          type: boolean
+        technical_name:
+          type: string
+        capability_mask:
+          type: integer
+          minimum: 0
+          maximum: 1023
+        action_mask:
+          type: integer
+          minimum: 0
+          maximum: 1023
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/FormFactorCapability"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/FormFactorAction"
+        schema_version:
+          type: integer
+          minimum: 1
+    FormFactorCapabilityEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/FormFactorCapabilitySummary"
+    FormFactorReportRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - technical_name
+        - capability_mask
+        - schema_version
+      properties:
+        technical_name:
+          type: string
+          minLength: 1
+          maxLength: 23
+        capability_mask:
+          type: integer
+          minimum: 0
+          maximum: 1023
+        schema_version:
+          type: integer
+          const: 1
+    FormFactorRecordedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - technical_name
+                - action_mask
+                - recorded
+              properties:
+                device_id:
+                  type: string
+                technical_name:
+                  type: string
+                action_mask:
+                  type: integer
+                  minimum: 0
+                  maximum: 1023
+                recorded:
+                  type: boolean
+                  const: true
+    FormFactorCount:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - count
+      properties:
+        label:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+    FormFactorAdminStats:
+      type: object
+      additionalProperties: false
+      required:
+        - window_days
+        - device_count
+        - locomotion_count
+        - voice_count
+        - video_call_count
+        - wearable_count
+        - name_buckets
+        - capability_counts
+        - generated_at
+      properties:
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        device_count:
+          type: integer
+          minimum: 0
+        locomotion_count:
+          type: integer
+          minimum: 0
+        voice_count:
+          type: integer
+          minimum: 0
+        video_call_count:
+          type: integer
+          minimum: 0
+        wearable_count:
+          type: integer
+          minimum: 0
+        name_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/FormFactorCount"
+        capability_counts:
+          type: array
+          items:
+            $ref: "#/components/schemas/FormFactorCount"
+        generated_at:
+          type: string
+          format: date-time
+    FormFactorAdminStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/FormFactorAdminStats"

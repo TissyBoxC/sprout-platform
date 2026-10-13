@@ -496,6 +496,33 @@ func TestMotionContractDocumentsPolicyAndStatusEndpoints(t *testing.T) {
 	}
 }
 
+func TestFormFactorContractDocumentsProfileEndpoints(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/form-factor/devices:",
+		"/api/v1/devices/{device_id}/form-factor/capability:",
+		"/api/v1/devices/{device_id}/form-factor/report:",
+		"/api/v1/admin/form-factor/stats:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected form-factor path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"FormFactorProfile:",
+		"FormFactorCapabilitySummary:",
+		"FormFactorReportRequest:",
+		"FormFactorAdminStats:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected form-factor schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

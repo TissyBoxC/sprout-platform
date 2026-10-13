@@ -2495,6 +2495,164 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/motion/policy:
+    get:
+      summary: Read the authenticated family's motion and motor policy
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Motion policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MotionPolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Publish the authenticated family's motion and motor policy
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MotionPolicyRequest"
+      responses:
+        "200":
+          description: Updated motion policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MotionPolicyEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/motion/devices:
+    get:
+      summary: List the authenticated family's latest motion statuses
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Motion statuses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MotionDevicesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/motion/capability:
+    get:
+      summary: Read one family device's motion capability
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Motion capability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MotionCapabilityEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/motion/status:
+    post:
+      summary: Report one bound device's motion status
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MotionStatusReportRequest"
+      responses:
+        "200":
+          description: Motion status recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MotionStatusRecordedEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/motion/policy:
+    get:
+      summary: Read the family motion policy from a bound device session
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Motion policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MotionPolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/motion/stats:
+    get:
+      summary: Read the fleet-wide motion summary
+      security:
+        - userToken: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        "200":
+          description: Motion statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MotionAdminStatsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -6572,3 +6730,289 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/PowerAdminStats"
+    MotionState:
+      type: string
+      enum:
+        - idle
+        - running
+        - stopped
+        - timeout
+        - fault
+    MotionAction:
+      type: string
+      enum:
+        - idle
+        - walk
+        - dance
+        - tail_wag
+        - gesture
+    MotionPolicyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - require_stop_ack
+        - allow_locomotion
+        - max_speed_percent
+        - max_runtime_ms
+        - stop_grace_ms
+      properties:
+        enabled:
+          type: boolean
+        require_stop_ack:
+          type: boolean
+        allow_locomotion:
+          type: boolean
+        max_speed_percent:
+          type: integer
+          minimum: 1
+          maximum: 100
+        max_runtime_ms:
+          type: integer
+          minimum: 200
+          maximum: 60000
+        stop_grace_ms:
+          type: integer
+          minimum: 0
+          maximum: 60000
+    MotionPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - enabled
+        - require_stop_ack
+        - allow_locomotion
+        - max_speed_percent
+        - max_runtime_ms
+        - stop_grace_ms
+        - revision
+      properties:
+        schema_version:
+          type: integer
+          minimum: 1
+        enabled:
+          type: boolean
+        require_stop_ack:
+          type: boolean
+        allow_locomotion:
+          type: boolean
+        max_speed_percent:
+          type: integer
+          minimum: 1
+          maximum: 100
+        max_runtime_ms:
+          type: integer
+          minimum: 200
+          maximum: 60000
+        stop_grace_ms:
+          type: integer
+          minimum: 0
+          maximum: 60000
+        revision:
+          type: integer
+          minimum: 0
+    MotionPolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/MotionPolicy"
+    MotionDeviceStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - family_id
+        - state
+        - action
+        - actuator_count
+        - faulted
+        - up_to_date
+        - reported_at
+      properties:
+        device_id:
+          type: string
+        family_id:
+          type: string
+        state:
+          $ref: "#/components/schemas/MotionState"
+        action:
+          $ref: "#/components/schemas/MotionAction"
+        actuator_count:
+          type: integer
+          minimum: 0
+          maximum: 32
+        faulted:
+          type: boolean
+        up_to_date:
+          type: boolean
+        reported_at:
+          type: string
+          format: date-time
+    MotionDevicesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - devices
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/MotionDeviceStatus"
+    MotionCapability:
+      type: object
+      additionalProperties: false
+      required:
+        - supported
+        - state
+        - action
+        - actuator_count
+        - faulted
+        - allow_locomotion
+        - schema_version
+        - policy_revision
+        - applied_revision
+        - up_to_date
+      properties:
+        supported:
+          type: boolean
+        state:
+          $ref: "#/components/schemas/MotionState"
+        action:
+          $ref: "#/components/schemas/MotionAction"
+        actuator_count:
+          type: integer
+          minimum: 0
+          maximum: 32
+        faulted:
+          type: boolean
+        allow_locomotion:
+          type: boolean
+        schema_version:
+          type: integer
+          minimum: 1
+        policy_revision:
+          type: integer
+          minimum: 0
+        applied_revision:
+          type: integer
+          minimum: 0
+        up_to_date:
+          type: boolean
+    MotionCapabilityEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/MotionCapability"
+    MotionStatusReportRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - action
+        - actuator_count
+        - faulted
+        - policy_revision
+      properties:
+        state:
+          $ref: "#/components/schemas/MotionState"
+        action:
+          $ref: "#/components/schemas/MotionAction"
+        actuator_count:
+          type: integer
+          minimum: 0
+          maximum: 32
+        faulted:
+          type: boolean
+        policy_revision:
+          type: integer
+          minimum: 0
+    MotionStatusRecordedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - policy_revision
+                - recorded
+              properties:
+                device_id:
+                  type: string
+                policy_revision:
+                  type: integer
+                  minimum: 0
+                recorded:
+                  type: boolean
+                  const: true
+    MotionCount:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - count
+      properties:
+        label:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+    MotionAdminStats:
+      type: object
+      additionalProperties: false
+      required:
+        - window_days
+        - device_count
+        - running_count
+        - faulted_count
+        - idle_count
+        - action_buckets
+        - state_buckets
+        - generated_at
+      properties:
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        device_count:
+          type: integer
+          minimum: 0
+        running_count:
+          type: integer
+          minimum: 0
+        faulted_count:
+          type: integer
+          minimum: 0
+        idle_count:
+          type: integer
+          minimum: 0
+        action_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/MotionCount"
+        state_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/MotionCount"
+        generated_at:
+          type: string
+          format: date-time
+    MotionAdminStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/MotionAdminStats"

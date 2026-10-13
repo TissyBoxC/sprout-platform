@@ -466,6 +466,36 @@ func TestPowerContractDocumentsPolicyAndStatusEndpoints(t *testing.T) {
 	}
 }
 
+func TestMotionContractDocumentsPolicyAndStatusEndpoints(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/motion/policy:",
+		"/api/v1/motion/devices:",
+		"/api/v1/devices/{device_id}/motion/capability:",
+		"/api/v1/devices/{device_id}/motion/status:",
+		"/api/v1/devices/{device_id}/motion/policy:",
+		"/api/v1/admin/motion/stats:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected motion path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"MotionPolicyRequest:",
+		"MotionPolicy:",
+		"MotionCapability:",
+		"MotionStatusReportRequest:",
+		"MotionAdminStats:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected motion schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

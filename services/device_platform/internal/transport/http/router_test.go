@@ -340,6 +340,41 @@ func TestDisplayContractDocumentsPolicyAndStatusEndpoints(t *testing.T) {
 	}
 }
 
+func TestScreenContractDocumentsPolicyDictionaryAndPlaybackEndpoints(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/screen/policy:",
+		"/api/v1/screen/devices:",
+		"/api/v1/screen/point-read:",
+		"/api/v1/screen/point-read/{entry_id}:",
+		"/api/v1/devices/{device_id}/screen/capability:",
+		"/api/v1/devices/{device_id}/screen/playback:",
+		"/api/v1/devices/{device_id}/screen/status:",
+		"/api/v1/devices/{device_id}/screen/policy:",
+		"/api/v1/admin/screen/stats:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected screen path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"ScreenPolicyRequest:",
+		"ScreenPolicyCatalogEnvelope:",
+		"ScreenDictionaryEntryRequest:",
+		"ScreenPlaybackRequest:",
+		"ScreenCapability:",
+		"ScreenStatusReportRequest:",
+		"ScreenAdminStats:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected screen schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

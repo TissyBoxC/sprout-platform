@@ -1733,6 +1733,294 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/screen/policy:
+    get:
+      summary: Read the authenticated family's screen policy and catalogs
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Screen policy with expression and animation catalogs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreenPolicyCatalogEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Publish the authenticated family's screen policy
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScreenPolicyRequest"
+      responses:
+        "200":
+          description: Updated screen policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreenPolicyEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/screen/devices:
+    get:
+      summary: List the authenticated family's latest screen statuses
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Screen statuses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreenDevicesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/screen/point-read:
+    get:
+      summary: List the authenticated family's point-to-read dictionary
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Point-to-read entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreenDictionaryEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Create or replace one point-to-read entry
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScreenDictionaryEntryRequest"
+      responses:
+        "200":
+          description: Stored point-to-read entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreenDictionaryEntryEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/screen/point-read/{entry_id}:
+    delete:
+      summary: Delete one point-to-read entry
+      security:
+        - userToken: []
+      parameters:
+        - name: entry_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        "200":
+          description: Point-to-read entry deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreenDeletedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Point-to-read entry not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/screen/capability:
+    get:
+      summary: Read one family device's screen capability
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Screen capability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreenCapabilityEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/screen/playback:
+    get:
+      summary: Read one family device's clamped video playback plan
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Video playback plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreenPlaybackEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Clamp and store one family device's video playback request
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScreenPlaybackRequest"
+      responses:
+        "200":
+          description: Clamped video playback plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreenPlaybackEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/screen/status:
+    post:
+      summary: Report one bound device's screen status
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScreenStatusReportRequest"
+      responses:
+        "200":
+          description: Screen status recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreenStatusRecordedEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/screen/policy:
+    get:
+      summary: Read the family screen policy from a bound device session
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Screen policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreenPolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/screen/stats:
+    get:
+      summary: Read the fleet-wide screen summary
+      security:
+        - userToken: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        "200":
+          description: Screen statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreenAdminStatsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -4400,3 +4688,444 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/DisplayAdminStats"
+    ScreenExpression:
+      type: string
+      enum:
+        - neutral
+        - happy
+        - sad
+        - curious
+        - sleepy
+        - surprised
+        - excited
+    ScreenAnimation:
+      type: string
+      enum:
+        - none
+        - idle
+        - blink
+        - wave
+        - nod
+        - dance
+    ScreenVideoState:
+      type: string
+      enum:
+        - idle
+        - loading
+        - playing
+        - paused
+        - ended
+        - failed
+    ScreenPolicyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - default_expression
+        - animation_enabled
+        - point_read_enabled
+        - video_enabled
+        - video_max_fps
+        - video_max_bitrate_kbps
+        - animation_frame_ms
+      properties:
+        default_expression:
+          $ref: "#/components/schemas/ScreenExpression"
+        animation_enabled:
+          type: boolean
+        point_read_enabled:
+          type: boolean
+        video_enabled:
+          type: boolean
+        video_max_fps:
+          type: integer
+          minimum: 5
+          maximum: 60
+        video_max_bitrate_kbps:
+          type: integer
+          minimum: 100
+          maximum: 8000
+        animation_frame_ms:
+          type: integer
+          minimum: 40
+          maximum: 1000
+    ScreenPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - default_expression
+        - animation_enabled
+        - point_read_enabled
+        - video_enabled
+        - video_max_fps
+        - video_max_bitrate_kbps
+        - animation_frame_ms
+        - revision
+      properties:
+        schema_version:
+          type: integer
+          minimum: 1
+        default_expression:
+          $ref: "#/components/schemas/ScreenExpression"
+        animation_enabled:
+          type: boolean
+        point_read_enabled:
+          type: boolean
+        video_enabled:
+          type: boolean
+        video_max_fps:
+          type: integer
+          minimum: 5
+          maximum: 60
+        video_max_bitrate_kbps:
+          type: integer
+          minimum: 100
+          maximum: 8000
+        animation_frame_ms:
+          type: integer
+          minimum: 40
+          maximum: 1000
+        revision:
+          type: integer
+          minimum: 0
+    ScreenPolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ScreenPolicy"
+    ScreenPolicyCatalogEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - policy
+                - expressions
+                - animations
+              properties:
+                policy:
+                  $ref: "#/components/schemas/ScreenPolicy"
+                expressions:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ScreenExpression"
+                animations:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ScreenAnimation"
+    ScreenDeviceStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - family_id
+        - screen_supported
+        - point_read_supported
+        - video_supported
+        - expression
+        - video_state
+        - up_to_date
+        - reported_at
+      properties:
+        device_id:
+          type: string
+        family_id:
+          type: string
+        screen_supported:
+          type: boolean
+        point_read_supported:
+          type: boolean
+        video_supported:
+          type: boolean
+        expression:
+          $ref: "#/components/schemas/ScreenExpression"
+        video_state:
+          $ref: "#/components/schemas/ScreenVideoState"
+        up_to_date:
+          type: boolean
+        reported_at:
+          type: string
+          format: date-time
+    ScreenDevicesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - devices
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ScreenDeviceStatus"
+    ScreenDictionaryEntryRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - term
+        - text
+      properties:
+        term:
+          type: string
+          minLength: 1
+          maxLength: 48
+        text:
+          type: string
+          minLength: 1
+          maxLength: 96
+    ScreenDictionaryEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - family_id
+        - term
+        - text
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+        family_id:
+          type: string
+        term:
+          type: string
+        text:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ScreenDictionaryEntryEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ScreenDictionaryEntry"
+    ScreenDictionaryEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - entries
+              properties:
+                entries:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ScreenDictionaryEntry"
+    ScreenDeletedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - deleted
+              properties:
+                deleted:
+                  type: boolean
+                  const: true
+    ScreenPlaybackRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - bitrate_kbps
+        - fps
+      properties:
+        bitrate_kbps:
+          type: integer
+          minimum: 100
+          maximum: 8000
+        fps:
+          type: integer
+          minimum: 5
+          maximum: 60
+    ScreenPlayback:
+      type: object
+      additionalProperties: false
+      required:
+        - bitrate_kbps
+        - fps
+      properties:
+        bitrate_kbps:
+          type: integer
+          minimum: 100
+          maximum: 8000
+        fps:
+          type: integer
+          minimum: 5
+          maximum: 60
+    ScreenPlaybackEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ScreenPlayback"
+    ScreenCapability:
+      type: object
+      additionalProperties: false
+      required:
+        - supported
+        - expressions_supported
+        - animation_supported
+        - point_read_supported
+        - video_supported
+        - schema_version
+        - policy_revision
+        - applied_revision
+        - up_to_date
+      properties:
+        supported:
+          type: boolean
+        expressions_supported:
+          type: boolean
+        animation_supported:
+          type: boolean
+        point_read_supported:
+          type: boolean
+        video_supported:
+          type: boolean
+        schema_version:
+          type: integer
+          minimum: 1
+        policy_revision:
+          type: integer
+          minimum: 0
+        applied_revision:
+          type: integer
+          minimum: 0
+        up_to_date:
+          type: boolean
+    ScreenCapabilityEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ScreenCapability"
+    ScreenStatusReportRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - screen_supported
+        - expressions_supported
+        - animation_supported
+        - point_read_supported
+        - video_supported
+        - expression
+        - animation
+        - video_state
+        - policy_revision
+      properties:
+        screen_supported:
+          type: boolean
+        expressions_supported:
+          type: boolean
+        animation_supported:
+          type: boolean
+        point_read_supported:
+          type: boolean
+        video_supported:
+          type: boolean
+        expression:
+          $ref: "#/components/schemas/ScreenExpression"
+        animation:
+          $ref: "#/components/schemas/ScreenAnimation"
+        video_state:
+          $ref: "#/components/schemas/ScreenVideoState"
+        policy_revision:
+          type: integer
+          minimum: 0
+    ScreenStatusRecordedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - policy_revision
+                - recorded
+              properties:
+                device_id:
+                  type: string
+                policy_revision:
+                  type: integer
+                  minimum: 0
+                recorded:
+                  type: boolean
+                  const: true
+    ScreenCount:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - count
+      properties:
+        label:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+    ScreenAdminStats:
+      type: object
+      additionalProperties: false
+      required:
+        - window_days
+        - device_count
+        - video_device_count
+        - point_read_device_count
+        - outdated_count
+        - state_buckets
+        - generated_at
+      properties:
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        device_count:
+          type: integer
+          minimum: 0
+        video_device_count:
+          type: integer
+          minimum: 0
+        point_read_device_count:
+          type: integer
+          minimum: 0
+        outdated_count:
+          type: integer
+          minimum: 0
+        state_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScreenCount"
+        generated_at:
+          type: string
+          format: date-time
+    ScreenAdminStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ScreenAdminStats"

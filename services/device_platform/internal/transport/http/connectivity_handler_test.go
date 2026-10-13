@@ -144,6 +144,25 @@ func TestConnectivityCurrentRequiresAuthentication(t *testing.T) {
 	}
 }
 
+func TestConnectivityDevicePolicyRequiresSession(t *testing.T) {
+	handler := deviceConnectivityHandler{
+		handler:        &connectivityHandler{service: &connectivityTestService{}},
+		bindingService: nil,
+		runtimeService: nil,
+	}
+	request := englishRequest(
+		http.MethodGet,
+		"/api/v1/devices/device-1/connectivity/policy",
+		"",
+		"",
+	)
+	recorder := httptest.NewRecorder()
+	handler.devicePolicy(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestConnectivityPublishAndReadBack(t *testing.T) {
 	handler := connectivityHandler{service: &connectivityTestService{}}
 	body := `{"enabled":true,"roaming_allowed":true,` +

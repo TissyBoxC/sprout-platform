@@ -70,6 +70,42 @@ void main() {
     expect(refreshCount, 1);
   });
 
+  test('refreshes a session stored as one compact value', () async {
+    final secureStore = InMemorySessionSecureStore();
+    await secureStore.writeSession(
+      const StoredSession(accessToken: 'expired', refreshToken: 'refresh'),
+    );
+
+    final dio = Dio(BaseOptions(baseUrl: 'https://api.example.test'));
+    dio.httpClientAdapter = _SequenceAdapter();
+
+    var refreshCount = 0;
+    final client = DioApiClient(
+      config: ApiClientConfig(
+        appConfig: AppConfig(
+          apiBaseUrl: Uri.parse('https://api.example.test'),
+          requestTimeout: const Duration(seconds: 1),
+        ),
+      ),
+      secureStore: secureStore,
+      refreshSession: (refreshToken) async {
+        refreshCount += 1;
+        return const AuthSession(
+          accessToken: 'renewed',
+          refreshToken: 'refresh-2',
+        );
+      },
+      dio: dio,
+    );
+
+    final response = await client.get('/api/parent/v1/devices');
+
+    expect(response, isNotEmpty);
+    expect(refreshCount, 1);
+    expect((await secureStore.readSession())?.accessToken, 'renewed');
+    expect((await secureStore.readSession())?.refreshToken, 'refresh-2');
+  });
+
   test('a 204 response with no body yields an empty result', () async {
     final secureStore = InMemorySecureStore();
     final dio = Dio(BaseOptions(baseUrl: 'https://api.example.test'));
@@ -251,6 +287,32 @@ class InMemorySecureStore implements SecureStore {
   Future<void> write(String key, String value) async {
     _values[key] = value;
   }
+}
+
+class InMemorySessionSecureStore implements SessionSecureStore {
+  StoredSession? _session;
+
+  @override
+  Future<StoredSession?> readSession() async => _session;
+
+  @override
+  Future<void> writeSession(StoredSession session) async {
+    _session = session;
+  }
+
+  @override
+  Future<void> clearSession() async {
+    _session = null;
+  }
+
+  @override
+  Future<String?> read(String key) async => null;
+
+  @override
+  Future<void> write(String key, String value) async {}
+
+  @override
+  Future<void> delete(String key) async {}
 }
 
 class _SequenceAdapter implements HttpClientAdapter {

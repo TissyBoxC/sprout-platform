@@ -1,6 +1,11 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:parent_app/core/error/app_exception.dart';
+import 'package:parent_app/core/config/app_config.dart';
+import 'package:parent_app/core/network/session_manager.dart';
 import 'package:parent_app/core/providers.dart';
 import 'package:parent_app/core/storage/secure_store.dart';
 import 'package:parent_app/features/auth/application/auth_controller.dart';
@@ -8,39 +13,42 @@ import 'package:parent_app/features/auth/data/auth_api.dart';
 
 void main() {
   test('restores a persisted refresh token on cold start', () async {
-    final secureStore = _MemorySecureStore({'auth_refresh_token': 'refresh'});
+    final secureStore = _MemorySecureStore({
+      SessionStoreKeys.accessToken: 'expired',
+      SessionStoreKeys.refreshToken: 'refresh',
+    });
+    final adapter = _RefreshAdapter();
     final api = _AuthApiStub();
-    final container = ProviderContainer(
-      overrides: [
-        secureStoreProvider.overrideWithValue(secureStore),
-        authApiProvider.overrideWithValue(api),
-      ],
+    final container = _container(
+      secureStore: secureStore,
+      adapter: adapter,
+      authApi: api,
     );
     addTearDown(container.dispose);
 
     final state = await container.read(authControllerProvider.future);
 
     expect(state.isSignedIn, isTrue);
-    expect(api.refreshCount, 1);
+    expect(adapter.refreshCount, 1);
     expect(api.meCount, 1);
-    expect(secureStore.values['auth_access_token'], 'access-renewed');
-    expect(secureStore.values['auth_refresh_token'], 'refresh-renewed');
+    expect(secureStore.values[SessionStoreKeys.accessToken], 'access-renewed');
+    expect(
+      secureStore.values[SessionStoreKeys.refreshToken],
+      'refresh-renewed',
+    );
   });
 
   test('keeps the session when startup refresh has a network error', () async {
-    final secureStore = _MemorySecureStore({'auth_refresh_token': 'refresh'});
-    final api = _AuthApiStub(
-      refreshError: const AppException(
-        kind: AppErrorKind.network,
-        message: '网络连接不稳定，请检查后重试',
-        retryable: true,
-      ),
-    );
-    final container = ProviderContainer(
-      overrides: [
-        secureStoreProvider.overrideWithValue(secureStore),
-        authApiProvider.overrideWithValue(api),
-      ],
+    final secureStore = _MemorySecureStore({
+      SessionStoreKeys.accessToken: 'expired',
+      SessionStoreKeys.refreshToken: 'refresh',
+    });
+    final adapter = _RefreshAdapter(timeout: true);
+    final api = _AuthApiStub();
+    final container = _container(
+      secureStore: secureStore,
+      adapter: adapter,
+      authApi: api,
     );
     addTearDown(container.dispose);
 
@@ -48,26 +56,22 @@ void main() {
 
     expect(state.canRetryRestore, isTrue);
     expect(state.isSignedIn, isFalse);
-    expect(secureStore.values['auth_refresh_token'], 'refresh');
+    expect(state.errorMessage, '网络连接不稳定，请检查后重试');
+    expect(secureStore.values[SessionStoreKeys.accessToken], 'expired');
+    expect(secureStore.values[SessionStoreKeys.refreshToken], 'refresh');
   });
 
   test('clears the session when startup refresh is rejected', () async {
     final secureStore = _MemorySecureStore({
-      'auth_access_token': 'access',
-      'auth_refresh_token': 'refresh',
+      SessionStoreKeys.accessToken: 'access',
+      SessionStoreKeys.refreshToken: 'refresh',
     });
-    final api = _AuthApiStub(
-      refreshError: const AppException(
-        kind: AppErrorKind.unauthenticated,
-        message: '登录已过期，请重新登录',
-        retryable: false,
-      ),
-    );
-    final container = ProviderContainer(
-      overrides: [
-        secureStoreProvider.overrideWithValue(secureStore),
-        authApiProvider.overrideWithValue(api),
-      ],
+    final adapter = _RefreshAdapter(reject: true);
+    final api = _AuthApiStub();
+    final container = _container(
+      secureStore: secureStore,
+      adapter: adapter,
+      authApi: api,
     );
     addTearDown(container.dispose);
 
@@ -80,15 +84,15 @@ void main() {
 
   test('logout clears local session even when server logout fails', () async {
     final secureStore = _MemorySecureStore({
-      'auth_access_token': 'access',
-      'auth_refresh_token': 'refresh',
+      SessionStoreKeys.accessToken: 'access',
+      SessionStoreKeys.refreshToken: 'refresh',
     });
+    final adapter = _RefreshAdapter();
     final api = _AuthApiStub(logoutError: StateError('network unavailable'));
-    final container = ProviderContainer(
-      overrides: [
-        secureStoreProvider.overrideWithValue(secureStore),
-        authApiProvider.overrideWithValue(api),
-      ],
+    final container = _container(
+      secureStore: secureStore,
+      adapter: adapter,
+      authApi: api,
     );
     addTearDown(container.dispose);
 
@@ -100,6 +104,37 @@ void main() {
     expect(container.read(authControllerProvider).value?.isSignedIn, isFalse);
   });
 }
+
+ProviderContainer _container({
+  required _MemorySecureStore secureStore,
+  required _RefreshAdapter adapter,
+  required _AuthApiStub authApi,
+}) {
+  final sessionManager = SessionManager(
+    secureStore: secureStore,
+    appConfig: _config,
+    dio: _adapterDio(adapter),
+  );
+  return ProviderContainer(
+    overrides: [
+      secureStoreProvider.overrideWithValue(secureStore),
+      appConfigProvider.overrideWithValue(_config),
+      sessionManagerProvider.overrideWithValue(sessionManager),
+      authApiProvider.overrideWithValue(authApi),
+    ],
+  );
+}
+
+Dio _adapterDio(HttpClientAdapter adapter) {
+  final dio = Dio(BaseOptions(baseUrl: 'https://api.example.test'));
+  dio.httpClientAdapter = adapter;
+  return dio;
+}
+
+final _config = AppConfig(
+  apiBaseUrl: Uri.parse('https://api.example.test'),
+  requestTimeout: const Duration(seconds: 1),
+);
 
 class _MemorySecureStore implements SecureStore {
   _MemorySecureStore(this.values);
@@ -123,26 +158,15 @@ class _MemorySecureStore implements SecureStore {
 }
 
 class _AuthApiStub implements AuthApi {
-  _AuthApiStub({this.refreshError, this.logoutError});
+  _AuthApiStub({this.logoutError});
 
-  final Object? refreshError;
   final Object? logoutError;
-  int refreshCount = 0;
   int meCount = 0;
   int logoutCount = 0;
 
   @override
-  Future<AuthResult> refresh(String refreshToken) async {
-    refreshCount += 1;
-    final error = refreshError;
-    if (error != null) {
-      throw error;
-    }
-    return const AuthResult(
-      accessToken: 'access-renewed',
-      refreshToken: 'refresh-renewed',
-      account: _account,
-    );
+  Future<AuthResult> refresh(String refreshToken) {
+    throw UnimplementedError();
   }
 
   @override
@@ -228,6 +252,67 @@ class _AuthApiStub implements AuthApi {
   }) {
     throw UnimplementedError();
   }
+}
+
+class _RefreshAdapter implements HttpClientAdapter {
+  _RefreshAdapter({this.reject = false, this.timeout = false});
+
+  final bool reject;
+  final bool timeout;
+  var refreshCount = 0;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    if (!options.path.endsWith('/api/v1/auth/refresh')) {
+      throw StateError('unexpected request: ${options.path}');
+    }
+    refreshCount += 1;
+    if (timeout) {
+      throw DioException(
+        requestOptions: options,
+        type: DioExceptionType.connectionTimeout,
+        error: 'temporary network failure',
+      );
+    }
+    if (reject) {
+      return _errorResponse();
+    }
+    return ResponseBody.fromString(
+      jsonEncode(<String, Object?>{
+        'data': <String, Object?>{
+          'access_token': 'access-renewed',
+          'refresh_token': 'refresh-renewed',
+        },
+      }),
+      200,
+      headers: <String, List<String>>{
+        Headers.contentTypeHeader: <String>[Headers.jsonContentType],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+ResponseBody _errorResponse() {
+  return ResponseBody.fromString(
+    jsonEncode(<String, Object?>{
+      'error': <String, Object?>{
+        'code': 'session_expired',
+        'message': '登录已过期，请重新登录',
+        'retryable': false,
+      },
+    }),
+    401,
+    headers: <String, List<String>>{
+      Headers.contentTypeHeader: <String>[Headers.jsonContentType],
+    },
+  );
 }
 
 const _account = ParentAccount(

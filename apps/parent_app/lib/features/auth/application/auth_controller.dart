@@ -1,9 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/error/app_exception.dart';
-import '../../../core/providers.dart';
-import '../../../core/storage/secure_store.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/network/session_manager.dart';
+import '../../../core/providers.dart';
 import '../data/auth_api.dart';
 
 const guardianConsentVersion = '2026-01';
@@ -60,17 +60,17 @@ class AuthState {
 /// Owns session restoration, registration, login, and sign-out.
 class AuthController extends AsyncNotifier<AuthState> {
   late final AuthApi _authApi;
-  late final SecureStore _secureStore;
+  late final SessionManager _sessionManager;
 
   @override
   Future<AuthState> build() async {
     _authApi = ref.read(authApiProvider);
-    _secureStore = ref.read(secureStoreProvider);
-    final refreshToken = await _secureStore.read(DioApiClient.refreshTokenKey);
-    if (refreshToken == null || refreshToken.isEmpty) {
+    _sessionManager = ref.read(sessionManagerProvider);
+    final storedSession = await _sessionManager.read();
+    if (storedSession == null || !storedSession.hasRefreshToken) {
       return const AuthState.signedOut();
     }
-    return _restoreSession(refreshToken);
+    return _restoreSession();
   }
 
   /// Retries startup recovery without discarding a valid local session.
@@ -80,22 +80,19 @@ class AuthController extends AsyncNotifier<AuthState> {
   Future<AuthState> retryRestore() async {
     state = const AsyncLoading();
     final nextState = await AsyncValue.guard(() async {
-      final refreshToken = await _secureStore.read(
-        DioApiClient.refreshTokenKey,
-      );
-      if (refreshToken == null || refreshToken.isEmpty) {
+      final storedSession = await _sessionManager.read();
+      if (storedSession == null || !storedSession.hasRefreshToken) {
         return const AuthState.signedOut();
       }
-      return _restoreSession(refreshToken);
+      return _restoreSession();
     });
     state = nextState;
     return nextState.value ?? const AuthState.restoreFailed();
   }
 
-  Future<AuthState> _restoreSession(String refreshToken) async {
+  Future<AuthState> _restoreSession() async {
     try {
-      final session = await _authApi.refresh(refreshToken);
-      await _saveSession(session);
+      await _sessionManager.refreshCurrent();
       final account = await _authApi.me();
       return AuthState(
         isLoading: false,
@@ -186,8 +183,9 @@ class AuthController extends AsyncNotifier<AuthState> {
 
   Future<void> logout() async {
     state = const AsyncLoading();
-    final refreshToken = await _secureStore.read(DioApiClient.refreshTokenKey);
-    if (refreshToken != null) {
+    final storedSession = await _sessionManager.read();
+    final refreshToken = storedSession?.refreshToken;
+    if (refreshToken != null && refreshToken.isNotEmpty) {
       try {
         await _authApi.logout(refreshToken);
       } on Object {
@@ -258,16 +256,16 @@ class AuthController extends AsyncNotifier<AuthState> {
   }
 
   Future<void> _saveSession(AuthResult session) async {
-    await _secureStore.write(DioApiClient.accessTokenKey, session.accessToken);
-    await _secureStore.write(
-      DioApiClient.refreshTokenKey,
-      session.refreshToken,
+    await _sessionManager.save(
+      AuthSession(
+        accessToken: session.accessToken,
+        refreshToken: session.refreshToken,
+      ),
     );
   }
 
   Future<void> _clearSession() async {
-    await _secureStore.delete(DioApiClient.accessTokenKey);
-    await _secureStore.delete(DioApiClient.refreshTokenKey);
+    await _sessionManager.clear();
   }
 }
 

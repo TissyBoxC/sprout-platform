@@ -95,12 +95,13 @@ class DioApiClient implements ApiClient {
     );
   }
 
-  static const accessTokenKey = 'auth_access_token';
-  static const refreshTokenKey = 'auth_refresh_token';
+  static const accessTokenKey = SessionStoreKeys.accessToken;
+  static const refreshTokenKey = SessionStoreKeys.refreshToken;
   static const _skipSessionRefreshExtra = 'skip_session_refresh';
 
   final Dio _dio;
   final SecureStore _secureStore;
+  late final SessionStore _sessionStore = SessionStore(_secureStore);
   final RefreshSession _refreshSession;
   final _refreshGate = SessionRefreshGate();
 
@@ -189,8 +190,9 @@ class DioApiClient implements ApiClient {
       handler.next(request);
       return;
     }
-    final accessToken = await _secureStore.read(accessTokenKey);
-    if (accessToken != null) {
+    final session = await _sessionStore.read();
+    final accessToken = session?.accessToken;
+    if (accessToken != null && accessToken.isNotEmpty) {
       request.headers['Authorization'] = 'Bearer $accessToken';
     }
     handler.next(request);
@@ -230,7 +232,8 @@ class DioApiClient implements ApiClient {
   }
 
   Future<_RefreshOutcome> _performRefresh() async {
-    final refreshToken = await _secureStore.read(refreshTokenKey);
+    final settings = await _sessionStore.read();
+    final refreshToken = settings?.refreshToken;
     if (refreshToken == null || refreshToken.isEmpty) {
       await _clearSession();
       return const _RefreshOutcome.failed();
@@ -238,8 +241,12 @@ class DioApiClient implements ApiClient {
 
     try {
       final session = await _refreshSession(refreshToken);
-      await _secureStore.write(accessTokenKey, session.accessToken);
-      await _secureStore.write(refreshTokenKey, session.refreshToken);
+      await _sessionStore.write(
+        StoredSession(
+          accessToken: session.accessToken,
+          refreshToken: session.refreshToken,
+        ),
+      );
       return _RefreshOutcome.succeeded(session.accessToken);
     } on Object catch (error) {
       if (isSessionRejected(error)) {
@@ -250,8 +257,7 @@ class DioApiClient implements ApiClient {
   }
 
   Future<void> _clearSession() async {
-    await _secureStore.delete(accessTokenKey);
-    await _secureStore.delete(refreshTokenKey);
+    await _sessionStore.clear();
   }
 
   Map<String, Object?> _requireResponseMap(Object? data) {

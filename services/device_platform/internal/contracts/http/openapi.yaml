@@ -5218,6 +5218,224 @@ paths:
           $ref: "#/components/responses/DeviceUnprocessable"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/playback/requests:
+    get:
+      summary: List the authenticated family's on-demand playback requests
+      security:
+        - userToken: []
+      parameters:
+        - name: device_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/PlaybackRequestStatus"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Playback request list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaybackRequestsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Create one on-demand playback request for a bound device
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlaybackRequestInput"
+      responses:
+        "201":
+          description: Playback request created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaybackRequestEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: A matching playback request is already pending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/playback/requests/{request_id}:
+    get:
+      summary: Read one on-demand playback request
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/PlaybackRequestId"
+      responses:
+        "200":
+          description: Playback request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaybackRequestEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Playback request not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/playback/requests/{request_id}/cancel:
+    post:
+      summary: Cancel one pending on-demand playback request
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/PlaybackRequestId"
+      responses:
+        "200":
+          description: Playback request cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaybackRequestEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Playback request not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Playback request is already terminal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/playback/requests:
+    get:
+      summary: List pending playback requests for a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Pending playback requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaybackRequestsEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/playback/requests/{request_id}/acknowledge:
+    post:
+      summary: Acknowledge one playback request from a bound device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/PlaybackRequestId"
+      responses:
+        "200":
+          description: Playback request acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaybackRequestEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "404":
+          description: Playback request not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Playback request is already terminal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/playback/requests/{request_id}/complete:
+    post:
+      summary: Complete one playback request with a terminal outcome
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/PlaybackRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlaybackOutcomeRequest"
+      responses:
+        "200":
+          description: Playback request completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaybackRequestEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "404":
+          description: Playback request not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Playback request is already terminal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -5298,6 +5516,14 @@ components:
         maxLength: 128
     AlarmId:
       name: alarm_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    PlaybackRequestId:
+      name: request_id
       in: path
       required: true
       schema:
@@ -13458,3 +13684,111 @@ components:
                   type: array
                   items:
                     type: string
+    PlaybackRequestSource:
+      type: string
+      enum:
+        - guardian
+        - recommendation
+    PlaybackRequestStatus:
+      type: string
+      enum:
+        - pending
+        - acknowledged
+        - completed
+        - failed
+        - cancelled
+    PlaybackOutcome:
+      type: string
+      enum:
+        - played
+        - skipped
+        - error
+    PlaybackRequestInput:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - package_id
+      properties:
+        device_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        package_id:
+          type: string
+          pattern: "^[a-z][a-z0-9]*(?:_[a-z0-9]+){1,7}$"
+        note:
+          type: string
+          maxLength: 200
+    PlaybackRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - device_id
+        - package_id
+        - source
+        - status
+        - note
+        - requested_at
+      properties:
+        id:
+          type: string
+        device_id:
+          type: string
+        package_id:
+          type: string
+        source:
+          $ref: "#/components/schemas/PlaybackRequestSource"
+        status:
+          $ref: "#/components/schemas/PlaybackRequestStatus"
+        note:
+          type: string
+          maxLength: 200
+        requested_at:
+          type: string
+          format: date-time
+        acknowledged_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        outcome:
+          $ref: "#/components/schemas/PlaybackOutcome"
+    PlaybackRequestEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - request
+              properties:
+                request:
+                  $ref: "#/components/schemas/PlaybackRequest"
+    PlaybackRequestsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - requests
+              properties:
+                requests:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PlaybackRequest"
+    PlaybackOutcomeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - outcome
+      properties:
+        outcome:
+          $ref: "#/components/schemas/PlaybackOutcome"

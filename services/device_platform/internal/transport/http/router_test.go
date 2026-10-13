@@ -831,6 +831,39 @@ func TestPrivacyContractDocumentsConsentExportDeletionAndAuditEndpoints(t *testi
 	}
 }
 
+func TestPlaybackContractDocumentsRequestsAndDeviceLifecycle(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/playback/requests:",
+		"/api/v1/playback/requests/{request_id}:",
+		"/api/v1/playback/requests/{request_id}/cancel:",
+		"/api/v1/devices/{device_id}/playback/requests:",
+		"/api/v1/devices/{device_id}/playback/requests/{request_id}/acknowledge:",
+		"/api/v1/devices/{device_id}/playback/requests/{request_id}/complete:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected playback path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"PlaybackRequestSource:",
+		"PlaybackRequestStatus:",
+		"PlaybackOutcome:",
+		"PlaybackRequestInput:",
+		"PlaybackRequest:",
+		"PlaybackRequestEnvelope:",
+		"PlaybackRequestsEnvelope:",
+		"PlaybackOutcomeRequest:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected playback schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

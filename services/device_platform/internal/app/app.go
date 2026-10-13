@@ -46,6 +46,8 @@ import (
 	displayService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/display/service"
 	englishRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/repository"
 	englishService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/service"
+	familyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/repository"
+	familyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/service"
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/repository"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
@@ -208,6 +210,12 @@ func Run() error {
 		return fmt.Errorf("create child profile service: %w", err)
 	}
 	parentAuthService.SetChildProvisioner(childProfileService)
+	familyMembershipService, err := familyService.New(familyService.Options{
+		Repository: familyRepository.NewPostgresRepository(databaseStore.Pool()),
+	})
+	if err != nil {
+		return fmt.Errorf("create family service: %w", err)
+	}
 	companionshipCompanionService, err := companionshipService.New(companionshipService.Options{
 		Repository: companionshipPersistence,
 	})
@@ -804,6 +812,7 @@ func Run() error {
 			InternalAPIConfig:            cfg.Internal,
 			AuthService:                  parentAuthService,
 			ChildService:                 childProfileService,
+			FamilyService:                familyMembershipService,
 			CompanionshipService:         companionshipCompanionService,
 			AlarmReminderService:         alarmReminder,
 			ParentPolicyService:          parentPolicyService,

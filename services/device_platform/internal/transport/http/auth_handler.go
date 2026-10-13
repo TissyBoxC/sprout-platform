@@ -527,6 +527,20 @@ func authenticatedAccountID(request *http.Request) (string, bool) {
 	return accountID, ok && strings.TrimSpace(accountID) != ""
 }
 
+// AccountEmail resolves the normalized login email for an authenticated
+// account. The family module uses it to match an invitation to the accepting
+// login without depending on the auth repository.
+func (handler authHandler) AccountEmail(
+	ctx context.Context,
+	accountID string,
+) (string, error) {
+	account, err := handler.service.GetIdentity(ctx, accountID)
+	if err != nil {
+		return "", err
+	}
+	return account.Email, nil
+}
+
 func authResponse(
 	account *authdomain.ParentAccount,
 	pair *authdomain.TokenPair,

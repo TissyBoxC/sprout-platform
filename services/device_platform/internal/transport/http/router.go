@@ -30,6 +30,7 @@ import (
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
 	displayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/display/service"
 	englishservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/service"
+	familyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/service"
 	featurecenterservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	formfactorservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/form_factor/service"
 	imageprivacyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/image_privacy/service"
@@ -66,6 +67,7 @@ type RouterOptions struct {
 	InternalAPIConfig            config.InternalAPIConfig
 	AuthService                  *authservice.Service
 	ChildService                 *childservice.Service
+	FamilyService                *familyservice.Service
 	CompanionshipService         *companionshipservice.Service
 	ParentPolicyService          *policeservice.Service
 	AIService                    *gatewayservice.Service
@@ -248,6 +250,44 @@ func NewRouter(options RouterOptions) http.Handler {
 			mux.HandleFunc(
 				"PUT /api/v1/children/{child_id}/policy",
 				authHandler.requireAuthentication(childHandler.updatePolicy),
+			)
+		}
+		if options.FamilyService != nil {
+			familyHandler := familyHandler{
+				service:       options.FamilyService,
+				accountReader: authHandler,
+			}
+			mux.HandleFunc(
+				"GET /api/v1/family/members",
+				authHandler.requireAuthentication(familyHandler.listMembers),
+			)
+			mux.HandleFunc(
+				"DELETE /api/v1/family/members/{user_id}",
+				authHandler.requireAuthentication(familyHandler.removeMember),
+			)
+			mux.HandleFunc(
+				"PUT /api/v1/family/members/{user_id}",
+				authHandler.requireAuthentication(familyHandler.updateMemberRole),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/family/invitations",
+				authHandler.requireAuthentication(familyHandler.listInvitations),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/family/invitations",
+				authHandler.requireAuthentication(familyHandler.createInvitation),
+			)
+			mux.HandleFunc(
+				"DELETE /api/v1/family/invitations/{invitation_id}",
+				authHandler.requireAuthentication(familyHandler.revokeInvitation),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/families/{family_id}/invitations/{invitation_id}/accept",
+				authHandler.requireAuthentication(familyHandler.acceptInvitation),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/family/capability",
+				authHandler.requireAuthentication(familyHandler.capability),
 			)
 		}
 		if options.CompanionshipService != nil {

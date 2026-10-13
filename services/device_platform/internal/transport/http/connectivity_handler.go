@@ -66,6 +66,19 @@ type connectivityStatusPayload struct {
 	PolicyRevision int    `json:"policy_revision"`
 }
 
+type deviceCellularPolicyResponse struct {
+	SchemaVersion       int    `json:"schema_version"`
+	Enabled             bool   `json:"enabled"`
+	RoamingAllowed      bool   `json:"roaming_allowed"`
+	RemoteWakeEnabled   bool   `json:"remote_wake_enabled"`
+	MeteredUploadLimit  bool   `json:"metered_upload_limit"`
+	Preference          string `json:"preference"`
+	MonthlyQuotaMB      int    `json:"monthly_quota_mb"`
+	LowQuotaWarnPercent int    `json:"low_quota_warn_percent"`
+	KeepaliveSeconds    int    `json:"keepalive_seconds"`
+	PolicyRevision      int    `json:"policy_revision"`
+}
+
 // current returns the guardian's cellular policy for the authenticated family.
 func (handler connectivityHandler) current(
 	response http.ResponseWriter,
@@ -197,6 +210,36 @@ func (handler deviceConnectivityHandler) reportStatus(
 		"device_id":       status.DeviceID,
 		"policy_revision": status.PolicyRevision,
 		"recorded":        true,
+	})
+}
+
+// devicePolicy returns the family cellular policy to a bound device that holds
+// a device session token, so the modem applies the guardian preference and
+// quota without an authenticated guardian present.
+func (handler deviceConnectivityHandler) devicePolicy(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	_, familyID, ok := handler.verifyDevice(response, request)
+	if !ok {
+		return
+	}
+	policy, err := handler.handler.service.Current(request.Context(), familyID)
+	if err != nil {
+		writeConnectivityError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, deviceCellularPolicyResponse{
+		SchemaVersion:       policy.SchemaVersion,
+		Enabled:             policy.Enabled,
+		RoamingAllowed:      policy.RoamingAllowed,
+		RemoteWakeEnabled:   policy.RemoteWakeEnabled,
+		MeteredUploadLimit:  policy.MeteredUploadLimit,
+		Preference:          string(policy.Preference),
+		MonthlyQuotaMB:      policy.MonthlyQuotaMB,
+		LowQuotaWarnPercent: policy.LowQuotaWarnPercent,
+		KeepaliveSeconds:    policy.KeepaliveSeconds,
+		PolicyRevision:      policy.Revision,
 	})
 }
 

@@ -516,6 +516,10 @@ func NewRouter(options RouterOptions) http.Handler {
 					"POST /api/v1/devices/{device_id}/connectivity/status",
 					deviceConnectivityHandler.reportStatus,
 				)
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/connectivity/policy",
+					deviceConnectivityHandler.devicePolicy,
+				)
 			}
 		}
 		if options.PowerService != nil {

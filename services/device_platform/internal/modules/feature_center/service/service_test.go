@@ -390,9 +390,6 @@ func TestDefaultRegistryCoversRequiredFeatures(t *testing.T) {
 		"deployment_infrastructure",
 	}
 	definitions := DefaultRegistry()
-	if len(definitions) != len(required) {
-		t.Fatalf("definition count = %d, want %d", len(definitions), len(required))
-	}
 	registered := make(map[string]Definition, len(definitions))
 	for _, definition := range definitions {
 		registered[definition.Feature.ID] = definition
@@ -405,9 +402,25 @@ func TestDefaultRegistryCoversRequiredFeatures(t *testing.T) {
 			t.Fatalf("incomplete feature definition: %+v", definition.Feature)
 		}
 	}
+	if len(required) != len(registered) {
+		t.Fatalf("required inventory count = %d, registered count = %d",
+			len(required), len(registered))
+	}
 	for _, featureID := range required {
 		if _, ok := registered[featureID]; !ok {
 			t.Fatalf("missing required feature %q", featureID)
+		}
+	}
+	for featureID := range registered {
+		found := false
+		for _, requiredFeatureID := range required {
+			if featureID == requiredFeatureID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("unexpected feature %q must be added to the required inventory", featureID)
 		}
 	}
 }

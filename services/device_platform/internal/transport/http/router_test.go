@@ -1515,6 +1515,36 @@ func TestAppUpdateContractDocumentsClientUpdateEndpoint(t *testing.T) {
 	}
 }
 
+func TestInternalContentAndReleasePublicationContractDocumentsRoutes(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/internal/v1/content/catalog:",
+		"/internal/v1/content/packages/{package_id}/download:",
+		"/internal/v1/release-files:",
+		"/api/v1/release-publication/files:",
+		"/internal/v1/release-index/refresh:",
+		"/api/v1/release-publication/index-refresh:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected internal content/release path %s in API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"ContentCatalogEnvelope:",
+		"ContentDownloadEnvelope:",
+		"AdminReleaseFileEnvelope:",
+		"AdminReleaseFileUploadRequest:",
+		"AdminReleaseIndexRefreshEnvelope:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected internal content/release schema %s in API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

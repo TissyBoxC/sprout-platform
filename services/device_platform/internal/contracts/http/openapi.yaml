@@ -109,6 +109,282 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResponseEnvelope"
+  /internal/v1/content/catalog:
+    get:
+      summary: Read the unrestricted incremental content catalog for internal consumers
+      description: >
+        Internal service-token surface used by release and operations jobs.
+        Unlike the guardian and device routes, it is not scoped to one
+        family policy.
+      parameters:
+        - name: since_revision
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+            default: 0
+        - name: age_tier
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ContentAgeTier"
+        - name: category
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ContentCategory"
+      responses:
+        "200":
+          description: Incremental content catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentCatalogEnvelope"
+        "401":
+          description: Service authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /internal/v1/content/packages/{package_id}/download:
+    get:
+      summary: Read a verified download descriptor for one published package
+      description: >
+        Internal service-token surface used by release and operations jobs.
+        It returns metadata only and never serves file bytes.
+      parameters:
+        - name: package_id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/ContentPackageID"
+      responses:
+        "200":
+          description: Published package download descriptor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentDownloadEnvelope"
+        "401":
+          description: Service authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "404":
+          description: Package or asset not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Stored asset checksum changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /internal/v1/release-files:
+    post:
+      summary: Upload one release artifact through the constrained release token
+      description: >
+        Release automation surface protected by the dedicated release-upload
+        token. It accepts the same multipart fields as the administration
+        upload route but grants no family or provider access.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/AdminReleaseFileUploadRequest"
+      responses:
+        "201":
+          description: File uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleaseFileEnvelope"
+        "400":
+          description: Malformed multipart upload or missing file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          description: Release-upload authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: File already exists without overwrite
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "413":
+          description: Upload exceeds the configured file size limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Relative path or release metadata invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/release-publication/files:
+    post:
+      summary: Upload one release artifact through the public release alias
+      description: >
+        Compatibility alias for the release automation upload route. It uses
+        the same dedicated release-upload token and constrained store surface.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/AdminReleaseFileUploadRequest"
+      responses:
+        "201":
+          description: File uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleaseFileEnvelope"
+        "400":
+          description: Malformed multipart upload or missing file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          description: Release-upload authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: File already exists without overwrite
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "413":
+          description: Upload exceeds the configured file size limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Relative path or release metadata invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /internal/v1/release-index/refresh:
+    post:
+      summary: Refresh one release index through the constrained release token
+      description: >
+        Release automation surface protected by the dedicated release-upload
+        token. The request body may be omitted only to signal a full store
+        scan; the internal handler requires a non-empty version otherwise.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRefreshReleaseIndexRequest"
+      responses:
+        "200":
+          description: Release index refreshed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleaseIndexRefreshEnvelope"
+        "400":
+          description: Malformed request body or missing version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          description: Release-upload authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "404":
+          description: Release directory not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Release metadata invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/release-publication/index-refresh:
+    post:
+      summary: Refresh one release index through the public release alias
+      description: >
+        Compatibility alias for the release automation index route. It uses
+        the same dedicated release-upload token and constrained store surface.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRefreshReleaseIndexRequest"
+      responses:
+        "200":
+          description: Release index refreshed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReleaseIndexRefreshEnvelope"
+        "400":
+          description: Malformed request body or missing version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          description: Release-upload authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "404":
+          description: Release directory not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Release metadata invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
   /api/v1/family/members:
     get:
       summary: List the members of the authenticated guardian's family

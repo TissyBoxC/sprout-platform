@@ -332,6 +332,167 @@ paths:
           $ref: "#/components/responses/FamilyNotFound"
         "500":
           $ref: "#/components/responses/FamilyServiceError"
+  /api/v1/children:
+    get:
+      summary: List the child profiles owned by the authenticated family
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Child profiles
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChildrenEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/ChildServiceError"
+    post:
+      summary: Create a child profile
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChildProfileRequest"
+      responses:
+        "201":
+          description: Child profile created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChildEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ChildUnprocessable"
+        "500":
+          $ref: "#/components/responses/ChildServiceError"
+  /api/v1/children/{child_id}:
+    put:
+      summary: Update a child profile
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ChildId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChildProfileRequest"
+      responses:
+        "200":
+          description: Child profile updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChildEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ChildNotFound"
+        "422":
+          $ref: "#/components/responses/ChildUnprocessable"
+        "500":
+          $ref: "#/components/responses/ChildServiceError"
+    delete:
+      summary: Delete a child profile
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ChildId"
+      responses:
+        "200":
+          description: Child profile deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChildDeletedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ChildNotFound"
+        "500":
+          $ref: "#/components/responses/ChildServiceError"
+  /api/v1/children/{child_id}/policy:
+    get:
+      summary: Read one child's parent policy
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ChildId"
+      responses:
+        "200":
+          description: Parent policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentPolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ChildNotFound"
+        "500":
+          $ref: "#/components/responses/ChildServiceError"
+    put:
+      summary: Update one child's parent policy with optimistic concurrency
+      description: >
+        The request must carry the policy version the guardian last read. A
+        stale version is rejected with 409 version_conflict so two guardians
+        cannot silently overwrite each other.
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ChildId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParentPolicyRequest"
+      responses:
+        "200":
+          description: Parent policy updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentPolicyEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ChildNotFound"
+        "409":
+          description: Policy version conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/ChildUnprocessable"
+        "500":
+          $ref: "#/components/responses/ChildServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -367,6 +528,14 @@ components:
         type: string
         minLength: 1
         maxLength: 128
+    ChildId:
+      name: child_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
   responses:
     Unauthorized:
       description: Authentication missing, expired, or invalid
@@ -396,6 +565,24 @@ components:
             $ref: "#/components/schemas/ResponseEnvelope"
     FamilyServiceError:
       description: Family operation failed unexpectedly
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    ChildNotFound:
+      description: Child or child policy not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    ChildUnprocessable:
+      description: Invalid child profile, consent, or parent policy
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    ChildServiceError:
+      description: Child or parent policy operation failed unexpectedly
       content:
         application/json:
           schema:
@@ -737,3 +924,276 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/FamilyCapability"
+    ChildProfileRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - nickname
+        - age_tier
+        - interests
+        - content_categories
+        - guardian_consent
+      properties:
+        nickname:
+          type: string
+          minLength: 1
+          maxLength: 32
+        age_tier:
+          type: string
+          enum:
+            - age_3_4
+            - age_5_6
+            - age_7_8
+        interests:
+          type: array
+          maxItems: 12
+          uniqueItems: true
+          items:
+            type: string
+            pattern: "^[a-z][a-z0-9_]{1,31}$"
+        content_categories:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+        guardian_consent:
+          type: boolean
+    Child:
+      type: object
+      additionalProperties: false
+      required:
+        - child_id
+        - family_id
+        - nickname
+        - age_tier
+        - interests
+        - content_categories
+        - guardian_consent
+        - guardian_consent_version
+        - created_at
+        - updated_at
+      properties:
+        child_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        family_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        nickname:
+          type: string
+          minLength: 1
+          maxLength: 32
+        age_tier:
+          type: string
+          enum:
+            - age_3_4
+            - age_5_6
+            - age_7_8
+        interests:
+          type: array
+          maxItems: 12
+          uniqueItems: true
+          items:
+            type: string
+        content_categories:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+        guardian_consent:
+          type: boolean
+          const: true
+        guardian_consent_version:
+          type: string
+          minLength: 1
+          maxLength: 32
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ChildrenEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - children
+              properties:
+                children:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Child"
+    ChildEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - child
+              properties:
+                child:
+                  $ref: "#/components/schemas/Child"
+    ChildDeletedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - deleted
+              properties:
+                deleted:
+                  type: boolean
+                  const: true
+    ParentPolicyVoiceConversation:
+      type: object
+      additionalProperties: false
+      required:
+        - continuous_conversation_enabled
+        - idle_window_seconds
+        - barge_in_enabled
+        - far_field_enabled
+      properties:
+        continuous_conversation_enabled:
+          type: boolean
+        idle_window_seconds:
+          type: integer
+          minimum: 2
+          maximum: 60
+        barge_in_enabled:
+          type: boolean
+        far_field_enabled:
+          type: boolean
+    ParentPolicyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - policy_version
+        - daily_limit_minutes
+        - allowed_categories
+        - disabled_periods
+        - max_volume_percent
+        - voice_conversation
+      properties:
+        policy_version:
+          type: integer
+          minimum: 1
+        daily_limit_minutes:
+          type: integer
+          minimum: 0
+          maximum: 720
+        allowed_categories:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+        disabled_periods:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/DisabledPeriod"
+        max_volume_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        voice_conversation:
+          $ref: "#/components/schemas/ParentPolicyVoiceConversation"
+    DisabledPeriod:
+      type: object
+      additionalProperties: false
+      required:
+        - start_time
+        - end_time
+      properties:
+        start_time:
+          type: string
+          pattern: "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+        end_time:
+          type: string
+          pattern: "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+    ParentPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - policy_id
+        - family_id
+        - child_id
+        - policy_version
+        - daily_limit_minutes
+        - allowed_categories
+        - disabled_periods
+        - max_volume_percent
+        - voice_conversation
+        - updated_at
+      properties:
+        policy_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        family_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        child_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        policy_version:
+          type: integer
+          minimum: 1
+        daily_limit_minutes:
+          type: integer
+          minimum: 0
+          maximum: 720
+        allowed_categories:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+        disabled_periods:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/DisabledPeriod"
+        max_volume_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        voice_conversation:
+          $ref: "#/components/schemas/ParentPolicyVoiceConversation"
+        updated_at:
+          type: string
+          format: date-time
+    ParentPolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - policy
+              properties:
+                policy:
+                  $ref: "#/components/schemas/ParentPolicy"

@@ -40,6 +40,25 @@ type Repository interface {
 	Delete(ctx context.Context, notificationID string) error
 	// ListAdmin returns a filtered, paged operator projection plus the total.
 	ListAdmin(ctx context.Context, filter domain.AdminFilter) ([]domain.AdminItem, int, error)
+	// ListDeviceMessages returns pending display messages addressed to one
+	// device, newest first. It is used by the device-authenticated poll path
+	// and is intentionally independent from administrator pagination.
+	ListDeviceMessages(
+		ctx context.Context,
+		parentAccountID string,
+		deviceID string,
+		now time.Time,
+		limit int,
+	) ([]domain.DeviceMessage, error)
+	// MarkDeliveryDeliveredByCommand records that a device command carrying a
+	// notification reached the device. It is idempotent and does not mark the
+	// delivery as read.
+	MarkDeliveryDeliveredByCommand(
+		ctx context.Context,
+		commandID string,
+		deviceID string,
+		now time.Time,
+	) error
 	// ActiveParentIDs returns the recipient set for a broadcast.
 	ActiveParentIDs(ctx context.Context) ([]string, error)
 	// ParentOwnsDevice reports whether the guardian has the device bound.
@@ -475,6 +494,92 @@ func (r *PostgresRepository) ListAdmin(
 		return nil, 0, fmt.Errorf("iterate notifications: %w", err)
 	}
 	return items, total, nil
+}
+
+// ListDeviceMessages returns valid family messages addressed to one device.
+func (r *PostgresRepository) ListDeviceMessages(
+	ctx context.Context,
+	parentAccountID string,
+	deviceID string,
+	now time.Time,
+	limit int,
+) ([]domain.DeviceMessage, error) {
+	if limit <= 0 {
+		return []domain.DeviceMessage{}, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT
+			n.id,
+			n.title,
+			n.body,
+			n.severity,
+			n.display_duration_seconds,
+			n.category
+		FROM notification_deliveries AS d
+		JOIN notifications AS n ON n.id = d.notification_id
+		WHERE d.parent_account_id = $1
+		  AND d.channel = 'device'
+		  AND n.device_id = $2
+		  AND n.publish_at <= $3
+		  AND (n.expires_at IS NULL OR n.expires_at > $3)
+		ORDER BY n.created_at DESC, n.id DESC
+		LIMIT $4
+	`, parentAccountID, deviceID, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list device messages: %w", err)
+	}
+	defer rows.Close()
+
+	messages := make([]domain.DeviceMessage, 0, limit)
+	for rows.Next() {
+		var message domain.DeviceMessage
+		if err := rows.Scan(
+			&message.ID,
+			&message.Title,
+			&message.Body,
+			&message.Severity,
+			&message.DurationSeconds,
+			&message.Category,
+		); err != nil {
+			return nil, fmt.Errorf("scan device message: %w", err)
+		}
+		if message.DurationSeconds <= 0 {
+			message.DurationSeconds = domain.DefaultDeviceMessageSeconds
+		}
+		messages = append(messages, message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate device messages: %w", err)
+	}
+	return messages, nil
+}
+
+// MarkDeliveryDeliveredByCommand records a device delivery acknowledgement.
+func (r *PostgresRepository) MarkDeliveryDeliveredByCommand(
+	ctx context.Context,
+	commandID string,
+	deviceID string,
+	now time.Time,
+) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE notification_deliveries AS d
+		SET status = 'delivered',
+		    delivered_at = COALESCE(d.delivered_at, $3),
+		    updated_at = $3
+		FROM notifications AS n
+		WHERE d.notification_id = n.id
+		  AND d.command_id = $1
+		  AND n.device_id = $2
+		  AND d.channel = 'device'
+		  AND d.status IN ('pending', 'failed')
+	`, commandID, deviceID, now)
+	if err != nil {
+		return fmt.Errorf("mark delivery delivered by command: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ActiveParentIDs returns the broadcast recipient set.

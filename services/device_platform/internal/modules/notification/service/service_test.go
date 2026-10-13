@@ -189,6 +189,74 @@ func (m *memoryRepository) ListAdmin(
 	return items, len(items), nil
 }
 
+func (m *memoryRepository) ListDeviceMessages(
+	_ context.Context,
+	parentAccountID string,
+	deviceID string,
+	now time.Time,
+	limit int,
+) ([]domain.DeviceMessage, error) {
+	messages := make([]domain.DeviceMessage, 0)
+	for _, delivery := range m.deliveries {
+		if delivery.ParentAccountID != parentAccountID ||
+			delivery.Channel != domain.ChannelDevice {
+			continue
+		}
+		notification, ok := m.notifications[delivery.NotificationID]
+		if !ok || notification.DeviceID != deviceID ||
+			notification.PublishAt.After(now) {
+			continue
+		}
+		if notification.ExpiresAt != nil && !notification.ExpiresAt.After(now) {
+			continue
+		}
+		duration := notification.DisplayDurationSeconds
+		if duration <= 0 {
+			duration = domain.DefaultDeviceMessageSeconds
+		}
+		messages = append(messages, domain.DeviceMessage{
+			ID:              notification.ID,
+			Title:           notification.Title,
+			Body:            notification.Body,
+			Severity:        notification.Severity,
+			DurationSeconds: duration,
+			Category:        notification.Category,
+		})
+	}
+	sort.Slice(messages, func(i, j int) bool {
+		return messages[i].ID > messages[j].ID
+	})
+	if len(messages) > limit {
+		messages = messages[:limit]
+	}
+	return messages, nil
+}
+
+func (m *memoryRepository) MarkDeliveryDeliveredByCommand(
+	_ context.Context,
+	commandID string,
+	deviceID string,
+	now time.Time,
+) error {
+	for _, delivery := range m.deliveries {
+		notification, ok := m.notifications[delivery.NotificationID]
+		if ok &&
+			delivery.CommandID == commandID &&
+			notification.DeviceID == deviceID &&
+			delivery.Channel == domain.ChannelDevice &&
+			(delivery.Status == domain.DeliveryStatusPending ||
+				delivery.Status == domain.DeliveryStatusFailed) {
+			delivery.Status = domain.DeliveryStatusDelivered
+			if delivery.DeliveredAt == nil {
+				delivery.DeliveredAt = &now
+			}
+			delivery.UpdatedAt = now
+			return nil
+		}
+	}
+	return repository.ErrNotFound
+}
+
 func (m *memoryRepository) ActiveParentIDs(_ context.Context) ([]string, error) {
 	return []string{testParentID}, nil
 }
@@ -519,6 +587,194 @@ func TestSendFamilyMessageDegradesWhenDeviceUnavailable(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected the device delivery to be marked failed")
+	}
+}
+
+func TestDeviceMessagesOnlyReturnsTargetDevice(t *testing.T) {
+	repo := newMemoryRepository()
+	repo.devices["sprout_device_other"] = testParentID
+	service := newTestService(t, repo, &fakeCommander{})
+
+	for _, deviceID := range []string{testDeviceID, "sprout_device_other"} {
+		if _, err := service.SendFamilyMessage(
+			context.Background(),
+			testParentID,
+			domain.GuardianMessageInput{
+				DeviceID:     deviceID,
+				Body:         "给" + deviceID + "的留言",
+				SendToDevice: true,
+			},
+		); err != nil {
+			t.Fatalf("send message to %s: %v", deviceID, err)
+		}
+	}
+
+	messages, err := service.DeviceMessages(
+		context.Background(),
+		testParentID,
+		testDeviceID,
+		20,
+	)
+	if err != nil {
+		t.Fatalf("device messages: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected exactly one target-device message, got %d", len(messages))
+	}
+	if messages[0].Body != "给"+testDeviceID+"的留言" {
+		t.Fatalf("unexpected message body %q", messages[0].Body)
+	}
+}
+
+func TestDeviceMessagesFiltersExpiredNotifications(t *testing.T) {
+	repo := newMemoryRepository()
+	service := newTestService(t, repo, &fakeCommander{})
+	fresh, err := service.CreateAdministratorNotice(
+		context.Background(),
+		"",
+		domain.AdministratorInput{
+			Category:               domain.CategoryFamilyMessage,
+			Title:                  "有效留言",
+			Body:                   "还在有效期内",
+			Audience:               domain.AudienceFamilyDevices,
+			Channels:               []string{domain.ChannelDevice},
+			ParentAccountID:        testParentID,
+			DeviceID:               testDeviceID,
+			DisplayDurationSeconds: 30,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create fresh message: %v", err)
+	}
+	expiredAt := time.Date(2026, 10, 9, 11, 59, 0, 0, time.UTC)
+	repo.notifications["expired-message"] = &domain.Notification{
+		ID:              "expired-message",
+		Category:        domain.CategoryFamilyMessage,
+		Severity:        domain.SeverityInfo,
+		Title:           "过期留言",
+		Body:            "已经过期",
+		Audience:        domain.AudienceFamilyDevices,
+		ParentAccountID: testParentID,
+		DeviceID:        testDeviceID,
+		PublishAt:       time.Date(2026, 10, 9, 11, 0, 0, 0, time.UTC),
+		ExpiresAt:       &expiredAt,
+	}
+	repo.deliveries = append(repo.deliveries, &domain.Delivery{
+		ID:              "expired-delivery",
+		NotificationID:  "expired-message",
+		ParentAccountID: testParentID,
+		Channel:         domain.ChannelDevice,
+		Status:          domain.DeliveryStatusPending,
+	})
+
+	messages, err := service.DeviceMessages(
+		context.Background(),
+		testParentID,
+		testDeviceID,
+		20,
+	)
+	if err != nil {
+		t.Fatalf("device messages: %v", err)
+	}
+	if len(messages) != 1 || messages[0].ID != fresh.ID {
+		t.Fatalf("expected only the fresh message, got %#v", messages)
+	}
+}
+
+func TestDeviceMessagesAppliesLimit(t *testing.T) {
+	repo := newMemoryRepository()
+	service := newTestService(t, repo, &fakeCommander{})
+	for index := 0; index < 3; index++ {
+		if _, err := service.SendFamilyMessage(
+			context.Background(),
+			testParentID,
+			domain.GuardianMessageInput{
+				DeviceID:     testDeviceID,
+				Body:         "留言",
+				SendToDevice: true,
+			},
+		); err != nil {
+			t.Fatalf("send message %d: %v", index, err)
+		}
+	}
+
+	messages, err := service.DeviceMessages(
+		context.Background(),
+		testParentID,
+		testDeviceID,
+		2,
+	)
+	if err != nil {
+		t.Fatalf("device messages: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected the limit to cap messages at 2, got %d", len(messages))
+	}
+}
+
+func TestMarkDeliveryDeliveredByCommandOnlyUpdatesTargetDevice(t *testing.T) {
+	repo := newMemoryRepository()
+	now := time.Date(2026, time.October, 14, 8, 0, 0, 0, time.UTC)
+	repo.notifications["notification-1"] = &domain.Notification{
+		ID:              "notification-1",
+		Category:        domain.CategoryFamilyMessage,
+		Severity:        domain.SeverityInfo,
+		Title:           "留言",
+		Body:            "测试",
+		Audience:        domain.AudienceFamilyDevices,
+		ParentAccountID: testParentID,
+		DeviceID:        testDeviceID,
+		PublishAt:       now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	repo.deliveries = append(repo.deliveries, &domain.Delivery{
+		ID:              "delivery-1",
+		NotificationID:  "notification-1",
+		ParentAccountID: testParentID,
+		Channel:         domain.ChannelDevice,
+		Status:          domain.DeliveryStatusPending,
+		CommandID:       "command-1",
+	})
+	repo.deliveries = append(repo.deliveries, &domain.Delivery{
+		ID:              "delivery-2",
+		NotificationID:  "notification-1",
+		ParentAccountID: testParentID,
+		Channel:         domain.ChannelInApp,
+		Status:          domain.DeliveryStatusDelivered,
+	})
+	service := newTestService(t, repo, &fakeCommander{})
+
+	if err := service.MarkDeliveryDeliveredByCommand(
+		context.Background(),
+		"command-1",
+		testDeviceID,
+	); err != nil {
+		t.Fatalf("mark delivery delivered: %v", err)
+	}
+	if repo.deliveries[0].Status != domain.DeliveryStatusDelivered {
+		t.Fatalf("expected device delivery delivered, got %q", repo.deliveries[0].Status)
+	}
+	if repo.deliveries[0].DeliveredAt == nil {
+		t.Fatal("expected a delivered timestamp")
+	}
+	if repo.deliveries[0].ReadAt != nil {
+		t.Fatal("delivery must not be marked read")
+	}
+	if repo.deliveries[1].Status != domain.DeliveryStatusDelivered {
+		t.Fatal("in-app delivery must remain unchanged")
+	}
+}
+
+func TestMarkDeliveryDeliveredByCommandIgnoresUnknownCommand(t *testing.T) {
+	repo := newMemoryRepository()
+	service := newTestService(t, repo, &fakeCommander{})
+	if err := service.MarkDeliveryDeliveredByCommand(
+		context.Background(),
+		"command-unknown",
+		testDeviceID,
+	); err != nil {
+		t.Fatalf("unknown command should be ignored, got %v", err)
 	}
 }
 

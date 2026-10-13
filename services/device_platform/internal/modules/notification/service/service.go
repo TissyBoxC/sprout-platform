@@ -29,6 +29,17 @@ type DeviceCommander interface {
 	) (*runtimedomain.Command, error)
 }
 
+// CommandAcknowledger is implemented by the notification service so the
+// device runtime can reflect a successful device command acknowledgement back
+// into notification delivery state without importing notification internals.
+type CommandAcknowledger interface {
+	MarkDeliveryDeliveredByCommand(
+		ctx context.Context,
+		commandID string,
+		deviceID string,
+	) error
+}
+
 // auditRecorder is the narrow platform audit write surface.
 type auditRecorder interface {
 	RecordAudit(
@@ -558,41 +569,38 @@ func (s *Service) DeviceMessages(
 	if limit <= 0 || limit > 20 {
 		limit = 20
 	}
-	// Reuse the admin list, filtered to this device's family messages.
-	items, _, err := s.repository.ListAdmin(ctx, domain.AdminFilter{
-		Category: domain.CategoryFamilyMessage,
-		Page:     1,
-		PageSize: limit,
-	})
-	if err != nil {
-		return nil, err
+	return s.repository.ListDeviceMessages(
+		ctx,
+		parentAccountID,
+		deviceID,
+		s.timeSource.Now().UTC(),
+		limit,
+	)
+}
+
+// MarkDeliveryDeliveredByCommand records that a device command carrying a
+// notification reached the device. Missing or unrelated commands are ignored
+// so a command acknowledgement is not rolled back by notification bookkeeping.
+func (s *Service) MarkDeliveryDeliveredByCommand(
+	ctx context.Context,
+	commandID string,
+	deviceID string,
+) error {
+	commandID = strings.TrimSpace(commandID)
+	deviceID = strings.TrimSpace(deviceID)
+	if commandID == "" || deviceID == "" {
+		return domain.ErrInvalidNotification
 	}
-	now := s.timeSource.Now().UTC()
-	messages := make([]domain.DeviceMessage, 0, len(items))
-	for _, item := range items {
-		if item.DeviceID != deviceID {
-			continue
-		}
-		if item.ParentAccountID != "" && item.ParentAccountID != parentAccountID {
-			continue
-		}
-		if item.ExpiresAt != nil && !item.ExpiresAt.After(now) {
-			continue
-		}
-		duration := item.DisplayDurationSeconds
-		if duration <= 0 {
-			duration = domain.DefaultDeviceMessageSeconds
-		}
-		messages = append(messages, domain.DeviceMessage{
-			ID:              item.ID,
-			Title:           item.Title,
-			Body:            item.Body,
-			Severity:        item.Severity,
-			DurationSeconds: duration,
-			Category:        item.Category,
-		})
+	err := s.repository.MarkDeliveryDeliveredByCommand(
+		ctx,
+		commandID,
+		deviceID,
+		s.timeSource.Now().UTC(),
+	)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil
 	}
-	return messages, nil
+	return err
 }
 
 // AdminList returns a filtered, paged operator projection.

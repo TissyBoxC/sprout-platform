@@ -455,6 +455,95 @@ func TestDefaultRegistryActiveFeaturesHaveHealthAndReadOnlyReason(t *testing.T) 
 	}
 }
 
+// TestDefaultRegistryMetricsHaveVerifiableSource is a guardrail against
+// registry-only placeholders. A feature metric may only be exposed when it is
+// backed by one of the reviewed live sources: MetricsRepository, the app-level
+// featureCenterMetricsReader, or a runtime settings projection.
+func TestDefaultRegistryMetricsHaveVerifiableSource(t *testing.T) {
+	repositoryMetrics := map[string]struct{}{
+		"active_parent_count":                   {},
+		"active_ai_account_count":               {},
+		"child_profile_count":                   {},
+		"policy_update_count":                   {},
+		"bound_device_count":                    {},
+		"online_device_count":                   {},
+		"diagnostic_event_count":                {},
+		"published_content_count":               {},
+		"published_firmware_count":              {},
+		"app_release_count":                     {},
+		"published_ui_text_count":               {},
+		"reported_usage_days":                   {},
+		"telemetry_device_count":                {},
+		"telemetry_online_count":                {},
+		"telemetry_pending_total":               {},
+		"notification_total":                    {},
+		"notification_pending_delivery":         {},
+		"notification_failed_delivery":          {},
+		"vision_task_count":                     {},
+		"vision_failed_task_count":              {},
+		"display_device_count":                  {},
+		"display_touch_device_count":            {},
+		"touch_device_count":                    {},
+		"touch_haptic_device_count":             {},
+		"screen_device_count":                   {},
+		"screen_point_read_device_count":        {},
+		"cellular_device_count":                 {},
+		"cellular_roaming_count":                {},
+		"power_device_count":                    {},
+		"power_low_power_count":                 {},
+		"power_deep_sleep_count":                {},
+		"motion_device_count":                   {},
+		"motion_running_count":                  {},
+		"motion_faulted_count":                  {},
+		"form_factor_device_count":              {},
+		"form_factor_action_count":              {},
+		"video_call_count":                      {},
+		"video_session_device_count":            {},
+		"wearable_device_count":                 {},
+		"wearable_sos_event_count":              {},
+		"device_group_count":                    {},
+		"device_mesh_pending_sync_count":        {},
+		"bluetooth_device_count":                {},
+		"bluetooth_connected_count":             {},
+		"learning_visualization_device_count":   {},
+		"image_privacy_device_count":            {},
+		"image_privacy_upload_allowed_count":    {},
+		"english_course_count":                  {},
+		"english_practice_count":                {},
+		"alarm_reminder_count":                  {},
+		"alarm_reminder_enabled_count":          {},
+		"alarm_reminder_event_count":            {},
+		"companionship_record_count":            {},
+		"habit_reminder_count":                  {},
+		"local_command_count":                   {},
+		"offline_policy_device_count":           {},
+		"content_favorite_count":                {},
+		"content_play_history_count":            {},
+		"content_theme_pack_count":              {},
+		"playback_request_count":                {},
+		"playback_pending_count":                {},
+		"playback_failed_count":                 {},
+		"recommendation_candidate_count":        {},
+		"consent_event_count":                   {},
+		"pending_deletion_count":                {},
+		"outdated_service_count":                {},
+		"running_service_count":                 {},
+		"download_file_count":                   {},
+		"notification_configured_channel_count": {},
+	}
+	for _, definition := range DefaultRegistry() {
+		for _, metric := range definition.Feature.ReadOnlyMetrics {
+			if _, ok := repositoryMetrics[metric.Key]; !ok {
+				t.Fatalf(
+					"feature %s exposes metric %s without a verified live source",
+					definition.Feature.ID,
+					metric.Key,
+				)
+			}
+		}
+	}
+}
+
 func TestValidateHealthProbeCoverageRejectsActiveFeatureWithoutProbe(t *testing.T) {
 	definitions := []Definition{
 		featureDef(

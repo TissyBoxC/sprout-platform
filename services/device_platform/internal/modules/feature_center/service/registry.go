@@ -17,7 +17,7 @@ func DefaultRegistry() []Definition {
 				boolField("phone_verification_required", "需要手机验证", true, true),
 				boolField("email_login_enabled", "允许邮箱登录", true, true),
 			),
-			metrics("login_success_rate", "登录成功率", "percent")),
+			nil),
 		readOnlyFeatureDef("parent_account", "家长账号", "家长资料、密码与账号状态管理。", "identity", "账号平台",
 			"家长资料、密码和状态在家长账号页面逐项管理，功能中心只提供能力状态和统计。",
 			metrics("active_parent_count", "有效家长数", "个")),
@@ -77,7 +77,7 @@ func DefaultRegistry() []Definition {
 			metrics("published_ui_text_count", "已发布文案", "个")),
 		readOnlyFeatureDef("voice_gateway", "语音网关", "儿童实时语音会话和语音安全。", "voice", "语音平台",
 			"语音网关的连接、密钥和会话策略由部署配置管理，功能中心只提供健康状态和统计。",
-			metrics("active_voice_session_count", "实时会话", "路")),
+			nil),
 		featureDef("voice_conversation", "语音对话", "全双工、连续会话与远场拾音的默认策略。", "voice", "语音平台", true,
 			configFields(
 				boolField("continuous_conversation_enabled", "默认启用连续会话", true, true),
@@ -85,14 +85,10 @@ func DefaultRegistry() []Definition {
 				boolField("barge_in_enabled", "允许打断语音", true, true),
 				boolField("far_field_enabled", "启用远场拾音", true, true),
 			),
-			metrics(
-				"voice_session_turn_count", "对话轮次", "次",
-				"voice_session_barge_in_count", "打断次数", "次",
-				"voice_session_continuous_rate", "连续会话占比", "percent",
-			)),
+			nil),
 		readOnlyFeatureDef("ai_model_gateway", "模型网关", "模型路由、限额与供应商健康。", "ai", "AI 服务",
 			"模型供应商和路由由 AI 服务统一管理，功能中心只提供健康状态和统计。",
-			metrics("model_request_count", "模型调用", "次")),
+			nil),
 		featureDef("usage_report", "使用报告", "设备使用时长和内容统计。", "family", "家庭平台", true,
 			configFields(
 				boundedIntegerField("retention_days", "数据保留天数", 365, 1, 3650, true, "天"),
@@ -119,7 +115,7 @@ func DefaultRegistry() []Definition {
 				boolField("output_moderation_enabled", "启用输出审核", true, true),
 				boolField("crisis_intervention_enabled", "启用危机干预", true, true),
 			),
-			metrics("blocked_login_count", "已阻止登录", "次")),
+			nil),
 		readOnlyFeatureDef("vision", "摄像头与视觉", "拍照识物、绘本识别与拍照问答。", "device", "视觉平台",
 			"视觉任务由设备上报、语音网关执行，家长端控制授权；功能中心只提供能力状态和统计。",
 			metrics(

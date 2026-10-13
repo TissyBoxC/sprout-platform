@@ -690,6 +690,40 @@ func TestDeviceMeshContractDocumentsGroupsMessagesAndContentSync(t *testing.T) {
 	}
 }
 
+func TestVideoCompanionContractDocumentsContactsCallsAndDeviceStatus(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/video-companion/contacts:",
+		"/api/v1/video-companion/contacts/{contact_id}:",
+		"/api/v1/video-companion/calls:",
+		"/api/v1/video-companion/calls/{call_id}:",
+		"/api/v1/video-companion/devices:",
+		"/api/v1/devices/{device_id}/video-companion/capability:",
+		"/api/v1/devices/{device_id}/video-companion/status:",
+		"/api/v1/admin/video-companion/stats:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected video-companion path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"VideoCompanionContactRequest:",
+		"VideoCompanionCallRequest:",
+		"VideoCompanionCallStateRequest:",
+		"VideoCompanionDeviceStatus:",
+		"VideoCompanionCapability:",
+		"VideoCompanionStatusRequest:",
+		"VideoCompanionAdminStats:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected video-companion schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

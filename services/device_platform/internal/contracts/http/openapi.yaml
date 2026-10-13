@@ -4106,6 +4106,317 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/video-companion/contacts:
+    get:
+      summary: List the authenticated family's video contacts
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Video contacts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCompanionContactsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Create a video contact
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VideoCompanionContactRequest"
+      responses:
+        "201":
+          description: Video contact created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCompanionContactEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/video-companion/contacts/{contact_id}:
+    put:
+      summary: Update a video contact
+      security:
+        - userToken: []
+      parameters:
+        - name: contact_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VideoCompanionContactRequest"
+      responses:
+        "200":
+          description: Video contact updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCompanionContactEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Video contact not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    delete:
+      summary: Delete a video contact
+      security:
+        - userToken: []
+      parameters:
+        - name: contact_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Video contact deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCompanionDeletedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Video contact not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/video-companion/calls:
+    get:
+      summary: List recent video calls in the authenticated family
+      security:
+        - userToken: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Video call history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCompanionCallsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Start one video call
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VideoCompanionCallRequest"
+      responses:
+        "201":
+          description: Video call started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCompanionCallEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Video contact not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/video-companion/calls/{call_id}:
+    put:
+      summary: Update one video call state
+      security:
+        - userToken: []
+      parameters:
+        - name: call_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VideoCompanionCallStateRequest"
+      responses:
+        "200":
+          description: Video call updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCompanionCallEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Video call not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/video-companion/devices:
+    get:
+      summary: List the authenticated family's latest video statuses
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Video device statuses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCompanionDevicesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/video-companion/capability:
+    get:
+      summary: Read one family device's video capability
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Video capability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCompanionCapabilityEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/video-companion/status:
+    post:
+      summary: Report one bound device's video status
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VideoCompanionStatusRequest"
+      responses:
+        "200":
+          description: Video status recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCompanionStatusRecordedEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/video-companion/stats:
+    get:
+      summary: Read the fleet-wide video-companionship summary
+      security:
+        - userToken: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        "200":
+          description: Video-companionship statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCompanionAdminStatsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -10762,6 +11073,408 @@ components:
             data:
               $ref: "#/components/schemas/DeviceMeshAdminStats"
     DeviceMeshDeletedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - deleted
+              properties:
+                deleted:
+                  type: boolean
+                  const: true
+    VideoCompanionContactRole:
+      type: string
+      enum:
+        - guardian
+        - family
+        - device
+    VideoCompanionCallState:
+      type: string
+      enum:
+        - idle
+        - ringing
+        - active
+        - ended
+        - rejected
+        - missed
+        - failed
+    VideoCompanionCallLifecycleState:
+      type: string
+      enum:
+        - ringing
+        - active
+        - ended
+        - rejected
+        - missed
+        - failed
+    VideoCompanionQuality:
+      type: string
+      enum:
+        - unknown
+        - good
+        - fair
+        - poor
+    VideoCompanionEndReason:
+      type: string
+      enum:
+        - hangup
+        - rejected
+        - missed
+        - timeout
+        - network
+        - permission_revoked
+        - device_offline
+    VideoCompanionInitiator:
+      type: string
+      enum:
+        - guardian
+        - device
+    VideoCompanionContactRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - child_id
+        - display_name
+        - role
+        - enabled
+      properties:
+        child_id:
+          type: string
+          maxLength: 128
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        role:
+          $ref: "#/components/schemas/VideoCompanionContactRole"
+        enabled:
+          type: boolean
+    VideoCompanionContact:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - child_id
+        - display_name
+        - role
+        - enabled
+        - created_at
+      properties:
+        id:
+          type: string
+        child_id:
+          type: string
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        role:
+          $ref: "#/components/schemas/VideoCompanionContactRole"
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    VideoCompanionContactEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/VideoCompanionContact"
+    VideoCompanionContactsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - contacts
+              properties:
+                contacts:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/VideoCompanionContact"
+    VideoCompanionCallRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - contact_id
+        - initiator
+      properties:
+        device_id:
+          $ref: "#/components/schemas/DeviceIdParameter"
+        contact_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        initiator:
+          $ref: "#/components/schemas/VideoCompanionInitiator"
+    VideoCompanionCallStateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - quality
+        - end_reason
+      properties:
+        state:
+          $ref: "#/components/schemas/VideoCompanionCallLifecycleState"
+        quality:
+          $ref: "#/components/schemas/VideoCompanionQuality"
+        end_reason:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/VideoCompanionEndReason"
+    VideoCompanionCall:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - device_id
+        - contact_id
+        - initiator
+        - state
+        - quality
+        - started_at
+      properties:
+        id:
+          type: string
+        device_id:
+          $ref: "#/components/schemas/DeviceIdParameter"
+        contact_id:
+          type: string
+        initiator:
+          $ref: "#/components/schemas/VideoCompanionInitiator"
+        state:
+          $ref: "#/components/schemas/VideoCompanionCallLifecycleState"
+        quality:
+          $ref: "#/components/schemas/VideoCompanionQuality"
+        end_reason:
+          $ref: "#/components/schemas/VideoCompanionEndReason"
+        started_at:
+          type: string
+          format: date-time
+        answered_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+    VideoCompanionCallEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/VideoCompanionCall"
+    VideoCompanionCallsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - calls
+              properties:
+                calls:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/VideoCompanionCall"
+    VideoCompanionDeviceStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - family_id
+        - call_state
+        - quality
+        - camera_allowed
+        - microphone_allowed
+        - reported_at
+      properties:
+        device_id:
+          $ref: "#/components/schemas/DeviceIdParameter"
+        family_id:
+          type: string
+        call_state:
+          $ref: "#/components/schemas/VideoCompanionCallState"
+        quality:
+          $ref: "#/components/schemas/VideoCompanionQuality"
+        camera_allowed:
+          type: boolean
+        microphone_allowed:
+          type: boolean
+        reported_at:
+          type: string
+          format: date-time
+    VideoCompanionDevicesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - devices
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/VideoCompanionDeviceStatus"
+    VideoCompanionCapability:
+      type: object
+      additionalProperties: false
+      required:
+        - supported
+        - call_state
+        - quality
+        - camera_allowed
+        - microphone_allowed
+        - schema_version
+      properties:
+        supported:
+          type: boolean
+        call_state:
+          $ref: "#/components/schemas/VideoCompanionCallState"
+        quality:
+          $ref: "#/components/schemas/VideoCompanionQuality"
+        camera_allowed:
+          type: boolean
+        microphone_allowed:
+          type: boolean
+        schema_version:
+          type: integer
+          const: 1
+    VideoCompanionCapabilityEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/VideoCompanionCapability"
+    VideoCompanionStatusRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - call_state
+        - quality
+        - camera_allowed
+        - microphone_allowed
+        - last_call_id
+      properties:
+        call_state:
+          $ref: "#/components/schemas/VideoCompanionCallState"
+        quality:
+          $ref: "#/components/schemas/VideoCompanionQuality"
+        camera_allowed:
+          type: boolean
+        microphone_allowed:
+          type: boolean
+        last_call_id:
+          type: string
+          maxLength: 128
+    VideoCompanionStatusRecordedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - recorded
+              properties:
+                device_id:
+                  $ref: "#/components/schemas/DeviceIdParameter"
+                recorded:
+                  type: boolean
+                  const: true
+    VideoCompanionCount:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - count
+      properties:
+        label:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+    VideoCompanionAdminStats:
+      type: object
+      additionalProperties: false
+      required:
+        - window_days
+        - call_count
+        - active_count
+        - ended_count
+        - missed_count
+        - rejected_count
+        - failed_count
+        - poor_quality_count
+        - state_buckets
+        - reason_buckets
+        - generated_at
+      properties:
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        call_count:
+          type: integer
+          minimum: 0
+        active_count:
+          type: integer
+          minimum: 0
+        ended_count:
+          type: integer
+          minimum: 0
+        missed_count:
+          type: integer
+          minimum: 0
+        rejected_count:
+          type: integer
+          minimum: 0
+        failed_count:
+          type: integer
+          minimum: 0
+        poor_quality_count:
+          type: integer
+          minimum: 0
+        state_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/VideoCompanionCount"
+        reason_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/VideoCompanionCount"
+        generated_at:
+          type: string
+          format: date-time
+    VideoCompanionAdminStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/VideoCompanionAdminStats"
+    VideoCompanionDeletedEnvelope:
       allOf:
         - $ref: "#/components/schemas/ResponseEnvelope"
         - type: object

@@ -505,6 +505,19 @@ list_releases_for_repository() {
   rm -f "$response_file"
 }
 
+annotate_releases_for_service() {
+  releases_json="$1"
+  current_version="$2"
+  latest_version="$3"
+  jq -c \
+    --arg current_version "$current_version" \
+    --arg latest_version "$latest_version" \
+    'map(. + {
+      is_current: ($current_version != "" and .version == $current_version),
+      is_latest: ($latest_version != "" and .version == $latest_version)
+    })' <<<"$releases_json"
+}
+
 write_release_catalog() {
   generated_at="$(iso_timestamp)"
   platform_releases="$(list_releases_for_repository "$platform_repository" "$release_catalog_limit")" || return 1
@@ -628,8 +641,14 @@ write_status_snapshot() {
       esac
     fi
 
-    releases_json="$(jq -c --arg id "$service" \
+    raw_releases_json="$(jq -c --arg id "$service" \
       '.services[$id] // []' "$root_dir/releases.json" 2>/dev/null || printf '%s' '[]')"
+    releases_json="$(
+      annotate_releases_for_service \
+        "$raw_releases_json" \
+        "$current_version" \
+        "$latest_version"
+    )"
     jq -n \
       --arg id "$service" \
       --arg display_name "$display_name" \

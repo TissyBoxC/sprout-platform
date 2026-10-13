@@ -428,4 +428,46 @@ if [ "$resolved_tag" != "1.27-alpine" ]; then
   exit 1
 fi
 
+# Status snapshots must mark the running version and newest release in the
+# selectable release list. Hard-coded false values made the console consider
+# every version non-current and non-latest even when status was "current".
+release_annotation_block="$(
+  sed -n '/^annotate_releases_for_service()/,/^}/p' "$worker_script"
+)"
+if ! printf '%s\n' "$release_annotation_block" | grep -Fq 'is_current:'; then
+  echo "annotate_releases_for_service 未标记当前版本。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$release_annotation_block" | grep -Fq 'is_latest:'; then
+  echo "annotate_releases_for_service 未标记最新版本。" >&2
+  exit 1
+fi
+
+if ! grep -Fq 'annotate_releases_for_service' <<<"$(
+  sed -n '/^write_status_snapshot()/,/^}/p' "$worker_script"
+)"; then
+  echo "write_status_snapshot 未调用版本标记逻辑。" >&2
+  exit 1
+fi
+
+annotated_releases="$(
+  source "$worker_script"
+  annotate_releases_for_service \
+    '[{"version":"0.22.0"},{"version":"0.21.0"},{"version":"0.20.0"}]' \
+    "0.22.0" \
+    "0.22.0"
+)"
+if ! jq -e '
+  length == 3
+  and .[0].is_current == true
+  and .[0].is_latest == true
+  and .[1].is_current == false
+  and .[1].is_latest == false
+  and .[2].is_current == false
+  and .[2].is_latest == false
+' <<<"$annotated_releases" >/dev/null; then
+  echo "版本标记结果不正确: $annotated_releases" >&2
+  exit 1
+fi
+
 echo "service-upgrade-worker shell contract passed."

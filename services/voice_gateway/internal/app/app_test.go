@@ -1,8 +1,10 @@
 package app
 
 import (
+	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/config"
@@ -33,4 +35,27 @@ func TestBuildRealtimeTransportDisabledIsNoOp(t *testing.T) {
 		t.Fatalf("disabled endpoint must not return a handler or manager")
 	}
 	shutdown()
+}
+
+// An enabled endpoint without the full ASR/LLM/TTS pipeline must fail closed at
+// the composition root instead of exposing a socket that fails on first audio.
+func TestBuildRealtimeTransportRejectsIncompleteConversationPipeline(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	cfg := config.Config{}
+	cfg.WebSocket.Enabled = true
+	cfg.WebSocket.AuthTokenSecret = strings.Repeat("s", 40)
+	cfg.Audio.ASRProvider = "openai"
+	cfg.Audio.TTSProvider = "openai"
+	cfg.Audio.LLMProvider = ""
+
+	_, _, _, err := buildRealtimeTransport(cfg, logger, nil, stubAuthorizer{}, nil)
+	if err == nil {
+		t.Fatal("expected an incomplete conversation pipeline to fail the realtime transport build")
+	}
+}
+
+type stubAuthorizer struct{}
+
+func (stubAuthorizer) AuthorizeDevice(context.Context, string) error {
+	return nil
 }

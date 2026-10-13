@@ -4967,6 +4967,257 @@ paths:
                 $ref: "#/components/schemas/ResponseEnvelope"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/privacy:
+    get:
+      summary: Read the authenticated guardian's privacy control state
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Privacy control state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyStatusEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Parent account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/privacy/export:
+    get:
+      summary: Export a redacted copy of the guardian's data
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Redacted guardian data export
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyDataExportEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Parent account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/privacy/deletion:
+    post:
+      summary: Request account deletion with an explicit confirmation
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyDeletionRequest"
+      responses:
+        "202":
+          description: Account deletion scheduled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyDeletionEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Parent account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Account deletion is already pending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    delete:
+      summary: Cancel the open account deletion request
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Account deletion cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyDeletionEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Parent account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: No cancellable deletion request is pending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/privacy/consent/withdraw:
+    post:
+      summary: Withdraw one guardian consent
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyConsentWithdrawalRequest"
+      responses:
+        "200":
+          description: Consent withdrawn
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyStatusEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Parent account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/privacy/consent/grant:
+    post:
+      summary: Grant one guardian consent
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyConsentGrantRequest"
+      responses:
+        "200":
+          description: Consent granted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyStatusEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Parent account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/audit:
+    get:
+      summary: Query the administrator audit trail
+      security:
+        - userToken: []
+      parameters:
+        - name: action
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+        - name: actor_account_id
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+        - name: target_account_id
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Administrator audit page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyAuditPageEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -12687,3 +12938,523 @@ components:
                 failed_delivery_count:
                   type: integer
                   minimum: 0
+    PrivacyConsentStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+        - status
+        - active
+        - reconsent_path
+      properties:
+        version:
+          type: string
+        consented_at:
+          type: string
+          format: date-time
+        withdrawn_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum:
+            - active
+            - withdrawn
+        active:
+          type: boolean
+        reconsent_path:
+          type: string
+          maxLength: 200
+    PrivacyConsentTypeStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - consent_type
+        - version
+        - status
+        - granted
+      properties:
+        consent_type:
+          $ref: "#/components/schemas/PrivacyConsentType"
+        version:
+          type: string
+        consented_at:
+          type: string
+          format: date-time
+        withdrawn_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum:
+            - active
+            - withdrawn
+        granted:
+          type: boolean
+    PrivacyConsentType:
+      type: string
+      enum:
+        - guardian_terms
+        - child_data_processing
+        - ai_interaction
+        - email_contact
+    PrivacyRetentionPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - audio_retention_days
+        - image_retention_days
+        - conversation_retention_days
+      properties:
+        audio_retention_days:
+          type: integer
+          minimum: 0
+        image_retention_days:
+          type: integer
+          minimum: 0
+        conversation_retention_days:
+          type: integer
+          minimum: 0
+    PrivacyDeletion:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - status
+        - reason
+        - requested_at
+        - execute_after
+        - failure_reason
+        - updated_at
+        - cancellable
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum:
+            - none
+            - pending
+            - processing
+            - cancelled
+            - completed
+            - failed
+        reason:
+          type: string
+          maxLength: 500
+        requested_at:
+          type: string
+          format: date-time
+        execute_after:
+          type: string
+          format: date-time
+        cancelled_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        failure_reason:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+        cancellable:
+          type: boolean
+        scheduled_for:
+          type: string
+          format: date-time
+    PrivacyExportReceipt:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - format
+        - status
+        - item_counts
+        - created_at
+        - expires_at
+      properties:
+        id:
+          type: string
+        format:
+          type: string
+        status:
+          type: string
+          enum:
+            - completed
+            - failed
+        item_counts:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    PrivacyExportStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - available
+      properties:
+        available:
+          type: boolean
+        last:
+          $ref: "#/components/schemas/PrivacyExportReceipt"
+    PrivacyStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - consent
+        - consents
+        - deletion
+        - export
+        - policy
+      properties:
+        consent:
+          $ref: "#/components/schemas/PrivacyConsentStatus"
+        consents:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyConsentTypeStatus"
+        deletion:
+          $ref: "#/components/schemas/PrivacyDeletion"
+        export:
+          $ref: "#/components/schemas/PrivacyExportStatus"
+        policy:
+          $ref: "#/components/schemas/PrivacyRetentionPolicy"
+    PrivacyStatusEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/PrivacyStatus"
+    PrivacyDeletionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - confirmation
+      properties:
+        confirmation:
+          type: string
+          const: DELETE
+        reason:
+          type: string
+          maxLength: 500
+    PrivacyDeletionEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - deletion
+              properties:
+                deletion:
+                  $ref: "#/components/schemas/PrivacyDeletion"
+    PrivacyConsentWithdrawalRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - confirmation
+      properties:
+        consent_type:
+          $ref: "#/components/schemas/PrivacyConsentType"
+        version:
+          type: string
+          maxLength: 32
+        confirmation:
+          type: string
+          const: WITHDRAW
+    PrivacyConsentGrantRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        consent_type:
+          $ref: "#/components/schemas/PrivacyConsentType"
+        version:
+          type: string
+          maxLength: 32
+    PrivacyExportAccount:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - phone
+        - email
+        - display_name
+        - guardian_family_name
+        - child_nickname
+        - child_birthday
+        - status
+        - created_at
+      properties:
+        id:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        display_name:
+          type: string
+        guardian_family_name:
+          type: string
+        child_nickname:
+          type: string
+        child_birthday:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_login_at:
+          type: string
+          format: date-time
+    PrivacyExportChild:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - nickname
+        - age_tier
+        - interests
+        - content_categories
+        - guardian_consent_version
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+        nickname:
+          type: string
+        age_tier:
+          type: string
+        interests:
+          type: array
+          items:
+            type: string
+        content_categories:
+          type: array
+          items:
+            type: string
+        guardian_consent_version:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PrivacyExportDevice:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - device_name
+        - hardware_model
+        - firmware_version
+        - capability_set
+        - bound_at
+        - updated_at
+        - online
+      properties:
+        device_id:
+          type: string
+        device_name:
+          type: string
+        hardware_model:
+          type: string
+        firmware_version:
+          type: string
+        capability_set:
+          type: array
+          items:
+            type: string
+        bound_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        online:
+          type: boolean
+    PrivacyExportUsage:
+      type: object
+      additionalProperties: false
+      required:
+        - days
+        - conversation_count
+        - active_seconds
+        - conversation_seconds
+        - content_play_count
+        - content_seconds
+        - spent_usd
+      properties:
+        days:
+          type: integer
+          minimum: 0
+        conversation_count:
+          type: integer
+          minimum: 0
+        active_seconds:
+          type: integer
+          minimum: 0
+        conversation_seconds:
+          type: integer
+          minimum: 0
+        content_play_count:
+          type: integer
+          minimum: 0
+        content_seconds:
+          type: integer
+          minimum: 0
+        spent_usd:
+          type: number
+          minimum: 0
+    PrivacyConsentEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - consent_type
+        - consent_version
+        - granted
+        - source
+        - detail
+        - created_at
+      properties:
+        id:
+          type: string
+        consent_type:
+          $ref: "#/components/schemas/PrivacyConsentType"
+        consent_version:
+          type: string
+        granted:
+          type: boolean
+        source:
+          type: string
+          enum:
+            - registration
+            - guardian
+            - administrator
+            - system
+        detail:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+    PrivacyDataExport:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - exported_at
+        - account
+        - children
+        - devices
+        - usage
+        - consent_history
+        - retention
+      properties:
+        schema_version:
+          type: string
+          const: 1.0.0
+        exported_at:
+          type: string
+          format: date-time
+        account:
+          $ref: "#/components/schemas/PrivacyExportAccount"
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyExportChild"
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyExportDevice"
+        usage:
+          $ref: "#/components/schemas/PrivacyExportUsage"
+        consent_history:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyConsentEvent"
+        retention:
+          $ref: "#/components/schemas/PrivacyRetentionPolicy"
+    PrivacyDataExportEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/PrivacyDataExport"
+    PrivacyAuditEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - actor_account_id
+        - actor_display_name
+        - target_account_id
+        - target_display_name
+        - action
+        - detail
+        - created_at
+      properties:
+        id:
+          type: string
+        actor_account_id:
+          type: string
+        actor_display_name:
+          type: string
+        target_account_id:
+          type: string
+        target_display_name:
+          type: string
+        action:
+          type: string
+        detail:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+    PrivacyAuditPageEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - items
+                - total
+                - page
+                - page_size
+                - actions
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PrivacyAuditEntry"
+                total:
+                  type: integer
+                  minimum: 0
+                page:
+                  type: integer
+                  minimum: 1
+                page_size:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                actions:
+                  type: array
+                  items:
+                    type: string

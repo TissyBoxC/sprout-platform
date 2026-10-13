@@ -793,6 +793,44 @@ func TestNotificationContractDocumentsInboxAndAdminEndpoints(t *testing.T) {
 	}
 }
 
+func TestPrivacyContractDocumentsConsentExportDeletionAndAuditEndpoints(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/privacy:",
+		"/api/v1/privacy/export:",
+		"/api/v1/privacy/deletion:",
+		"/api/v1/privacy/consent/withdraw:",
+		"/api/v1/privacy/consent/grant:",
+		"/api/v1/admin/audit:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected privacy path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"PrivacyConsentStatus:",
+		"PrivacyConsentTypeStatus:",
+		"PrivacyRetentionPolicy:",
+		"PrivacyDeletion:",
+		"PrivacyExportStatus:",
+		"PrivacyStatus:",
+		"PrivacyDataExport:",
+		"PrivacyDeletionRequest:",
+		"PrivacyDeletionEnvelope:",
+		"PrivacyConsentWithdrawalRequest:",
+		"PrivacyConsentGrantRequest:",
+		"PrivacyAuditEntry:",
+		"PrivacyAuditPageEnvelope:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected privacy schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

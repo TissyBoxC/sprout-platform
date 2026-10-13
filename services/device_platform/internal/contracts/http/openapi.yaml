@@ -2337,6 +2337,164 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/power/policy:
+    get:
+      summary: Read the authenticated family's battery and low-power policy
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Power policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PowerPolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Publish the authenticated family's battery and low-power policy
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PowerPolicyRequest"
+      responses:
+        "200":
+          description: Updated power policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PowerPolicyEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/power/devices:
+    get:
+      summary: List the authenticated family's latest power statuses
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Power statuses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PowerDevicesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/power/capability:
+    get:
+      summary: Read one family device's battery capability
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Power capability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PowerCapabilityEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/power/status:
+    post:
+      summary: Report one bound device's power status
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PowerStatusReportRequest"
+      responses:
+        "200":
+          description: Power status recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PowerStatusRecordedEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/power/policy:
+    get:
+      summary: Read the family power policy from a bound device session
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Power policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PowerPolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/power/stats:
+    get:
+      summary: Read the fleet-wide battery and power summary
+      security:
+        - userToken: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        "200":
+          description: Power statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PowerAdminStatsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -6116,3 +6274,301 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/ConnectivityAdminStats"
+    PowerChargeState:
+      type: string
+      enum:
+        - unknown
+        - discharging
+        - charging
+        - full
+    PowerMode:
+      type: string
+      enum:
+        - normal
+        - low_power
+        - deep_sleep
+    PowerPolicyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - low_power_enabled
+        - deep_sleep_enabled
+        - charge_priority
+        - low_battery_warn_percent
+        - low_power_enter_percent
+        - sleep_after_seconds
+      properties:
+        enabled:
+          type: boolean
+        low_power_enabled:
+          type: boolean
+        deep_sleep_enabled:
+          type: boolean
+        charge_priority:
+          type: boolean
+        low_battery_warn_percent:
+          type: integer
+          minimum: 5
+          maximum: 50
+        low_power_enter_percent:
+          type: integer
+          minimum: 5
+          maximum: 50
+        sleep_after_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+    PowerPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - enabled
+        - low_power_enabled
+        - deep_sleep_enabled
+        - charge_priority
+        - low_battery_warn_percent
+        - low_power_enter_percent
+        - sleep_after_seconds
+        - revision
+      properties:
+        schema_version:
+          type: integer
+          minimum: 1
+        enabled:
+          type: boolean
+        low_power_enabled:
+          type: boolean
+        deep_sleep_enabled:
+          type: boolean
+        charge_priority:
+          type: boolean
+        low_battery_warn_percent:
+          type: integer
+          minimum: 5
+          maximum: 50
+        low_power_enter_percent:
+          type: integer
+          minimum: 5
+          maximum: 50
+        sleep_after_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+        revision:
+          type: integer
+          minimum: 0
+    PowerPolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/PowerPolicy"
+    PowerDeviceStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - family_id
+        - charge_state
+        - power_mode
+        - battery_percent
+        - charging
+        - up_to_date
+        - reported_at
+      properties:
+        device_id:
+          type: string
+        family_id:
+          type: string
+        charge_state:
+          $ref: "#/components/schemas/PowerChargeState"
+        power_mode:
+          $ref: "#/components/schemas/PowerMode"
+        battery_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        charging:
+          type: boolean
+        up_to_date:
+          type: boolean
+        reported_at:
+          type: string
+          format: date-time
+    PowerDevicesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - devices
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PowerDeviceStatus"
+    PowerCapability:
+      type: object
+      additionalProperties: false
+      required:
+        - supported
+        - charge_state
+        - power_mode
+        - battery_percent
+        - charging
+        - low_warning
+        - schema_version
+        - policy_revision
+        - applied_revision
+        - up_to_date
+      properties:
+        supported:
+          type: boolean
+        charge_state:
+          $ref: "#/components/schemas/PowerChargeState"
+        power_mode:
+          $ref: "#/components/schemas/PowerMode"
+        battery_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        charging:
+          type: boolean
+        low_warning:
+          type: boolean
+        schema_version:
+          type: integer
+          minimum: 1
+        policy_revision:
+          type: integer
+          minimum: 0
+        applied_revision:
+          type: integer
+          minimum: 0
+        up_to_date:
+          type: boolean
+    PowerCapabilityEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/PowerCapability"
+    PowerStatusReportRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - charge_state
+        - power_mode
+        - battery_percent
+        - millivolts
+        - charging
+        - policy_revision
+      properties:
+        charge_state:
+          $ref: "#/components/schemas/PowerChargeState"
+        power_mode:
+          $ref: "#/components/schemas/PowerMode"
+        battery_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        millivolts:
+          type: integer
+          minimum: 0
+          maximum: 6000
+        charging:
+          type: boolean
+        policy_revision:
+          type: integer
+          minimum: 0
+    PowerStatusRecordedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - policy_revision
+                - recorded
+              properties:
+                device_id:
+                  type: string
+                policy_revision:
+                  type: integer
+                  minimum: 0
+                recorded:
+                  type: boolean
+                  const: true
+    PowerCount:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - count
+      properties:
+        label:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+    PowerAdminStats:
+      type: object
+      additionalProperties: false
+      required:
+        - window_days
+        - device_count
+        - charging_count
+        - low_battery_count
+        - low_power_count
+        - deep_sleep_count
+        - average_percent
+        - percentage_buckets
+        - generated_at
+      properties:
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        device_count:
+          type: integer
+          minimum: 0
+        charging_count:
+          type: integer
+          minimum: 0
+        low_battery_count:
+          type: integer
+          minimum: 0
+        low_power_count:
+          type: integer
+          minimum: 0
+        deep_sleep_count:
+          type: integer
+          minimum: 0
+        average_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        percentage_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/PowerCount"
+        generated_at:
+          type: string
+          format: date-time
+    PowerAdminStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/PowerAdminStats"

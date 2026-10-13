@@ -194,6 +194,25 @@ func (handler deviceMotionHandler) reportStatus(
 	})
 }
 
+// devicePolicy returns the family motion policy to a bound device over its
+// device session token so the firmware can clamp and apply it, mirroring the
+// other device policy endpoints.
+func (handler deviceMotionHandler) devicePolicy(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	_, familyID, ok := handler.verifyDevice(response, request)
+	if !ok {
+		return
+	}
+	policy, err := handler.handler.service.Current(request.Context(), familyID)
+	if err != nil {
+		writeMotionError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, motionPolicyResponse(policy))
+}
+
 // adminStats returns the bounded fleet motion summary.
 func (handler motionHandler) adminStats(
 	response http.ResponseWriter,

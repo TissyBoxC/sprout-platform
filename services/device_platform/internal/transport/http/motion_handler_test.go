@@ -140,6 +140,25 @@ func TestMotionCurrentRequiresAuthentication(t *testing.T) {
 	}
 }
 
+func TestMotionDevicePolicyRequiresSession(t *testing.T) {
+	handler := deviceMotionHandler{
+		handler:        &motionHandler{service: &motionTestService{}},
+		bindingService: nil,
+		runtimeService: nil,
+	}
+	request := englishRequest(
+		http.MethodGet,
+		"/api/v1/devices/device-1/motion/policy",
+		"",
+		"",
+	)
+	recorder := httptest.NewRecorder()
+	handler.devicePolicy(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestMotionPublishAndReadBack(t *testing.T) {
 	handler := motionHandler{service: &motionTestService{}}
 	body := `{"enabled":true,"require_stop_ack":true,` +

@@ -672,6 +672,34 @@ func TestContentContractDocumentsCatalogFavoritesHistoryAndPolicies(t *testing.T
 	}
 }
 
+func TestOTAContractDocumentsDeviceUpdateAndEventEndpoints(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/devices/{device_id}/ota:",
+		"/api/v1/devices/{device_id}/ota/events:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected OTA path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"OTAChannel:",
+		"OTAEventType:",
+		"OTADeviceRelease:",
+		"DeviceUpdate:",
+		"DeviceUpdateEnvelope:",
+		"OTADeviceEventRequest:",
+		"OTADeviceEventResultEnvelope:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected OTA schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestDeviceMeshContractDocumentsGroupsMessagesAndContentSync(t *testing.T) {
 	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
 	if err != nil {

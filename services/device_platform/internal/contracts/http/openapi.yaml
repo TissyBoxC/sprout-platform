@@ -7113,6 +7113,399 @@ paths:
           description: The client is already current or no update is available
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/content/packages:
+    get:
+      summary: List content packages for the management console
+      security:
+        - userToken: []
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ContentCategory"
+        - name: age_tier
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ContentAgeTier"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ContentStatus"
+        - name: keyword
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated content packages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentPackagePageEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Create a draft content package
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContentPackageCreateRequest"
+      responses:
+        "201":
+          description: Draft content package created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentPackageVersionEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Content package id already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/content/packages/{package_id}:
+    get:
+      summary: Read one content package with versions and review history
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ContentPackageId"
+      responses:
+        "200":
+          description: Content package detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentPackageDetailEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Content package not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/content/packages/{package_id}/versions:
+    post:
+      summary: Create a new draft version of a content package
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ContentPackageId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContentPackageUpdateRequest"
+      responses:
+        "201":
+          description: Draft content package version created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentPackageVersionEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Content package not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: The next version cannot be allocated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/content/packages/{package_id}/versions/{package_version}:
+    put:
+      summary: Update one draft content package version
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ContentPackageId"
+        - $ref: "#/components/parameters/ContentPackageVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContentPackageUpdateRequest"
+      responses:
+        "200":
+          description: Draft content package version updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentPackageVersionEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Content package version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/content/packages/{package_id}/versions/{package_version}/submit:
+    post:
+      summary: Submit one draft content package version for review
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ContentPackageId"
+        - $ref: "#/components/parameters/ContentPackageVersion"
+      responses:
+        "200":
+          description: Content package version submitted for review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentPackageVersionEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Content package version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/content/packages/{package_id}/versions/{package_version}/approve:
+    post:
+      summary: Approve one content package version under review
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ContentPackageId"
+        - $ref: "#/components/parameters/ContentPackageVersion"
+      responses:
+        "200":
+          description: Content package version approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentPackageVersionEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Content package version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/content/packages/{package_id}/versions/{package_version}/reject:
+    post:
+      summary: Reject one content package version under review
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ContentPackageId"
+        - $ref: "#/components/parameters/ContentPackageVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContentDecisionRequest"
+      responses:
+        "200":
+          description: Content package version rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentPackageVersionEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Content package version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/content/packages/{package_id}/versions/{package_version}/publish:
+    post:
+      summary: Publish one approved content package version
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ContentPackageId"
+        - $ref: "#/components/parameters/ContentPackageVersion"
+      responses:
+        "200":
+          description: Content package version published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentPackageVersionEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Content package version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/content/packages/{package_id}/versions/{package_version}/withdraw:
+    post:
+      summary: Withdraw one published content package version
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ContentPackageId"
+        - $ref: "#/components/parameters/ContentPackageVersion"
+      responses:
+        "200":
+          description: Content package version withdrawn
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentPackageVersionEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Content package version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/content/packages/{package_id}/versions/{package_version}/archive:
+    post:
+      summary: Archive one content package version
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ContentPackageId"
+        - $ref: "#/components/parameters/ContentPackageVersion"
+      responses:
+        "200":
+          description: Content package version archived
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentPackageVersionEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Content package version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -7271,6 +7664,26 @@ components:
       required: true
       schema:
         $ref: "#/components/schemas/UITextPlatform"
+    ContentPackageId:
+      name: package_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/ContentPackageID"
+    ContentPackageVersion:
+      name: package_version
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000000
+    ContentThemeId:
+      name: theme_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/ContentPackageID"
   responses:
     Unauthorized:
       description: Authentication missing, expired, or invalid
@@ -13123,6 +13536,187 @@ components:
         updated_at:
           type: string
           format: date-time
+    ContentPackageCreateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - package_id
+        - title
+        - category
+        - age_tiers
+        - asset_key
+        - sha256
+        - size_bytes
+      properties:
+        package_id:
+          $ref: "#/components/schemas/ContentPackageID"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 128
+        category:
+          $ref: "#/components/schemas/ContentCategory"
+        age_tiers:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ContentAgeTier"
+        asset_key:
+          type: string
+          minLength: 1
+          maxLength: 512
+        sha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 4294967296
+    ContentPackageUpdateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - title
+        - category
+        - age_tiers
+        - asset_key
+        - sha256
+        - size_bytes
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 128
+        category:
+          $ref: "#/components/schemas/ContentCategory"
+        age_tiers:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ContentAgeTier"
+        asset_key:
+          type: string
+          minLength: 1
+          maxLength: 512
+        sha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 4294967296
+    ContentDecisionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          maxLength: 500
+    ContentPackageVersionEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - package
+              properties:
+                package:
+                  $ref: "#/components/schemas/ContentPackageVersion"
+    ContentPackagePageEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - packages
+                - page
+                - page_size
+                - total
+              properties:
+                packages:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ContentPackageVersion"
+                page:
+                  type: integer
+                  minimum: 1
+                page_size:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                total:
+                  type: integer
+                  minimum: 0
+    ContentReviewLog:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - package_id
+        - package_version
+        - action
+        - from_status
+        - to_status
+        - actor_account_id
+        - created_at
+      properties:
+        id:
+          type: string
+        package_id:
+          $ref: "#/components/schemas/ContentPackageID"
+        package_version:
+          type: integer
+          minimum: 1
+        action:
+          $ref: "#/components/schemas/ContentAction"
+        from_status:
+          $ref: "#/components/schemas/ContentStatus"
+        to_status:
+          $ref: "#/components/schemas/ContentStatus"
+        reason:
+          type: string
+        actor_account_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    ContentPackageDetail:
+      type: object
+      additionalProperties: false
+      required:
+        - package_id
+        - versions
+        - history
+      properties:
+        package_id:
+          $ref: "#/components/schemas/ContentPackageID"
+        versions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContentPackageVersion"
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContentReviewLog"
+    ContentPackageDetailEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ContentPackageDetail"
     ContentCatalog:
       type: object
       additionalProperties: false

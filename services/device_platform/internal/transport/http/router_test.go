@@ -1207,6 +1207,56 @@ func TestContentAdminContractDocumentsThemePackLifecycle(t *testing.T) {
 	}
 }
 
+func TestAdminFamilyContractDocumentsFamiliesAndAIAccounts(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/admin/families:",
+		"/api/v1/admin/families/{parent_account_id}/ai-account:",
+		"/api/v1/admin/families/{parent_account_id}/profile:",
+		"/api/v1/admin/families/{parent_account_id}/password:",
+		"/api/v1/admin/families/{parent_account_id}/devices:",
+		"/api/v1/admin/families/{parent_account_id}/devices/{device_id}:",
+		"/api/v1/admin/families/{parent_account_id}/children:",
+		"/api/v1/admin/families/{parent_account_id}/usage-reports:",
+		"/api/v1/admin/families/{parent_account_id}/ai-usage:",
+		"/api/v1/admin/ai-accounts:",
+		"/api/v1/admin/ai-accounts/{provider_account_id}:",
+		"/api/v1/admin/ai-account-defaults:",
+		"/api/v1/admin/ai-models:",
+		"/api/v1/admin/ai-gateway/child-policy:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected admin family path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"AdminFamiliesEnvelope:",
+		"AdminFamilyAccount:",
+		"AdminFamilyAIAccount:",
+		"AdminCreateParentRequest:",
+		"AdminUpdateParentProfileRequest:",
+		"AdminParentProfileEnvelope:",
+		"AdminResetParentPasswordRequest:",
+		"AdminPasswordResetEnvelope:",
+		"AdminDeviceUnboundEnvelope:",
+		"AdminFamilyChildrenEnvelope:",
+		"AdminAIAccountsEnvelope:",
+		"AdminAIAccountEnvelope:",
+		"AdminUpdateAIAccountRequest:",
+		"AIAccountDefaultsEnvelope:",
+		"AIModelsEnvelope:",
+		"AIGatewayChildPolicyEnvelope:",
+		"AIUsageReconciliationEnvelope:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected admin family schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestAppUpdateContractDocumentsClientUpdateEndpoint(t *testing.T) {
 	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
 	if err != nil {

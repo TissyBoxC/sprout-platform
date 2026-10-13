@@ -7678,6 +7678,521 @@ paths:
           $ref: "#/components/responses/DeviceUnprocessable"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/families:
+    get:
+      summary: List parent accounts with their dependent AI account
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Parent accounts and AI account state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminFamiliesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/FamilyServiceError"
+    post:
+      summary: Create a parent account and its dependent AI account
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCreateParentRequest"
+      responses:
+        "201":
+          description: Parent account created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Phone already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/AuthUnprocessable"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/admin/families/{parent_account_id}/ai-account:
+    post:
+      summary: Repair or create one family's dependent AI account
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ParentAccountId"
+      responses:
+        "200":
+          description: AI account repaired or created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIAccountEnvelope"
+        "400":
+          description: Missing parent account id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Parent account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Account is not a parent account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "502":
+          description: AI provider rejected the request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/admin/families/{parent_account_id}/profile:
+    put:
+      summary: Update one parent's editable profile fields
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ParentAccountId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUpdateParentProfileRequest"
+      responses:
+        "200":
+          description: Parent profile updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminParentProfileEnvelope"
+        "400":
+          description: Malformed request body or missing parent account id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Parent account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/AuthUnprocessable"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/admin/families/{parent_account_id}/password:
+    post:
+      summary: Reset one parent's password and revoke active sessions
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ParentAccountId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminResetParentPasswordRequest"
+      responses:
+        "200":
+          description: Password reset completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminPasswordResetEnvelope"
+        "400":
+          description: Malformed request body or missing parent account id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Parent account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/AuthUnprocessable"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/admin/families/{parent_account_id}/devices:
+    get:
+      summary: List one family's bound devices and latest runtime state
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ParentAccountId"
+      responses:
+        "200":
+          description: Family bound devices
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceStatusesEnvelope"
+        "400":
+          description: Missing parent account id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/DeviceRuntimeNotFound"
+        "503":
+          description: Device status service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/families/{parent_account_id}/devices/{device_id}:
+    delete:
+      summary: Unbind one device from a family and revoke device sessions
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ParentAccountId"
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Device unbound
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDeviceUnboundEnvelope"
+        "400":
+          description: Missing parent account id or device id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "409":
+          $ref: "#/components/responses/DeviceBindingConflict"
+        "410":
+          $ref: "#/components/responses/DeviceBindingGone"
+        "503":
+          description: Device binding service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/families/{parent_account_id}/children:
+    get:
+      summary: List one family's children and current parent policy state
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ParentAccountId"
+      responses:
+        "200":
+          description: Family children and policy state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminFamilyChildrenEnvelope"
+        "400":
+          description: Missing parent account id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          description: Child or policy service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/ChildServiceError"
+  /api/v1/admin/families/{parent_account_id}/usage-reports:
+    get:
+      summary: List one family's daily usage reports
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ParentAccountId"
+        - $ref: "#/components/parameters/UsageReportDays"
+      responses:
+        "200":
+          description: Family usage reports
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageReportsEnvelope"
+        "400":
+          description: Missing parent account id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Usage report not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid usage report window
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          description: Usage report service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/families/{parent_account_id}/ai-usage:
+    get:
+      summary: Reconcile one family's AI usage against the gateway
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ParentAccountId"
+        - $ref: "#/components/parameters/AIUsageStartTime"
+        - $ref: "#/components/parameters/AIUsageEndTime"
+      responses:
+        "200":
+          description: AI usage reconciliation for one family
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIUsageReconciliationEnvelope"
+        "400":
+          description: Missing parent account id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: AI account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid AI usage window
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "502":
+          description: AI gateway unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/admin/ai-accounts:
+    get:
+      summary: List every guardian AI account for the management console
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Guardian AI accounts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAIAccountsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/admin/ai-accounts/{provider_account_id}:
+    put:
+      summary: Update one guardian AI account status and limits
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ProviderAccountId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUpdateAIAccountRequest"
+      responses:
+        "200":
+          description: Guardian AI account updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAIAccountEnvelope"
+        "400":
+          description: Malformed request body or missing provider account id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: AI account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid status, balance, or concurrency limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "502":
+          description: AI provider rejected the update
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/admin/ai-account-defaults:
+    get:
+      summary: Read the AI gateway's current account defaults
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: AI account defaults
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIAccountDefaultsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          description: AI provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/admin/ai-models:
+    get:
+      summary: List the AI gateway's measured models
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Measured AI models
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIModelsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          description: AI provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
+  /api/v1/admin/ai-gateway/child-policy:
+    get:
+      summary: Read the AI gateway's child-safety policy alignment
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: AI gateway child policy alignment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIGatewayChildPolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          description: AI provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/AuthServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -7709,6 +8224,45 @@ components:
         type: string
         minLength: 1
         maxLength: 128
+    ParentAccountId:
+      name: parent_account_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    ProviderAccountId:
+      name: provider_account_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    UsageReportDays:
+      name: days
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 90
+        default: 30
+    AIUsageStartTime:
+      name: start_time
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+    AIUsageEndTime:
+      name: end_time
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
     InvitationId:
       name: invitation_id
       in: path
@@ -8420,6 +8974,223 @@ components:
                   type: array
                   items:
                     $ref: "#/components/schemas/Child"
+    AdminFamilyChild:
+      type: object
+      additionalProperties: false
+      required:
+        - child_id
+        - family_id
+        - nickname
+        - age_tier
+        - interests
+        - content_categories
+        - guardian_consent
+        - guardian_consent_version
+        - created_at
+        - updated_at
+        - policy_state
+      properties:
+        child_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        family_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        nickname:
+          type: string
+          minLength: 1
+          maxLength: 32
+        age_tier:
+          type: string
+          enum:
+            - age_3_4
+            - age_5_6
+            - age_7_8
+        interests:
+          type: array
+          maxItems: 12
+          uniqueItems: true
+          items:
+            type: string
+        content_categories:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+        guardian_consent:
+          type: boolean
+          const: true
+        guardian_consent_version:
+          type: string
+          minLength: 1
+          maxLength: 32
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        policy:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/ParentPolicy"
+        policy_state:
+          type: string
+          enum:
+            - available
+            - not_set
+            - unavailable
+        policy_error:
+          type: string
+          minLength: 1
+          maxLength: 256
+    AdminFamilyChildrenEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - children
+              properties:
+                children:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/AdminFamilyChild"
+    AdminCreateParentRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - phone
+        - password
+        - guardian_family_name
+        - child_nickname
+        - child_birthday
+      properties:
+        phone:
+          type: string
+          pattern: "^1[0-9]{10}$"
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+        guardian_family_name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        child_nickname:
+          type: string
+          minLength: 1
+          maxLength: 40
+        child_birthday:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    AdminUpdateParentProfileRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - display_name
+        - guardian_family_name
+        - child_nickname
+        - child_birthday
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        guardian_family_name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        child_nickname:
+          type: string
+          minLength: 1
+          maxLength: 40
+        child_birthday:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    AdminResetParentPasswordRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - password
+      properties:
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+    AdminParentProfile:
+      type: object
+      additionalProperties: false
+      required:
+        - parent_account_id
+        - display_name
+        - guardian_family_name
+        - child_nickname
+        - child_birthday
+      properties:
+        parent_account_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        display_name:
+          type: string
+          maxLength: 64
+        guardian_family_name:
+          type: string
+          maxLength: 40
+        child_nickname:
+          type: string
+          maxLength: 40
+        child_birthday:
+          type: string
+          maxLength: 10
+    AdminParentProfileEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - account
+              properties:
+                account:
+                  $ref: "#/components/schemas/AdminParentProfile"
+    AdminPasswordResetEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - password_reset
+              properties:
+                password_reset:
+                  type: boolean
+                  const: true
+    AdminDeviceUnboundEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - unbound
+              properties:
+                unbound:
+                  type: boolean
+                  const: true
     ChildEnvelope:
       allOf:
         - $ref: "#/components/schemas/ResponseEnvelope"
@@ -8874,6 +9645,485 @@ components:
             type: string
         provider_ready:
           type: boolean
+    AdminFamilyAIAccount:
+      type: object
+      additionalProperties: false
+      required:
+        - provider_account_id
+        - status
+        - balance_usd
+        - concurrency_limit
+        - available_models
+        - selected_models
+        - allowed_models
+        - credential_ready
+        - updated_at
+      properties:
+        provider_account_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        status:
+          type: string
+          minLength: 1
+          maxLength: 64
+        balance_usd:
+          type: number
+        concurrency_limit:
+          type: integer
+          minimum: 0
+        available_models:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        selected_models:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        allowed_models:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        credential_ready:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+    AdminFamilyAccount:
+      type: object
+      additionalProperties: false
+      required:
+        - parent_account_id
+        - phone
+        - email
+        - display_name
+        - guardian_family_name
+        - child_nickname
+        - child_birthday
+        - status
+        - created_at
+        - last_login_at
+        - ai_account
+      properties:
+        parent_account_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        phone:
+          type: string
+          maxLength: 32
+        email:
+          type: string
+          maxLength: 254
+        display_name:
+          type: string
+          maxLength: 64
+        guardian_family_name:
+          type: string
+          maxLength: 40
+        child_nickname:
+          type: string
+          maxLength: 40
+        child_birthday:
+          type: string
+          maxLength: 10
+        status:
+          type: string
+          minLength: 1
+          maxLength: 32
+        created_at:
+          type: string
+          format: date-time
+        last_login_at:
+          nullable: true
+          type: string
+          format: date-time
+        ai_account:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AdminFamilyAIAccount"
+    AdminFamiliesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - accounts
+              properties:
+                accounts:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/AdminFamilyAccount"
+    AdminAIAccount:
+      type: object
+      additionalProperties: false
+      required:
+        - parent_account_id
+        - parent_email
+        - parent_display_name
+        - provider_account_id
+        - status
+        - balance_usd
+        - concurrency_limit
+        - available_models
+        - selected_models
+        - allowed_models
+        - credential_ready
+        - updated_at
+      properties:
+        parent_account_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        parent_email:
+          type: string
+          maxLength: 254
+        parent_display_name:
+          type: string
+          maxLength: 64
+        provider_account_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        status:
+          type: string
+          minLength: 1
+          maxLength: 64
+        balance_usd:
+          type: number
+        concurrency_limit:
+          type: integer
+          minimum: 0
+        available_models:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        selected_models:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        allowed_models:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        credential_ready:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+    AdminAIAccountsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - accounts
+              properties:
+                accounts:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/AdminAIAccount"
+    AdminAIAccountEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AdminAIAccount"
+    AdminUpdateAIAccountRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - balance_usd
+        - concurrency_limit
+        - available_models
+        - reason
+      properties:
+        status:
+          type: string
+          enum:
+            - active
+            - suspended
+        balance_usd:
+          type: number
+          minimum: 0
+        concurrency_limit:
+          type: integer
+          minimum: 1
+        available_models:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        reason:
+          type: string
+          maxLength: 512
+    AIAccountDefaults:
+      type: object
+      additionalProperties: false
+      required:
+        - default_balance_usd
+        - default_concurrency
+        - source
+      properties:
+        default_balance_usd:
+          type: number
+        default_concurrency:
+          type: integer
+          minimum: 0
+        source:
+          type: string
+          const: sub2api
+    AIAccountDefaultsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AIAccountDefaults"
+    AIModel:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - latency_ms
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        latency_ms:
+          nullable: true
+          type: integer
+          minimum: 0
+    AIModelsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - models
+              properties:
+                models:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/AIModel"
+    AIGatewayChildPolicyBand:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - allowed_models
+        - max_output_tokens
+        - content_rating
+      properties:
+        name:
+          type: string
+        allowed_models:
+          type: array
+          items:
+            type: string
+        max_output_tokens:
+          type: integer
+          minimum: 0
+        content_rating:
+          type: string
+    AIGatewayChildPolicyTier:
+      type: object
+      additionalProperties: false
+      required:
+        - age_tier
+        - age_band
+        - bound
+        - age_band_missing
+        - allowed_models
+        - max_output_tokens
+        - content_rating
+      properties:
+        age_tier:
+          type: string
+        age_band:
+          type: string
+        bound:
+          type: boolean
+        age_band_missing:
+          type: boolean
+        allowed_models:
+          type: array
+          items:
+            type: string
+        max_output_tokens:
+          type: integer
+          minimum: 0
+        content_rating:
+          type: string
+    AIGatewayChildPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - require_policy_version
+        - default_age_band
+        - inject_safety_boundary
+        - aligned
+        - bands
+        - tiers
+      properties:
+        enabled:
+          type: boolean
+        require_policy_version:
+          type: boolean
+        default_age_band:
+          type: string
+        inject_safety_boundary:
+          type: boolean
+        aligned:
+          type: boolean
+        bands:
+          type: array
+          items:
+            $ref: "#/components/schemas/AIGatewayChildPolicyBand"
+        tiers:
+          type: array
+          items:
+            $ref: "#/components/schemas/AIGatewayChildPolicyTier"
+    AIGatewayChildPolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AIGatewayChildPolicy"
+    AIUsageTotals:
+      type: object
+      additionalProperties: false
+      required:
+        - requests
+        - input_tokens
+        - output_tokens
+        - cache_creation_tokens
+        - cache_read_tokens
+        - total_tokens
+        - cost_usd
+        - actual_cost_usd
+        - average_duration_ms
+      properties:
+        requests:
+          type: integer
+          minimum: 0
+        input_tokens:
+          type: integer
+          minimum: 0
+        output_tokens:
+          type: integer
+          minimum: 0
+        cache_creation_tokens:
+          type: integer
+          minimum: 0
+        cache_read_tokens:
+          type: integer
+          minimum: 0
+        total_tokens:
+          type: integer
+          minimum: 0
+        cost_usd:
+          type: number
+        actual_cost_usd:
+          type: number
+        average_duration_ms:
+          type: integer
+          minimum: 0
+    AIUsageModel:
+      type: object
+      additionalProperties: false
+      required:
+        - model
+        - requests
+        - input_tokens
+        - output_tokens
+        - cache_creation_tokens
+        - cache_read_tokens
+        - total_tokens
+        - cost_usd
+        - actual_cost_usd
+      properties:
+        model:
+          type: string
+          minLength: 1
+          maxLength: 128
+        requests:
+          type: integer
+          minimum: 0
+        input_tokens:
+          type: integer
+          minimum: 0
+        output_tokens:
+          type: integer
+          minimum: 0
+        cache_creation_tokens:
+          type: integer
+          minimum: 0
+        cache_read_tokens:
+          type: integer
+          minimum: 0
+        total_tokens:
+          type: integer
+          minimum: 0
+        cost_usd:
+          type: number
+        actual_cost_usd:
+          type: number
+    AIUsageReconciliation:
+      type: object
+      additionalProperties: false
+      required:
+        - provider_account_id
+        - start_time
+        - end_time
+        - totals
+        - models
+      properties:
+        provider_account_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        start_time:
+          type: string
+          format: date-time
+        end_time:
+          type: string
+          format: date-time
+        totals:
+          $ref: "#/components/schemas/AIUsageTotals"
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/AIUsageModel"
+    AIUsageReconciliationEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AIUsageReconciliation"
     AccountEnvelope:
       allOf:
         - $ref: "#/components/schemas/ResponseEnvelope"

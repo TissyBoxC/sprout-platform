@@ -639,9 +639,12 @@ func Run() error {
 			},
 		},
 	)
-	featureCenterHealthProbes["recommendation"] = recommendationReadinessProbe(
-		contentRecommendations,
-	)
+	if err := featureCenter.SetHealthProbe(
+		"recommendation",
+		recommendationReadinessProbe(contentRecommendations),
+	); err != nil {
+		return fmt.Errorf("wire recommendation health probe: %w", err)
+	}
 	localCommands := localCommandService.New(localCommandService.Options{
 		Repository: localCommandRepository.NewPostgresRepository(databaseStore.Pool()),
 	})
@@ -691,7 +694,12 @@ func Run() error {
 		releaseStore:    releaseStore,
 		notifications:   notifications,
 	})
-	featureCenterHealthProbes["notification"] = notificationReadinessProbe(notifications)
+	if err := featureCenter.SetHealthProbe(
+		"notification",
+		notificationReadinessProbe(notifications),
+	); err != nil {
+		return fmt.Errorf("wire notification health probe: %w", err)
+	}
 	uiTextVerifier, err := ui_textService.NewEd25519KeyringVerifier(
 		cfg.UIText.SignaturePublicKeys,
 	)

@@ -107,6 +107,28 @@ func New(options Options) (*Service, error) {
 	}, nil
 }
 
+// SetHealthProbe replaces the health probe for a registered feature after the
+// service has been constructed. The composition root uses this for runtime
+// dependencies that are created after the feature center, such as the
+// notification store and recommendation catalog readers.
+func (s *Service) SetHealthProbe(featureID string, probe HealthProbe) error {
+	if s == nil {
+		return errors.New("feature center service is nil")
+	}
+	featureID = strings.TrimSpace(featureID)
+	if _, ok := s.byID[featureID]; !ok {
+		return domain.ErrFeatureNotFound
+	}
+	if probe == nil {
+		return errors.New("health probe is required")
+	}
+	if s.probes == nil {
+		s.probes = make(map[string]HealthProbe)
+	}
+	s.probes[featureID] = probe
+	return nil
+}
+
 // List returns every registered feature with persisted values merged in.
 func (s *Service) List(ctx context.Context) ([]domain.Feature, error) {
 	overlays, err := s.repository.List(ctx)

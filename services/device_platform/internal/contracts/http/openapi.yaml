@@ -1220,6 +1220,361 @@ paths:
           $ref: "#/components/responses/DeviceUnprocessable"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/status:
+    get:
+      summary: List the authenticated guardian's device runtime statuses
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Device runtime statuses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceStatusesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/status:
+    get:
+      summary: Read one bound device's runtime status
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Device runtime status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceStatusEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DeviceRuntimeNotFound"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/runtime/heartbeat:
+    post:
+      summary: Record an authenticated device heartbeat
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceHeartbeatRequest"
+      responses:
+        "200":
+          description: Persisted runtime status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceRuntimeStatusEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          description: Heartbeat, diagnostic, or provisioning payload invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/runtime/commands:
+    get:
+      summary: List pending commands for one authenticated device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Pending device commands
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceCommandsEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "404":
+          $ref: "#/components/responses/DeviceRuntimeNotFound"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/runtime/commands/{command_id}/ack:
+    post:
+      summary: Acknowledge one pending device command
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/CommandId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceCommandAckRequest"
+      responses:
+        "200":
+          description: Command acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceCommandAckEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "409":
+          description: Command already handled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid command acknowledgement
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/runtime/parent-policy:
+    get:
+      summary: Read the effective parent policy for one authenticated device
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Effective parent policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EffectiveParentPolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "404":
+          description: Parent policy not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Parent policy conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          description: Parent policy service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/runtime/usage:
+    post:
+      summary: Upload one day of device usage to the platform
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceUsageUploadRequest"
+      responses:
+        "200":
+          description: Usage report stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceUsageUploadEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          description: Usage report invalid or schema version mismatch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          description: Usage report service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/usage-reports:
+    get:
+      summary: List the authenticated guardian's usage report days
+      security:
+        - userToken: []
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 30
+      responses:
+        "200":
+          description: Guardian usage reports
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageReportsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          description: Invalid report window
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/devices:
+    get:
+      summary: List every bound device for administrators
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Device runtime statuses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceStatusesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/devices/{device_id}/commands:
+    get:
+      summary: List commands issued for one device
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Device commands
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceCommandsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/DeviceRuntimeNotFound"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Create one maintenance command for a device
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRuntimeCommandRequest"
+      responses:
+        "201":
+          description: Command created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceCommandEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/DeviceRuntimeNotFound"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/devices/{device_id}/sessions/revoke:
+    post:
+      summary: Revoke every live session for one device
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeDeviceSessionsRequest"
+      responses:
+        "200":
+          description: Device sessions revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevokeDeviceSessionsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/DeviceRuntimeNotFound"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "503":
+          description: Device session service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -1282,6 +1637,14 @@ components:
       schema:
         type: string
         pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    CommandId:
+      name: command_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
   responses:
     Unauthorized:
       description: Authentication missing, expired, or invalid
@@ -1389,6 +1752,12 @@ components:
             $ref: "#/components/schemas/ResponseEnvelope"
     DeviceServiceError:
       description: Device lifecycle operation failed unexpectedly
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResponseEnvelope"
+    DeviceRuntimeNotFound:
+      description: Device runtime or command not found
       content:
         application/json:
           schema:
@@ -2844,3 +3213,732 @@ components:
                 removed:
                   type: boolean
                   const: true
+    DeviceHeartbeatRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - heartbeat_id
+        - reported_at
+        - firmware_version
+        - connection
+        - network_quality
+        - time_sync
+        - offline
+      properties:
+        heartbeat_id:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+        reported_at:
+          type: string
+          format: date-time
+        firmware_version:
+          type: string
+          minLength: 1
+          maxLength: 64
+        connection:
+          type: object
+          additionalProperties: false
+          required:
+            - state
+            - transport
+          properties:
+            state:
+              type: string
+              enum:
+                - offline
+                - connecting
+                - online
+            transport:
+              type: string
+              enum:
+                - none
+                - wifi
+                - cellular_4g
+        network_quality:
+          type: object
+          additionalProperties: false
+          required:
+            - level
+            - rssi_dbm
+            - latency_ms
+            - packet_loss_percent
+          properties:
+            level:
+              type: string
+              enum:
+                - unknown
+                - poor
+                - fair
+                - good
+                - excellent
+            rssi_dbm:
+              type: integer
+              minimum: -127
+              maximum: 0
+            latency_ms:
+              type: integer
+              minimum: 0
+              maximum: 60000
+            packet_loss_percent:
+              type: integer
+              minimum: 0
+              maximum: 100
+        temperature:
+          type: object
+          additionalProperties: false
+          required:
+            - state
+          properties:
+            state:
+              type: string
+              enum:
+                - unknown
+                - normal
+                - warm
+                - hot
+                - critical
+            celsius_tenths:
+              type: integer
+              minimum: -400
+              maximum: 1250
+              nullable: true
+        time_sync:
+          type: object
+          additionalProperties: false
+          required:
+            - state
+            - source
+            - offset_ms
+          properties:
+            state:
+              type: string
+              enum:
+                - unsynchronized
+                - synchronizing
+                - synchronized
+            source:
+              type: string
+              enum:
+                - none
+                - sntp
+                - platform
+            last_synced_at:
+              type: string
+              format: date-time
+              nullable: true
+            offset_ms:
+              type: integer
+              minimum: -60000
+              maximum: 60000
+        offline:
+          type: object
+          additionalProperties: false
+          required:
+            - state
+            - reason
+            - fallback_active
+            - pending_telemetry
+          properties:
+            state:
+              type: string
+              enum:
+                - online
+                - grace
+                - offline
+            reason:
+              type: string
+              enum:
+                - none
+                - network_unavailable
+                - authentication_failed
+                - time_not_synchronized
+                - service_unavailable
+            fallback_active:
+              type: boolean
+            pending_telemetry:
+              type: integer
+              minimum: 0
+              maximum: 10000
+        provisioning:
+          type: object
+          nullable: true
+          additionalProperties: true
+        diagnostics:
+          type: object
+          nullable: true
+          additionalProperties: true
+    RuntimeConnection:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - transport
+      properties:
+        state:
+          type: string
+        transport:
+          type: string
+    RuntimeNetworkQuality:
+      type: object
+      additionalProperties: false
+      required:
+        - level
+        - rssi_dbm
+        - latency_ms
+        - packet_loss_percent
+      properties:
+        level:
+          type: string
+        rssi_dbm:
+          type: integer
+        latency_ms:
+          type: integer
+        packet_loss_percent:
+          type: integer
+    RuntimeTemperature:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - celsius_tenths
+      properties:
+        state:
+          type: string
+        celsius_tenths:
+          type: integer
+          nullable: true
+    RuntimeTimeSync:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - source
+        - last_synced_at
+        - offset_ms
+      properties:
+        state:
+          type: string
+        source:
+          type: string
+        last_synced_at:
+          type: string
+          format: date-time
+          nullable: true
+        offset_ms:
+          type: integer
+    RuntimeOffline:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - reason
+        - fallback_active
+        - pending_telemetry
+      properties:
+        state:
+          type: string
+        reason:
+          type: string
+        fallback_active:
+          type: boolean
+        pending_telemetry:
+          type: integer
+    RuntimeDiagnostics:
+      type: object
+      additionalProperties: false
+      required:
+        - recent_crash_count
+      properties:
+        recent_crash_count:
+          type: integer
+          minimum: 0
+    RuntimeProvisioning:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - wifi_configured
+        - session_state
+        - last_provisioned_at
+        - dropped_events
+      properties:
+        state:
+          type: string
+        wifi_configured:
+          type: boolean
+        session_state:
+          type: string
+        last_provisioned_at:
+          type: string
+          format: date-time
+          nullable: true
+        dropped_events:
+          type: integer
+          minimum: 0
+    DeviceRuntimeStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - heartbeat_id
+        - reported_at
+        - received_at
+        - firmware_version
+        - is_online
+        - connection
+        - network_quality
+        - temperature
+        - diagnostics
+        - time_sync
+        - offline
+        - provisioning
+      properties:
+        device_id:
+          type: string
+        heartbeat_id:
+          type: string
+        reported_at:
+          type: string
+          format: date-time
+        received_at:
+          type: string
+          format: date-time
+        firmware_version:
+          type: string
+        is_online:
+          type: boolean
+        connection:
+          $ref: "#/components/schemas/RuntimeConnection"
+        network_quality:
+          $ref: "#/components/schemas/RuntimeNetworkQuality"
+        temperature:
+          $ref: "#/components/schemas/RuntimeTemperature"
+        diagnostics:
+          $ref: "#/components/schemas/RuntimeDiagnostics"
+        time_sync:
+          $ref: "#/components/schemas/RuntimeTimeSync"
+        offline:
+          $ref: "#/components/schemas/RuntimeOffline"
+        provisioning:
+          $ref: "#/components/schemas/RuntimeProvisioning"
+    DeviceStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - parent_account_id
+        - device_id
+        - device_name
+        - hardware_model
+        - firmware_version
+        - capabilities
+        - lifecycle_status
+        - bound_at
+        - updated_at
+        - runtime
+      properties:
+        parent_account_id:
+          type: string
+        device_id:
+          type: string
+        device_name:
+          type: string
+        hardware_model:
+          type: string
+        firmware_version:
+          type: string
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceCapability"
+        lifecycle_status:
+          type: string
+        bound_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        runtime:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/DeviceRuntimeStatus"
+    DeviceRuntimeStatusEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/DeviceRuntimeStatus"
+    DeviceStatusEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/DeviceStatus"
+    DeviceStatusesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - devices
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/DeviceStatus"
+    DeviceCommand:
+      type: object
+      additionalProperties: false
+      required:
+        - command_id
+        - device_id
+        - command_type
+        - status
+      properties:
+        command_id:
+          type: string
+        device_id:
+          type: string
+        command_type:
+          type: string
+          enum:
+            - refresh_configuration
+            - reconnect_network
+            - resync_time
+            - factory_reset
+            - display_message
+            - sync_privacy_consent
+        status:
+          type: string
+          enum:
+            - pending
+            - delivered
+            - acknowledged
+            - failed
+            - expired
+        request_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        delivered_at:
+          type: string
+          format: date-time
+          nullable: true
+        acknowledged_at:
+          type: string
+          format: date-time
+          nullable: true
+        result_code:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+    DeviceCommandsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - commands
+              properties:
+                commands:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/DeviceCommand"
+    DeviceCommandEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/DeviceCommand"
+    CreateRuntimeCommandRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - command_type
+      properties:
+        command_type:
+          type: string
+          enum:
+            - refresh_configuration
+            - reconnect_network
+            - resync_time
+            - factory_reset
+            - display_message
+            - sync_privacy_consent
+    DeviceCommandAckRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - result_code
+      properties:
+        status:
+          type: string
+          enum:
+            - acknowledged
+            - failed
+        result_code:
+          type: string
+          maxLength: 128
+    DeviceCommandAckEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - acknowledged
+              properties:
+                acknowledged:
+                  type: boolean
+                  const: true
+    RevokeDeviceSessionsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        disable_device:
+          type: boolean
+    RevokeDeviceSessionsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - sessions_revoked
+                - device_disabled
+              properties:
+                device_id:
+                  type: string
+                sessions_revoked:
+                  type: boolean
+                  const: true
+                device_disabled:
+                  type: boolean
+    DeviceUsageUploadRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - report_date
+        - timezone_offset_minutes
+        - active_seconds
+        - conversation_count
+        - conversation_seconds
+        - content_play_count
+        - content_seconds
+        - categories
+        - blocked
+      properties:
+        schema_version:
+          type: string
+          const: 1.0.0
+        report_date:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        timezone_offset_minutes:
+          type: integer
+          minimum: -840
+          maximum: 840
+        active_seconds:
+          type: integer
+          minimum: 0
+        conversation_count:
+          type: integer
+          minimum: 0
+        conversation_seconds:
+          type: integer
+          minimum: 0
+        content_play_count:
+          type: integer
+          minimum: 0
+        content_seconds:
+          type: integer
+          minimum: 0
+        categories:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - category
+              - play_count
+              - seconds
+            properties:
+              category:
+                type: string
+              play_count:
+                type: integer
+                minimum: 0
+              seconds:
+                type: integer
+                minimum: 0
+        blocked:
+          type: object
+          additionalProperties: false
+          required:
+            - disabled_period
+            - daily_limit
+            - category_denied
+            - time_untrusted
+          properties:
+            disabled_period:
+              type: integer
+              minimum: 0
+            daily_limit:
+              type: integer
+              minimum: 0
+            category_denied:
+              type: integer
+              minimum: 0
+            time_untrusted:
+              type: integer
+              minimum: 0
+    DeviceUsageUploadEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - report_date
+                - updated_at
+              properties:
+                report_date:
+                  type: string
+                updated_at:
+                  type: string
+                  format: date-time
+    UsageReport:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - report_date
+        - timezone_offset_minutes
+        - active_minutes
+        - conversation_count
+        - conversation_minutes
+        - content_play_count
+        - content_minutes
+        - daily_limit_minutes
+        - remaining_minutes
+        - limit_reached
+        - categories
+        - blocked
+        - devices
+        - updated_at
+      properties:
+        schema_version:
+          type: string
+        report_date:
+          type: string
+        timezone_offset_minutes:
+          type: integer
+        active_minutes:
+          type: integer
+        conversation_count:
+          type: integer
+        conversation_minutes:
+          type: integer
+        content_play_count:
+          type: integer
+        content_minutes:
+          type: integer
+        daily_limit_minutes:
+          type: integer
+        remaining_minutes:
+          type: integer
+        limit_reached:
+          type: boolean
+        categories:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - category
+              - play_count
+              - minutes
+            properties:
+              category:
+                type: string
+              play_count:
+                type: integer
+              minutes:
+                type: integer
+        blocked:
+          type: object
+          additionalProperties: false
+          required:
+            - disabled_period
+            - daily_limit
+            - category_denied
+            - time_untrusted
+          properties:
+            disabled_period:
+              type: integer
+            daily_limit:
+              type: integer
+            category_denied:
+              type: integer
+            time_untrusted:
+              type: integer
+        devices:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - device_id
+              - device_name
+              - active_minutes
+              - conversation_count
+              - content_play_count
+            properties:
+              device_id:
+                type: string
+              device_name:
+                type: string
+              active_minutes:
+                type: integer
+              conversation_count:
+                type: integer
+              content_play_count:
+                type: integer
+        updated_at:
+          type: string
+          format: date-time
+    UsageReportsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - reports
+              properties:
+                reports:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/UsageReport"

@@ -274,6 +274,42 @@ func TestDeviceBindingContractDocumentsLifecycleEndpoints(t *testing.T) {
 	}
 }
 
+func TestDeviceRuntimeContractDocumentsStatusAndCommandEndpoints(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/devices/status:",
+		"/api/v1/devices/{device_id}/status:",
+		"/api/v1/devices/{device_id}/runtime/heartbeat:",
+		"/api/v1/devices/{device_id}/runtime/commands:",
+		"/api/v1/devices/{device_id}/runtime/commands/{command_id}/ack:",
+		"/api/v1/devices/{device_id}/runtime/parent-policy:",
+		"/api/v1/devices/{device_id}/runtime/usage:",
+		"/api/v1/usage-reports:",
+		"/api/v1/admin/devices:",
+		"/api/v1/admin/devices/{device_id}/commands:",
+		"/api/v1/admin/devices/{device_id}/sessions/revoke:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected device runtime path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"DeviceHeartbeatRequest:",
+		"DeviceRuntimeStatus:",
+		"DeviceStatus:",
+		"DeviceCommand:",
+		"DeviceUsageUploadRequest:",
+		"UsageReport:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected device runtime schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

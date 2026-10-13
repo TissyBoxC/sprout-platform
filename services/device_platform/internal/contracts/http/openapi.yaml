@@ -3092,6 +3092,425 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/wearable/policy:
+    get:
+      summary: Read the authenticated family's wearable location policy
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Wearable location policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearablePolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Publish the authenticated family's wearable location policy
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WearablePolicyRequest"
+      responses:
+        "200":
+          description: Updated wearable location policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearablePolicyEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/wearable/contacts:
+    get:
+      summary: List the authenticated family's emergency contacts
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Emergency contacts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearableContactsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Create an emergency contact
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WearableContactRequest"
+      responses:
+        "201":
+          description: Emergency contact created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearableContactEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/wearable/contacts/{contact_id}:
+    put:
+      summary: Update an emergency contact
+      security:
+        - userToken: []
+      parameters:
+        - name: contact_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WearableContactRequest"
+      responses:
+        "200":
+          description: Updated emergency contact
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearableContactEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Emergency contact not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    delete:
+      summary: Delete an emergency contact
+      security:
+        - userToken: []
+      parameters:
+        - name: contact_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Emergency contact deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearableDeletedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Emergency contact not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/wearable/geofence:
+    get:
+      summary: Read the authenticated family's home geofence
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Home geofence, or null when unset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearableGeofenceEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Publish the authenticated family's home geofence
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WearableGeofenceRequest"
+      responses:
+        "200":
+          description: Updated home geofence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearableGeofenceWriteEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/wearable/devices:
+    get:
+      summary: List the authenticated family's latest wearable statuses
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Wearable device statuses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearableDevicesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/wearable/capability:
+    get:
+      summary: Read one family device's wearable capability
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Wearable capability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearableCapabilityEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/wearable/sos:
+    get:
+      summary: List the authenticated family's recent SOS history
+      security:
+        - userToken: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: SOS history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearableSOSEventsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/wearable/sos/active:
+    get:
+      summary: List the authenticated family's active SOS events
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Active SOS events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearableSOSEventsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/wearable/sos/{event_id}/cancel:
+    put:
+      summary: Cancel one active SOS event
+      security:
+        - userToken: []
+      parameters:
+        - name: event_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Cancelled SOS event
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearableSOSEventEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: SOS event not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/wearable/location:
+    post:
+      summary: Report one bound device's bounded location
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WearableLocationReportRequest"
+      responses:
+        "200":
+          description: Location recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearableLocationRecordedEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/wearable/policy:
+    get:
+      summary: Read the family wearable policy from a bound device session
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Device-facing wearable policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearableDevicePolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/wearable/sos:
+    post:
+      summary: Report one bound device's SOS trigger
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WearableSOSRequest"
+      responses:
+        "201":
+          description: SOS event triggered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearableSOSEventEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/wearable/stats:
+    get:
+      summary: Read the fleet-wide wearable summary
+      security:
+        - userToken: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        "200":
+          description: Wearable statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WearableAdminStatsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -8339,3 +8758,561 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/BluetoothAudioAdminStats"
+    WearablePrecision:
+      type: string
+      enum:
+        - coarse
+        - balanced
+        - precise
+    WearableGeofenceState:
+      type: string
+      enum:
+        - inside
+        - outside
+        - unknown
+    WearableSOSState:
+      type: string
+      enum:
+        - idle
+        - armed
+        - triggered
+        - cancelled
+    WearableContactRole:
+      type: string
+      enum:
+        - guardian
+        - family
+        - service
+    WearablePolicyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - permission_granted
+        - precision
+        - upload_interval_seconds
+        - retention_days
+        - geofence_radius_meters
+      properties:
+        enabled:
+          type: boolean
+        permission_granted:
+          type: boolean
+        precision:
+          $ref: "#/components/schemas/WearablePrecision"
+        upload_interval_seconds:
+          type: integer
+          minimum: 30
+          maximum: 86400
+        retention_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        geofence_radius_meters:
+          type: integer
+          minimum: 50
+          maximum: 10000
+    WearablePolicy:
+      allOf:
+        - $ref: "#/components/schemas/WearablePolicyRequest"
+        - type: object
+          required:
+            - updated_at
+          properties:
+            updated_at:
+              type: string
+              format: date-time
+    WearableDevicePolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - enabled
+        - permission_granted
+        - precision
+        - upload_interval_seconds
+        - retention_days
+        - geofence_radius_meters
+      properties:
+        schema_version:
+          type: integer
+          const: 1
+        enabled:
+          type: boolean
+        permission_granted:
+          type: boolean
+        precision:
+          $ref: "#/components/schemas/WearablePrecision"
+        upload_interval_seconds:
+          type: integer
+          minimum: 30
+          maximum: 86400
+        retention_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        geofence_radius_meters:
+          type: integer
+          minimum: 50
+          maximum: 10000
+    WearablePolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WearablePolicy"
+    WearableDevicePolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WearableDevicePolicy"
+    WearableContactRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - child_id
+        - display_name
+        - phone
+        - role
+        - priority
+        - enabled
+      properties:
+        child_id:
+          type: string
+          maxLength: 128
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        phone:
+          type: string
+          minLength: 1
+          maxLength: 32
+        role:
+          $ref: "#/components/schemas/WearableContactRole"
+        priority:
+          type: integer
+          minimum: 0
+        enabled:
+          type: boolean
+    WearableContact:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - child_id
+        - display_name
+        - phone
+        - role
+        - priority
+        - enabled
+        - created_at
+      properties:
+        id:
+          type: string
+        child_id:
+          type: string
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        phone:
+          type: string
+          minLength: 1
+          maxLength: 32
+        role:
+          $ref: "#/components/schemas/WearableContactRole"
+        priority:
+          type: integer
+          minimum: 0
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    WearableContactEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WearableContact"
+    WearableContactsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - contacts
+              properties:
+                contacts:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/WearableContact"
+    WearableGeofenceRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - child_id
+        - latitude
+        - longitude
+        - radius_meters
+        - enabled
+      properties:
+        child_id:
+          type: string
+          maxLength: 128
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+        radius_meters:
+          type: integer
+          minimum: 50
+          maximum: 10000
+        enabled:
+          type: boolean
+    WearableGeofence:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - child_id
+        - latitude
+        - longitude
+        - radius_meters
+        - enabled
+        - updated_at
+      properties:
+        id:
+          type: string
+        child_id:
+          type: string
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+        radius_meters:
+          type: integer
+          minimum: 50
+          maximum: 10000
+        enabled:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+    WearableGeofenceEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - geofence
+              properties:
+                geofence:
+                  oneOf:
+                    - type: "null"
+                    - $ref: "#/components/schemas/WearableGeofence"
+    WearableGeofenceWriteEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WearableGeofence"
+    WearableDeviceStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - family_id
+        - location_enabled
+        - permission_granted
+        - precision
+        - sos_state
+        - latitude
+        - longitude
+        - accuracy_meters
+        - geofence_state
+        - last_reported_at
+      properties:
+        device_id:
+          type: string
+        family_id:
+          type: string
+        location_enabled:
+          type: boolean
+        permission_granted:
+          type: boolean
+        precision:
+          $ref: "#/components/schemas/WearablePrecision"
+        sos_state:
+          $ref: "#/components/schemas/WearableSOSState"
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+        accuracy_meters:
+          type: number
+          format: double
+          minimum: 0
+        geofence_state:
+          $ref: "#/components/schemas/WearableGeofenceState"
+        last_reported_at:
+          type: string
+          format: date-time
+    WearableDevicesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - devices
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/WearableDeviceStatus"
+    WearableCapabilityEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WearableDeviceStatus"
+    WearableSOSRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - latitude
+        - longitude
+      properties:
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+    WearableSOSEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - device_id
+        - latitude
+        - longitude
+        - state
+        - triggered_at
+      properties:
+        id:
+          type: string
+        device_id:
+          type: string
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+        state:
+          $ref: "#/components/schemas/WearableSOSState"
+        triggered_at:
+          type: string
+          format: date-time
+        cancelled_at:
+          type: string
+          format: date-time
+          nullable: true
+    WearableSOSEventEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WearableSOSEvent"
+    WearableSOSEventsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - events
+              properties:
+                events:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/WearableSOSEvent"
+    WearableLocationReportRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - latitude
+        - longitude
+        - accuracy_meters
+        - precision
+        - geofence_state
+      properties:
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+        accuracy_meters:
+          type: number
+          format: double
+          minimum: 0
+        precision:
+          $ref: "#/components/schemas/WearablePrecision"
+        geofence_state:
+          $ref: "#/components/schemas/WearableGeofenceState"
+        sampled_at:
+          type: string
+          format: date-time
+          nullable: true
+    WearableLocationRecordedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - geofence_state
+                - recorded
+              properties:
+                device_id:
+                  type: string
+                geofence_state:
+                  $ref: "#/components/schemas/WearableGeofenceState"
+                recorded:
+                  type: boolean
+                  const: true
+    WearableCount:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - count
+      properties:
+        label:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+    WearableAdminStats:
+      type: object
+      additionalProperties: false
+      required:
+        - window_days
+        - device_count
+        - location_enabled_count
+        - permission_count
+        - sos_triggered_count
+        - sos_cancelled_count
+        - geofence_outside_count
+        - precision_buckets
+        - state_buckets
+        - generated_at
+      properties:
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        device_count:
+          type: integer
+          minimum: 0
+        location_enabled_count:
+          type: integer
+          minimum: 0
+        permission_count:
+          type: integer
+          minimum: 0
+        sos_triggered_count:
+          type: integer
+          minimum: 0
+        sos_cancelled_count:
+          type: integer
+          minimum: 0
+        geofence_outside_count:
+          type: integer
+          minimum: 0
+        precision_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/WearableCount"
+        state_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/WearableCount"
+        generated_at:
+          type: string
+          format: date-time
+    WearableAdminStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WearableAdminStats"
+    WearableDeletedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - deleted
+              properties:
+                deleted:
+                  type: boolean
+                  const: true

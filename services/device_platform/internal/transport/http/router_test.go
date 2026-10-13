@@ -582,6 +582,46 @@ func TestBluetoothAudioContractDocumentsPolicyAndStatusEndpoints(t *testing.T) {
 	}
 }
 
+func TestWearableContractDocumentsPolicyLocationAndSOSEndpoints(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/wearable/policy:",
+		"/api/v1/wearable/contacts:",
+		"/api/v1/wearable/contacts/{contact_id}:",
+		"/api/v1/wearable/geofence:",
+		"/api/v1/wearable/devices:",
+		"/api/v1/devices/{device_id}/wearable/capability:",
+		"/api/v1/wearable/sos:",
+		"/api/v1/wearable/sos/active:",
+		"/api/v1/wearable/sos/{event_id}/cancel:",
+		"/api/v1/devices/{device_id}/wearable/location:",
+		"/api/v1/devices/{device_id}/wearable/policy:",
+		"/api/v1/devices/{device_id}/wearable/sos:",
+		"/api/v1/admin/wearable/stats:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected wearable path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"WearablePolicyRequest:",
+		"WearableDevicePolicy:",
+		"WearableContactRequest:",
+		"WearableGeofenceRequest:",
+		"WearableDeviceStatus:",
+		"WearableSOSEvent:",
+		"WearableLocationReportRequest:",
+		"WearableAdminStats:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected wearable schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

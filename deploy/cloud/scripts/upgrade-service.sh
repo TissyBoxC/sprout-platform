@@ -8,7 +8,7 @@ set -euo pipefail
 set -E
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-cloud_dir="$(CDPATH= cd -- "$script_dir/.." && pwd)"
+cloud_dir="${SPROUT_UPGRADE_CLOUD_DIR:-$(CDPATH= cd -- "$script_dir/.." && pwd)}"
 compose_file="$cloud_dir/docker-compose.yml"
 env_file="$cloud_dir/.env"
 compose_project_dir="${SPROUT_SERVICE_VERSION_HOST_CLOUD_DIR:-${SPROUT_UPGRADE_HOST_CLOUD_DIR:-$cloud_dir}}"
@@ -66,6 +66,13 @@ require_command() {
     echo "缺少命令: $command_name" >&2
     exit 1
   fi
+}
+
+prepare_upgrade_executor_runtime_copy() {
+  runtime_copy="$(mktemp "${TMPDIR:-/tmp}/sprout-upgrade-service.XXXXXX")"
+  cp "${BASH_SOURCE[0]}" "$runtime_copy"
+  chmod 700 "$runtime_copy"
+  printf '%s\n' "$runtime_copy"
 }
 
 validate_service() {
@@ -769,5 +776,17 @@ main() {
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  # The release sync advances the checkout that contains this script. Run from
+  # an immutable temporary copy so Git cannot replace a file Bash is reading.
+  # Health checks never mutate the checkout, so keep their startup path simple.
+  if [ "$#" -ge 1 ] && [ "$1" != "--check" ] && [ -z "${SPROUT_UPGRADE_EXECUTOR_RUNTIME_COPY:-}" ]; then
+    runtime_copy="$(prepare_upgrade_executor_runtime_copy)"
+    SPROUT_UPGRADE_EXECUTOR_RUNTIME_COPY="$runtime_copy" \
+      SPROUT_UPGRADE_CLOUD_DIR="$cloud_dir" \
+      exec bash "$runtime_copy" "$@"
+  fi
+  if [ -n "${SPROUT_UPGRADE_EXECUTOR_RUNTIME_COPY:-}" ]; then
+    trap 'rm -f "$SPROUT_UPGRADE_EXECUTOR_RUNTIME_COPY"' EXIT
+  fi
   main "$@"
 fi

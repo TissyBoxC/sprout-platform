@@ -13,6 +13,35 @@ if ! grep -Eq '^require_command\(\)' "$worker_script"; then
   exit 1
 fi
 
+if ! grep -Eq '^prepare_worker_runtime_copy\(\)' "$worker_script"; then
+  echo "service-upgrade-worker.sh 缺少运行时副本准备逻辑。" >&2
+  exit 1
+fi
+
+worker_runtime_block="$(
+  sed -n '/^prepare_worker_runtime_copy()/,/^}/p' "$worker_script"
+)"
+if ! printf '%s\n' "$worker_runtime_block" | grep -Fq 'cp "${BASH_SOURCE[0]}" "$runtime_copy"'; then
+  echo "service-upgrade-worker.sh 的运行时副本未复制自身。" >&2
+  exit 1
+fi
+
+worker_main_block="$(
+  sed -n '/^main()/,/^}/p' "$worker_script"
+)"
+if ! printf '%s\n' "$worker_main_block" | grep -Fq 'exec bash "$runtime_copy" "$@"'; then
+  echo "service-upgrade-worker.sh 未从运行时副本重新执行。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$worker_main_block" | grep -Fq 'SPROUT_SERVICE_UPGRADE_WORKER_RUNTIME_COPY="$runtime_copy"'; then
+  echo "service-upgrade-worker.sh 未传递运行时副本标记。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$worker_main_block" | grep -Fq 'SPROUT_UPGRADE_CLOUD_DIR="$cloud_dir"'; then
+  echo "service-upgrade-worker.sh 未向运行时副本传递原始 cloud_dir。" >&2
+  exit 1
+fi
+
 if ! grep -Eq '^release_catalog_is_valid\(\)' "$worker_script"; then
   echo "service-upgrade-worker.sh 缺少版本目录有效性校验。" >&2
   exit 1
@@ -42,6 +71,38 @@ bash -n "$upgrade_script"
 
 if ! grep -Eq '^assert_platform_checkout_version\(\)' "$upgrade_script"; then
   echo "upgrade-service.sh 缺少部署源码版本门禁。" >&2
+  exit 1
+fi
+
+if ! grep -Eq '^prepare_upgrade_executor_runtime_copy\(\)' "$upgrade_script"; then
+  echo "upgrade-service.sh 缺少运行时副本准备逻辑。" >&2
+  exit 1
+fi
+
+executor_runtime_block="$(
+  sed -n '/^prepare_upgrade_executor_runtime_copy()/,/^}/p' "$upgrade_script"
+)"
+if ! printf '%s\n' "$executor_runtime_block" | grep -Fq 'cp "${BASH_SOURCE[0]}" "$runtime_copy"'; then
+  echo "upgrade-service.sh 的运行时副本未复制自身。" >&2
+  exit 1
+fi
+
+executor_launch_block="$(
+  sed -n '/^if \[ "${BASH_SOURCE\[0\]}" = "$0" \]; then/,/^fi$/p' "$upgrade_script"
+)"
+if ! printf '%s\n' "$executor_launch_block" | grep -Fq 'exec bash "$runtime_copy" "$@"'; then
+  echo "upgrade-service.sh 未从运行时副本重新执行。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$executor_launch_block" | grep -Fq 'SPROUT_UPGRADE_CLOUD_DIR="$cloud_dir"'; then
+  echo "upgrade-service.sh 未向运行时副本传递原始 cloud_dir。" >&2
+  exit 1
+fi
+
+executor_exec_line="$(grep -n 'exec bash "$runtime_copy" "$@"' "$upgrade_script" | head -n 1 | cut -d: -f1)"
+executor_main_line="$(grep -n '^  main "$@"$' "$upgrade_script" | head -n 1 | cut -d: -f1)"
+if [ -z "$executor_exec_line" ] || [ -z "$executor_main_line" ] || [ "$executor_exec_line" -ge "$executor_main_line" ]; then
+  echo "upgrade-service.sh 必须在执行主流程前切换到运行时副本。" >&2
   exit 1
 fi
 
@@ -108,6 +169,22 @@ if [ -z "$sync_call_line" ] || [ -z "$guard_call_line" ] || [ -z "$compose_check
 fi
 if [ "$sync_call_line" -gt "$guard_call_line" ] || [ "$guard_call_line" -gt "$compose_check_line" ]; then
   echo "发布同步必须早于版本门禁，版本门禁必须早于 Compose 校验。" >&2
+  exit 1
+fi
+
+worker_runtime_copy="$(mktemp "${TMPDIR:-/tmp}/sprout-worker-runtime-test.XXXXXX")"
+cp "$worker_script" "$worker_runtime_copy"
+trap 'rm -f "$worker_runtime_copy"' EXIT
+if ! cmp -s "$worker_runtime_copy" "$worker_script"; then
+  echo "service-upgrade-worker.sh 的运行时副本内容不一致。" >&2
+  exit 1
+fi
+
+executor_runtime_copy="$(mktemp "${TMPDIR:-/tmp}/sprout-executor-runtime-test.XXXXXX")"
+cp "$upgrade_script" "$executor_runtime_copy"
+trap 'rm -f "$worker_runtime_copy" "$executor_runtime_copy"' EXIT
+if ! cmp -s "$executor_runtime_copy" "$upgrade_script"; then
+  echo "upgrade-service.sh 的运行时副本内容不一致。" >&2
   exit 1
 fi
 

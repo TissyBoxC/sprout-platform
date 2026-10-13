@@ -179,6 +179,13 @@ require_command() {
   fi
 }
 
+prepare_worker_runtime_copy() {
+  runtime_copy="$(mktemp "${TMPDIR:-/tmp}/sprout-service-upgrade-worker.XXXXXX")"
+  cp "${BASH_SOURCE[0]}" "$runtime_copy"
+  chmod 700 "$runtime_copy"
+  printf '%s\n' "$runtime_copy"
+}
+
 validate_operation_id() {
   operation_id="$1"
   printf '%s' "$operation_id" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
@@ -806,6 +813,17 @@ process_operation() {
 }
 
 main() {
+  # Platform upgrades advance the mounted checkout that contains this script.
+  # Re-exec from a temporary copy so the running worker is never rewritten in
+  # place while Bash is still reading commands from it.
+  if [ -z "${SPROUT_SERVICE_UPGRADE_WORKER_RUNTIME_COPY:-}" ]; then
+    runtime_copy="$(prepare_worker_runtime_copy)"
+    SPROUT_SERVICE_UPGRADE_WORKER_RUNTIME_COPY="$runtime_copy" \
+      SPROUT_UPGRADE_CLOUD_DIR="$cloud_dir" \
+      exec bash "$runtime_copy" "$@"
+  fi
+  trap 'rm -f "$SPROUT_SERVICE_UPGRADE_WORKER_RUNTIME_COPY"' EXIT
+
   validate_positive_integer "SPROUT_SERVICE_VERSION_CHECK_INTERVAL_SECONDS" "$status_interval" 10 86400
   validate_positive_integer "SPROUT_SERVICE_VERSION_POLL_INTERVAL_SECONDS" "$poll_interval" 1 3600
   validate_positive_integer "SPROUT_SERVICE_VERSION_MAX_REQUEST_BYTES" "$max_request_bytes" 1024 1048576
@@ -856,4 +874,6 @@ main() {
   done
 }
 
-main "$@"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi

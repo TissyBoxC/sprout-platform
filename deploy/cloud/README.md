@@ -306,8 +306,10 @@ OpenResty 容器执行 `openresty -t` 和 reload；校验失败会自动回滚�
 
 第二条命令会先备份到 `/opt/1panel/www/.codex-backups/`，补齐 HSTS 并把
 `X-Cache` 改为 `always`，然后调用当前 OpenResty 容器执行 `openresty -t`
-和 reload；任何一步失败都会自动回滚。修复后应重新验证 API、管理端、下载、
-Sub2API 和语音站点的响应头，而不是只依赖 `nginx -t`。
+和 reload；任何一步失败都会自动回滚。审计覆盖所有代理 `location`，包括
+`internal-access.conf` 和 `release-upload.conf` 这类独立片段，不只覆盖带
+`X-Cache` 的根代理。修复后应重新验证 API、管理端、下载、Sub2API 和语音
+站点的响应头，并确认错误响应也包含 HSTS，而不是只依赖 `nginx -t`。
 
 设备 MQTT 使用独立域名（待确认），在 1Panel 或云防火墙中放行
 `8883/tcp`。不要对公网放行 `1883/tcp`。

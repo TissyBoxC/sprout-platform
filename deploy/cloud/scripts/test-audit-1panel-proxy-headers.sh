@@ -41,6 +41,18 @@ location ^~ / {
 }
 EOF
 
+cat > "$proxy_dir/internal-access.conf" <<'EOF'
+location ^~ /internal {
+    return 404;
+}
+EOF
+
+cat > "$proxy_dir/release-upload.conf" <<'EOF'
+location ^~ /api/v1/release-publication/ {
+    proxy_pass http://127.0.0.1:8081;
+}
+EOF
+
 cat > "$fixture_root/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -66,6 +78,19 @@ grep -Fq 'add_header Strict-Transport-Security "max-age=31536000; includeSubDoma
 
 if [ "$(grep -Fc 'add_header Strict-Transport-Security' "$proxy_dir/root.conf")" -ne 1 ]; then
   echo "代理片段应恰好包含一条 HSTS 响应头。" >&2
+  exit 1
+fi
+
+grep -Fq 'add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;' "$proxy_dir/internal-access.conf"
+grep -Fq 'add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;' "$proxy_dir/release-upload.conf"
+
+if [ "$(grep -Fc 'add_header Strict-Transport-Security' "$proxy_dir/internal-access.conf")" -ne 1 ]; then
+  echo "独立拒绝 location 应恰好包含一条 HSTS 响应头。" >&2
+  exit 1
+fi
+
+if [ "$(grep -Fc 'add_header Strict-Transport-Security' "$proxy_dir/release-upload.conf")" -ne 1 ]; then
+  echo "独立上传 location 应恰好包含一条 HSTS 响应头。" >&2
   exit 1
 fi
 

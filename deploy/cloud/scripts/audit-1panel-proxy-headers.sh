@@ -74,23 +74,33 @@ fi
 header_needs_fix() {
   file="$1"
   awk '
-    BEGIN { location = 0; has_cache = 0; has_hsts = 0 }
+    BEGIN { location = 0; cache_needs_always = 0; has_hsts = 0 }
     /^[[:space:]]*location[[:space:]]/ {
-      if (location && has_cache && !has_hsts) {
+      if (location && (!has_hsts || cache_needs_always)) {
         exit 10
       }
       location = 1
-      has_cache = 0
+      cache_needs_always = 0
       has_hsts = 0
     }
     location && /^[[:space:]]*add_header[[:space:]]+X-Cache[[:space:]]/ {
-      has_cache = 1
+      if ($0 !~ /always;/) {
+        cache_needs_always = 1
+      }
     }
     location && /^[[:space:]]*add_header[[:space:]]+Strict-Transport-Security[[:space:]]/ {
       has_hsts = 1
     }
+    location && /^[[:space:]]*}$/ {
+      if (!has_hsts || cache_needs_always) {
+        exit 10
+      }
+      location = 0
+      cache_needs_always = 0
+      has_hsts = 0
+    }
     END {
-      if (location && has_cache && !has_hsts) {
+      if (location && (!has_hsts || cache_needs_always)) {
         exit 10
       }
     }
@@ -101,46 +111,43 @@ fix_header_block() {
   file="$1"
   temp_file="$(mktemp "${file}.codex-headers.XXXXXX")"
   if ! awk '
-    BEGIN { location = 0; changed = 0 }
+    BEGIN { location = 0; has_hsts = 0; changed = 0 }
     /^[[:space:]]*location[[:space:]]/ {
-      if (location && pending) {
+      if (location && !has_hsts) {
         print "    add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;"
         changed = 1
-        pending = 0
       }
       location = 1
-      if ($0 ~ /^[[:space:]]*\/\*.*\*\//) {
-        pending = 0
-      }
+      has_hsts = 0
       print
       next
     }
     location && /^[[:space:]]*add_header[[:space:]]+X-Cache[[:space:]]/ {
       if ($0 !~ /always;/) {
         sub(/;[[:space:]]*$/, " always;", $0)
+        changed = 1
       }
       print
-      pending = 1
       next
     }
     location && /^[[:space:]]*add_header[[:space:]]+Strict-Transport-Security[[:space:]]/ {
-      pending = 0
+      has_hsts = 1
       print
       next
     }
-    location && /^}$/ {
-      if (pending) {
+    location && /^[[:space:]]*}$/ {
+      if (!has_hsts) {
         print "    add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;"
         changed = 1
-        pending = 0
       }
       print
       location = 0
+      has_hsts = 0
       next
     }
     { print }
     END {
-      if (pending) {
+      if (location && !has_hsts) {
         print "    add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;"
         changed = 1
       }

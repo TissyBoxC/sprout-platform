@@ -86,7 +86,6 @@ type Invitation struct {
 // Capability summarizes a family's membership surface for the guardian view.
 type Capability struct {
 	FamilyID       string `json:"family_id"`
-	FamilyName     string `json:"family_name"`
 	OwnerUserID    string `json:"owner_user_id"`
 	MemberCount    int    `json:"member_count"`
 	PendingInvites int    `json:"pending_invite_count"`

@@ -83,6 +83,18 @@ func (r *fakeRepository) Member(
 	return member, ok, nil
 }
 
+func (r *fakeRepository) MemberByUser(
+	_ context.Context,
+	userID string,
+) (domain.Member, bool, error) {
+	for _, member := range r.members {
+		if member.UserID == userID {
+			return member, true, nil
+		}
+	}
+	return domain.Member{}, false, nil
+}
+
 func (r *fakeRepository) CreateInvitation(_ context.Context, invitation domain.Invitation) error {
 	for _, existing := range r.invitations {
 		if existing.FamilyID == invitation.FamilyID &&

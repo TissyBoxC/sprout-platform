@@ -24,6 +24,7 @@ type Repository interface {
 	DeleteMember(ctx context.Context, familyID string, userID string) error
 	Members(ctx context.Context, familyID string) ([]domain.Member, error)
 	Member(ctx context.Context, familyID string, userID string) (domain.Member, bool, error)
+	MemberByUser(ctx context.Context, userID string) (domain.Member, bool, error)
 
 	CreateInvitation(ctx context.Context, invitation domain.Invitation) error
 	Invitation(
@@ -117,6 +118,27 @@ func (s *Service) Members(
 		return nil, err
 	}
 	return s.repository.Members(ctx, familyID)
+}
+
+// ResolveFamily returns the acting membership for an authenticated account.
+// The HTTP layer uses it to scope a request that names no family id, so a
+// guardian who joined by invitation reads the family they actually belong to.
+func (s *Service) ResolveFamily(
+	ctx context.Context,
+	userID string,
+) (domain.Member, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return domain.Member{}, domain.ErrInvalidMember
+	}
+	member, ok, err := s.repository.MemberByUser(ctx, userID)
+	if err != nil {
+		return domain.Member{}, err
+	}
+	if !ok {
+		return domain.Member{}, domain.ErrMemberNotFound
+	}
+	return member, nil
 }
 
 // Invitations lists a family's invitations. Any member may read them.

@@ -19,6 +19,7 @@ type Repository interface {
 	DeleteMember(ctx context.Context, familyID string, userID string) error
 	Members(ctx context.Context, familyID string) ([]domain.Member, error)
 	Member(ctx context.Context, familyID string, userID string) (domain.Member, bool, error)
+	MemberByUser(ctx context.Context, userID string) (domain.Member, bool, error)
 
 	CreateInvitation(ctx context.Context, invitation domain.Invitation) error
 	Invitation(
@@ -181,6 +182,38 @@ func (r *PostgresRepository) Member(
 	}
 	if err != nil {
 		return domain.Member{}, false, fmt.Errorf("read family member: %w", err)
+	}
+	return member, true, nil
+}
+
+// MemberByUser loads the membership for one account without knowing its family
+// in advance. A platform account belongs to at most one family today, so this
+// resolves the acting family for an authenticated request.
+func (r *PostgresRepository) MemberByUser(
+	ctx context.Context,
+	userID string,
+) (domain.Member, bool, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT id, family_id, user_id, role, created_at, updated_at
+		FROM family_members
+		WHERE user_id = $1
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, userID)
+	var member domain.Member
+	err := row.Scan(
+		&member.ID,
+		&member.FamilyID,
+		&member.UserID,
+		&member.Role,
+		&member.CreatedAt,
+		&member.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Member{}, false, nil
+	}
+	if err != nil {
+		return domain.Member{}, false, fmt.Errorf("read family member by user: %w", err)
 	}
 	return member, true, nil
 }

@@ -3511,6 +3511,314 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/content/catalog:
+    get:
+      summary: Read the authenticated family's incremental content catalog
+      security:
+        - userToken: []
+      parameters:
+        - name: since_revision
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+            default: 0
+        - name: age_tier
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ContentAgeTier"
+        - name: category
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ContentCategory"
+      responses:
+        "200":
+          description: Incremental content catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentCatalogEnvelope"
+        "400":
+          description: Requested revision is ahead of the catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/content/packages/{package_id}/download:
+    get:
+      summary: Read a verified download descriptor for one published package
+      security:
+        - userToken: []
+      parameters:
+        - name: package_id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/ContentPackageID"
+      responses:
+        "200":
+          description: Published package download descriptor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentDownloadEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Package or asset not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Stored asset checksum changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/content/favorites:
+    get:
+      summary: List the authenticated guardian's content favorites
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Favorite content packages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentFavoritesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/content/favorites/{package_id}:
+    put:
+      summary: Add one package to the authenticated guardian's favorites
+      security:
+        - userToken: []
+      parameters:
+        - name: package_id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/ContentPackageID"
+      responses:
+        "200":
+          description: Favorite already existed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentFavoriteMutationEnvelope"
+        "201":
+          description: Favorite created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentFavoriteMutationEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Package not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    delete:
+      summary: Remove one package from the authenticated guardian's favorites
+      security:
+        - userToken: []
+      parameters:
+        - name: package_id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/ContentPackageID"
+      responses:
+        "200":
+          description: Favorite removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentFavoriteMutationEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/content/play-history:
+    get:
+      summary: Read merged playback history for the authenticated guardian's devices
+      security:
+        - userToken: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 50
+        - name: device_id
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/DeviceIdParameter"
+      responses:
+        "200":
+          description: Bounded playback history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentPlayHistoryEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Requested device is not owned by the guardian
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+        "503":
+          description: Playback history source is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+  /api/v1/content/theme-packs:
+    get:
+      summary: List published theme packs for the guardian console
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Published theme packs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentThemePacksEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/content/recommendations:
+    get:
+      summary: Read family-scoped content recommendations
+      security:
+        - userToken: []
+      parameters:
+        - name: age_tier
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ContentAgeTier"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 24
+            default: 8
+        - name: exclude
+          in: query
+          required: false
+          description: Repeatable package identifiers to exclude
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/ContentPackageID"
+      responses:
+        "200":
+          description: Ranked recommendations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentRecommendationsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/content/offline-policy:
+    get:
+      summary: Read the platform content offline download policy
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Content offline download policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentOfflinePolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Publish the platform content offline download policy
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContentOfflinePolicyRequest"
+      responses:
+        "200":
+          description: Updated content offline download policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentOfflinePolicyEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/content/offline-policy/acknowledgements:
+    get:
+      summary: List the authenticated family's offline policy acknowledgements
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Offline policy acknowledgements by device
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentOfflinePolicyAcknowledgementsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -9316,3 +9624,513 @@ components:
                 deleted:
                   type: boolean
                   const: true
+    ContentPackageID:
+      type: string
+      pattern: "^[a-z][a-z0-9]*(?:_[a-z0-9]+){1,7}$"
+    ContentCategory:
+      type: string
+      enum:
+        - story
+        - nursery_rhyme
+        - poetry
+        - english
+        - encyclopedia
+        - bedtime
+    ContentAgeTier:
+      type: string
+      enum:
+        - age_3_4
+        - age_5_6
+        - age_7_8
+    ContentStatus:
+      type: string
+      enum:
+        - draft
+        - in_review
+        - published
+        - withdrawn
+        - archived
+    ContentAction:
+      type: string
+      enum:
+        - submit
+        - approve
+        - reject
+        - publish
+        - withdraw
+        - archive
+    ContentPlayOutcome:
+      type: string
+      enum:
+        - completed
+        - interrupted
+    ContentThemePackStatus:
+      type: string
+      enum:
+        - draft
+        - published
+        - withdrawn
+    ContentRecommendationReason:
+      type: string
+      enum:
+        - same_category
+        - same_age_tier
+        - fresh
+    DeviceIdParameter:
+      type: string
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    ContentPackageVersion:
+      type: object
+      additionalProperties: false
+      required:
+        - package_id
+        - package_version
+        - title
+        - category
+        - age_tiers
+        - asset_key
+        - sha256
+        - size_bytes
+        - status
+        - catalog_revision
+        - created_at
+        - updated_at
+      properties:
+        package_id:
+          $ref: "#/components/schemas/ContentPackageID"
+        package_version:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 128
+        category:
+          $ref: "#/components/schemas/ContentCategory"
+        age_tiers:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ContentAgeTier"
+        asset_key:
+          type: string
+          minLength: 1
+          maxLength: 512
+        sha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 4294967296
+        status:
+          $ref: "#/components/schemas/ContentStatus"
+        submitted_at:
+          type: string
+          format: date-time
+        approved_at:
+          type: string
+          format: date-time
+        approved_by:
+          type: string
+        published_at:
+          type: string
+          format: date-time
+        catalog_revision:
+          type: integer
+          format: int64
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ContentCatalog:
+      type: object
+      additionalProperties: false
+      required:
+        - catalog_revision
+        - packages
+        - withdrawn_package_ids
+        - generated_at
+      properties:
+        catalog_revision:
+          type: integer
+          format: int64
+          minimum: 0
+        packages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContentPackageVersion"
+        withdrawn_package_ids:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContentPackageID"
+        generated_at:
+          type: string
+          format: date-time
+    ContentCatalogEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ContentCatalog"
+    ContentDownload:
+      type: object
+      additionalProperties: false
+      required:
+        - package_id
+        - package_version
+        - title
+        - asset_key
+        - sha256
+        - size_bytes
+        - download_url
+        - published_at
+      properties:
+        package_id:
+          $ref: "#/components/schemas/ContentPackageID"
+        package_version:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 128
+        asset_key:
+          type: string
+          minLength: 1
+          maxLength: 512
+        sha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 4294967296
+        download_url:
+          type: string
+          format: uri
+        published_at:
+          type: string
+          format: date-time
+    ContentDownloadEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - download
+              properties:
+                download:
+                  $ref: "#/components/schemas/ContentDownload"
+    ContentFavorite:
+      type: object
+      additionalProperties: false
+      required:
+        - package_id
+        - title
+        - category
+        - age_tiers
+        - package_version
+        - available
+        - created_at
+      properties:
+        package_id:
+          $ref: "#/components/schemas/ContentPackageID"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 128
+        category:
+          $ref: "#/components/schemas/ContentCategory"
+        age_tiers:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ContentAgeTier"
+        package_version:
+          type: integer
+          minimum: 1
+        available:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    ContentFavoritesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - favorites
+              properties:
+                favorites:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ContentFavorite"
+    ContentFavoriteMutation:
+      type: object
+      additionalProperties: false
+      required:
+        - package_id
+      properties:
+        package_id:
+          $ref: "#/components/schemas/ContentPackageID"
+        created_at:
+          type: string
+          format: date-time
+    ContentFavoriteMutationEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ContentFavoriteMutation"
+    ContentPlayRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - device_id
+        - package_id
+        - package_version
+        - outcome
+        - played_seconds
+        - played_at
+      properties:
+        id:
+          type: string
+        device_id:
+          $ref: "#/components/schemas/DeviceIdParameter"
+        package_id:
+          $ref: "#/components/schemas/ContentPackageID"
+        package_version:
+          type: integer
+          minimum: 1
+        outcome:
+          $ref: "#/components/schemas/ContentPlayOutcome"
+        played_seconds:
+          type: integer
+          minimum: 0
+          maximum: 86400
+        played_at:
+          type: string
+          format: date-time
+    ContentPlayHistoryEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - history
+              properties:
+                history:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ContentPlayRecord"
+    ContentThemePack:
+      type: object
+      additionalProperties: false
+      required:
+        - theme_id
+        - title
+        - summary
+        - age_tiers
+        - package_ids
+        - status
+        - catalog_revision
+        - created_at
+        - updated_at
+      properties:
+        theme_id:
+          $ref: "#/components/schemas/ContentPackageID"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 64
+        summary:
+          type: string
+          maxLength: 200
+        age_tiers:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ContentAgeTier"
+        package_ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ContentPackageID"
+        status:
+          $ref: "#/components/schemas/ContentThemePackStatus"
+        catalog_revision:
+          type: integer
+          format: int64
+          minimum: 0
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ContentThemePacksEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - theme_packs
+              properties:
+                theme_packs:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ContentThemePack"
+    ContentRecommendation:
+      type: object
+      additionalProperties: false
+      required:
+        - package_id
+        - title
+        - category
+        - age_tiers
+        - score
+        - reason
+      properties:
+        package_id:
+          $ref: "#/components/schemas/ContentPackageID"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 128
+        category:
+          $ref: "#/components/schemas/ContentCategory"
+        age_tiers:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ContentAgeTier"
+        score:
+          type: integer
+          minimum: 0
+        reason:
+          $ref: "#/components/schemas/ContentRecommendationReason"
+    ContentRecommendationsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - recommendations
+              properties:
+                recommendations:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ContentRecommendation"
+    ContentOfflinePolicyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - offline_enabled
+        - max_cached_packages
+        - max_cache_bytes
+        - cache_ttl_hours
+        - download_over_wifi_only
+      properties:
+        offline_enabled:
+          type: boolean
+        max_cached_packages:
+          type: integer
+          minimum: 1
+          maximum: 200
+        max_cache_bytes:
+          type: integer
+          format: int64
+          minimum: 16777216
+          maximum: 8589934592
+        cache_ttl_hours:
+          type: integer
+          minimum: 1
+          maximum: 8760
+        download_over_wifi_only:
+          type: boolean
+    ContentOfflinePolicy:
+      allOf:
+        - $ref: "#/components/schemas/ContentOfflinePolicyRequest"
+        - type: object
+          required:
+            - revision
+          properties:
+            revision:
+              type: integer
+              minimum: 0
+    ContentOfflinePolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ContentOfflinePolicy"
+    ContentOfflinePolicyAcknowledgement:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - revision
+        - up_to_date
+      properties:
+        device_id:
+          $ref: "#/components/schemas/DeviceIdParameter"
+        revision:
+          type: integer
+          minimum: 0
+        up_to_date:
+          type: boolean
+    ContentOfflinePolicyAcknowledgementsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - devices
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ContentOfflinePolicyAcknowledgement"

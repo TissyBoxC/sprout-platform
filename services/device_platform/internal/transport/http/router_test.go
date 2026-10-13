@@ -622,6 +622,42 @@ func TestWearableContractDocumentsPolicyLocationAndSOSEndpoints(t *testing.T) {
 	}
 }
 
+func TestContentContractDocumentsCatalogFavoritesHistoryAndPolicies(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/content/catalog:",
+		"/api/v1/content/packages/{package_id}/download:",
+		"/api/v1/content/favorites:",
+		"/api/v1/content/favorites/{package_id}:",
+		"/api/v1/content/play-history:",
+		"/api/v1/content/theme-packs:",
+		"/api/v1/content/recommendations:",
+		"/api/v1/content/offline-policy:",
+		"/api/v1/content/offline-policy/acknowledgements:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected content path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"ContentCatalog:",
+		"ContentPackageVersion:",
+		"ContentFavorite:",
+		"ContentPlayRecord:",
+		"ContentThemePack:",
+		"ContentRecommendation:",
+		"ContentOfflinePolicy:",
+		"ContentOfflinePolicyAcknowledgement:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected content schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

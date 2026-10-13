@@ -36,6 +36,8 @@ import WearableStatsPage from '@/features/wearable/presentation/WearableStatsPag
 import MultiDeviceStatsPage from '@/features/multi_device/presentation/MultiDeviceStatsPage.vue'
 import ScreenStatsPage from '@/features/screen/presentation/ScreenStatsPage.vue'
 import { useAuthStore } from '@/features/auth/application/authStore'
+import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
+import ForbiddenPage from '@/features/auth/presentation/ForbiddenPage.vue'
 
 /// Feature routes are registered here so removing a feature only changes its
 /// page import and route entry.
@@ -53,26 +55,31 @@ export function createAdminRouter() {
         path: '/',
         name: 'dashboard',
         component: DashboardPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.statsRead },
       },
       {
         path: '/families',
         name: 'families',
         component: FamilyAccountsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.familyRead },
       },
       {
         path: '/children',
         name: 'children',
         component: ChildProfilesPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.familyRead },
       },
       {
         path: '/usage-reports',
         name: 'usage-reports',
         component: UsageReportPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.familyRead },
       },
       {
         path: '/notifications',
         name: 'notifications',
         component: NotificationCenterPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.notificationsRead },
       },
       {
         path: '/ai-accounts',
@@ -82,146 +89,180 @@ export function createAdminRouter() {
         path: '/releases',
         name: 'releases',
         component: ReleasePage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.storageRead },
       },
       {
         path: '/device-ota',
         name: 'device-ota',
         component: DeviceOtaPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.otaRead },
       },
       {
         path: '/downloads',
         name: 'downloads',
         component: DownloadFilesPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.storageRead },
       },
       {
         path: '/content',
         name: 'content',
         component: ContentLibraryPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.contentRead },
       },
       {
         path: '/content/theme-packs',
         name: 'content-theme-packs',
         component: ThemePackPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.contentRead },
       },
       {
         path: '/content/offline-policy',
         name: 'content-offline-policy',
         component: OfflinePolicyPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.contentRead },
       },
       {
         path: '/services',
         name: 'services',
         component: VersionManagementPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.serviceRead },
       },
       {
         path: '/settings',
         name: 'settings',
         component: SystemSettingsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.settingsRead },
       },
       {
         path: '/admin-permissions',
         name: 'admin-permissions',
         component: AdminPermissionPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.adminsRead },
       },
       {
         path: '/feature-center',
         name: 'feature-center',
         component: FeatureCenterPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.featureCenterRead },
       },
       {
         path: '/devices',
         name: 'devices',
         component: DevicePage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.devicesRead },
       },
       {
         path: '/device-diagnostics',
         name: 'device-diagnostics',
         component: DeviceDiagnosticsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.devicesRead },
       },
       {
         path: '/vision',
         name: 'vision',
         component: VisionStatsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.statsRead },
       },
       {
         path: '/display',
         name: 'display',
         component: DisplayStatsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.statsRead },
       },
       {
         path: '/touch',
         name: 'touch',
         component: TouchStatsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.statsRead },
       },
       {
         path: '/cellular',
         name: 'cellular',
         component: CellularStatsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.statsRead },
       },
       {
         path: '/power',
         name: 'power',
         component: PowerStatsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.statsRead },
       },
       {
         path: '/motion',
         name: 'motion',
         component: MotionStatsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.statsRead },
       },
       {
         path: '/form-factor',
         name: 'form-factor',
         component: FormFactorStatsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.statsRead },
       },
       {
         path: '/video-companion',
         name: 'video-companion',
         component: VideoStatsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.statsRead },
       },
       {
         path: '/video-session',
         name: 'video-session',
         component: VideoSessionStatsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.statsRead },
       },
       {
         path: '/bluetooth-audio',
         name: 'bluetooth-audio',
         component: BluetoothAudioStatsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.statsRead },
       },
       {
         path: '/learning-visualization',
         name: 'learning-visualization',
         component: LearningVisualizationStatsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.statsRead },
       },
       {
         path: '/image-privacy',
         name: 'image-privacy',
         component: ImagePrivacyStatsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.statsRead },
       },
       {
         path: '/wearable',
         name: 'wearable',
         component: WearableStatsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.statsRead },
       },
       {
         path: '/multi-device',
         name: 'multi-device',
         component: MultiDeviceStatsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.statsRead },
       },
       {
         path: '/screen',
         name: 'screen',
         component: ScreenStatsPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.statsRead },
       },
       {
         path: '/audit',
         name: 'audit',
         component: OperationAuditPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.auditRead },
       },
       {
         path: '/ui-text',
         name: 'ui-text',
         component: UITextPage,
+        meta: { requiredPermission: ADMIN_PERMISSIONS.contentRead },
+      },
+      {
+        path: '/forbidden',
+        name: 'forbidden',
+        component: ForbiddenPage,
       },
     ],
   })
@@ -234,7 +275,20 @@ export function createAdminRouter() {
     if (to.meta.public === true) {
       return authStore.isSignedIn ? '/' : true
     }
-    return authStore.isSignedIn ? true : '/login'
+    if (!authStore.isSignedIn) {
+      return '/login'
+    }
+    const requiredPermission = to.meta.requiredPermission
+    if (
+      typeof requiredPermission === 'string' &&
+      !authStore.can(requiredPermission as Parameters<typeof authStore.can>[0])
+    ) {
+      return {
+        name: 'forbidden',
+        query: { from: to.fullPath },
+      }
+    }
+    return true
   })
 
   return router

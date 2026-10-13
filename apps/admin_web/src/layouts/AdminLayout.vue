@@ -2,6 +2,7 @@
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/features/auth/application/authStore'
+import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
 
 const router = useRouter()
 const route = useRoute()
@@ -31,140 +32,146 @@ async function logout(): Promise<void> {
       </RouterLink>
       <nav class="admin-nav" aria-label="主要导航">
         <p class="nav-section">品牌管理</p>
-        <RouterLink to="/">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/">
           <span class="nav-dot" aria-hidden="true"></span>
           品牌总览
         </RouterLink>
-        <RouterLink to="/families">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.familyRead)" to="/families">
           <span class="nav-dot" aria-hidden="true"></span>
           家长账号
         </RouterLink>
-        <RouterLink to="/children">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.familyRead)" to="/children">
           <span class="nav-dot" aria-hidden="true"></span>
           儿童档案
         </RouterLink>
-        <RouterLink to="/usage-reports">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.familyRead)" to="/usage-reports">
           <span class="nav-dot" aria-hidden="true"></span>
           使用报告
         </RouterLink>
-        <RouterLink to="/notifications">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.notificationsRead)" to="/notifications">
           <span class="nav-dot" aria-hidden="true"></span>
           消息通知
         </RouterLink>
-        <RouterLink to="/devices">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.devicesRead)" to="/devices">
           <span class="nav-dot" aria-hidden="true"></span>
           设备管理
         </RouterLink>
-        <RouterLink to="/device-diagnostics">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.devicesRead)" to="/device-diagnostics">
           <span class="nav-dot" aria-hidden="true"></span>
           设备诊断
         </RouterLink>
-        <RouterLink to="/vision">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/vision">
           <span class="nav-dot" aria-hidden="true"></span>
           摄像头与视觉
         </RouterLink>
-        <RouterLink to="/display">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/display">
           <span class="nav-dot" aria-hidden="true"></span>
           屏幕与护眼
         </RouterLink>
-        <RouterLink to="/screen">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/screen">
           <span class="nav-dot" aria-hidden="true"></span>
           屏幕能力
         </RouterLink>
-        <RouterLink to="/touch">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/touch">
           <span class="nav-dot" aria-hidden="true"></span>
           触摸交互
         </RouterLink>
-        <RouterLink to="/cellular">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/cellular">
           <span class="nav-dot" aria-hidden="true"></span>
           蜂窝网络
         </RouterLink>
-        <RouterLink to="/power">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/power">
           <span class="nav-dot" aria-hidden="true"></span>
           电池与省电
         </RouterLink>
-        <RouterLink to="/motion">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/motion">
           <span class="nav-dot" aria-hidden="true"></span>
           动作与电机
         </RouterLink>
-        <RouterLink to="/form-factor">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/form-factor">
           <span class="nav-dot" aria-hidden="true"></span>
           形态能力
         </RouterLink>
-        <RouterLink to="/video-companion">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/video-companion">
           <span class="nav-dot" aria-hidden="true"></span>
           视频陪伴
         </RouterLink>
-        <RouterLink to="/video-session">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/video-session">
           <span class="nav-dot" aria-hidden="true"></span>
           视频会话
         </RouterLink>
-        <RouterLink to="/bluetooth-audio">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/bluetooth-audio">
           <span class="nav-dot" aria-hidden="true"></span>
           蓝牙音箱
         </RouterLink>
-        <RouterLink to="/learning-visualization">
+        <RouterLink
+          v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)"
+          to="/learning-visualization"
+        >
           <span class="nav-dot" aria-hidden="true"></span>
           学习可视化
         </RouterLink>
-        <RouterLink to="/image-privacy">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/image-privacy">
           <span class="nav-dot" aria-hidden="true"></span>
           图片隐私
         </RouterLink>
-        <RouterLink to="/wearable">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/wearable">
           <span class="nav-dot" aria-hidden="true"></span>
           穿戴与定位
         </RouterLink>
-        <RouterLink to="/multi-device">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/multi-device">
           <span class="nav-dot" aria-hidden="true"></span>
           多设备
         </RouterLink>
-        <RouterLink to="/audit">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.auditRead)" to="/audit">
           <span class="nav-dot" aria-hidden="true"></span>
           操作审计
         </RouterLink>
-        <RouterLink to="/releases">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.storageRead)" to="/releases">
           <span class="nav-dot" aria-hidden="true"></span>
           内容发布
         </RouterLink>
-        <RouterLink to="/device-ota">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.otaRead)" to="/device-ota">
           <span class="nav-dot" aria-hidden="true"></span>
           设备 OTA
         </RouterLink>
-        <RouterLink to="/content">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.contentRead)" to="/content">
           <span class="nav-dot" aria-hidden="true"></span>
           内容库
         </RouterLink>
-        <RouterLink to="/content/theme-packs">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.contentRead)" to="/content/theme-packs">
           <span class="nav-dot" aria-hidden="true"></span>
           主题包
         </RouterLink>
-        <RouterLink to="/content/offline-policy">
+        <RouterLink
+          v-if="authStore.can(ADMIN_PERMISSIONS.contentRead)"
+          to="/content/offline-policy"
+        >
           <span class="nav-dot" aria-hidden="true"></span>
           离线下载策略
         </RouterLink>
-        <RouterLink to="/downloads">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.storageRead)" to="/downloads">
           <span class="nav-dot" aria-hidden="true"></span>
           下载文件
         </RouterLink>
-        <RouterLink to="/ui-text">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.contentRead)" to="/ui-text">
           <span class="nav-dot" aria-hidden="true"></span>
           界面文案
         </RouterLink>
         <p class="nav-section nav-section-services">服务管理</p>
-        <RouterLink to="/services">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.serviceRead)" to="/services">
           <span class="nav-dot" aria-hidden="true"></span>
           服务版本
         </RouterLink>
-        <RouterLink to="/feature-center">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.featureCenterRead)" to="/feature-center">
           <span class="nav-dot" aria-hidden="true"></span>
           功能中心
         </RouterLink>
-        <RouterLink to="/settings">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.settingsRead)" to="/settings">
           <span class="nav-dot" aria-hidden="true"></span>
           系统设置
         </RouterLink>
-        <RouterLink to="/admin-permissions">
+        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.adminsRead)" to="/admin-permissions">
           <span class="nav-dot" aria-hidden="true"></span>
           管理员权限
         </RouterLink>

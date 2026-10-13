@@ -4,6 +4,11 @@ import { computed, ref } from 'vue'
 import { createHttpClient } from '@/api/httpClient'
 import { SessionStorageAuthSessionStore } from '@/api/authSession'
 import { mapApiError, type ApiError } from '@/api/apiError'
+import {
+  ADMIN_PERMISSIONS,
+  hasAdminPermission,
+  type AdminPermission,
+} from '@/features/auth/domain/adminPermission'
 
 /// One administrator session returned by the device platform.
 export interface AdminAccount {
@@ -26,11 +31,15 @@ export const useAuthStore = defineStore('admin-auth', () => {
   const isSignedIn = computed(() => account.value !== null)
   const isMFARequired = computed(() => mfaChallengeToken.value !== null)
   const canReadFeatureCenter = computed(() =>
-    hasPermission(account.value, 'feature_center.read'),
+    can(ADMIN_PERMISSIONS.featureCenterRead),
   )
   const canManageFeatureCenter = computed(() =>
-    hasPermission(account.value, 'feature_center.manage'),
+    can(ADMIN_PERMISSIONS.featureCenterManage),
   )
+
+  function can(permission: AdminPermission): boolean {
+    return hasAdminPermission(account.value?.permissions ?? [], permission)
+  }
 
   async function restoreSession(): Promise<void> {
     isRestoring.value = true
@@ -43,8 +52,12 @@ export const useAuthStore = defineStore('admin-auth', () => {
       const response = await httpClient.get('/api/v1/auth/me')
       account.value = toAccount(response.data.data.account)
     } catch (caught: unknown) {
-      sessionStore.clearSession()
-      account.value = null
+      const mappedError = mapApiError(caught)
+      if (mappedError.kind === 'unauthenticated' || mappedError.kind === 'insufficient_permission') {
+        sessionStore.clearSession()
+        account.value = null
+      }
+      error.value = mappedError
     } finally {
       isRestoring.value = false
     }
@@ -139,6 +152,7 @@ export const useAuthStore = defineStore('admin-auth', () => {
     account,
     canReadFeatureCenter,
     canManageFeatureCenter,
+    can,
     error,
     isRestoring,
     isSignedIn,
@@ -166,13 +180,6 @@ function toAccount(value: {
     role: value.role,
     permissions: stringList(value.admin_permissions),
   }
-}
-
-function hasPermission(account: AdminAccount | null, permission: string): boolean {
-  if (account === null) {
-    return false
-  }
-  return account.permissions.includes('*') || account.permissions.includes(permission)
 }
 
 function stringList(value: unknown): string[] {

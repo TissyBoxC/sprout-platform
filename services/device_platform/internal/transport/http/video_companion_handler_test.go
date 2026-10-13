@@ -346,3 +346,22 @@ func TestVideoCapabilityComposes(t *testing.T) {
 		t.Fatalf("unexpected capability: %+v", envelope.Data)
 	}
 }
+
+func TestVideoDeviceReportRequiresDeviceSession(t *testing.T) {
+	handler := deviceVideoHandler{
+		handler: &videoCompanionHandler{service: newVideoTestService()},
+	}
+	request := englishRequest(
+		http.MethodPost,
+		"/api/v1/devices/device-1/video-companion/status",
+		"",
+		"",
+	)
+	request.SetPathValue("device_id", "device-1")
+	recorder := httptest.NewRecorder()
+	handler.reportStatus(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d: %s",
+			recorder.Code, http.StatusUnauthorized, recorder.Body.String())
+	}
+}

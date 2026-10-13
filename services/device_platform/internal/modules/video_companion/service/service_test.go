@@ -290,6 +290,40 @@ func TestReportStatusAndCapability(t *testing.T) {
 	}
 }
 
+// A device that never placed a call reports the idle state, which must be
+// accepted so its capability row converges instead of reading as unsupported.
+func TestReportStatusAcceptsIdleDeviceState(t *testing.T) {
+	repository := newFakeRepository()
+	service := newService(t, repository)
+
+	status, err := service.ReportStatus(
+		context.Background(), "family-1", "device-1",
+		domain.CallStatusInput{
+			CallState:         domain.StateIdle,
+			Quality:           domain.QualityUnknown,
+			CameraAllowed:     false,
+			MicrophoneAllowed: false,
+		},
+	)
+	if err != nil {
+		t.Fatalf("report idle status: %v", err)
+	}
+	if status.CallState != domain.StateIdle {
+		t.Fatalf("unexpected status: %+v", status)
+	}
+
+	capability, err := service.Capability(context.Background(), "family-1", "device-1")
+	if err != nil {
+		t.Fatalf("capability: %v", err)
+	}
+	if !capability.Supported {
+		t.Fatalf("an idle device must still be supported: %+v", capability)
+	}
+	if capability.CallState != domain.StateIdle {
+		t.Fatalf("unexpected call state: %+v", capability)
+	}
+}
+
 func TestAdminStatsDefaultsWindow(t *testing.T) {
 	repository := newFakeRepository()
 	repository.stats = domain.AdminStats{CallCount: 9}

@@ -9,6 +9,7 @@ package domain
 
 import (
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -36,6 +37,7 @@ const (
 
 // Call states the platform recognises.
 const (
+	StateIdle     = "idle"
 	StateRinging  = "ringing"
 	StateActive   = "active"
 	StateEnded    = "ended"
@@ -171,6 +173,21 @@ type CallStatusInput struct {
 	LastCallID        string
 }
 
+// SupportedDeviceState reports whether a device-reported call state is
+// accepted. It is broader than SupportedState: "idle" is the stored default and
+// the state a device reports when no call is in progress, so a device that never
+// placed a call still converges its capability row. "idle" is deliberately not
+// a video_calls lifecycle state.
+func SupportedDeviceState(state string) bool {
+	switch state {
+	case StateIdle, StateRinging, StateActive, StateEnded, StateRejected,
+		StateMissed, StateFailed:
+		return true
+	default:
+		return false
+	}
+}
+
 // DeviceStatus is the stored latest video status for one device.
 type DeviceStatus struct {
 	DeviceID          string
@@ -255,7 +272,10 @@ func ValidateCallInput(input CallInput) (CallInput, error) {
 // ValidateCallStatus normalizes and validates one device status report.
 func ValidateCallStatus(input CallStatusInput) (CallStatusInput, error) {
 	normalized := input
-	if !SupportedState(normalized.CallState) {
+	normalized.CallState = strings.TrimSpace(input.CallState)
+	normalized.Quality = strings.TrimSpace(input.Quality)
+	normalized.LastCallID = strings.TrimSpace(input.LastCallID)
+	if !SupportedDeviceState(normalized.CallState) {
 		return CallStatusInput{}, ErrInvalidCall
 	}
 	if !SupportedQuality(normalized.Quality) {

@@ -552,6 +552,36 @@ func TestAlarmReminderContractDocumentsAlarmAndEventEndpoints(t *testing.T) {
 	}
 }
 
+func TestBluetoothAudioContractDocumentsPolicyAndStatusEndpoints(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/bluetooth-audio/policy:",
+		"/api/v1/bluetooth-audio/devices:",
+		"/api/v1/devices/{device_id}/bluetooth-audio/capability:",
+		"/api/v1/devices/{device_id}/bluetooth-audio/policy:",
+		"/api/v1/devices/{device_id}/bluetooth-audio/status:",
+		"/api/v1/admin/bluetooth-audio/stats:",
+	} {
+		if !bytes.Contains(contract, []byte(path)) {
+			t.Fatalf("expected bluetooth-audio path %s in internal API contract", path)
+		}
+	}
+	for _, schema := range []string{
+		"BluetoothAudioPolicyRequest:",
+		"BluetoothAudioPolicyCatalogEnvelope:",
+		"BluetoothAudioCapability:",
+		"BluetoothAudioStatusReportRequest:",
+		"BluetoothAudioAdminStats:",
+	} {
+		if !bytes.Contains(contract, []byte(schema)) {
+			t.Fatalf("expected bluetooth-audio schema %s in internal API contract", schema)
+		}
+	}
+}
+
 func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,

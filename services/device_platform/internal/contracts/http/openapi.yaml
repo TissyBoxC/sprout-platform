@@ -2934,6 +2934,164 @@ paths:
           $ref: "#/components/responses/DeviceUnprocessable"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/bluetooth-audio/policy:
+    get:
+      summary: Read the authenticated family's Bluetooth audio policy and catalogs
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Bluetooth audio policy with codec and state catalogs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BluetoothAudioPolicyCatalogEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: Publish the authenticated family's Bluetooth audio policy
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BluetoothAudioPolicyRequest"
+      responses:
+        "200":
+          description: Updated Bluetooth audio policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BluetoothAudioPolicyEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/bluetooth-audio/devices:
+    get:
+      summary: List the authenticated family's latest Bluetooth adapter statuses
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: Bluetooth adapter statuses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BluetoothAudioDevicesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/bluetooth-audio/capability:
+    get:
+      summary: Read one family device's Bluetooth audio capability
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Bluetooth audio capability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BluetoothAudioCapabilityEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DeviceBindingNotFound"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/bluetooth-audio/policy:
+    get:
+      summary: Read the family Bluetooth audio policy from a bound device session
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Bluetooth audio policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BluetoothAudioPolicyEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/bluetooth-audio/status:
+    post:
+      summary: Report one bound device's Bluetooth adapter status
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BluetoothAudioStatusReportRequest"
+      responses:
+        "200":
+          description: Bluetooth adapter status recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BluetoothAudioStatusRecordedEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "422":
+          $ref: "#/components/responses/DeviceUnprocessable"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/bluetooth-audio/stats:
+    get:
+      summary: Read the fleet-wide Bluetooth audio summary
+      security:
+        - userToken: []
+      parameters:
+        - name: window_days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        "200":
+          description: Bluetooth audio statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BluetoothAudioAdminStatsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
 components:
   securitySchemes:
     serviceToken:
@@ -7807,3 +7965,377 @@ components:
                 recorded:
                   type: boolean
                   const: true
+    BluetoothAudioPreferredCodec:
+      type: string
+      enum:
+        - auto
+        - sbc
+        - aac
+        - ldac
+    BluetoothAudioActiveCodec:
+      type: string
+      enum:
+        - unknown
+        - sbc
+        - aac
+        - ldac
+    BluetoothAudioAdapterState:
+      type: string
+      enum:
+        - off
+        - idle
+        - advertising
+        - connecting
+        - connected
+        - error
+    BluetoothAudioDisconnectReason:
+      type: string
+      enum:
+        - none
+        - user
+        - range
+        - peer
+        - policy
+        - error
+    BluetoothAudioPolicyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - speaker_mode_allowed
+        - pairing_allowed
+        - auto_reconnect
+        - preferred_codec
+        - max_volume_percent
+        - display_name
+      properties:
+        enabled:
+          type: boolean
+        speaker_mode_allowed:
+          type: boolean
+        pairing_allowed:
+          type: boolean
+        auto_reconnect:
+          type: boolean
+        preferred_codec:
+          $ref: "#/components/schemas/BluetoothAudioPreferredCodec"
+        max_volume_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        display_name:
+          type: string
+          maxLength: 48
+    BluetoothAudioPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - enabled
+        - speaker_mode_allowed
+        - pairing_allowed
+        - auto_reconnect
+        - preferred_codec
+        - max_volume_percent
+        - display_name
+        - revision
+      properties:
+        schema_version:
+          type: integer
+          minimum: 1
+        enabled:
+          type: boolean
+        speaker_mode_allowed:
+          type: boolean
+        pairing_allowed:
+          type: boolean
+        auto_reconnect:
+          type: boolean
+        preferred_codec:
+          $ref: "#/components/schemas/BluetoothAudioPreferredCodec"
+        max_volume_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        display_name:
+          type: string
+        revision:
+          type: integer
+          minimum: 0
+    BluetoothAudioPolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/BluetoothAudioPolicy"
+    BluetoothAudioPolicyCatalogEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - policy
+                - preferred_codecs
+                - active_codecs
+                - adapter_states
+                - disconnect_reasons
+              properties:
+                policy:
+                  $ref: "#/components/schemas/BluetoothAudioPolicy"
+                preferred_codecs:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/BluetoothAudioPreferredCodec"
+                active_codecs:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/BluetoothAudioActiveCodec"
+                adapter_states:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/BluetoothAudioAdapterState"
+                disconnect_reasons:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/BluetoothAudioDisconnectReason"
+    BluetoothAudioDeviceStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - family_id
+        - bluetooth_supported
+        - speaker_mode
+        - adapter_state
+        - paired_device_count
+        - connected_device_count
+        - active_codec
+        - volume_percent
+        - last_disconnect_reason
+        - up_to_date
+        - reported_at
+      properties:
+        device_id:
+          type: string
+        family_id:
+          type: string
+        bluetooth_supported:
+          type: boolean
+        speaker_mode:
+          type: boolean
+        adapter_state:
+          $ref: "#/components/schemas/BluetoothAudioAdapterState"
+        paired_device_count:
+          type: integer
+          minimum: 0
+          maximum: 16
+        connected_device_count:
+          type: integer
+          minimum: 0
+          maximum: 16
+        active_codec:
+          $ref: "#/components/schemas/BluetoothAudioActiveCodec"
+        volume_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        last_disconnect_reason:
+          $ref: "#/components/schemas/BluetoothAudioDisconnectReason"
+        up_to_date:
+          type: boolean
+        reported_at:
+          type: string
+          format: date-time
+    BluetoothAudioDevicesEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - devices
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/BluetoothAudioDeviceStatus"
+    BluetoothAudioCapability:
+      type: object
+      additionalProperties: false
+      required:
+        - supported
+        - speaker_mode
+        - adapter_state
+        - active_codec
+        - volume_percent
+        - schema_version
+        - policy_revision
+        - applied_revision
+        - up_to_date
+      properties:
+        supported:
+          type: boolean
+        speaker_mode:
+          type: boolean
+        adapter_state:
+          $ref: "#/components/schemas/BluetoothAudioAdapterState"
+        active_codec:
+          $ref: "#/components/schemas/BluetoothAudioActiveCodec"
+        volume_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        schema_version:
+          type: integer
+          minimum: 1
+        policy_revision:
+          type: integer
+          minimum: 0
+        applied_revision:
+          type: integer
+          minimum: 0
+        up_to_date:
+          type: boolean
+    BluetoothAudioCapabilityEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/BluetoothAudioCapability"
+    BluetoothAudioStatusReportRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - bluetooth_supported
+        - speaker_mode
+        - adapter_state
+        - paired_device_count
+        - connected_device_count
+        - active_codec
+        - volume_percent
+        - last_disconnect_reason
+        - policy_revision
+      properties:
+        bluetooth_supported:
+          type: boolean
+        speaker_mode:
+          type: boolean
+        adapter_state:
+          $ref: "#/components/schemas/BluetoothAudioAdapterState"
+        paired_device_count:
+          type: integer
+          minimum: 0
+          maximum: 16
+        connected_device_count:
+          type: integer
+          minimum: 0
+          maximum: 16
+        active_codec:
+          $ref: "#/components/schemas/BluetoothAudioActiveCodec"
+        volume_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        last_disconnect_reason:
+          $ref: "#/components/schemas/BluetoothAudioDisconnectReason"
+        policy_revision:
+          type: integer
+          minimum: 0
+    BluetoothAudioStatusRecordedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - adapter_state
+                - policy_revision
+                - recorded
+              properties:
+                device_id:
+                  type: string
+                adapter_state:
+                  $ref: "#/components/schemas/BluetoothAudioAdapterState"
+                policy_revision:
+                  type: integer
+                  minimum: 0
+                recorded:
+                  type: boolean
+                  const: true
+    BluetoothAudioCount:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - count
+      properties:
+        label:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+    BluetoothAudioAdminStats:
+      type: object
+      additionalProperties: false
+      required:
+        - window_days
+        - device_count
+        - supported_count
+        - speaker_mode_count
+        - connected_count
+        - paired_device_total
+        - outdated_count
+        - state_buckets
+        - codec_buckets
+        - generated_at
+      properties:
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        device_count:
+          type: integer
+          minimum: 0
+        supported_count:
+          type: integer
+          minimum: 0
+        speaker_mode_count:
+          type: integer
+          minimum: 0
+        connected_count:
+          type: integer
+          minimum: 0
+        paired_device_total:
+          type: integer
+          minimum: 0
+        outdated_count:
+          type: integer
+          minimum: 0
+        state_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/BluetoothAudioCount"
+        codec_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/BluetoothAudioCount"
+        generated_at:
+          type: string
+          format: date-time
+    BluetoothAudioAdminStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/BluetoothAudioAdminStats"

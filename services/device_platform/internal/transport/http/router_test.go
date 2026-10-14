@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"mime/multipart"
 	stdhttp "net/http"
@@ -42,6 +43,81 @@ func TestHealthEndpointReturnsTraceParent(t *testing.T) {
 
 	if recorder.Header().Get("traceparent") == "" {
 		t.Fatal("expected traceparent response header")
+	}
+}
+
+func TestReadyEndpointWithoutProbesReportsReady(t *testing.T) {
+	request := httptest.NewRequest(stdhttp.MethodGet, "/readyz", nil)
+	recorder := httptest.NewRecorder()
+
+	NewRouter(newTestRouterOptions()).ServeHTTP(recorder, request)
+
+	if recorder.Code != stdhttp.StatusOK {
+		t.Fatalf("expected status %d, got %d", stdhttp.StatusOK, recorder.Code)
+	}
+}
+
+func TestReadyEndpointRunsEveryProbe(t *testing.T) {
+	options := newTestRouterOptions()
+	called := 0
+	options.ReadinessProbes = []ReadinessProbe{
+		func(context.Context) error {
+			called++
+			return nil
+		},
+		func(context.Context) error {
+			called++
+			return nil
+		},
+	}
+
+	request := httptest.NewRequest(stdhttp.MethodGet, "/readyz", nil)
+	recorder := httptest.NewRecorder()
+	NewRouter(options).ServeHTTP(recorder, request)
+
+	if recorder.Code != stdhttp.StatusOK {
+		t.Fatalf("expected status %d, got %d", stdhttp.StatusOK, recorder.Code)
+	}
+	if called != 2 {
+		t.Fatalf("probe calls = %d, want 2", called)
+	}
+}
+
+func TestReadyEndpointReturnsUnavailableWhenDependencyFails(t *testing.T) {
+	options := newTestRouterOptions()
+	options.ReadinessProbes = []ReadinessProbe{
+		func(context.Context) error {
+			return nil
+		},
+		func(context.Context) error {
+			return errors.New("postgres: connection refused")
+		},
+		func(context.Context) error {
+			t.Fatal("later probes must not run after readiness fails")
+			return nil
+		},
+	}
+
+	request := httptest.NewRequest(stdhttp.MethodGet, "/readyz", nil)
+	recorder := httptest.NewRecorder()
+	NewRouter(options).ServeHTTP(recorder, request)
+
+	if recorder.Code != stdhttp.StatusServiceUnavailable {
+		t.Fatalf(
+			"expected status %d, got %d",
+			stdhttp.StatusServiceUnavailable,
+			recorder.Code,
+		)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(recorder.Body).Decode(&body); err != nil {
+		t.Fatalf("decode readiness response: %v", err)
+	}
+	if body["status"] != "unavailable" {
+		t.Fatalf("status = %v, want unavailable", body["status"])
+	}
+	if strings.Contains(recorder.Body.String(), "connection refused") {
+		t.Fatal("readiness response must not expose dependency errors")
 	}
 }
 

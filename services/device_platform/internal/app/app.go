@@ -806,8 +806,20 @@ func Run() error {
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),
 		Handler: platformhttp.NewRouter(platformhttp.RouterOptions{
-			Logger:                       logger,
-			InternalAPIConfig:            cfg.Internal,
+			Logger:            logger,
+			InternalAPIConfig: cfg.Internal,
+			ReadinessProbes: []platformhttp.ReadinessProbe{
+				databaseStore.Pool().Ping,
+				func(ctx context.Context) error {
+					return redisCache.Client().Ping(ctx).Err()
+				},
+				func(_ context.Context) error {
+					if !mqttClient.Connected() {
+						return errors.New("mqtt is disconnected")
+					}
+					return nil
+				},
+			},
 			AuthService:                  parentAuthService,
 			ChildService:                 childProfileService,
 			FamilyService:                familyMembershipService,

@@ -19,6 +19,8 @@ paths:
       responses:
         "200":
           description: Service is ready
+        "503":
+          description: Service is running but one or more dependencies are not ready
   /internal/v1/runtime:
     get:
       summary: Read service runtime information

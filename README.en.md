@@ -319,8 +319,9 @@ GET /healthz
 GET /readyz
 ```
 
-`readyz` currently reports process readiness. Independent readiness checks for
-database, Redis, and MQTT are still required.
+`readyz` checks PostgreSQL, Redis, and MQTT in order and returns `503` when any
+dependency is unavailable, so a container is not marked traffic-ready while
+its database or message transport is down.
 
 ### Firmware
 

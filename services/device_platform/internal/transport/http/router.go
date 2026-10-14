@@ -65,6 +65,7 @@ import (
 type RouterOptions struct {
 	Logger                       *slog.Logger
 	InternalAPIConfig            config.InternalAPIConfig
+	ReadinessProbes              []ReadinessProbe
 	AuthService                  *authservice.Service
 	ChildService                 *childservice.Service
 	FamilyService                *familyservice.Service
@@ -111,6 +112,11 @@ type RouterOptions struct {
 	ScreenService                *screenservice.Service
 	AuditRecorder                auditRecorder
 }
+
+// ReadinessProbe checks one runtime dependency before the platform accepts
+// traffic. Implementations must be safe for concurrent use and should return
+// promptly so the route remains a process-level health check.
+type ReadinessProbe func(ctx context.Context) error
 
 // auditRecorder is the narrow operation-audit write surface used by existing
 // administrator handlers. The privacy service implements it; transport does
@@ -171,7 +177,7 @@ func NewRouter(options RouterOptions) http.Handler {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthHandler)
-	mux.HandleFunc("GET /readyz", readyHandler)
+	mux.HandleFunc("GET /readyz", readyHandler(options.ReadinessProbes))
 
 	if options.AuthService != nil {
 		authHandler := authHandler{
@@ -2473,10 +2479,24 @@ func healthHandler(response http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func readyHandler(response http.ResponseWriter, _ *http.Request) {
-	writeJSON(response, http.StatusOK, map[string]any{
-		"status": "ready",
-	})
+func readyHandler(probes []ReadinessProbe) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		for _, probe := range probes {
+			if probe == nil {
+				continue
+			}
+			if err := probe(request.Context()); err != nil {
+				writeJSON(response, http.StatusServiceUnavailable, map[string]any{
+					"status": "unavailable",
+				})
+				return
+			}
+		}
+
+		writeJSON(response, http.StatusOK, map[string]any{
+			"status": "ready",
+		})
+	}
 }
 
 func runtimeHandler(response http.ResponseWriter, request *http.Request) {

@@ -321,7 +321,8 @@ GET /healthz
 GET /readyz
 ```
 
-`readyz` 当前返回服务就绪状态；数据库、Redis 和 MQTT 的独立依赖就绪判断仍待接入。
+`readyz` 会依次检查 PostgreSQL、Redis 和 MQTT；任一依赖不可用时返回 `503`，
+避免容器在数据库或消息通道不可用期间被标记为可接收流量。
 
 ### 固件
 

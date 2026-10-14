@@ -421,6 +421,25 @@ docker compose --env-file .env up -d --force-recreate mqtt device_platform
 
 `local` 模式会接受空验证码或 `000000`，只允许在开发环境使用。
 
+### 通知外部投递
+
+站内通知和设备留言不需要任何 provider。推送、短信和邮件是三个相互独立的
+可选渠道：只有配置了端点的渠道才会真正外发，未配置的渠道仍会把待投递标记为
+`channel_not_configured`，因此积压计数保持真实。
+
+| 变量 | 作用 | 生产建议 |
+| --- | --- | --- |
+| `SPROUT_NOTIFICATION_PUSH_ENDPOINT` | 推送 provider 的 https 回调地址 | 未接入时留空 |
+| `SPROUT_NOTIFICATION_PUSH_TOKEN` | 推送 provider Bearer 令牌 | 使用独立随机值，不能留空端点单独设置 |
+| `SPROUT_NOTIFICATION_SMS_ENDPOINT` | 短信 provider 的 https 回调地址 | 未接入时留空 |
+| `SPROUT_NOTIFICATION_SMS_TOKEN` | 短信 provider Bearer 令牌 | 使用独立随机值 |
+| `SPROUT_NOTIFICATION_EMAIL_ENDPOINT` | 邮件 provider 的 https 回调地址 | 未接入时留空 |
+| `SPROUT_NOTIFICATION_EMAIL_TOKEN` | 邮件 provider Bearer 令牌 | 使用独立随机值 |
+
+端点必须是绝对 `https` URL，不能包含内嵌凭据或 URL 片段；平台在启动时就
+拒绝非法配置。每个渠道只发送路由标识、标题、正文和深链路径，不包含儿童
+对话文本、音频、图片、令牌或凭据。
+
 ### AI 账号默认值
 
 | 变量 | 作用 | 生产建议 |

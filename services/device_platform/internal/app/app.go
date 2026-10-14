@@ -64,6 +64,7 @@ import (
 	motionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/repository"
 	motionRuntimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
 	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
+	notificationDelivery "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/delivery"
 	notificationRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/repository"
 	notificationService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
 	operationsRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/repository"
@@ -658,6 +659,9 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create notification service: %w", err)
 	}
+	if err := registerNotificationDeliveryProviders(notifications, cfg); err != nil {
+		return err
+	}
 	deviceRuntimeService.SetCommandAcknowledgementSink(notifications)
 	featureCenterHealthProbes["notification"] = notificationReadinessProbe(
 		notifications,
@@ -983,6 +987,60 @@ func runRetentionWorker(
 		case <-ticker.C:
 		}
 	}
+}
+
+// registerNotificationDeliveryProviders wires one outbound sender per
+// configured external channel. Channels without an endpoint keep no sender, so
+// the delivery worker retires their rows as channel_not_configured instead of
+// retrying forever. In-app and device delivery are unaffected.
+func registerNotificationDeliveryProviders(
+	notifications *notificationService.Service,
+	cfg config.Config,
+) error {
+	if notifications == nil {
+		return fmt.Errorf("notification service is required")
+	}
+	providers := []struct {
+		channel  string
+		endpoint string
+		token    string
+	}{
+		{
+			channel:  notificationDomain.ChannelPush,
+			endpoint: cfg.Notification.Push.Endpoint,
+			token:    cfg.Notification.Push.Token,
+		},
+		{
+			channel:  notificationDomain.ChannelSMS,
+			endpoint: cfg.Notification.SMS.Endpoint,
+			token:    cfg.Notification.SMS.Token,
+		},
+		{
+			channel:  notificationDomain.ChannelEmail,
+			endpoint: cfg.Notification.Email.Endpoint,
+			token:    cfg.Notification.Email.Token,
+		},
+	}
+	for _, provider := range providers {
+		if strings.TrimSpace(provider.endpoint) == "" {
+			continue
+		}
+		sender, err := notificationDelivery.NewWebhookProvider(
+			provider.channel,
+			provider.endpoint,
+			provider.token,
+			nil,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"create %s notification provider: %w",
+				provider.channel,
+				err,
+			)
+		}
+		notifications.SetDeliverySender(provider.channel, sender)
+	}
+	return nil
 }
 
 // runNotificationDeliveryWorker processes external notification channels.

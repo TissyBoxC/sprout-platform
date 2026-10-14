@@ -126,6 +126,70 @@ func TestLoadRejectsUnsafeVoiceGatewaySettings(t *testing.T) {
 	}
 }
 
+func TestLoadReadsNotificationDeliveryEndpoints(t *testing.T) {
+	setAuthenticationTestSecrets(t)
+	t.Setenv(
+		"DEVICE_PLATFORM_NOTIFICATION_PUSH_ENDPOINT",
+		"https://notify.example.test/push",
+	)
+	t.Setenv("DEVICE_PLATFORM_NOTIFICATION_PUSH_TOKEN", "push-token")
+	t.Setenv(
+		"DEVICE_PLATFORM_NOTIFICATION_EMAIL_ENDPOINT",
+		"https://notify.example.test/email",
+	)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.Notification.Push.Endpoint != "https://notify.example.test/push" {
+		t.Fatalf("unexpected push endpoint: %q", cfg.Notification.Push.Endpoint)
+	}
+	if cfg.Notification.Push.Token != "push-token" {
+		t.Fatalf("unexpected push token: %q", cfg.Notification.Push.Token)
+	}
+	if cfg.Notification.Email.Endpoint != "https://notify.example.test/email" {
+		t.Fatalf("unexpected email endpoint: %q", cfg.Notification.Email.Endpoint)
+	}
+	if cfg.Notification.SMS.Endpoint != "" {
+		t.Fatalf("expected unset SMS endpoint, got %q", cfg.Notification.SMS.Endpoint)
+	}
+}
+
+func TestLoadRejectsUnsafeNotificationDeliverySettings(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{
+			name:  "insecure endpoint",
+			key:   "DEVICE_PLATFORM_NOTIFICATION_PUSH_ENDPOINT",
+			value: "http://notify.example.test/push",
+		},
+		{
+			name:  "endpoint with credentials",
+			key:   "DEVICE_PLATFORM_NOTIFICATION_SMS_ENDPOINT",
+			value: "https://user:pass@notify.example.test/sms",
+		},
+		{
+			name:  "token without endpoint",
+			key:   "DEVICE_PLATFORM_NOTIFICATION_EMAIL_TOKEN",
+			value: "orphan-token",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setAuthenticationTestSecrets(t)
+			t.Setenv(test.key, test.value)
+
+			if _, err := Load(); err == nil {
+				t.Fatal("expected unsafe notification delivery setting to be rejected")
+			}
+		})
+	}
+}
+
 func setAuthenticationTestSecrets(t *testing.T) {
 	t.Helper()
 	t.Setenv(

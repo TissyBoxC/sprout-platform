@@ -27,6 +27,7 @@ type Config struct {
 	ServiceVersion ServiceVersionConfig
 	ReleaseStore   ReleaseStoreConfig
 	VoiceGateway   VoiceGatewayConfig
+	Notification   NotificationConfig
 }
 
 // HTTPConfig contains HTTP server settings.
@@ -165,6 +166,22 @@ type VoiceGatewayConfig struct {
 	WebSocketURL  string
 }
 
+// NotificationChannelConfig points at one outbound provider endpoint. The
+// token is a per-channel credential and never reaches devices or frontends.
+type NotificationChannelConfig struct {
+	Endpoint string
+	Token    string
+}
+
+// NotificationConfig holds optional outbound delivery providers. In-app and
+// device delivery stay enabled without any provider; push, SMS, and email are
+// registered only when their endpoint is configured.
+type NotificationConfig struct {
+	Push  NotificationChannelConfig
+	SMS   NotificationChannelConfig
+	Email NotificationChannelConfig
+}
+
 // Load reads configuration from environment variables with local defaults.
 func Load() (Config, error) {
 	cfg := Config{
@@ -275,6 +292,20 @@ func Load() (Config, error) {
 				"wss://voice.clarkhub.cn/v1/voice",
 			),
 		},
+		Notification: NotificationConfig{
+			Push: NotificationChannelConfig{
+				Endpoint: env("DEVICE_PLATFORM_NOTIFICATION_PUSH_ENDPOINT", ""),
+				Token:    env("DEVICE_PLATFORM_NOTIFICATION_PUSH_TOKEN", ""),
+			},
+			SMS: NotificationChannelConfig{
+				Endpoint: env("DEVICE_PLATFORM_NOTIFICATION_SMS_ENDPOINT", ""),
+				Token:    env("DEVICE_PLATFORM_NOTIFICATION_SMS_TOKEN", ""),
+			},
+			Email: NotificationChannelConfig{
+				Endpoint: env("DEVICE_PLATFORM_NOTIFICATION_EMAIL_ENDPOINT", ""),
+				Token:    env("DEVICE_PLATFORM_NOTIFICATION_EMAIL_TOKEN", ""),
+			},
+		},
 	}
 
 	if cfg.Internal.Enabled && len(strings.TrimSpace(cfg.Internal.AuthToken)) < 32 {
@@ -346,6 +377,32 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf(
 			"DEVICE_PLATFORM_VOICE_GATEWAY_WS_URL must be a public wss URL without credentials or fragments",
 		)
+	}
+
+	for name, channel := range map[string]NotificationChannelConfig{
+		"PUSH":  cfg.Notification.Push,
+		"SMS":   cfg.Notification.SMS,
+		"EMAIL": cfg.Notification.Email,
+	} {
+		endpoint := strings.TrimSpace(channel.Endpoint)
+		token := strings.TrimSpace(channel.Token)
+		if endpoint == "" {
+			if token != "" {
+				return Config{}, fmt.Errorf(
+					"DEVICE_PLATFORM_NOTIFICATION_%s_TOKEN requires DEVICE_PLATFORM_NOTIFICATION_%s_ENDPOINT",
+					name, name,
+				)
+			}
+			continue
+		}
+		parsed, err := url.ParseRequestURI(endpoint)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" ||
+			parsed.User != nil || parsed.Fragment != "" {
+			return Config{}, fmt.Errorf(
+				"DEVICE_PLATFORM_NOTIFICATION_%s_ENDPOINT must be an absolute https URL without credentials or fragments",
+				name,
+			)
+		}
 	}
 
 	return cfg, nil

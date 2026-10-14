@@ -30,6 +30,19 @@ var contractIdentifierPattern = regexp.MustCompile(
 	`^[a-z][a-z0-9]*(?:_[a-z0-9]+){1,7}$`,
 )
 
+// Command acknowledgements use bounded, printable routing values. The
+// request id pattern matches the shared error-envelope convention while still
+// accepting the generated request_<hex> command ids.
+var contractRequestIDPattern = regexp.MustCompile(
+	`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`,
+)
+
+// Result codes are device-local error names such as "ok",
+// "invalid_payload", or "ESP_ERR_INVALID_ARG".
+var contractResultCodePattern = regexp.MustCompile(
+	`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`,
+)
+
 // pahoClient is the subset of paho.Client this adapter uses. Narrowing the
 // surface lets tests exercise topic, QoS, and payload construction without a
 // live broker.
@@ -296,6 +309,69 @@ func DeviceIDFromAckTopic(topic string) (string, bool) {
 	return deviceID, true
 }
 
+func isCommandAckIdentifier(value string, maxLength int) bool {
+	return value != "" &&
+		value == strings.TrimSpace(value) &&
+		len(value) <= maxLength &&
+		contractIdentifierPattern.MatchString(value)
+}
+
+func isCommandAckUUID(value string) bool {
+	if value == "" || value != strings.TrimSpace(value) {
+		return false
+	}
+	parsed, err := uuid.Parse(value)
+	return err == nil && parsed.String() == value
+}
+
+func validCommandAckRequestID(value string) bool {
+	return value != "" &&
+		value == strings.TrimSpace(value) &&
+		len(value) <= 128 &&
+		contractRequestIDPattern.MatchString(value)
+}
+
+func validCommandAckCommandID(value string) bool {
+	return isCommandAckIdentifier(value, 64) || isCommandAckUUID(value)
+}
+
+func validCommandAckResultCode(value string) bool {
+	return value == "" ||
+		(value == strings.TrimSpace(value) &&
+			len(value) <= 128 &&
+			contractResultCodePattern.MatchString(value))
+}
+
+func validCommandAckEnvelope(ack DeviceCommandAck, deviceID string) bool {
+	if ack.SchemaVersion != "1.0.0" ||
+		ack.EventType != "device.command_ack" ||
+		ack.Producer != "firmware" {
+		return false
+	}
+	if !contractIdentifierPattern.MatchString(ack.EventID) {
+		return false
+	}
+	if _, err := time.Parse(time.RFC3339, ack.OccurredAt); err != nil {
+		return false
+	}
+	if ack.Subject.Type != "device" ||
+		ack.Subject.ID != deviceID ||
+		!isCommandAckIdentifier(ack.Subject.ID, 95) {
+		return false
+	}
+	if !validCommandAckRequestID(ack.RequestID) ||
+		ack.Payload.RequestID != ack.RequestID {
+		return false
+	}
+	if !validCommandAckCommandID(ack.Payload.CommandID) {
+		return false
+	}
+	if ack.Payload.Status != "acknowledged" && ack.Payload.Status != "failed" {
+		return false
+	}
+	return validCommandAckResultCode(ack.Payload.ResultCode)
+}
+
 // SubscribeCommandAcks subscribes to every device command acknowledgement
 // topic with QoS 1 and dispatches validated acks to the handler.
 //
@@ -324,16 +400,7 @@ func (c *Client) SubscribeCommandAcks(
 			if err := json.Unmarshal(message.Payload(), &ack); err != nil {
 				return
 			}
-			if ack.SchemaVersion != "1.0.0" || ack.EventType != "device.command_ack" {
-				return
-			}
-			if !contractIdentifierPattern.MatchString(ack.EventID) {
-				return
-			}
-			if ack.Subject.Type != "device" || ack.Subject.ID != deviceID {
-				return
-			}
-			if strings.TrimSpace(ack.Payload.CommandID) == "" {
+			if !validCommandAckEnvelope(ack, deviceID) {
 				return
 			}
 			// The paho callback must not block its ordered dispatch goroutine,

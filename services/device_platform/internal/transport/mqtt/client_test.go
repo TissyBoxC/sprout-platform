@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -86,6 +87,24 @@ func sampleCommand() *runtimedomain.Command {
 		Payload:   map[string]any{"message": "晚安"},
 		RequestID: "request_11111111222233334444555555555555",
 		CreatedAt: time.Date(2026, time.October, 14, 9, 0, 0, 0, time.UTC),
+	}
+}
+
+func validCommandAckFixture() DeviceCommandAck {
+	return DeviceCommandAck{
+		SchemaVersion: "1.0.0",
+		EventID:       "command_ack_11111111222233334444555555555555",
+		EventType:     "device.command_ack",
+		OccurredAt:    "2026-10-14T09:00:01Z",
+		Producer:      "firmware",
+		Subject:       DeviceCommandSubject{Type: "device", ID: "device_test_001"},
+		RequestID:     "request_11111111222233334444555555555555",
+		Payload: DeviceCommandAckPayload{
+			CommandID:  "11111111-2222-3333-4444-555555555555",
+			Status:     "acknowledged",
+			ResultCode: "ok",
+			RequestID:  "request_11111111222233334444555555555555",
+		},
 	}
 }
 
@@ -310,20 +329,7 @@ func TestSubscribeCommandAcksDispatchesValidAck(t *testing.T) {
 		t.Fatalf("expected QoS 1, got %d", stub.subQoS)
 	}
 
-	payload, err := json.Marshal(DeviceCommandAck{
-		SchemaVersion: "1.0.0",
-		EventID:       "command_ack_11111111222233334444555555555555",
-		EventType:     "device.command_ack",
-		Producer:      "firmware",
-		Subject:       DeviceCommandSubject{Type: "device", ID: "device_test_001"},
-		RequestID:     "request_11111111222233334444555555555555",
-		Payload: DeviceCommandAckPayload{
-			CommandID:  "11111111-2222-3333-4444-555555555555",
-			Status:     "acknowledged",
-			ResultCode: "ok",
-			RequestID:  "request_11111111222233334444555555555555",
-		},
-	})
+	payload, err := json.Marshal(validCommandAckFixture())
 	if err != nil {
 		t.Fatalf("marshal ack: %v", err)
 	}
@@ -360,38 +366,143 @@ func TestSubscribeCommandAcksDropsInvalidMessages(t *testing.T) {
 		t.Fatalf("SubscribeCommandAcks() error = %v", err)
 	}
 
-	validPayload := `{"schema_version":"1.0.0","event_id":"command_ack_11111111222233334444555555555555","event_type":"device.command_ack","producer":"firmware","subject":{"type":"device","id":"device_test_001"},"request_id":"request_11111111222233334444555555555555","payload":{"command_id":"11111111-2222-3333-4444-555555555555","status":"acknowledged","request_id":"request_11111111222233334444555555555555"}}`
+	tests := []struct {
+		name   string
+		topic  string
+		raw    []byte
+		mutate func(*DeviceCommandAck)
+	}{
+		{
+			name:  "wrong topic family",
+			topic: "sprout/v1/devices/device_test_001/commands",
+		},
+		{
+			name:   "malformed JSON",
+			raw:    []byte("{"),
+			mutate: nil,
+		},
+		{
+			name: "wrong schema version",
+			mutate: func(ack *DeviceCommandAck) {
+				ack.SchemaVersion = "2.0.0"
+			},
+		},
+		{
+			name: "wrong event type",
+			mutate: func(ack *DeviceCommandAck) {
+				ack.EventType = "device.command"
+			},
+		},
+		{
+			name: "wrong producer",
+			mutate: func(ack *DeviceCommandAck) {
+				ack.Producer = "device_platform"
+			},
+		},
+		{
+			name: "invalid event id",
+			mutate: func(ack *DeviceCommandAck) {
+				ack.EventID = "event-1"
+			},
+		},
+		{
+			name: "invalid occurred at",
+			mutate: func(ack *DeviceCommandAck) {
+				ack.OccurredAt = "not-a-timestamp"
+			},
+		},
+		{
+			name: "wrong subject type",
+			mutate: func(ack *DeviceCommandAck) {
+				ack.Subject.Type = "family"
+			},
+		},
+		{
+			name: "subject does not match topic device",
+			mutate: func(ack *DeviceCommandAck) {
+				ack.Subject.ID = "device_other_002"
+			},
+		},
+		{
+			name: "missing request id",
+			mutate: func(ack *DeviceCommandAck) {
+				ack.RequestID = ""
+			},
+		},
+		{
+			name: "invalid request id characters",
+			mutate: func(ack *DeviceCommandAck) {
+				ack.RequestID = "request id with spaces"
+			},
+		},
+		{
+			name: "overlong request id",
+			mutate: func(ack *DeviceCommandAck) {
+				ack.RequestID = strings.Repeat("a", 129)
+			},
+		},
+		{
+			name: "payload request id mismatch",
+			mutate: func(ack *DeviceCommandAck) {
+				ack.Payload.RequestID = "request_other_001"
+			},
+		},
+		{
+			name: "missing command id",
+			mutate: func(ack *DeviceCommandAck) {
+				ack.Payload.CommandID = ""
+			},
+		},
+		{
+			name: "invalid command id",
+			mutate: func(ack *DeviceCommandAck) {
+				ack.Payload.CommandID = "command id with spaces"
+			},
+		},
+		{
+			name: "invalid status",
+			mutate: func(ack *DeviceCommandAck) {
+				ack.Payload.Status = "pending"
+			},
+		},
+		{
+			name: "invalid result code characters",
+			mutate: func(ack *DeviceCommandAck) {
+				ack.Payload.ResultCode = "bad result"
+			},
+		},
+		{
+			name: "overlong result code",
+			mutate: func(ack *DeviceCommandAck) {
+				ack.Payload.ResultCode = strings.Repeat("a", 129)
+			},
+		},
+	}
 
-	// Wrong topic family.
-	stub.subHandler(nil, stubMessage{
-		topic:   "sprout/v1/devices/device_test_001/commands",
-		payload: []byte(validPayload),
-	})
-	// Malformed JSON.
-	stub.subHandler(nil, stubMessage{
-		topic:   "sprout/v1/devices/device_test_001/commands/ack",
-		payload: []byte("{"),
-	})
-	// Subject does not match the topic device id.
-	stub.subHandler(nil, stubMessage{
-		topic:   "sprout/v1/devices/device_test_001/commands/ack",
-		payload: []byte(`{"schema_version":"1.0.0","event_type":"device.command_ack","subject":{"type":"device","id":"device_other_002"},"payload":{"command_id":"command-1","status":"acknowledged"}}`),
-	})
-	// Wrong event type.
-	stub.subHandler(nil, stubMessage{
-		topic:   "sprout/v1/devices/device_test_001/commands/ack",
-		payload: []byte(`{"schema_version":"1.0.0","event_type":"device.online","subject":{"type":"device","id":"device_test_001"},"payload":{"command_id":"command-1","status":"acknowledged"}}`),
-	})
-	// Missing command id.
-	stub.subHandler(nil, stubMessage{
-		topic:   "sprout/v1/devices/device_test_001/commands/ack",
-		payload: []byte(`{"schema_version":"1.0.0","event_type":"device.command_ack","subject":{"type":"device","id":"device_test_001"},"payload":{"status":"acknowledged"}}`),
-	})
-	// Invalid event id for the shared event envelope.
-	stub.subHandler(nil, stubMessage{
-		topic:   "sprout/v1/devices/device_test_001/commands/ack",
-		payload: []byte(`{"schema_version":"1.0.0","event_id":"event-1","event_type":"device.command_ack","subject":{"type":"device","id":"device_test_001"},"payload":{"command_id":"command_1","status":"acknowledged"}}`),
-	})
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			topic := test.topic
+			if topic == "" {
+				topic = "sprout/v1/devices/device_test_001/commands/ack"
+			}
+			payload := test.raw
+			if payload == nil {
+				ack := validCommandAckFixture()
+				if test.mutate != nil {
+					test.mutate(&ack)
+				}
+				encoded, err := json.Marshal(ack)
+				if err != nil {
+					t.Fatalf("marshal invalid ack: %v", err)
+				}
+				payload = encoded
+			}
+			stub.subHandler(nil, stubMessage{
+				topic:   topic,
+				payload: payload,
+			})
+		})
+	}
 
 	calls, _, _ := handler.snapshot()
 	if calls != 0 {

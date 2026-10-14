@@ -91,6 +91,9 @@ jobs:
 
           (cd services/device_platform && go test ./... && go build -o ../../dist/device-platform ./cmd/device-platform)
           (cd services/voice_gateway && go test ./... && go build -o ../../dist/voice-gateway ./cmd/voice-gateway)
+          python3 -m unittest \
+            tools.test_upload_release_artifacts \
+            tools.test_upload_release_artifacts_http
           bash deploy/cloud/scripts/test-service-upgrade-worker.sh
           bash deploy/cloud/scripts/test-audit-api-internal-access.sh
           bash deploy/cloud/scripts/test-audit-1panel-proxy-headers.sh

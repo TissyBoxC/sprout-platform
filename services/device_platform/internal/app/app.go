@@ -663,6 +663,7 @@ func Run() error {
 		return err
 	}
 	deviceRuntimeService.SetCommandAcknowledgementSink(notifications)
+	deviceRuntimeService.SetCommandPublisher(mqttClient)
 	featureCenterHealthProbes["notification"] = notificationReadinessProbe(
 		notifications,
 	)

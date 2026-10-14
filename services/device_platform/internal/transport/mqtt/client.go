@@ -5,18 +5,31 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	paho "github.com/eclipse/paho.mqtt.golang"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/config"
+	runtimedomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
 )
 
 // Client owns the MQTT connection used by device-control handlers.
 type Client struct {
-	client paho.Client
+	client pahoClient
+}
+
+// pahoClient is the subset of paho.Client this adapter uses. Narrowing the
+// surface lets tests exercise topic, QoS, and payload construction without a
+// live broker.
+type pahoClient interface {
+	Connect() paho.Token
+	Disconnect(quiesce uint)
+	IsConnectionOpen() bool
+	Publish(topic string, qos byte, retained bool, payload interface{}) paho.Token
 }
 
 // Open connects to the broker with mutual TLS and verifies the connection
@@ -94,4 +107,104 @@ func (c *Client) Connected() bool {
 		return false
 	}
 	return c.client.IsConnectionOpen()
+}
+
+// commandTopic is the versioned platform-to-device command channel from
+// packages/contracts/mqtt/README.md.
+func commandTopic(deviceID string) string {
+	return "sprout/v1/devices/" + deviceID + "/commands"
+}
+
+// PublishCommand publishes one command event to the device command topic.
+//
+// The payload follows the shared device_event envelope and carries only the
+// authored command plus its routing identifiers. Publishing is QoS 1 and not
+// retained: a durable command row plus the device's HTTP poll remain the
+// recovery path, so a missed publish cannot silently drop a command.
+func (c *Client) PublishCommand(
+	ctx context.Context,
+	deviceID string,
+	command *runtimedomain.Command,
+) error {
+	if c == nil || c.client == nil {
+		return fmt.Errorf("publish device command: MQTT client is not connected")
+	}
+	deviceID = strings.TrimSpace(deviceID)
+	if deviceID == "" {
+		return fmt.Errorf("publish device command: device id is required")
+	}
+	if command == nil {
+		return fmt.Errorf("publish device command: command is required")
+	}
+	if strings.TrimSpace(command.RequestID) == "" {
+		return fmt.Errorf("publish device command: request id is required")
+	}
+
+	event := DeviceCommandEvent{
+		SchemaVersion: "1.0.0",
+		EventID:       command.ID,
+		EventType:     "device.command",
+		OccurredAt:    command.CreatedAt.UTC().Format(time.RFC3339),
+		Producer:      "device_platform",
+		Subject: DeviceCommandSubject{
+			Type: "device",
+			ID:   deviceID,
+		},
+		RequestID: command.RequestID,
+		Payload: DeviceCommandPayload{
+			CommandID:   command.ID,
+			CommandType: string(command.Type),
+			RequestID:   command.RequestID,
+			Data:        command.Payload,
+		},
+	}
+
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("encode device command event: %w", err)
+	}
+
+	token := c.client.Publish(commandTopic(deviceID), 1, false, encoded)
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("publish device command: %w", ctx.Err())
+	case <-tokenDone(token):
+	}
+	if err := token.Error(); err != nil {
+		return fmt.Errorf("publish device command: %w", err)
+	}
+	return nil
+}
+
+// tokenDone exposes a paho token's completion channel so callers can bound a
+// publish with a context.
+func tokenDone(token paho.Token) <-chan struct{} {
+	return token.Done()
+}
+
+// DeviceCommandEvent is the platform-to-device command envelope defined by
+// packages/contracts/events/device_event.schema.json.
+type DeviceCommandEvent struct {
+	SchemaVersion string                `json:"schema_version"`
+	EventID       string                `json:"event_id"`
+	EventType     string                `json:"event_type"`
+	OccurredAt    string                `json:"occurred_at"`
+	Producer      string                `json:"producer"`
+	Subject       DeviceCommandSubject  `json:"subject"`
+	RequestID     string                `json:"request_id"`
+	Payload       DeviceCommandPayload  `json:"payload"`
+}
+
+// DeviceCommandSubject identifies the target device.
+type DeviceCommandSubject struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+// DeviceCommandPayload carries the authored command plus routing identifiers.
+type DeviceCommandPayload struct {
+	CommandID   string         `json:"command_id"`
+	CommandType string         `json:"command_type"`
+	RequestID   string         `json:"request_id"`
+	Data        map[string]any `json:"data,omitempty"`
 }

@@ -470,8 +470,91 @@ type fixedClock struct {
 	now time.Time
 }
 
+func TestCreateCommandPublishesToCommandTransport(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 14, 9, 0, 0, 0, time.UTC)
+	publisher := &recordingCommandPublisher{}
+	service, err := New(Options{
+		Repository: newMemoryRepository(),
+		BindingService: &memoryBindingReader{
+			deviceID: "device_test_001",
+		},
+		Clock:            fixedClock{now: now},
+		CommandPublisher: publisher,
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+
+	command, err := service.CreateCommand(
+		context.Background(),
+		"device_test_001",
+		domain.CommandRefreshConfiguration,
+		"admin_test_001",
+		map[string]any{"reason": "support"},
+	)
+	if err != nil {
+		t.Fatalf("create command: %v", err)
+	}
+	if publisher.deviceID != "device_test_001" {
+		t.Fatalf("unexpected published device id: %q", publisher.deviceID)
+	}
+	if publisher.command == nil || publisher.command.ID != command.ID {
+		t.Fatalf("expected the created command to be published, got %#v", publisher.command)
+	}
+}
+
+func TestCreateCommandSurvivesPublishFailure(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 14, 9, 0, 0, 0, time.UTC)
+	repository := newMemoryRepository()
+	service, err := New(Options{
+		Repository: repository,
+		BindingService: &memoryBindingReader{
+			deviceID: "device_test_001",
+		},
+		Clock: fixedClock{now: now},
+		CommandPublisher: &recordingCommandPublisher{
+			err: errors.New("broker unavailable"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+
+	command, err := service.CreateCommand(
+		context.Background(),
+		"device_test_001",
+		domain.CommandReconnectNetwork,
+		"admin_test_001",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("expected a publish failure to keep the command durable: %v", err)
+	}
+	if repository.commands[command.ID].ID != command.ID {
+		t.Fatal("expected the command row to be persisted despite the publish failure")
+	}
+}
+
 func (clock fixedClock) Now() time.Time {
 	return clock.now
+}
+
+type recordingCommandPublisher struct {
+	deviceID string
+	command  *domain.Command
+	err      error
+}
+
+func (publisher *recordingCommandPublisher) PublishCommand(
+	_ context.Context,
+	deviceID string,
+	command *domain.Command,
+) error {
+	publisher.deviceID = deviceID
+	publisher.command = command
+	return publisher.err
 }
 
 type memoryBindingReader struct {

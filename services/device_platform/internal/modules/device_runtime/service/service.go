@@ -49,12 +49,27 @@ type CommandAcknowledgementSink interface {
 	) error
 }
 
+// CommandPublisher pushes one freshly created command to a device transport.
+//
+// It is optional. Command rows are always persisted first, and the device's
+// authenticated HTTP poll remains the recovery path, so a publish failure must
+// never fail command creation. Implementations are expected to be safe for
+// concurrent use.
+type CommandPublisher interface {
+	PublishCommand(
+		ctx context.Context,
+		deviceID string,
+		command *domain.Command,
+	) error
+}
+
 // Service validates, stores, and exposes device runtime state.
 type Service struct {
 	repository          repository.Repository
 	bindingReader       BindingReader
 	diagnosticReader    DiagnosticReader
 	acknowledgementSink CommandAcknowledgementSink
+	commandPublisher    CommandPublisher
 	timeSource          clock.Clock
 	offlineThreshold    time.Duration
 	commandTTL          time.Duration
@@ -66,6 +81,7 @@ type Options struct {
 	BindingService      BindingReader
 	DiagnosticReader    DiagnosticReader
 	AcknowledgementSink CommandAcknowledgementSink
+	CommandPublisher    CommandPublisher
 	Clock               clock.Clock
 	OfflineThreshold    time.Duration
 	CommandTTL          time.Duration
@@ -96,6 +112,7 @@ func New(options Options) (*Service, error) {
 		bindingReader:       options.BindingService,
 		diagnosticReader:    options.DiagnosticReader,
 		acknowledgementSink: options.AcknowledgementSink,
+		commandPublisher:    options.CommandPublisher,
 		timeSource:          timeSource,
 		offlineThreshold:    offlineThreshold,
 		commandTTL:          commandTTL,
@@ -108,6 +125,13 @@ func (s *Service) SetCommandAcknowledgementSink(
 	sink CommandAcknowledgementSink,
 ) {
 	s.acknowledgementSink = sink
+}
+
+// SetCommandPublisher wires the optional real-time command transport after the
+// service graph is constructed. A nil publisher keeps command creation working
+// with the durable row plus HTTP-poll recovery path only.
+func (s *Service) SetCommandPublisher(publisher CommandPublisher) {
+	s.commandPublisher = publisher
 }
 
 // RecordHeartbeat validates and persists one authenticated runtime snapshot.
@@ -379,6 +403,12 @@ func (s *Service) CreateCommand(
 	}
 	if err := s.repository.CreateCommand(ctx, command); err != nil {
 		return nil, err
+	}
+	// Best-effort real-time push. The command row is already durable and the
+	// device's authenticated poll remains the recovery path, so a transport
+	// failure must not fail or roll back the operator's action.
+	if s.commandPublisher != nil {
+		_ = s.commandPublisher.PublishCommand(ctx, command.DeviceID, command)
 	}
 	return command, nil
 }

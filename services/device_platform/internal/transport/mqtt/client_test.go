@@ -80,11 +80,11 @@ func (client *stubPahoClient) Subscribe(
 
 func sampleCommand() *runtimedomain.Command {
 	return &runtimedomain.Command{
-		ID:        "command-1",
+		ID:        "11111111-2222-3333-4444-555555555555",
 		DeviceID:  "device_test_001",
 		Type:      runtimedomain.CommandDisplayMessage,
 		Payload:   map[string]any{"message": "晚安"},
-		RequestID: "request-1",
+		RequestID: "request_11111111222233334444555555555555",
 		CreatedAt: time.Date(2026, time.October, 14, 9, 0, 0, 0, time.UTC),
 	}
 }
@@ -135,10 +135,13 @@ func TestPublishCommandUsesVersionedTopicAndEnvelope(t *testing.T) {
 	if event.Subject.Type != "device" || event.Subject.ID != "device_test_001" {
 		t.Fatalf("unexpected subject: %#v", event.Subject)
 	}
-	if event.RequestID != "request-1" {
+	if event.EventID != "command_11111111222233334444555555555555" {
+		t.Fatalf("unexpected event id: %q", event.EventID)
+	}
+	if event.RequestID != "request_11111111222233334444555555555555" {
 		t.Fatalf("unexpected request id: %q", event.RequestID)
 	}
-	if event.Payload.CommandID != "command-1" {
+	if event.Payload.CommandID != "11111111-2222-3333-4444-555555555555" {
 		t.Fatalf("unexpected command id: %q", event.Payload.CommandID)
 	}
 	if event.Payload.CommandType != string(runtimedomain.CommandDisplayMessage) {
@@ -309,16 +312,16 @@ func TestSubscribeCommandAcksDispatchesValidAck(t *testing.T) {
 
 	payload, err := json.Marshal(DeviceCommandAck{
 		SchemaVersion: "1.0.0",
-		EventID:       "event-1",
+		EventID:       "command_ack_11111111222233334444555555555555",
 		EventType:     "device.command_ack",
 		Producer:      "firmware",
 		Subject:       DeviceCommandSubject{Type: "device", ID: "device_test_001"},
-		RequestID:     "request-1",
+		RequestID:     "request_11111111222233334444555555555555",
 		Payload: DeviceCommandAckPayload{
-			CommandID:  "command-1",
+			CommandID:  "11111111-2222-3333-4444-555555555555",
 			Status:     "acknowledged",
 			ResultCode: "ok",
-			RequestID:  "request-1",
+			RequestID:  "request_11111111222233334444555555555555",
 		},
 	})
 	if err != nil {
@@ -339,7 +342,7 @@ func TestSubscribeCommandAcksDispatchesValidAck(t *testing.T) {
 	if deviceID != "device_test_001" {
 		t.Fatalf("unexpected device id: %q", deviceID)
 	}
-	if ack.Payload.CommandID != "command-1" {
+	if ack.Payload.CommandID != "11111111-2222-3333-4444-555555555555" {
 		t.Fatalf("unexpected command id: %q", ack.Payload.CommandID)
 	}
 	if ack.Payload.Status != "acknowledged" {
@@ -357,7 +360,7 @@ func TestSubscribeCommandAcksDropsInvalidMessages(t *testing.T) {
 		t.Fatalf("SubscribeCommandAcks() error = %v", err)
 	}
 
-	validPayload := `{"schema_version":"1.0.0","event_id":"e","event_type":"device.command_ack","producer":"firmware","subject":{"type":"device","id":"device_test_001"},"request_id":"r","payload":{"command_id":"command-1","status":"acknowledged","request_id":"r"}}`
+	validPayload := `{"schema_version":"1.0.0","event_id":"command_ack_11111111222233334444555555555555","event_type":"device.command_ack","producer":"firmware","subject":{"type":"device","id":"device_test_001"},"request_id":"request_11111111222233334444555555555555","payload":{"command_id":"11111111-2222-3333-4444-555555555555","status":"acknowledged","request_id":"request_11111111222233334444555555555555"}}`
 
 	// Wrong topic family.
 	stub.subHandler(nil, stubMessage{
@@ -383,6 +386,11 @@ func TestSubscribeCommandAcksDropsInvalidMessages(t *testing.T) {
 	stub.subHandler(nil, stubMessage{
 		topic:   "sprout/v1/devices/device_test_001/commands/ack",
 		payload: []byte(`{"schema_version":"1.0.0","event_type":"device.command_ack","subject":{"type":"device","id":"device_test_001"},"payload":{"status":"acknowledged"}}`),
+	})
+	// Invalid event id for the shared event envelope.
+	stub.subHandler(nil, stubMessage{
+		topic:   "sprout/v1/devices/device_test_001/commands/ack",
+		payload: []byte(`{"schema_version":"1.0.0","event_id":"event-1","event_type":"device.command_ack","subject":{"type":"device","id":"device_test_001"},"payload":{"command_id":"command_1","status":"acknowledged"}}`),
 	})
 
 	calls, _, _ := handler.snapshot()

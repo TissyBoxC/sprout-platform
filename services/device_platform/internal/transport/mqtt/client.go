@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	paho "github.com/eclipse/paho.mqtt.golang"
+	"github.com/google/uuid"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/config"
 	runtimedomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
@@ -21,6 +23,12 @@ import (
 type Client struct {
 	client pahoClient
 }
+
+// contractIdentifierPattern mirrors the shared identifier definition in
+// packages/contracts/schemas/common.schema.json.
+var contractIdentifierPattern = regexp.MustCompile(
+	`^[a-z][a-z0-9]*(?:_[a-z0-9]+){1,7}$`,
+)
 
 // pahoClient is the subset of paho.Client this adapter uses. Narrowing the
 // surface lets tests exercise topic, QoS, and payload construction without a
@@ -149,10 +157,14 @@ func (c *Client) PublishCommand(
 	if strings.TrimSpace(command.RequestID) == "" {
 		return fmt.Errorf("publish device command: request id is required")
 	}
+	eventID, err := commandEventID(command.ID)
+	if err != nil {
+		return fmt.Errorf("publish device command: %w", err)
+	}
 
 	event := DeviceCommandEvent{
 		SchemaVersion: "1.0.0",
-		EventID:       command.ID,
+		EventID:       eventID,
 		EventType:     "device.command",
 		OccurredAt:    command.CreatedAt.UTC().Format(time.RFC3339),
 		Producer:      "device_platform",
@@ -184,6 +196,18 @@ func (c *Client) PublishCommand(
 		return fmt.Errorf("publish device command: %w", err)
 	}
 	return nil
+}
+
+// commandEventID maps the database command UUID to the lower_snake_case event
+// identifier required by the shared event envelope. Removing the UUID hyphens
+// keeps the mapping deterministic across retries without exposing another
+// random identifier.
+func commandEventID(commandID string) (string, error) {
+	parsed, err := uuid.Parse(strings.TrimSpace(commandID))
+	if err != nil {
+		return "", fmt.Errorf("command id must be a UUID")
+	}
+	return "command_" + strings.ReplaceAll(parsed.String(), "-", ""), nil
 }
 
 // tokenDone exposes a paho token's completion channel so callers can bound a
@@ -301,6 +325,9 @@ func (c *Client) SubscribeCommandAcks(
 				return
 			}
 			if ack.SchemaVersion != "1.0.0" || ack.EventType != "device.command_ack" {
+				return
+			}
+			if !contractIdentifierPattern.MatchString(ack.EventID) {
 				return
 			}
 			if ack.Subject.Type != "device" || ack.Subject.ID != deviceID {

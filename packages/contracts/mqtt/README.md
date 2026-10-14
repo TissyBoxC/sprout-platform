@@ -31,9 +31,12 @@ acknowledgement and does not execute the command again.
   are accepted. A retransmitted terminal acknowledgement is treated as an
   idempotent success on this transport; the HTTP acknowledgement endpoint
   keeps its explicit `409 command_already_handled` response.
-- The device-side MQTT subscriber is not implemented yet. Firmware currently
-  consumes commands through the authenticated HTTP poll only; both transports
-  are specified to be idempotent on `request_id`.
+- The device-side MQTT subscriber uses mutual TLS, subscribes to the
+  per-device command topic, executes through the same idempotent runtime path,
+  and publishes acknowledgements on the per-device ack topic. The
+  authenticated HTTP command poll and acknowledgement path remains available
+  as a fallback when MQTT credentials are absent or the broker is down; both
+  transports remain idempotent on `request_id`.
 
 Interaction events are not a separate MQTT topic. They are delivered inside the
 authenticated runtime heartbeat as `diagnostics.interaction_events`, together

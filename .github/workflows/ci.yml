@@ -19,6 +19,8 @@ jobs:
           python3 -m unittest \
             tools.test_upload_release_artifacts \
             tools.test_upload_release_artifacts_http
+      - name: Validate download release key generation
+        run: bash deploy/cloud/scripts/test-download-release-key.sh
 
   workspace-lock:
     runs-on: ubuntu-latest

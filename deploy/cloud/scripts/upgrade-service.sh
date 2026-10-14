@@ -348,14 +348,21 @@ assert_git_clean() {
     exit 1
   fi
 
-  # Generated migration data, certificates, and operator backups are runtime
-  # artifacts, not source changes. Everything else must be clean before a
-  # release image is allowed to replace a running container.
-  # Git reports paths relative to the repository root even with -C cloud_dir.
-  # Accept both forms so the guard keeps working if the checkout layout changes.
+  # Generated migration data, certificates, operator backups, and the local
+  # Compose override are runtime artifacts, not source changes. Everything else
+  # must be clean before a release image is allowed to replace a running
+  # container. Git reports paths relative to the repository root even with
+  # -C cloud_dir, so accept both path forms to keep the guard working if the
+  # checkout layout changes.
+  #
+  # The override must pass this generic check so the dedicated per-service guard
+  # (assert_no_managed_image_override) can reject the exact managed service it
+  # pins. Treating it as an uncommitted source change instead rejected every
+  # service, including ones the override never touched.
   git_status="$(
     git -C "$cloud_dir" status --porcelain --untracked-files=all -- . |
-      grep -vE '^(\?\?|!!) (deploy/cloud/)?(migration-data|mosquitto/certs|\.codex-backups)/' || true
+      grep -vE '^(\?\?|!!) (deploy/cloud/)?(migration-data|mosquitto/certs|\.codex-backups)/' |
+      grep -vE '^(\?\?|!!) (deploy/cloud/)?docker-compose\.override\.yml$' || true
   )"
   if [ -n "$git_status" ]; then
     echo "云端部署目录存在未提交变更，拒绝升级。请先提交或清理：" >&2

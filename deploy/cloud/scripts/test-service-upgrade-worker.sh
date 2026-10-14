@@ -260,11 +260,56 @@ git -C "$clean_repo" commit -qm "clean baseline"
 printf '%s\n' "runtime-data" > "$clean_repo/deploy/cloud/migration-data/keep.dump"
 printf '%s\n' "runtime-cert" > "$clean_repo/deploy/cloud/mosquitto/certs/keep.crt"
 printf '%s\n' "runtime-backup" > "$clean_repo/deploy/cloud/.codex-backups/keep.yml"
+# The production override is an operator-local runtime file, not a source
+# change. The generic cleanliness guard has to let it through so the dedicated
+# per-service override guard decides which service (if any) is blocked.
+printf '%s\n' \
+  'services:' \
+  '  postgres:' \
+  '    image: local-postgres:16' > "$clean_repo/deploy/cloud/docker-compose.override.yml"
 (
   source "$upgrade_script"
   cloud_dir="$clean_repo/deploy/cloud"
   assert_git_clean
 )
+(
+  source "$upgrade_script"
+  cloud_dir="$clean_repo/deploy/cloud"
+  assert_no_managed_image_override
+)
+# A managed-service override must still pass the generic cleanliness guard and
+# be rejected by the dedicated guard, otherwise the checkout would be rejected
+# wholesale instead of only the service the override pins.
+printf '%s\n' \
+  'services:' \
+  '  device_platform:' \
+  '    image: sprout-device-platform:0.22.0' > "$clean_repo/deploy/cloud/docker-compose.override.yml"
+(
+  source "$upgrade_script"
+  cloud_dir="$clean_repo/deploy/cloud"
+  assert_git_clean
+)
+if (
+  source "$upgrade_script"
+  cloud_dir="$clean_repo/deploy/cloud"
+  assert_no_managed_image_override
+) >/dev/null 2>&1; then
+  echo "受管镜像覆盖门禁未拒绝 device_platform 本地覆盖。" >&2
+  exit 1
+fi
+# A tracked override that was edited is a real source change and must still be
+# rejected by the generic guard.
+git -C "$clean_repo" add deploy/cloud/docker-compose.override.yml
+git -C "$clean_repo" commit -qm "track override"
+printf '%s\n' "extra" >> "$clean_repo/deploy/cloud/docker-compose.override.yml"
+if (
+  source "$upgrade_script"
+  cloud_dir="$clean_repo/deploy/cloud"
+  assert_git_clean
+) >/dev/null 2>&1; then
+  echo "Git 清洁门禁未拒绝已跟踪 override 的未提交修改。" >&2
+  exit 1
+fi
 printf '%s\n' "source-change" > "$clean_repo/deploy/cloud/source-change.txt"
 if (
   source "$upgrade_script"

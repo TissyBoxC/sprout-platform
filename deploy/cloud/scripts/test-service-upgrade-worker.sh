@@ -470,4 +470,335 @@ if ! jq -e '
   exit 1
 fi
 
+if ! grep -Eq '^recover_stale_processing_operations\(\)' "$worker_script"; then
+  echo "service-upgrade-worker.sh 缺少 processing 残留恢复逻辑。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$worker_main_block" | grep -Fq 'recover_stale_processing_operations'; then
+  echo "worker 主流程未在启动时恢复 processing 残留。" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# A worker restart that happens mid-operation must not strand the request in
+# processing/: the claim was taken with mv -n and the terminal result was never
+# written, so nothing else would advance it. Recovery has to publish an explicit
+# failed result and clear the stale claim.
+# ---------------------------------------------------------------------------
+recovery_root="$(mktemp -d)"
+mkdir -p "$recovery_root/processing" "$recovery_root/results"
+cat > "$recovery_root/processing/op-recover-1.json" <<'EOF'
+{"id":"op-recover-1","target_service":"admin_web","target_version":"0.2.0","requested_at":"2026-01-01T00:00:00Z","requested_by":"recovery-test"}
+EOF
+(
+  source "$worker_script"
+  root_dir="$recovery_root"
+  queue_dir="$root_dir/queue"
+  processing_dir="$root_dir/processing"
+  results_dir="$root_dir/results"
+  release_cache_dir="$root_dir/.release-cache"
+  state_uid=0
+  state_gid=0
+  read_running_image_version() { printf '%s\n' "0.1.0"; }
+  recover_stale_processing_operations
+)
+if [ -n "$(find "$recovery_root/processing" -type f -name '*.json' -print -quit)" ]; then
+  echo "processing 残留未被清理。" >&2
+  exit 1
+fi
+if [ ! -f "$recovery_root/results/op-recover-1.json" ]; then
+  echo "processing 残留未生成终态结果。" >&2
+  exit 1
+fi
+if ! jq -e '
+  .id == "op-recover-1"
+  and .status == "failed"
+  and .target_service == "admin_web"
+  and .target_version == "0.2.0"
+  and .current_version == "0.1.0"
+  and .requested_by == "recovery-test"
+  and (.finished_at | type == "string")
+  and (.log_tail | type == "string")
+' "$recovery_root/results/op-recover-1.json" >/dev/null; then
+  echo "processing 残留恢复结果内容不正确。" >&2
+  cat "$recovery_root/results/op-recover-1.json" >&2
+  exit 1
+fi
+rm -rf "$recovery_root"
+
+# ---------------------------------------------------------------------------
+# Fault injection: real upgrade-service.sh functions run against a fake docker
+# boundary so pull failures, compose-up failures, and health failures can be
+# injected. The executor must leave .env and the running images on the previous
+# release whenever the upgrade does not complete.
+# ---------------------------------------------------------------------------
+fault_root="$(mktemp -d)"
+fault_cloud="$fault_root/deploy/cloud"
+fault_tmp="$fault_root/tmp"
+mkdir -p "$fault_cloud/scripts" "$fault_tmp"
+printf '%s\n' 'services: {}' > "$fault_cloud/docker-compose.yml"
+cat > "$fault_cloud/scripts/validate-cloud-env.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$fault_cloud/scripts/validate-cloud-env.sh"
+export TMPDIR="$fault_tmp"
+
+reset_fault_env() {
+  printf '%s\n' \
+    'SPROUT_PLATFORM_VERSION=0.1.0' \
+    'SPROUT_SUB2API_VERSION=0.1.0' > "$fault_cloud/.env"
+}
+
+# Runs upgrade_services in a subshell with the real executor functions and the
+# fake docker boundary. Fault knobs, all optional:
+#   FAULT_PULL_FAIL                            - every image pull fails
+#   FAULT_UP_FAIL                              - every Compose recreate fails
+#   FAULT_HEALTH_SERVICE + FAULT_HEALTH_STATUS - one service never becomes ready
+run_upgrade_fault_case() {
+  requested_service="$1"
+  requested_version="$2"
+  expected_exit="$3"
+  fault_log="$4"
+  : > "$fault_log"
+
+  # Prefix assignments before a function call are not guaranteed to reach the
+  # nested subshell, so export the knobs explicitly before dropping into it.
+  export FAULT_CURRENT_VERSION="${FAULT_CURRENT_VERSION:-0.1.0}"
+  export FAULT_PULL_FAIL="${FAULT_PULL_FAIL:-0}"
+  export FAULT_UP_FAIL="${FAULT_UP_FAIL:-0}"
+  export FAULT_HEALTH_SERVICE="${FAULT_HEALTH_SERVICE:-}"
+  export FAULT_HEALTH_STATUS="${FAULT_HEALTH_STATUS:-starting}"
+  export FAULT_HEALTH_TIMEOUT="${FAULT_HEALTH_TIMEOUT:-120}"
+
+  # Deliberately not `if ( ... ); then`: wrapping the subshell in an `if`
+  # condition suppresses `set -e` and the ERR trap inside it, which would hide
+  # exactly the failure propagation this test exists to verify.
+  set +e
+  (
+    set -euo pipefail
+    # shellcheck source=deploy/cloud/scripts/upgrade-service.sh
+    source "$upgrade_script"
+    cloud_dir="$fault_cloud"
+    compose_file="$cloud_dir/docker-compose.yml"
+    env_file="$cloud_dir/.env"
+    compose_project_dir="$cloud_dir"
+    health_timeout="$FAULT_HEALTH_TIMEOUT"
+    platform_repository="example/platform"
+    sub2api_repository="example/sub2api"
+
+    export FAULT_LOG="$fault_log"
+
+    # Stub the network and checkout boundaries; the failure paths under test are
+    # entirely inside the version switch, Compose recreate, and rollback logic.
+    resolve_release_by_version() { resolved_version="$2"; resolved_release_url=""; return 0; }
+    resolve_latest_release() { resolved_version="0.2.0"; resolved_release_url=""; return 0; }
+    release_version_is_published() { return 0; }
+    sync_platform_checkout() { return 0; }
+    assert_platform_checkout_version() { return 0; }
+    assert_git_clean() { return 0; }
+
+    docker() {
+      docker_argv=("$@")
+      docker_platform="${SPROUT_PLATFORM_VERSION:-}"
+      docker_sub2api="${SPROUT_SUB2API_VERSION:-}"
+      docker_env_file=""
+      docker_index=0
+      while [ "$docker_index" -lt "${#docker_argv[@]}" ]; do
+        if [ "${docker_argv[$docker_index]}" = "--env-file" ]; then
+          docker_env_file="${docker_argv[$((docker_index + 1))]}"
+          break
+        fi
+        docker_index=$((docker_index + 1))
+      done
+      # The recreate loop relies on docker compose reading the already-written
+      # .env file instead of prefixing the version variables, so mirror that
+      # precedence here.
+      if [ -z "$docker_platform" ] && [ -n "$docker_env_file" ] && [ -f "$docker_env_file" ]; then
+        docker_platform="$(awk -F= '$1 == "SPROUT_PLATFORM_VERSION" { print $2 }' "$docker_env_file")"
+        docker_sub2api="$(awk -F= '$1 == "SPROUT_SUB2API_VERSION" { print $2 }' "$docker_env_file")"
+      fi
+      {
+        printf 'PLATFORM=%s SUB2API=%s ARGS=' \
+          "$docker_platform" "$docker_sub2api"
+        printf '%s ' "$@"
+        printf '\n'
+      } >> "$FAULT_LOG"
+
+      if [ "$1" = "compose" ]; then
+        shift
+        while [ "$#" -gt 0 ]; do
+          case "$1" in
+            --project-directory|-f|--env-file) shift 2 ;;
+            *) break ;;
+          esac
+        done
+        subcommand="$1"
+        shift
+        case "$subcommand" in
+          config)
+            return 0
+            ;;
+          ps)
+            ps_service=""
+            for ps_arg in "$@"; do
+              ps_service="$ps_arg"
+            done
+            printf '%s\n' "cid-${ps_service}"
+            return 0
+            ;;
+          pull)
+            pull_service=""
+            for pull_arg in "$@"; do
+              pull_service="$pull_arg"
+            done
+            if [ "$FAULT_PULL_FAIL" = "1" ]; then
+              printf '%s\n' "injected pull failure: ${pull_service}" >&2
+              return 1
+            fi
+            return 0
+            ;;
+          up)
+            up_service=""
+            for up_arg in "$@"; do
+              up_service="$up_arg"
+            done
+            if [ "$FAULT_UP_FAIL" = "1" ]; then
+              printf '%s\n' "injected up failure: ${up_service}" >&2
+              return 1
+            fi
+            return 0
+            ;;
+        esac
+        return 0
+      fi
+
+      if [ "$1" = "inspect" ]; then
+        inspect_format="$3"
+        inspect_container="$4"
+        inspect_service="${inspect_container#cid-}"
+        case "$inspect_format" in
+          *Health*)
+            if [ -n "$FAULT_HEALTH_SERVICE" ] && [ "$inspect_service" = "$FAULT_HEALTH_SERVICE" ]; then
+              printf '%s\n' "$FAULT_HEALTH_STATUS"
+            else
+              printf '%s\n' "healthy"
+            fi
+            return 0
+            ;;
+          *Config.Image*)
+            printf '%s\n' "ghcr.io/example/service:${FAULT_CURRENT_VERSION}"
+            return 0
+            ;;
+        esac
+        printf '%s\n' "healthy"
+        return 0
+      fi
+      return 0
+    }
+
+    if [ -n "$requested_version" ]; then
+      upgrade_services "$requested_service" "$requested_version"
+    else
+      upgrade_services "$requested_service"
+    fi
+  )
+  actual_exit=$?
+  set -e
+
+  if [ "$actual_exit" -ne "$expected_exit" ]; then
+    echo "故障用例 ${requested_service} 退出码应为 ${expected_exit}，实际 ${actual_exit}。" >&2
+    cat "$fault_log" >&2
+    exit 1
+  fi
+}
+
+assert_fault_env_versions() {
+  expected_platform="$1"
+  expected_sub2api="$2"
+  actual_platform="$(awk -F= '$1 == "SPROUT_PLATFORM_VERSION" { print $2 }' "$fault_cloud/.env")"
+  actual_sub2api="$(awk -F= '$1 == "SPROUT_SUB2API_VERSION" { print $2 }' "$fault_cloud/.env")"
+  if [ "$actual_platform" != "$expected_platform" ] ||
+    [ "$actual_sub2api" != "$expected_sub2api" ]; then
+    echo ".env 版本应为 platform=${expected_platform} sub2api=${expected_sub2api}，实际 platform=${actual_platform} sub2api=${actual_sub2api}。" >&2
+    exit 1
+  fi
+}
+
+assert_up_call_with_platform() {
+  expected_platform="$1"
+  service="$2"
+  fault_log="$3"
+  # Require the version and the service on the same recorded invocation so a
+  # match cannot be stitched together from two different log lines.
+  if ! awk -v expected="PLATFORM=${expected_platform} " \
+    -v target=" up -d --no-deps ${service} " '
+      index($0, expected) == 1 && index($0, target) > 0 { found = 1 }
+      END { exit(found ? 0 : 1) }
+    ' "$fault_log"; then
+    echo "未按预期以 platform=${expected_platform} 重建 ${service}。" >&2
+    cat "$fault_log" >&2
+    exit 1
+  fi
+}
+
+reset_fault_env
+FAULT_PULL_FAIL=1 FAULT_UP_FAIL=0 \
+  FAULT_HEALTH_SERVICE="" FAULT_CURRENT_VERSION="0.1.0" \
+  run_upgrade_fault_case admin_web 0.2.0 1 "$fault_root/pre-pull.log"
+assert_fault_env_versions 0.1.0 0.1.0
+if grep -Eq ' up -d ' "$fault_root/pre-pull.log"; then
+  echo "镜像预拉取失败后不应重建任何容器。" >&2
+  cat "$fault_root/pre-pull.log" >&2
+  exit 1
+fi
+
+reset_fault_env
+FAULT_PULL_FAIL=0 FAULT_UP_FAIL=1 \
+  FAULT_HEALTH_SERVICE="" FAULT_CURRENT_VERSION="0.1.0" \
+  run_upgrade_fault_case admin_web 0.2.0 1 "$fault_root/up-fail.log"
+assert_fault_env_versions 0.1.0 0.1.0
+assert_up_call_with_platform 0.2.0 admin_web "$fault_root/up-fail.log"
+assert_up_call_with_platform 0.1.0 admin_web "$fault_root/up-fail.log"
+
+reset_fault_env
+FAULT_PULL_FAIL=0 FAULT_UP_FAIL=0 \
+  FAULT_HEALTH_SERVICE="admin_web" FAULT_HEALTH_STATUS="exited" FAULT_CURRENT_VERSION="0.1.0" \
+  run_upgrade_fault_case admin_web 0.2.0 1 "$fault_root/health-exited.log"
+assert_fault_env_versions 0.1.0 0.1.0
+assert_up_call_with_platform 0.1.0 admin_web "$fault_root/health-exited.log"
+
+reset_fault_env
+FAULT_PULL_FAIL=0 FAULT_UP_FAIL=0 \
+  FAULT_HEALTH_SERVICE="admin_web" FAULT_HEALTH_STATUS="starting" FAULT_HEALTH_TIMEOUT=10 \
+  FAULT_CURRENT_VERSION="0.1.0" \
+  run_upgrade_fault_case admin_web 0.2.0 1 "$fault_root/health-timeout.log"
+assert_fault_env_versions 0.1.0 0.1.0
+assert_up_call_with_platform 0.1.0 admin_web "$fault_root/health-timeout.log"
+
+# Upgrading every service must follow the fixed dependency order and, when the
+# last service fails, roll every already-recreated service back to the previous
+# release rather than leaving a half-upgraded stack behind.
+reset_fault_env
+FAULT_PULL_FAIL=0 FAULT_UP_FAIL=0 \
+  FAULT_HEALTH_SERVICE="admin_web" FAULT_HEALTH_STATUS="exited" FAULT_CURRENT_VERSION="0.1.0" \
+  run_upgrade_fault_case all "" 1 "$fault_root/all-fail.log"
+assert_fault_env_versions 0.1.0 0.1.0
+ordered_up_services="$(
+  grep -E ' up -d --no-deps ' "$fault_root/all-fail.log" |
+    grep -E '^PLATFORM=0\.2\.0' |
+    sed -E 's/.*up -d --no-deps ([^ ]+) .*/\1/' |
+    paste -sd' ' -
+)"
+if [ "$ordered_up_services" != "sub2api device_platform voice_gateway admin_web" ]; then
+  echo "全量升级顺序不正确: $ordered_up_services" >&2
+  cat "$fault_root/all-fail.log" >&2
+  exit 1
+fi
+for service in sub2api device_platform voice_gateway admin_web; do
+  assert_up_call_with_platform 0.1.0 "$service" "$fault_root/all-fail.log"
+done
+
+rm -rf "$fault_root"
+
 echo "service-upgrade-worker shell contract passed."

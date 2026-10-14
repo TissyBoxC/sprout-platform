@@ -254,18 +254,22 @@ release_version_is_published() {
   resolve_release_by_version "$repository" "$requested_version"
 }
 
+# Keep these scoped: upgrade_services reuses current_version as its loop variable
+# and compares it after this call. Assigning the function arguments to the global
+# names clobbered the caller's current_version, which made every service look
+# already-upgraded so no upgrade ever ran.
 version_is_older() {
-  current_version="$1"
-  latest_version="$2"
-  awk -v current_version="$current_version" -v latest_version="$latest_version" '
+  local older_version="$1"
+  local newer_version="$2"
+  awk -v older_version="$older_version" -v newer_version="$newer_version" '
     BEGIN {
-      split(current_version, current_parts, ".")
-      split(latest_version, latest_parts, ".")
+      split(older_version, older_parts, ".")
+      split(newer_version, newer_parts, ".")
       for (part = 1; part <= 3; part++) {
-        if ((current_parts[part] + 0) < (latest_parts[part] + 0)) {
+        if ((older_parts[part] + 0) < (newer_parts[part] + 0)) {
           exit 0
         }
-        if ((current_parts[part] + 0) > (latest_parts[part] + 0)) {
+        if ((older_parts[part] + 0) > (newer_parts[part] + 0)) {
           exit 1
         }
       }
@@ -552,16 +556,28 @@ pre_pull_images() {
   pull_sub2api="$2"
 
   if [ "$pull_platform" = "1" ]; then
-    SPROUT_PLATFORM_VERSION="$target_platform_version" \
+    # The failure must be returned explicitly: a trailing `if` with a false
+    # condition exits 0 in Bash, which previously swallowed the pull failure and
+    # let the upgrade rewrite .env and recreate containers against images that
+    # were never downloaded.
+    if ! SPROUT_PLATFORM_VERSION="$target_platform_version" \
       SPROUT_SUB2API_VERSION="$previous_sub2api_version" \
-      compose pull device_platform voice_gateway admin_web
+      compose pull device_platform voice_gateway admin_web; then
+      echo "平台镜像预拉取失败，升级已停止，部署文件未被修改。" >&2
+      return 1
+    fi
   fi
 
   if [ "$pull_sub2api" = "1" ]; then
-    SPROUT_PLATFORM_VERSION="$previous_platform_version" \
+    if ! SPROUT_PLATFORM_VERSION="$previous_platform_version" \
       SPROUT_SUB2API_VERSION="$target_sub2api_version" \
-      compose pull sub2api
+      compose pull sub2api; then
+      echo "AI 网关镜像预拉取失败，升级已停止，部署文件未被修改。" >&2
+      return 1
+    fi
   fi
+
+  return 0
 }
 
 wait_for_service() {

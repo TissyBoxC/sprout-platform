@@ -359,23 +359,61 @@ read_running_image_version() {
   fi
 }
 
+# A worker restart can strand a request in processing/: the process that claimed
+# it with mv -n died before writing a terminal result, so nothing else will ever
+# advance it and the console would poll "running" forever. On startup, before
+# the consume loop begins, fail every leftover claim with an explicit result so
+# the operation reaches a terminal state and the operator can retry.
+recover_stale_processing_operations() {
+  for stale_file in "$processing_dir"/*.json; do
+    [ -f "$stale_file" ] || continue
+
+    processing_file="$stale_file"
+    stale_id="$(basename -- "$stale_file")"
+    stale_id="${stale_id%.json}"
+    if ! validate_operation_id "$stale_id"; then
+      rm -f "$stale_file"
+      continue
+    fi
+
+    service="$(jq -r '.target_service // "unknown"' "$stale_file" 2>/dev/null || printf '%s' unknown)"
+    target_version="$(jq -r '.target_version // "unknown"' "$stale_file" 2>/dev/null || printf '%s' unknown)"
+    current_version="$(read_running_image_version "$service" 2>/dev/null || printf '%s' unknown)"
+    recovered_at="$(iso_timestamp)"
+    write_result_snapshot \
+      "$stale_id" \
+      "$service" \
+      "$current_version" \
+      "$target_version" \
+      "failed" \
+      "升级过程中升级 worker 已重启，任务未完成，可能已回滚。请重新发起升级。" \
+      "$recovered_at" \
+      "$(json_string_or_null "$recovered_at")" \
+      /dev/null
+    rm -f "$stale_file"
+  done
+  processing_file=""
+}
+
 validate_version() {
   version="$1"
   printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
 }
 
+# Keep these scoped so a version comparison can never clobber the caller's
+# current_version/latest_version variables used to build the status snapshot.
 version_is_older() {
-  current_version="$1"
-  latest_version="$2"
-  awk -v current_version="$current_version" -v latest_version="$latest_version" '
+  local older_version="$1"
+  local newer_version="$2"
+  awk -v older_version="$older_version" -v newer_version="$newer_version" '
     BEGIN {
-      split(current_version, current_parts, ".")
-      split(latest_version, latest_parts, ".")
+      split(older_version, older_parts, ".")
+      split(newer_version, newer_parts, ".")
       for (part = 1; part <= 3; part++) {
-        if ((current_parts[part] + 0) < (latest_parts[part] + 0)) {
+        if ((older_parts[part] + 0) < (newer_parts[part] + 0)) {
           exit 0
         }
-        if ((current_parts[part] + 0) > (latest_parts[part] + 0)) {
+        if ((older_parts[part] + 0) > (newer_parts[part] + 0)) {
           exit 1
         }
       }
@@ -863,6 +901,8 @@ main() {
   require_command docker
   require_command jq
   require_command curl
+
+  recover_stale_processing_operations
 
   if ! refresh_release_catalog 1; then
     if [ -f "$root_dir/releases.json" ]; then

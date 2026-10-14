@@ -547,6 +547,103 @@ type recordingCommandPublisher struct {
 	err      error
 }
 
+func TestAcknowledgeCommandFromDeviceIsIdempotent(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 14, 9, 0, 0, 0, time.UTC)
+	repository := newMemoryRepository()
+	sink := &recordingAcknowledgementSink{}
+	service, err := New(Options{
+		Repository: repository,
+		BindingService: &memoryBindingReader{
+			deviceID: "device_test_001",
+		},
+		AcknowledgementSink: sink,
+		Clock:               fixedClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+	command, err := service.CreateCommand(
+		context.Background(),
+		"device_test_001",
+		domain.CommandRefreshConfiguration,
+		"admin_test_001",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("create command: %v", err)
+	}
+
+	if err := service.AcknowledgeCommandFromDevice(
+		context.Background(),
+		"device_test_001",
+		command.ID,
+		domain.CommandStatusAcknowledged,
+		"ok",
+	); err != nil {
+		t.Fatalf("acknowledge command: %v", err)
+	}
+	if repository.commands[command.ID].Status != domain.CommandStatusAcknowledged {
+		t.Fatalf(
+			"expected acknowledged status, got %q",
+			repository.commands[command.ID].Status,
+		)
+	}
+	if sink.commandID != command.ID || sink.deviceID != "device_test_001" {
+		t.Fatalf("unexpected sink notification: %#v", sink)
+	}
+
+	// A retransmitted QoS 1 ack must not apply the terminal state twice, but
+	// the broker may legitimately redeliver it before the SUBACK is processed.
+	if err := service.AcknowledgeCommandFromDevice(
+		context.Background(),
+		"device_test_001",
+		command.ID,
+		domain.CommandStatusAcknowledged,
+		"ok",
+	); err != nil {
+		t.Fatalf("expected repeated ack to be idempotent, got %v", err)
+	}
+}
+
+func TestAcknowledgeCommandFromDeviceValidatesInput(t *testing.T) {
+	t.Parallel()
+	service, err := New(Options{
+		Repository: newMemoryRepository(),
+		BindingService: &memoryBindingReader{
+			deviceID: "device_test_001",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+
+	cases := []struct {
+		name      string
+		deviceID  string
+		commandID string
+		status    domain.CommandStatus
+	}{
+		{"bad device id", "bad device id", "command_test_001", domain.CommandStatusAcknowledged},
+		{"bad command id", "device_test_001", "bad command id", domain.CommandStatusAcknowledged},
+		{"bad status", "device_test_001", "command_test_001", domain.CommandStatusPending},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			err := service.AcknowledgeCommandFromDevice(
+				context.Background(),
+				test.deviceID,
+				test.commandID,
+				test.status,
+				"",
+			)
+			if err != domain.ErrInvalidCommand {
+				t.Fatalf("expected ErrInvalidCommand, got %v", err)
+			}
+		})
+	}
+}
+
 func (publisher *recordingCommandPublisher) PublishCommand(
 	_ context.Context,
 	deviceID string,

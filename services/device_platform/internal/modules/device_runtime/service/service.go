@@ -500,6 +500,65 @@ func (s *Service) AcknowledgeCommand(
 	return nil
 }
 
+// AcknowledgeCommandFromDevice records a device result that arrived on the
+// authenticated MQTT channel.
+//
+// The MQTT broker authenticates the device by mutual TLS and maps the
+// certificate identity to the device id, so there is no HTTP session token
+// here. The device id and the command id must still match the durable command
+// row, and the repository update is the same single-writer idempotent path the
+// HTTP acknowledgement uses, so a retransmitted ack never double-applies.
+func (s *Service) AcknowledgeCommandFromDevice(
+	ctx context.Context,
+	deviceID string,
+	commandID string,
+	status domain.CommandStatus,
+	resultCode string,
+) error {
+	deviceID = strings.TrimSpace(deviceID)
+	commandID = strings.TrimSpace(commandID)
+	if !runtimeIdentifierPattern.MatchString(deviceID) {
+		return domain.ErrInvalidCommand
+	}
+	if !runtimeIdentifierPattern.MatchString(commandID) && !isUUID(commandID) {
+		return domain.ErrInvalidCommand
+	}
+	if status != domain.CommandStatusAcknowledged &&
+		status != domain.CommandStatusFailed {
+		return domain.ErrInvalidCommand
+	}
+	if err := s.repository.AcknowledgeCommand(
+		ctx,
+		commandID,
+		deviceID,
+		status,
+		strings.TrimSpace(resultCode),
+	); err != nil {
+		if errors.Is(err, domain.ErrCommandNotFound) {
+			existing, lookupErr := s.repository.GetCommand(ctx, commandID)
+			if lookupErr == nil &&
+				existing.DeviceID == deviceID &&
+				(existing.Status == domain.CommandStatusAcknowledged ||
+					existing.Status == domain.CommandStatusFailed) {
+				// QoS 1 can redeliver an ack after the first write committed.
+				// The MQTT path is already authenticated by device identity,
+				// so a terminal row is an idempotent success, not an unknown
+				// command. The HTTP path keeps its explicit 409 contract.
+				return nil
+			}
+		}
+		return err
+	}
+	if s.acknowledgementSink != nil {
+		_ = s.acknowledgementSink.MarkDeliveryDeliveredByCommand(
+			ctx,
+			commandID,
+			deviceID,
+		)
+	}
+	return nil
+}
+
 // ResolveDeviceFamily verifies that the path device id belongs to the
 // authenticated device session and returns the owning parent account id. The
 // binding lookup is server-side; a client cannot choose a family id.

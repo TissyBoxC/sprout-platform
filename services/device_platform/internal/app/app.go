@@ -63,8 +63,8 @@ import (
 	localCommandService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
 	motionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/repository"
 	motionRuntimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
-	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
 	notificationDelivery "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/delivery"
+	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
 	notificationRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/repository"
 	notificationService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
 	operationsRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/repository"
@@ -121,6 +121,9 @@ func Run() error {
 		},
 	)))
 	slog.SetDefault(logger)
+
+	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
+	defer runtimeCancel()
 
 	startupCtx, startupCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer startupCancel()
@@ -664,6 +667,12 @@ func Run() error {
 	}
 	deviceRuntimeService.SetCommandAcknowledgementSink(notifications)
 	deviceRuntimeService.SetCommandPublisher(mqttClient)
+	if err := mqttClient.SubscribeCommandAcks(
+		runtimeCtx,
+		mqttCommandAckAdapter{runtime: deviceRuntimeService},
+	); err != nil {
+		return fmt.Errorf("subscribe MQTT command acknowledgements: %w", err)
+	}
 	featureCenterHealthProbes["notification"] = notificationReadinessProbe(
 		notifications,
 	)
@@ -882,12 +891,10 @@ func Run() error {
 		}
 	}()
 
-	workerCtx, workerCancel := context.WithCancel(context.Background())
-	defer workerCancel()
-	go runDeletionWorker(workerCtx, logger, privacy)
-	go runRetentionWorker(workerCtx, logger, privacy, vision)
+	go runDeletionWorker(runtimeCtx, logger, privacy)
+	go runRetentionWorker(runtimeCtx, logger, privacy, vision)
 	go runNotificationDeliveryWorker(
-		workerCtx,
+		runtimeCtx,
 		logger,
 		notifications,
 		[]string{

@@ -24,6 +24,13 @@ acknowledgement and does not execute the command again.
   operator command is created. Publishing is best-effort: the durable command
   row and the device's authenticated `GET /api/v1/devices/{device_id}/runtime/commands`
   poll remain the recovery path, so a broker outage never loses a command.
+- `device_platform` subscribes to
+  `sprout/v1/devices/+/commands/ack` with QoS 1. The device id is taken from
+  the authenticated topic, the payload subject must match it, and only
+  `1.0.0` `device.command_ack` events with a non-empty `payload.command_id`
+  are accepted. A retransmitted terminal acknowledgement is treated as an
+  idempotent success on this transport; the HTTP acknowledgement endpoint
+  keeps its explicit `409 command_already_handled` response.
 - The device-side MQTT subscriber is not implemented yet. Firmware currently
   consumes commands through the authenticated HTTP poll only; both transports
   are specified to be idempotent on `request_id`.

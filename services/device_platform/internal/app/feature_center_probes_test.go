@@ -3,8 +3,15 @@ package app
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +37,69 @@ func TestPlaceholderHealthProbeFailsCoverageValidation(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatal("placeholder probe passed coverage validation")
+	}
+}
+
+// TestFeatureCenterProbeMapCoversEveryActiveFeature parses the real production
+// assembly instead of a duplicated fixture. The v0.22.0 image registered
+// app_update and voice_conversation without probes and then refused to start,
+// so this test must fail before that composition can be published again.
+func TestFeatureCenterProbeMapCoversEveryActiveFeature(t *testing.T) {
+	appPath := filepath.Join(".", "app.go")
+	source, err := os.ReadFile(appPath)
+	if err != nil {
+		t.Fatalf("read app assembly: %v", err)
+	}
+
+	file, err := parser.ParseFile(token.NewFileSet(), appPath, source, 0)
+	if err != nil {
+		t.Fatalf("parse app assembly: %v", err)
+	}
+
+	registered := make(map[string]struct{})
+	for _, definition := range featureCenterService.DefaultRegistry() {
+		if definition.Feature.Status == featureCenterDomain.FeatureStatusActive {
+			registered[definition.Feature.ID] = struct{}{}
+		}
+	}
+
+	assembled := make(map[string]struct{})
+	ast.Inspect(file, func(node ast.Node) bool {
+		assignment, ok := node.(*ast.AssignStmt)
+		if !ok || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 {
+			return true
+		}
+		identifier, ok := assignment.Lhs[0].(*ast.Ident)
+		if !ok || identifier.Name != "featureCenterHealthProbes" {
+			return true
+		}
+		literal, ok := assignment.Rhs[0].(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+		for _, element := range literal.Elts {
+			keyValue, ok := element.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			key, ok := keyValue.Key.(*ast.BasicLit)
+			if !ok || key.Kind != token.STRING {
+				continue
+			}
+			assembled[strings.Trim(key.Value, `"`)] = struct{}{}
+		}
+		return false
+	})
+
+	missing := make([]string, 0)
+	for featureID := range registered {
+		if _, exists := assembled[featureID]; !exists {
+			missing = append(missing, featureID)
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Fatalf("active features missing from production health probe map: %s", strings.Join(missing, ", "))
 	}
 }
 

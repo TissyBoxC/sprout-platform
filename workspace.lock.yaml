@@ -5,7 +5,7 @@ repositories:
     path: firmware
     url: https://github.com/TissyBoxC/sprout-firmware.git
     branch: main
-    revision: 899647ed6c5106807f0fb914dd464a8821407f4d
+    revision: 7a9850a370bb7ac16e59305776a0aecc1ff76329
 
   sub2api_fork:
     path: services/sub2api_fork

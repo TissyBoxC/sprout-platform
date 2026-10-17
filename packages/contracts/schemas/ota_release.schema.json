@@ -75,18 +75,18 @@
       "maximum": 16777216
     },
     "signature_key_id": {
-      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{1,64}$"
     },
     "signature_algorithm": {
       "type": "string",
-      "enum": [
-        "ed25519"
-      ]
+      "const": "ed25519"
     },
     "signature": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9+/]+={0,2}$",
-      "maxLength": 8192
+      "pattern": "^[A-Za-z0-9+/]{86}==$",
+      "minLength": 88,
+      "maxLength": 88
     },
     "signature_status": {
       "type": "string",

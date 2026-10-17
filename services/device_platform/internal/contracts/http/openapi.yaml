@@ -22618,16 +22618,14 @@ components:
           minimum: 1
         signature_key_id:
           type: string
-          minLength: 1
-          maxLength: 128
+          pattern: "^[A-Za-z0-9._:-]{1,64}$"
         signature_algorithm:
           type: string
-          minLength: 1
-          maxLength: 64
+          enum:
+            - ed25519
         signature:
           type: string
-          minLength: 1
-          maxLength: 4096
+          pattern: "^[A-Za-z0-9+/]{86}==$"
         rollback_allowed:
           type: boolean
         mandatory:
@@ -22722,16 +22720,14 @@ components:
           minimum: 1
         signature_key_id:
           type: string
-          minLength: 1
-          maxLength: 128
+          pattern: "^[A-Za-z0-9._:-]{1,64}$"
         signature_algorithm:
           type: string
-          minLength: 1
-          maxLength: 64
+          enum:
+            - ed25519
         signature:
           type: string
-          minLength: 1
-          maxLength: 4096
+          pattern: "^[A-Za-z0-9+/]{86}==$"
         signature_status:
           type: string
           minLength: 1
@@ -23107,13 +23103,14 @@ components:
           minimum: 1
         signature_key_id:
           type: string
-          minLength: 1
+          pattern: "^[A-Za-z0-9._:-]{1,64}$"
         signature_algorithm:
           type: string
-          minLength: 1
+          enum:
+            - ed25519
         signature:
           type: string
-          minLength: 1
+          pattern: "^[A-Za-z0-9+/]{86}==$"
         rollback_allowed:
           type: boolean
         mandatory:

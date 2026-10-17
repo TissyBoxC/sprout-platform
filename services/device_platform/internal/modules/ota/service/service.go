@@ -227,6 +227,9 @@ func (s *Service) PublishRelease(
 	if strings.TrimSpace(release.Signature) == "" {
 		return nil, domain.ErrSignatureRequired
 	}
+	if !domain.ValidEd25519Signature(release.Signature) {
+		return nil, domain.ErrSignatureInvalid
+	}
 	if s.verifier == nil {
 		return nil, domain.ErrSignatureKeyUnknown
 	}

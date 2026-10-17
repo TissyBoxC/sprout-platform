@@ -11,7 +11,7 @@
   "size_bytes": 4194304,
   "signature_key_id": "ota_signing_001",
   "signature_algorithm": "ed25519",
-  "signature": "MEUCIQDExampleSignatureForContractValidationOnly",
+  "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
   "signature_status": "verified",
   "signature_verified_at": "2026-10-01T00:00:00Z",
   "rollback_allowed": true,

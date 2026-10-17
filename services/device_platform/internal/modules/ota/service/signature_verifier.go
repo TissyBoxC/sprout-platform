@@ -33,15 +33,19 @@ func NewEd25519KeyringVerifier(encoded string) (*Ed25519KeyringVerifier, error) 
 		return nil, errors.New("firmware signature public keys must be a JSON object")
 	}
 	for keyID, value := range decoded {
-		keyID = strings.TrimSpace(keyID)
-		if keyID == "" {
-			return nil, errors.New("firmware signature key id must not be blank")
+		if strings.TrimSpace(keyID) != keyID ||
+			!domain.ValidSignatureKeyID(keyID) {
+			return nil, errors.New(
+				"firmware signature key id must be 1-64 characters from [A-Za-z0-9._:-]",
+			)
 		}
-		raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(value))
+		value = strings.TrimSpace(value)
+		raw, err := base64.StdEncoding.Strict().DecodeString(value)
 		if err != nil {
 			return nil, errors.New("firmware signature public key must be base64")
 		}
-		if len(raw) != ed25519.PublicKeySize {
+		if len(raw) != ed25519.PublicKeySize ||
+			base64.StdEncoding.EncodeToString(raw) != value {
 			return nil, errors.New("firmware signature public key must be 32 bytes")
 		}
 		verifier.keys[keyID] = ed25519.PublicKey(raw)
@@ -59,10 +63,13 @@ func (verifier *Ed25519KeyringVerifier) Verify(
 	if verifier == nil {
 		return domain.ErrSignatureKeyUnknown
 	}
-	if strings.ToLower(strings.TrimSpace(algorithm)) != "ed25519" {
+	if !domain.ValidSignatureAlgorithm(algorithm) {
 		return domain.ErrSignatureInvalid
 	}
-	publicKey, ok := verifier.keys[strings.TrimSpace(keyID)]
+	if strings.TrimSpace(keyID) != keyID {
+		return domain.ErrSignatureKeyUnknown
+	}
+	publicKey, ok := verifier.keys[keyID]
 	if !ok || len(publicKey) == 0 {
 		return domain.ErrSignatureKeyUnknown
 	}
@@ -70,8 +77,13 @@ func (verifier *Ed25519KeyringVerifier) Verify(
 	if _, err := hex.DecodeString(digest); err != nil {
 		return domain.ErrSignatureInvalid
 	}
-	rawSignature, err := base64.StdEncoding.DecodeString(strings.TrimSpace(signature))
+	signature = strings.TrimSpace(signature)
+	rawSignature, err := base64.StdEncoding.Strict().DecodeString(signature)
 	if err != nil {
+		return domain.ErrSignatureInvalid
+	}
+	if len(rawSignature) != ed25519.SignatureSize ||
+		base64.StdEncoding.EncodeToString(rawSignature) != signature {
 		return domain.ErrSignatureInvalid
 	}
 	if !ed25519.Verify(publicKey, []byte(digest), rawSignature) {

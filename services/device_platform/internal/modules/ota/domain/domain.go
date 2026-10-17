@@ -2,7 +2,9 @@
 package domain
 
 import (
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"net/url"
@@ -71,8 +73,11 @@ var (
 	versionPattern = regexp.MustCompile(
 		`^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`,
 	)
-	sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	base64Pattern = regexp.MustCompile(`^[A-Za-z0-9+/]+={0,2}$`)
+	sha256Pattern         = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	base64Pattern         = regexp.MustCompile(`^[A-Za-z0-9+/]+={0,2}$`)
+	signatureKeyIDPattern = regexp.MustCompile(
+		`^[A-Za-z0-9._:-]{1,64}$`,
+	)
 )
 
 // Channel is the release audience channel.
@@ -649,8 +654,7 @@ func ValidateRelease(release *Release) error {
 		!ValidSHA256(release.SHA256) ||
 		release.SizeBytes <= 0 ||
 		release.SizeBytes > 512*1024*1024 ||
-		release.SignatureKeyID == "" ||
-		len(release.SignatureKeyID) > 128 ||
+		!ValidSignatureKeyID(release.SignatureKeyID) ||
 		!ValidSignatureAlgorithm(release.SignatureAlgorithm) ||
 		!ValidSignature(release.Signature) ||
 		len([]rune(release.ReleaseNotes)) > 4000 ||
@@ -663,9 +667,31 @@ func ValidateRelease(release *Release) error {
 	return nil
 }
 
+// ValidSignatureKeyID reports whether a key identifier is accepted by both the
+// platform and the firmware manifest parser.
+func ValidSignatureKeyID(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && signatureKeyIDPattern.MatchString(value)
+}
+
+// ValidEd25519Signature reports whether a detached signature has the exact
+// canonical standard Base64 form of one 64-byte Ed25519 signature. Cryptographic
+// verification still happens against the trusted keyring before publication.
+func ValidEd25519Signature(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) != 88 ||
+		!base64Pattern.MatchString(value) {
+		return false
+	}
+	raw, err := base64.StdEncoding.Strict().DecodeString(value)
+	return err == nil &&
+		len(raw) == ed25519.SignatureSize &&
+		base64.StdEncoding.EncodeToString(raw) == value
+}
+
 // ValidSignature reports whether a detached signature is a bounded-base64
-// value. Cryptographic verification happens against the trusted keyring before
-// publication, because a regex cannot prove authenticity.
+// value. Draft manifests may retain legacy placeholder signatures, but
+// publishing requires ValidEd25519Signature.
 func ValidSignature(value string) bool {
 	value = strings.TrimSpace(value)
 	return value != "" &&
@@ -720,12 +746,7 @@ func ValidateEvent(event *Event) error {
 // ValidSignatureAlgorithm reports whether a firmware signature algorithm is
 // supported. The private key is never part of the manifest.
 func ValidSignatureAlgorithm(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "ed25519":
-		return true
-	default:
-		return false
-	}
+	return strings.TrimSpace(value) == "ed25519"
 }
 
 func isHTTPSArtifactURL(value string) bool {

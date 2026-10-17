@@ -450,7 +450,7 @@ func validReleaseInput() domain.ReleaseInput {
 		SizeBytes:          1024,
 		SignatureKeyID:     "firmware-prod-2026",
 		SignatureAlgorithm: "ed25519",
-		Signature:          "c2lnbmF0dXJl",
+		Signature:          strings.Repeat("A", 86) + "==",
 		RollbackAllowed:    true,
 		Target: domain.Target{
 			Scope: domain.TargetScopeAll,
@@ -495,6 +495,58 @@ func TestCreateReleaseDraftValidatesManifest(t *testing.T) {
 	) {
 		t.Fatalf("expected invalid signature rejection, got %v", err)
 	}
+
+	input = validReleaseInput()
+	input.SignatureAlgorithm = "ED25519"
+	if _, err := service.CreateReleaseDraft(context.Background(), input); !errors.Is(
+		err,
+		domain.ErrInvalidRelease,
+	) {
+		t.Fatalf("expected strict algorithm rejection, got %v", err)
+	}
+
+	input = validReleaseInput()
+	input.SignatureKeyID = strings.Repeat("k", 65)
+	if _, err := service.CreateReleaseDraft(context.Background(), input); !errors.Is(
+		err,
+		domain.ErrInvalidRelease,
+	) {
+		t.Fatalf("expected oversized key id rejection, got %v", err)
+	}
+}
+
+func TestValidEd25519SignatureRequiresCanonicalEncoding(t *testing.T) {
+	canonical := strings.Repeat("A", 86) + "=="
+	if !domain.ValidEd25519Signature(canonical) {
+		t.Fatal("canonical 64-byte signature must be accepted")
+	}
+	for _, invalid := range []string{
+		"",
+		strings.Repeat("A", 86),
+		strings.Repeat("A", 87) + "=",
+		strings.Repeat("A", 88),
+		strings.Repeat("A", 85) + "===",
+		strings.Repeat("A", 85) + "+=",
+	} {
+		if domain.ValidEd25519Signature(invalid) {
+			t.Fatalf("non-canonical signature %q was accepted", invalid)
+		}
+	}
+}
+
+func TestEd25519KeyringRejectsInvalidKeyIDs(t *testing.T) {
+	publicKey := "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo="
+	for _, keyring := range []string{
+		`{" key":"` + publicKey + `"}`,
+		`{"key ":"` + publicKey + `"}`,
+		`{"": "` + publicKey + `"}`,
+		`{"` + strings.Repeat("k", 65) + `":"` + publicKey + `"}`,
+		`{"bad/key":"` + publicKey + `"}`,
+	} {
+		if _, err := NewEd25519KeyringVerifier(keyring); err == nil {
+			t.Fatalf("invalid keyring %q was accepted", keyring)
+		}
+	}
 }
 
 func TestReleaseStateMachineAndOptimisticConflict(t *testing.T) {
@@ -529,6 +581,47 @@ func TestReleaseStateMachineAndOptimisticConflict(t *testing.T) {
 		1,
 	); !errors.Is(err, domain.ErrReleaseVersionConflict) {
 		t.Fatalf("expected release version conflict, got %v", err)
+	}
+}
+
+func TestPublishReleaseRejectsPlaceholderSignature(t *testing.T) {
+	repository := newFakeRepository()
+	service, err := New(Options{
+		Repository: repository,
+		Verifier:   acceptingVerifier{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	repository.releases["release-placeholder"] = &domain.Release{
+		ID:                 "release-placeholder",
+		Version:            "1.2.3",
+		Channel:            domain.ChannelStable,
+		HardwareRevision:   "sprout-v1",
+		MinSourceVersion:   "1.0.0",
+		ArtifactURL:        "https://download.clarkhub.cn/firmware/1.2.3.bin",
+		ArtifactKey:        "firmware/1.2.3.bin",
+		SHA256:             strings.Repeat("a", 64),
+		SizeBytes:          1024,
+		SignatureKeyID:     "firmware-prod-2026",
+		SignatureAlgorithm: "ed25519",
+		Signature:          "base64-signature",
+		SignatureStatus:    domain.SignatureStatusPending,
+		RollbackAllowed:    true,
+		Status:             domain.ReleaseStatusDraft,
+		Target:             domain.Target{Scope: domain.TargetScopeAll},
+		RecordVersion:      1,
+		CreatedBy:          "admin-1",
+		UpdatedBy:          "admin-1",
+	}
+	if _, err := service.PublishRelease(
+		context.Background(),
+		"release-placeholder",
+		"admin-1",
+		1,
+	); !errors.Is(err, domain.ErrSignatureInvalid) {
+		t.Fatalf("expected placeholder signature rejection, got %v", err)
 	}
 }
 

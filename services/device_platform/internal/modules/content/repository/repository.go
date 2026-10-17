@@ -75,10 +75,7 @@ type Repository interface {
 		limit int,
 		now time.Time,
 	) (domain.PlayRecord, error)
-	ListPlayHistory(
-		ctx context.Context,
-		query domain.PlayHistoryQuery,
-	) ([]domain.PlayRecord, error)
+	ListPlayHistory(ctx context.Context, query domain.PlayHistoryQuery) ([]domain.PlayRecord, error)
 	ListThemePacks(
 		ctx context.Context,
 		query domain.ThemePackQuery,

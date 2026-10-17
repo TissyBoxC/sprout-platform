@@ -1355,6 +1355,7 @@ func (repository *memoryRepository) RecordPlayback(
 	}
 	record := domain.PlayRecord{
 		ID:             fmt.Sprintf("play-%d", len(repository.history)+1),
+		FamilyID:       input.FamilyID,
 		DeviceID:       input.DeviceID,
 		PackageID:      input.PackageID,
 		PackageVersion: input.PackageVersion,
@@ -1366,7 +1367,7 @@ func (repository *memoryRepository) RecordPlayback(
 	perDevice := 0
 	kept := make([]domain.PlayRecord, 0, len(repository.history))
 	for _, item := range repository.history {
-		if item.DeviceID == input.DeviceID {
+		if item.FamilyID == input.FamilyID && item.DeviceID == input.DeviceID {
 			perDevice++
 			if perDevice > limit {
 				continue
@@ -1390,7 +1391,7 @@ func (repository *memoryRepository) ListPlayHistory(
 	}
 	records := make([]domain.PlayRecord, 0)
 	for _, item := range repository.history {
-		if item.DeviceID != query.DeviceID {
+		if item.FamilyID != query.FamilyID || item.DeviceID != query.DeviceID {
 			continue
 		}
 		records = append(records, item)
@@ -1645,6 +1646,7 @@ func TestRecordPlaybackValidatesAndBounds(t *testing.T) {
 	if _, err := service.RecordPlayback(
 		context.Background(),
 		domain.PlayRecordInput{
+			FamilyID:       "family_test_001",
 			DeviceID:       "sprout_device_001",
 			PackageID:      published.PackageID,
 			PackageVersion: published.PackageVersion,
@@ -1658,6 +1660,7 @@ func TestRecordPlaybackValidatesAndBounds(t *testing.T) {
 	if _, err := service.RecordPlayback(
 		context.Background(),
 		domain.PlayRecordInput{
+			FamilyID:       "family_test_001",
 			DeviceID:       "sprout_device_001",
 			PackageID:      published.PackageID,
 			PackageVersion: published.PackageVersion,
@@ -1673,6 +1676,7 @@ func TestRecordPlaybackValidatesAndBounds(t *testing.T) {
 		if _, err := service.RecordPlayback(
 			context.Background(),
 			domain.PlayRecordInput{
+				FamilyID:       "family_test_001",
 				DeviceID:       "sprout_device_001",
 				PackageID:      published.PackageID,
 				PackageVersion: published.PackageVersion,
@@ -1685,6 +1689,7 @@ func TestRecordPlaybackValidatesAndBounds(t *testing.T) {
 	}
 	history, err := service.ListPlayHistory(
 		context.Background(),
+		"family_test_001",
 		"sprout_device_001",
 		200,
 	)
@@ -1710,6 +1715,7 @@ func TestListPlayHistoryForParentMergesOwnedDevices(t *testing.T) {
 		if _, err := service.RecordPlayback(
 			context.Background(),
 			domain.PlayRecordInput{
+				FamilyID:       "family_test_001",
 				DeviceID:       deviceID,
 				PackageID:      published.PackageID,
 				PackageVersion: published.PackageVersion,
@@ -1729,6 +1735,7 @@ func TestListPlayHistoryForParentMergesOwnedDevices(t *testing.T) {
 	// excluded even though it has history rows.
 	merged, err := service.ListPlayHistoryForParent(
 		context.Background(),
+		"family_test_001",
 		[]string{"sprout_device_001", "sprout_device_002"},
 		50,
 	)
@@ -1751,6 +1758,7 @@ func TestListPlayHistoryForParentMergesOwnedDevices(t *testing.T) {
 	// The limit caps the merged result.
 	capped, err := service.ListPlayHistoryForParent(
 		context.Background(),
+		"family_test_001",
 		[]string{"sprout_device_001", "sprout_device_002"},
 		2,
 	)
@@ -1762,12 +1770,66 @@ func TestListPlayHistoryForParentMergesOwnedDevices(t *testing.T) {
 	}
 
 	// A guardian with no bound devices sees an empty, non-nil list.
-	empty, err := service.ListPlayHistoryForParent(context.Background(), nil, 50)
+	empty, err := service.ListPlayHistoryForParent(
+		context.Background(),
+		"family_test_001",
+		nil,
+		50,
+	)
 	if err != nil {
 		t.Fatalf("merge empty history: %v", err)
 	}
 	if empty == nil || len(empty) != 0 {
 		t.Fatalf("empty history = %v, want empty slice", empty)
+	}
+}
+
+func TestPlayHistoryCannotCrossFamilyAfterDeviceRebind(t *testing.T) {
+	repository := newMemoryRepository()
+	service := newContentService(t, repository, validAssetReader())
+	published := publishPackage(t, service, validMetadata())
+	record := func(familyID string, seconds int) {
+		t.Helper()
+		if _, err := service.RecordPlayback(
+			context.Background(),
+			domain.PlayRecordInput{
+				FamilyID:       familyID,
+				DeviceID:       "sprout_device_001",
+				PackageID:      published.PackageID,
+				PackageVersion: published.PackageVersion,
+				Outcome:        domain.PlayOutcomeCompleted,
+				PlayedSeconds:  seconds,
+			},
+		); err != nil {
+			t.Fatalf("record playback for %s: %v", familyID, err)
+		}
+	}
+	record("family_original_001", 7)
+	record("family_new_001", 3)
+
+	original, err := service.ListPlayHistory(
+		context.Background(),
+		"family_original_001",
+		"sprout_device_001",
+		50,
+	)
+	if err != nil {
+		t.Fatalf("list original family history: %v", err)
+	}
+	if len(original) != 1 || original[0].PlayedSeconds != 7 {
+		t.Fatalf("original family history = %#v", original)
+	}
+	rebound, err := service.ListPlayHistory(
+		context.Background(),
+		"family_new_001",
+		"sprout_device_001",
+		50,
+	)
+	if err != nil {
+		t.Fatalf("list rebound family history: %v", err)
+	}
+	if len(rebound) != 1 || rebound[0].PlayedSeconds != 3 {
+		t.Fatalf("rebound family history = %#v", rebound)
 	}
 }
 

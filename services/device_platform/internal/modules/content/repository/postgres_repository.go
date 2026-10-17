@@ -846,13 +846,14 @@ func (r *PostgresRepository) RecordPlayback(
 	if err := transaction.QueryRow(
 		ctx,
 		`INSERT INTO content_play_history (
-		     id, device_id, package_id, package_version, outcome,
+		     id, family_id, device_id, package_id, package_version, outcome,
 		     played_seconds, played_at
 		 )
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
-		 RETURNING id, device_id, package_id, package_version, outcome,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 RETURNING id, family_id, device_id, package_id, package_version, outcome,
 		           played_seconds, played_at`,
 		recordID,
+		input.FamilyID,
 		input.DeviceID,
 		input.PackageID,
 		input.PackageVersion,
@@ -861,6 +862,7 @@ func (r *PostgresRepository) RecordPlayback(
 		now,
 	).Scan(
 		&stored.ID,
+		&stored.FamilyID,
 		&stored.DeviceID,
 		&stored.PackageID,
 		&stored.PackageVersion,
@@ -873,13 +875,16 @@ func (r *PostgresRepository) RecordPlayback(
 	if _, err := transaction.Exec(
 		ctx,
 		`DELETE FROM content_play_history
-		 WHERE device_id = $1
+		 WHERE family_id = $1
+		   AND device_id = $2
 		   AND id NOT IN (
 		       SELECT id FROM content_play_history
-		       WHERE device_id = $1
+		       WHERE family_id = $1
+		         AND device_id = $2
 		       ORDER BY played_at DESC, id DESC
-		       LIMIT $2
+		       LIMIT $3
 		   )`,
+		input.FamilyID,
 		input.DeviceID,
 		limit,
 	); err != nil {
@@ -891,7 +896,7 @@ func (r *PostgresRepository) RecordPlayback(
 	return stored, nil
 }
 
-// ListPlayHistory returns the bounded, newest-first history for one device.
+// ListPlayHistory returns bounded history for one family-owned device.
 func (r *PostgresRepository) ListPlayHistory(
 	ctx context.Context,
 	query domain.PlayHistoryQuery,
@@ -902,12 +907,14 @@ func (r *PostgresRepository) ListPlayHistory(
 	}
 	rows, err := r.pool.Query(
 		ctx,
-		`SELECT id, device_id, package_id, package_version, outcome,
+		`SELECT id, family_id, device_id, package_id, package_version, outcome,
 		        played_seconds, played_at
 		 FROM content_play_history
-		 WHERE device_id = $1
+		 WHERE family_id = $1
+		   AND device_id = $2
 		 ORDER BY played_at DESC, id DESC
-		 LIMIT $2`,
+		 LIMIT $3`,
+		query.FamilyID,
 		query.DeviceID,
 		limit,
 	)
@@ -920,6 +927,7 @@ func (r *PostgresRepository) ListPlayHistory(
 		var record domain.PlayRecord
 		if err := rows.Scan(
 			&record.ID,
+			&record.FamilyID,
 			&record.DeviceID,
 			&record.PackageID,
 			&record.PackageVersion,

@@ -538,6 +538,10 @@ func (s *Service) RecordPlayback(
 	ctx context.Context,
 	input domain.PlayRecordInput,
 ) (domain.PlayRecord, error) {
+	input.FamilyID = strings.TrimSpace(input.FamilyID)
+	if input.FamilyID == "" {
+		return domain.PlayRecord{}, domain.ErrInvalidMetadata
+	}
 	normalized, err := domain.ValidatePlayRecord(input)
 	if err != nil {
 		return domain.PlayRecord{}, err
@@ -553,14 +557,20 @@ func (s *Service) RecordPlayback(
 // ListPlayHistory returns the bounded, newest-first history for one device.
 func (s *Service) ListPlayHistory(
 	ctx context.Context,
+	familyID string,
 	deviceID string,
 	limit int,
 ) ([]domain.PlayRecord, error) {
+	familyID = strings.TrimSpace(familyID)
+	if familyID == "" {
+		return nil, domain.ErrInvalidMetadata
+	}
 	deviceID = strings.TrimSpace(deviceID)
 	if deviceID == "" {
 		return nil, domain.ErrInvalidMetadata
 	}
 	records, err := s.repository.ListPlayHistory(ctx, domain.PlayHistoryQuery{
+		FamilyID: familyID,
 		DeviceID: deviceID,
 		Limit:    limit,
 	})
@@ -710,9 +720,14 @@ func normalizeThemePack(pack *domain.ThemePack) {
 // per-device history, capping the merged result at the requested limit.
 func (s *Service) ListPlayHistoryForParent(
 	ctx context.Context,
+	familyID string,
 	deviceIDs []string,
 	limit int,
 ) ([]domain.PlayRecord, error) {
+	familyID = strings.TrimSpace(familyID)
+	if familyID == "" {
+		return nil, domain.ErrInvalidMetadata
+	}
 	if limit < 1 || limit > 200 {
 		limit = 50
 	}
@@ -723,6 +738,7 @@ func (s *Service) ListPlayHistoryForParent(
 			continue
 		}
 		records, err := s.repository.ListPlayHistory(ctx, domain.PlayHistoryQuery{
+			FamilyID: familyID,
 			DeviceID: deviceID,
 			Limit:    limit,
 		})

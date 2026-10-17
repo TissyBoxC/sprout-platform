@@ -123,6 +123,7 @@ type FavoriteView struct {
 // PlayRecord is one bounded device playback history row.
 type PlayRecord struct {
 	ID             string      `json:"id"`
+	FamilyID       string      `json:"-"`
 	DeviceID       string      `json:"device_id"`
 	PackageID      string      `json:"package_id"`
 	PackageVersion int         `json:"package_version"`
@@ -133,6 +134,7 @@ type PlayRecord struct {
 
 // PlayRecordInput is the validated payload for recording one playback event.
 type PlayRecordInput struct {
+	FamilyID       string
 	DeviceID       string
 	PackageID      string
 	PackageVersion int
@@ -142,6 +144,7 @@ type PlayRecordInput struct {
 
 // PlayHistoryQuery bounds a device history read.
 type PlayHistoryQuery struct {
+	FamilyID string
 	DeviceID string
 	Limit    int
 }

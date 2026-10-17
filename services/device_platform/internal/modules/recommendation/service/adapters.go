@@ -126,7 +126,11 @@ func (reader ContentSignalReader) recentRecords(
 	for _, deviceID := range deviceIDs {
 		deviceRecords, err := reader.Repository.ListPlayHistory(
 			ctx,
-			contentdomain.PlayHistoryQuery{DeviceID: deviceID, Limit: MaxLimit},
+			contentdomain.PlayHistoryQuery{
+				FamilyID: familyID,
+				DeviceID: deviceID,
+				Limit:    MaxLimit,
+			},
 		)
 		if err != nil {
 			return nil, err

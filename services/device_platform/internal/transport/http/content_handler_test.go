@@ -856,6 +856,7 @@ func TestGuardianPlayHistoryMergesOwnedDevices(t *testing.T) {
 		if _, err := service.RecordPlayback(
 			context.Background(),
 			contentdomain.PlayRecordInput{
+				FamilyID:       "parent-001",
 				DeviceID:       deviceID,
 				PackageID:      "content_story_001",
 				PackageVersion: 1,
@@ -917,6 +918,20 @@ func TestGuardianPlayHistoryMergesOwnedDevices(t *testing.T) {
 		if item.DeviceID == "sprout_device_009" {
 			t.Fatalf("history leaked unowned device: %s", recorder.Body.String())
 		}
+	}
+	otherAccount := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/content/play-history",
+		nil,
+	).WithContext(context.WithValue(
+		context.Background(),
+		authenticatedAccountKey{},
+		"parent-002",
+	))
+	recorder = httptest.NewRecorder()
+	handler.listPlayHistoryForGuardian(recorder, otherAccount)
+	if recorder.Code != http.StatusOK || len(decodeHistory(recorder.Body.Bytes())) != 0 {
+		t.Fatalf("history crossed family scope: %s", recorder.Body.String())
 	}
 
 	// A device filter narrows to a single owned device.
@@ -1135,6 +1150,7 @@ func (repository *contentTestRepository) RecordPlayback(
 	}
 	record := contentdomain.PlayRecord{
 		ID:             fmt.Sprintf("play-%d", len(repository.history)+1),
+		FamilyID:       input.FamilyID,
 		DeviceID:       input.DeviceID,
 		PackageID:      input.PackageID,
 		PackageVersion: input.PackageVersion,
@@ -1145,7 +1161,7 @@ func (repository *contentTestRepository) RecordPlayback(
 	repository.history = append([]contentdomain.PlayRecord{record}, repository.history...)
 	deviceRecords := make([]contentdomain.PlayRecord, 0, len(repository.history))
 	for _, item := range repository.history {
-		if item.DeviceID == input.DeviceID {
+		if item.FamilyID == input.FamilyID && item.DeviceID == input.DeviceID {
 			deviceRecords = append(deviceRecords, item)
 		}
 	}
@@ -1154,7 +1170,7 @@ func (repository *contentTestRepository) RecordPlayback(
 	}
 	kept := make([]contentdomain.PlayRecord, 0, len(repository.history))
 	for _, item := range repository.history {
-		if item.DeviceID != input.DeviceID {
+		if item.FamilyID != input.FamilyID || item.DeviceID != input.DeviceID {
 			kept = append(kept, item)
 		}
 	}
@@ -1174,7 +1190,7 @@ func (repository *contentTestRepository) ListPlayHistory(
 	}
 	records := make([]contentdomain.PlayRecord, 0)
 	for _, item := range repository.history {
-		if item.DeviceID != query.DeviceID {
+		if item.FamilyID != query.FamilyID || item.DeviceID != query.DeviceID {
 			continue
 		}
 		records = append(records, item)

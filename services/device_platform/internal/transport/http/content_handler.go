@@ -782,6 +782,7 @@ func (handler contentHandler) listPlayHistoryForGuardian(
 	}
 	records, err := handler.service.ListPlayHistoryForParent(
 		request.Context(),
+		accountID,
 		deviceIDs,
 		limit,
 	)
@@ -809,7 +810,8 @@ func (handler deviceContentHandler) recordPlayback(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	if _, ok := handler.verifyDeviceFamily(response, request); !ok {
+	familyID, ok := handler.verifyDeviceFamily(response, request)
+	if !ok {
 		return
 	}
 	var payload recordPlaybackRequest
@@ -820,6 +822,7 @@ func (handler deviceContentHandler) recordPlayback(
 	record, err := handler.contentHandler.service.RecordPlayback(
 		request.Context(),
 		contentdomain.PlayRecordInput{
+			FamilyID:       familyID,
 			DeviceID:       strings.TrimSpace(request.PathValue("device_id")),
 			PackageID:      payload.PackageID,
 			PackageVersion: payload.PackageVersion,
@@ -841,7 +844,8 @@ func (handler deviceContentHandler) listPlayHistory(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	if _, ok := handler.verifyDeviceFamily(response, request); !ok {
+	familyID, ok := handler.verifyDeviceFamily(response, request)
+	if !ok {
 		return
 	}
 	limit, err := contentPositiveInt(request.URL.Query().Get("limit"), 50)
@@ -851,6 +855,7 @@ func (handler deviceContentHandler) listPlayHistory(
 	}
 	records, err := handler.contentHandler.service.ListPlayHistory(
 		request.Context(),
+		familyID,
 		request.PathValue("device_id"),
 		limit,
 	)

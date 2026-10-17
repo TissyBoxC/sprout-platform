@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,6 +82,47 @@ func TestRecordHeartbeatRejectsUnknownDeviceAndBadMetrics(t *testing.T) {
 	input.PacketLossPercent = 101
 	if _, err := service.RecordHeartbeat(context.Background(), "session", input); err != domain.ErrInvalidHeartbeat {
 		t.Fatalf("expected invalid heartbeat for packet loss, got %v", err)
+	}
+}
+
+func TestRecordHeartbeatRejectsContradictoryOfflineState(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
+	repository := newMemoryRepository()
+	service, err := New(Options{
+		Repository:     repository,
+		BindingService: &memoryBindingReader{deviceID: "device_test_001"},
+		Clock:          fixedClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+	cases := map[string]func(*domain.HeartbeatInput){
+		"online fallback": func(input *domain.HeartbeatInput) {
+			input.FallbackActive = true
+		},
+		"online reason": func(input *domain.HeartbeatInput) {
+			input.OfflineReason = domain.OfflineReasonServiceUnavailable
+		},
+		"offline without reason": func(input *domain.HeartbeatInput) {
+			input.ConnectionState = domain.ConnectionStateOffline
+			input.OfflineState = domain.OfflineStateOffline
+			input.FallbackActive = true
+		},
+		"grace fallback": func(input *domain.HeartbeatInput) {
+			input.ConnectionState = domain.ConnectionStateConnecting
+			input.OfflineState = domain.OfflineStateGrace
+			input.OfflineReason = domain.OfflineReasonNetworkUnavailable
+			input.FallbackActive = true
+		},
+	}
+	for name, mutate := range cases {
+		input := validHeartbeatInput(now)
+		input.HeartbeatID = "heartbeat_" + strings.ReplaceAll(name, " ", "_")
+		mutate(&input)
+		if _, err := service.RecordHeartbeat(context.Background(), "session", input); err != domain.ErrInvalidHeartbeat {
+			t.Errorf("%s: expected invalid heartbeat, got %v", name, err)
+		}
 	}
 }
 

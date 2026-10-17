@@ -661,6 +661,19 @@ func validateHeartbeatMetrics(input domain.HeartbeatInput) error {
 	default:
 		return domain.ErrInvalidHeartbeat
 	}
+	if input.ConnectionState == domain.ConnectionStateOnline {
+		if input.OfflineState != domain.OfflineStateOnline ||
+			input.OfflineReason != domain.OfflineReasonNone ||
+			input.FallbackActive {
+			return domain.ErrInvalidHeartbeat
+		}
+	} else {
+		if input.OfflineState == domain.OfflineStateOnline ||
+			input.OfflineReason == domain.OfflineReasonNone ||
+			(input.OfflineState == domain.OfflineStateGrace && input.FallbackActive) {
+			return domain.ErrInvalidHeartbeat
+		}
+	}
 	switch input.Temperature {
 	case domain.TemperatureStateUnknown,
 		domain.TemperatureStateNormal,

@@ -52,7 +52,7 @@ fi
 required_ports="22 80 443 8883"
 for port in $required_ports; do
   if ! printf '%s\n' "$status" |
-    grep -Eq "^${port}/tcp[[:space:]]+ALLOW IN[[:space:]]+Anywhere"; then
+    grep -Eq "^${port}/tcp[[:space:]]+ALLOW( IN)?[[:space:]]+Anywhere"; then
     echo "UFW 未放行必需的 TCP 端口: $port" >&2
     exit 1
   fi
@@ -61,7 +61,7 @@ done
 forbidden_ports="1883 2022 8081 8082 8083 8084 8085 58976"
 for port in $forbidden_ports; do
   if printf '%s\n' "$status" |
-    grep -Eq "^${port}/tcp[[:space:]]+ALLOW IN[[:space:]]+Anywhere"; then
+    grep -Eq "^${port}/tcp[[:space:]]+ALLOW( IN)?[[:space:]]+Anywhere"; then
     echo "UFW 不应向公网放行端口: $port" >&2
     exit 1
   fi

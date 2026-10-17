@@ -94,6 +94,19 @@ check_service "sub2api" "sub2api" "http://127.0.0.1:8080/health"
 check_service "admin console" "admin_web" "http://127.0.0.1:8080/healthz"
 
 echo
+echo "== admin API proxy =="
+admin_api_status="$(
+  docker compose -f "$compose_file" --env-file "$env_file" exec -T admin_web \
+    wget -q -S -O /dev/null http://127.0.0.1:8080/api/v1/admin/service-versions 2>&1 |
+    awk '/^  HTTP\// {code=$2} END {print code}' || true
+)"
+if [ "$admin_api_status" != "401" ]; then
+  echo "admin API proxy should return 401 without credentials, got ${admin_api_status:-no response}" >&2
+  exit 1
+fi
+echo "admin API proxy reaches device_platform (401 unauthenticated)"
+
+echo
 echo "== device platform upgrade state access =="
 docker compose -f "$compose_file" --env-file "$env_file" \
   exec -T device_platform sh -c '

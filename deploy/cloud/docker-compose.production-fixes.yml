@@ -1,0 +1,17 @@
+# Runtime-only fixes for hosts that cannot immediately adopt a new release.
+#
+# This file is intentionally not a general deployment override. Copy it to
+# docker-compose.override.yml on the affected host, keep the repair script
+# outside the Git checkout, and rebuild only upgrade_worker. The normal
+# upgrade guard ignores docker-compose.override.yml and still rejects any
+# override that pins a managed service image.
+services:
+  upgrade_worker:
+    environment:
+      SPROUT_SERVICE_VERSION_GITHUB_CONNECT_TIMEOUT_SECONDS: "5"
+      SPROUT_SERVICE_VERSION_GITHUB_REQUEST_TIMEOUT_SECONDS: "15"
+    volumes:
+      - /opt/sprout-ops-backups/runtime-fixes/20261017/service-upgrade-worker.sh:/opt/sprout-runtime-fixes/service-upgrade-worker.sh:ro
+    command:
+      - "bash"
+      - "/opt/sprout-runtime-fixes/service-upgrade-worker.sh"

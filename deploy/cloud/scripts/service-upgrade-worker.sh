@@ -26,8 +26,11 @@ release_catalog_limit="${SPROUT_SERVICE_VERSION_RELEASE_CATALOG_LIMIT:-100}"
 release_catalog_retry_interval="${SPROUT_SERVICE_VERSION_RELEASE_CATALOG_RETRY_SECONDS:-30}"
 release_catalog_state_file="$root_dir/.releases-state"
 release_catalog_next_refresh_at=0
+release_catalog_fresh=0
 platform_repository="${SPROUT_UPGRADE_PLATFORM_REPOSITORY:-TissyBoxC/sprout-platform}"
 sub2api_repository="${SPROUT_UPGRADE_SUB2API_REPOSITORY:-TissyBoxC/sprout-sub2api-fork}"
+github_connect_timeout="${SPROUT_SERVICE_VERSION_GITHUB_CONNECT_TIMEOUT_SECONDS:-5}"
+github_request_timeout="${SPROUT_SERVICE_VERSION_GITHUB_REQUEST_TIMEOUT_SECONDS:-15}"
 
 service_ids="device_platform voice_gateway admin_web sub2api postgres redis mqtt download_init download_ftp download_http"
 upgrade_order="sub2api device_platform voice_gateway admin_web"
@@ -460,7 +463,8 @@ resolve_latest_release() {
     --silent
     --show-error
     --location
-    --max-time 20
+    --connect-timeout "$github_connect_timeout"
+    --max-time "$github_request_timeout"
     --header "Accept: application/vnd.github+json"
     --header "User-Agent: sprout-service-upgrade-worker"
   )
@@ -511,7 +515,8 @@ list_releases_for_repository() {
     --silent
     --show-error
     --location
-    --max-time 20
+    --connect-timeout "$github_connect_timeout"
+    --max-time "$github_request_timeout"
     --header "Accept: application/vnd.github+json"
     --header "User-Agent: sprout-service-upgrade-worker"
   )
@@ -558,7 +563,9 @@ annotate_releases_for_service() {
 
 write_release_catalog() {
   generated_at="$(iso_timestamp)"
+  release_catalog_fresh=0
   platform_releases="$(list_releases_for_repository "$platform_repository" "$release_catalog_limit")" || return 1
+  release_catalog_fresh=1
   sub2api_releases="$(list_releases_for_repository "$sub2api_repository" "$release_catalog_limit")" || return 1
 
   catalog_temp="$(mktemp "$root_dir/.releases.json.XXXXXX")"
@@ -640,6 +647,20 @@ write_status_snapshot() {
   status_temp="$(mktemp "$root_dir/.status.XXXXXX")"
   services_file="$(mktemp)"
   generated_at="$(iso_timestamp)"
+  catalog_fresh=0
+
+  # A release fetch failure must not stop this snapshot from becoming fresh.
+  # The console can keep showing the last known release while GitHub is
+  # temporarily unreachable, but the worker health probe still needs a current
+  # generated_at or Docker marks a functioning worker as unhealthy.
+  if [ "$force_refresh" = "1" ] || [ ! -s "$root_dir/releases.json" ] ||
+    [ "$(date +%s)" -ge "$release_catalog_next_refresh_at" ]; then
+    if refresh_release_catalog "$force_refresh"; then
+      catalog_fresh=1
+    fi
+  elif release_catalog_is_valid; then
+    catalog_fresh=1
+  fi
 
   for service in $service_ids; do
     current_version="$(read_running_image_tag "$service")"
@@ -652,7 +673,8 @@ write_status_snapshot() {
       display_name="$(service_display_name_fallback "$service")"
     fi
 
-    if is_managed_service "$service" && resolve_latest_release "$(service_repository "$service")" "$force_refresh"; then
+    if is_managed_service "$service" && [ "$catalog_fresh" -eq 1 ] &&
+      resolve_latest_release "$(service_repository "$service")" 0; then
       latest_version="$resolved_release_version"
       release_url="$resolved_release_url"
       if [ "$current_version" = "unknown" ] || ! validate_version "$current_version"; then
@@ -887,6 +909,8 @@ main() {
   validate_positive_integer "SPROUT_SERVICE_VERSION_RELEASE_CACHE_SECONDS" "$release_cache_ttl" 0 86400
   validate_positive_integer "SPROUT_SERVICE_VERSION_RELEASE_CATALOG_LIMIT" "$release_catalog_limit" 1 500
   validate_positive_integer "SPROUT_SERVICE_VERSION_RELEASE_CATALOG_RETRY_SECONDS" "$release_catalog_retry_interval" 5 3600
+  validate_positive_integer "SPROUT_SERVICE_VERSION_GITHUB_CONNECT_TIMEOUT_SECONDS" "$github_connect_timeout" 1 60
+  validate_positive_integer "SPROUT_SERVICE_VERSION_GITHUB_REQUEST_TIMEOUT_SECONDS" "$github_request_timeout" 5 120
   validate_positive_integer "SPROUT_SERVICE_VERSION_STATE_UID" "$state_uid" 0 4294967295
   validate_positive_integer "SPROUT_SERVICE_VERSION_STATE_GID" "$state_gid" 0 4294967295
 

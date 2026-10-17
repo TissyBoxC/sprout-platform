@@ -59,6 +59,26 @@ if ! printf '%s\n' "$resolve_latest_block" | grep -Eq 'cached_version'; then
   echo "resolve_latest_release 缺少 GitHub 失败时的缓存回退。" >&2
   exit 1
 fi
+if ! printf '%s\n' "$resolve_latest_block" | grep -Eq 'connect-timeout|max-time'; then
+  echo "resolve_latest_release 缺少有界网络超时。" >&2
+  exit 1
+fi
+
+release_catalog_block="$(
+  sed -n '/^write_release_catalog()/,/^}/p' "$worker_script"
+)"
+if ! printf '%s\n' "$release_catalog_block" | grep -Fq 'release_catalog_fresh=0'; then
+  echo "write_release_catalog 未区分刷新成功和保留旧目录。" >&2
+  exit 1
+fi
+
+status_snapshot_block="$(
+  sed -n '/^write_status_snapshot()/,/^}/p' "$worker_script"
+)"
+if ! printf '%s\n' "$status_snapshot_block" | grep -Fq 'catalog_fresh'; then
+  echo "write_status_snapshot 未区分目录新鲜度和单服务请求失败。" >&2
+  exit 1
+fi
 
 if ! grep -Eq '^platform_repository=' "$worker_script" ||
   ! grep -Eq '^sub2api_repository=' "$worker_script"; then
@@ -450,6 +470,12 @@ if ! grep -Fq 'status.json fresh' "$check_stack_script"; then
 fi
 if ! grep -Fq 'upgrade_worker' "$check_stack_script"; then
   echo "check-stack.sh 未检查升级 worker 容器。" >&2
+  exit 1
+fi
+if ! grep -Fq 'admin API proxy' "$check_stack_script" ||
+  ! grep -Fq '401' "$check_stack_script" ||
+  ! grep -Fq '/api/v1/admin/service-versions' "$check_stack_script"; then
+  echo "check-stack.sh 未验证管理员 API 的同源代理。" >&2
   exit 1
 fi
 

@@ -39,10 +39,10 @@ New profiles: skip
 
 To                         Action      From
 --                         ------      ----
-22/tcp                     ALLOW IN    Anywhere
-80/tcp                     ALLOW IN    Anywhere
-443/tcp                    ALLOW IN    Anywhere
-8883/tcp                   ALLOW IN    Anywhere
+22/tcp                     ALLOW       Anywhere
+80/tcp                     ALLOW       Anywhere
+443/tcp                    ALLOW       Anywhere
+8883/tcp                   ALLOW       Anywhere
 STATUS
 EOF
 chmod +x "$fixture_root/bin/ufw"
@@ -60,11 +60,11 @@ New profiles: skip
 
 To                         Action      From
 --                         ------      ----
-22/tcp                     ALLOW IN    Anywhere
-80/tcp                     ALLOW IN    Anywhere
-443/tcp                    ALLOW IN    Anywhere
-8883/tcp                   ALLOW IN    Anywhere
-58976/tcp                  ALLOW IN    Anywhere
+22/tcp                     ALLOW       Anywhere
+80/tcp                     ALLOW       Anywhere
+443/tcp                    ALLOW       Anywhere
+8883/tcp                   ALLOW       Anywhere
+58976/tcp                  ALLOW       Anywhere
 STATUS
 EOF
 chmod +x "$fixture_root/bin/ufw"

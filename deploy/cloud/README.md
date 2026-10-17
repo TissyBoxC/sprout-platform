@@ -235,6 +235,20 @@ send_timeout 3600s;
 
 管理端镜像已内置 `/api/` 同源代理，不需要为管理端再单独配置 API 路径。
 
+Sub2API 和语音 WebSocket 都依赖关闭代理缓冲和长连接超时。部署仓库提供
+只读审计和幂等修复：
+
+```bash
+./scripts/audit-1panel-streaming-proxy.sh
+./scripts/audit-1panel-streaming-proxy.sh --apply
+```
+
+第二条命令会先备份受影响的 `proxy/root.conf` 和站点配置文件，再补齐
+`proxy_buffering off`、`proxy_request_buffering off`、3600 秒读写超时和
+WebSocket `Connection: upgrade`，并通过当前 OpenResty 容器执行
+`openresty -t` 和 reload；校验失败会自动回滚。修复后应确认
+`https://sub.clarkhub.cn/`、语音健康检查和 `/internal/` 公网拒绝仍正常。
+
 `api.clarkhub.cn` 还要承载发布流水线的文件上传，单个 APK 体积远大于 Nginx
 默认的 1 MB 请求体上限。如果只配置普通反向代理，上传会在 TLS 握手后被
 连接重置，`SPROUT_RELEASE_UPLOAD_TOKEN` 正确也无法成功。
@@ -616,6 +630,13 @@ docker compose down -v
 `voice_gateway`、`admin_web` 或 `sub2api` 的 `image`，升级脚本会直接拒绝，
 因为这种情况下重建容器可能仍然使用本地旧镜像。需要长期调整时，应把变更提交
 到发布仓库，而不是保留服务器上的本地覆盖。
+
+如果生产需要临时运行未发布的 worker 修复，可把修复脚本放在 Git checkout
+之外，再使用 `docker-compose.production-fixes.yml` 作为模板生成
+`docker-compose.override.yml`。该 override 只覆盖 `upgrade_worker` 的启动
+脚本和超时变量，不覆盖任何受管服务镜像；升级门禁会允许它，同时仍会拒绝
+受管镜像覆盖。确认修复进入正式发布并完成升级后，再删除 override 和
+`/opt/sprout-runtime-fixes/` 下的临时脚本。
 
 管理端把共享状态写入 `SPROUT_SERVICE_VERSION_STATE_DIR`，默认是命名卷
 `sprout_upgrade_data` 内的 `/var/lib/sprout-upgrades`。该目录同时挂载给

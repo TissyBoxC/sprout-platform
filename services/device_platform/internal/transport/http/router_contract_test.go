@@ -80,6 +80,7 @@ func documentedOpenAPIRoutes(t *testing.T) map[string]bool {
 	inPaths := false
 	currentPath := ""
 	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSuffix(line, "\r")
 		switch {
 		case line == "paths:":
 			inPaths = true

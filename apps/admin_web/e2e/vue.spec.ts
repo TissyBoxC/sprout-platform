@@ -15,6 +15,32 @@ async function useAdminSession(page: Page): Promise<void> {
             email: 'admin@sprout.local',
             display_name: '管理员',
             role: 'admin',
+            admin_permissions: [
+              'admins.read',
+              'admins.manage',
+              'devices.read',
+              'devices.manage',
+              'family.read',
+              'family.manage',
+              'ai_accounts.read',
+              'ai_accounts.manage',
+              'ota.read',
+              'ota.manage',
+              'storage.read',
+              'storage.manage',
+              'content.read',
+              'content.review',
+              'service.read',
+              'service.upgrade',
+              'feature_center.read',
+              'feature_center.manage',
+              'settings.read',
+              'settings.manage',
+              'notifications.read',
+              'notifications.manage',
+              'stats.read',
+              'audit.read',
+            ],
           },
         },
       }),
@@ -639,10 +665,10 @@ test('checks and upgrades brand services from the service version page', async (
   await expect(page.getByRole('heading', { name: '服务版本' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '全部服务' })).toBeVisible()
   await expect(page.locator('table')).toHaveCount(1)
-  await expect(page.locator('table tbody tr')).toHaveCount(10)
+  await expect(page.locator('table tbody tr')).toHaveCount(9)
   await expect(page.locator('.time-value')).toHaveText(/2026/)
   await expect(page.getByText('只读服务')).toHaveCount(0)
-  await expect(page.getByText('管理端自身')).toBeVisible()
+  await expect(page.getByText('管理端自身', { exact: true })).toBeVisible()
   await expect(page.getByText('固定镜像，由部署配置统一维护').first()).toBeVisible()
   await expect(page.getByText('管理端自身升级时，页面会短暂重载，完成后自动恢复')).toBeVisible()
   await expect(page.getByText('0.9.0', { exact: true }).first()).toBeVisible()
@@ -662,7 +688,10 @@ test('checks and upgrades brand services from the service version page', async (
   )
 
   await expect(page.getByLabel('品牌管理端版本')).toHaveValue('0.9.1')
-  await page.getByRole('button', { name: '升级到 0.9.1' }).click()
+  await page
+    .getByRole('row', { name: /品牌管理端/ })
+    .getByRole('button', { name: '升级到 0.9.1' })
+    .click()
 
   await expect(page.getByText('品牌管理端 的升级已开始。')).toBeVisible()
   await expect(page.getByRole('button', { name: '查看进度' })).toBeVisible()

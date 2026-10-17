@@ -218,7 +218,8 @@ class ContentLibraryController extends AsyncNotifier<ContentLibraryState> {
     );
 
     final fetched = <String, ContentPackage>{
-      for (final package in _remoteCatalog) package.packageId: package,
+      if (!fullRefresh)
+        for (final package in _remoteCatalog) package.packageId: package,
       for (final package in catalog.packages) package.packageId: package,
     };
     _remoteCatalog = fetched.values.toList(growable: false);

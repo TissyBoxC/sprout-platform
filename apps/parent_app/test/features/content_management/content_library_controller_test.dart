@@ -68,6 +68,43 @@ void main() {
       expect(index.packages, isEmpty);
     },
   );
+
+  test('replaces the remote catalog when the age filter changes', () async {
+    final supportDirectory = await Directory.systemTemp.createTemp(
+      'sprout-content-filter-test-',
+    );
+    addTearDown(() async {
+      if (await supportDirectory.exists()) {
+        await supportDirectory.delete(recursive: true);
+      }
+    });
+    final store = ContentLibraryStore(
+      supportDirectory: () async => supportDirectory,
+      temporaryDirectory: () async => supportDirectory,
+    );
+    final api = _FilteringContentManagementApi();
+    final container = ProviderContainer(
+      overrides: [
+        contentManagementApiProvider.overrideWithValue(api),
+        contentLibraryStoreProvider.overrideWithValue(store),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(contentLibraryControllerProvider.future);
+    final controller = container.read(
+      contentLibraryControllerProvider.notifier,
+    );
+    await controller.applyFilter(
+      const ContentLibraryFilter(ageTier: ContentAgeTier.age5to6),
+    );
+    await controller.refresh();
+
+    final state = container.read(contentLibraryControllerProvider).value;
+    expect(state?.entries.map((entry) => entry.package.packageId), ['age_5_6']);
+    expect(api.lastAgeTier, ContentAgeTier.age5to6);
+    expect(api.sinceRevisions.last, 1);
+  });
 }
 
 class _FakeContentManagementApi implements ContentManagementApi {
@@ -112,4 +149,76 @@ class _FakeContentManagementApi implements ContentManagementApi {
     int limit = 8,
     List<String> excludePackageIds = const <String>[],
   }) async => const <ContentRecommendation>[];
+}
+
+class _FilteringContentManagementApi implements ContentManagementApi {
+  ContentAgeTier? lastAgeTier;
+  final List<int> sinceRevisions = [];
+
+  @override
+  Future<ContentCatalog> fetchCatalog({
+    required int sinceRevision,
+    ContentAgeTier? ageTier,
+    ContentCategory? category,
+  }) async {
+    lastAgeTier = ageTier;
+    sinceRevisions.add(sinceRevision);
+    final packages = ageTier == null
+        ? [
+            _contentPackage('age_3_4', const [ContentAgeTier.age3to4]),
+          ]
+        : [
+            _contentPackage('age_5_6', const [ContentAgeTier.age5to6]),
+          ];
+    return ContentCatalog(
+      catalogRevision: sinceRevision + 1,
+      packages: packages,
+      withdrawnPackageIds: const [],
+    );
+  }
+
+  @override
+  Future<ContentDownloadSpec> fetchDownloadSpec(String packageId) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<List<ContentFavorite>> fetchFavorites() async => const [];
+
+  @override
+  Future<void> addFavorite(String packageId) async {}
+
+  @override
+  Future<void> removeFavorite(String packageId) async {}
+
+  @override
+  Future<List<ContentPlayRecord>> fetchPlayHistory({String? deviceId}) async =>
+      const [];
+
+  @override
+  Future<List<ContentThemePack>> fetchThemePacks() async => const [];
+
+  @override
+  Future<List<ContentRecommendation>> fetchRecommendations({
+    ContentAgeTier? ageTier,
+    int limit = 8,
+    List<String> excludePackageIds = const <String>[],
+  }) async => const [];
+}
+
+ContentPackage _contentPackage(
+  String packageId,
+  List<ContentAgeTier> ageTiers,
+) {
+  return ContentPackage(
+    packageId: packageId,
+    packageVersion: 1,
+    title: packageId,
+    category: ContentCategory.story,
+    ageTiers: ageTiers,
+    assetKey: packageId,
+    sha256: 'a' * 64,
+    sizeBytes: 1024,
+    publishedAt: DateTime.utc(2026, 10, 8),
+  );
 }

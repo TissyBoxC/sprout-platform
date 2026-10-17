@@ -2,6 +2,8 @@ import base64
 import contextlib
 import io
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -107,6 +109,59 @@ class SignOtaArtifactTest(unittest.TestCase):
             with mock.patch("sys.argv", ["sign_ota_artifact.py", *arguments]):
                 with self.assertRaises(FileExistsError):
                     sign_ota_artifact.main()
+
+    def test_command_line_executable_publishes_public_key(self) -> None:
+        private_key = Ed25519PrivateKey.generate()
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            artifact = root / "firmware.bin"
+            key_path = root / "signing.pem"
+            output_path = root / "manifest.json"
+            artifact.write_bytes(b"firmware")
+            key_path.write_bytes(
+                private_key.private_bytes(
+                    serialization.Encoding.PEM,
+                    serialization.PrivateFormat.PKCS8,
+                    serialization.NoEncryption(),
+                )
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(sign_ota_artifact.__file__).resolve()),
+                    "--artifact",
+                    str(artifact),
+                    "--private-key",
+                    str(key_path),
+                    "--signature-key-id",
+                    "release-key-1",
+                    "--release-id",
+                    "ota_release_cli_executable",
+                    "--firmware-version",
+                    "1.2.3",
+                    "--hardware-revision",
+                    "esp32s3",
+                    "--artifact-key",
+                    "firmware.bin",
+                    "--artifact-url",
+                    "https://download.example.com/firmware.bin",
+                    "--output",
+                    str(output_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            result = json.loads(completed.stdout)
+            expected_public_key = base64.b64encode(
+                private_key.public_key().public_bytes(
+                    serialization.Encoding.Raw,
+                    serialization.PublicFormat.Raw,
+                )
+            ).decode("ascii")
+            self.assertEqual(result["public_key"], expected_public_key)
+            self.assertEqual(result["manifest"], str(output_path.resolve()))
+            self.assertTrue(output_path.is_file())
 
 
 if __name__ == "__main__":

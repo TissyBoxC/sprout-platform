@@ -25,9 +25,7 @@ SET status = 'archived',
 WHERE status = 'published'
   AND size_bytes NOT BETWEEN 1 AND 786432;
 
-DROP CONSTRAINT IF EXISTS content_package_versions_size_valid
-    ON content_package_versions;
-
 ALTER TABLE content_package_versions
+    DROP CONSTRAINT IF EXISTS content_package_versions_size_valid,
     ADD CONSTRAINT content_package_versions_size_valid
     CHECK (size_bytes BETWEEN 1 AND 786432);

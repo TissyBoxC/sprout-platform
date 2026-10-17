@@ -58,6 +58,10 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
+# Local migration verification harnesses
+.tmp-*/
+**/.tmp-*/
+
 # Flutter/Dart generated output
 **/.dart_tool/
 **/.flutter-plugins

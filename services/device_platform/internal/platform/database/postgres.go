@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/migrations"
@@ -108,6 +109,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 	sort.Slice(entries, func(left, right int) bool {
 		return entries[left].Name() < entries[right].Name()
 	})
+	if err := validateMigrationVersions(entries); err != nil {
+		return err
+	}
 
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -145,6 +149,30 @@ func (s *Store) Migrate(ctx context.Context) error {
 		}
 	}
 
+	return nil
+}
+
+func validateMigrationVersions(entries []fs.DirEntry) error {
+	versions := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		separator := strings.IndexByte(entry.Name(), '_')
+		if separator < 1 {
+			return fmt.Errorf("migration %s must start with a numeric version", entry.Name())
+		}
+		version := entry.Name()[:separator]
+		if existing, ok := versions[version]; ok {
+			return fmt.Errorf(
+				"migration version %s is used by both %s and %s",
+				version,
+				existing,
+				entry.Name(),
+			)
+		}
+		versions[version] = entry.Name()
+	}
 	return nil
 }
 

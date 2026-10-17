@@ -1,43 +1,78 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-import DashboardPage from '@/features/dashboard/presentation/DashboardPage.vue'
-import DevicePage from '@/features/device/presentation/DevicePage.vue'
-import UITextPage from '@/features/ui_text/presentation/UITextPage.vue'
-import LoginPage from '@/features/auth/presentation/LoginPage.vue'
-import FamilyAccountsPage from '@/features/family/presentation/FamilyAccountsPage.vue'
-import ChildProfilesPage from '@/features/child/presentation/ChildProfilesPage.vue'
-import ReleasePage from '@/features/ota/presentation/ReleasePage.vue'
-import DeviceOtaPage from '@/features/ota/presentation/DeviceOtaPage.vue'
-import SystemSettingsPage from '@/features/system/presentation/SystemSettingsPage.vue'
-import AdminPermissionPage from '@/features/admin_permission/presentation/AdminPermissionPage.vue'
-import VersionManagementPage from '@/features/version_management/presentation/VersionManagementPage.vue'
-import FeatureCenterPage from '@/features/feature_center/presentation/FeatureCenterPage.vue'
-import DownloadFilesPage from '@/features/downloads/presentation/DownloadFilesPage.vue'
-import ContentLibraryPage from '@/features/content/presentation/ContentLibraryPage.vue'
-import ThemePackPage from '@/features/content/presentation/ThemePackPage.vue'
-import OfflinePolicyPage from '@/features/content/presentation/OfflinePolicyPage.vue'
-import DeviceDiagnosticsPage from '@/features/audit/presentation/DeviceDiagnosticsPage.vue'
-import OperationAuditPage from '@/features/audit/presentation/OperationAuditPage.vue'
-import UsageReportPage from '@/features/usage_report/presentation/UsageReportPage.vue'
-import NotificationCenterPage from '@/features/notifications/presentation/NotificationCenterPage.vue'
-import VisionStatsPage from '@/features/vision/presentation/VisionStatsPage.vue'
-import DisplayStatsPage from '@/features/display/presentation/DisplayStatsPage.vue'
-import TouchStatsPage from '@/features/touch/presentation/TouchStatsPage.vue'
-import CellularStatsPage from '@/features/cellular/presentation/CellularStatsPage.vue'
-import PowerStatsPage from '@/features/power/presentation/PowerStatsPage.vue'
-import MotionStatsPage from '@/features/motion/presentation/MotionStatsPage.vue'
-import FormFactorStatsPage from '@/features/form_factor/presentation/FormFactorStatsPage.vue'
-import VideoStatsPage from '@/features/video_companion/presentation/VideoStatsPage.vue'
-import VideoSessionStatsPage from '@/features/video_session/presentation/VideoSessionStatsPage.vue'
-import BluetoothAudioStatsPage from '@/features/bluetooth_audio/presentation/BluetoothAudioStatsPage.vue'
-import LearningVisualizationStatsPage from '@/features/learning_visualization/presentation/LearningVisualizationStatsPage.vue'
-import ImagePrivacyStatsPage from '@/features/image_privacy/presentation/ImagePrivacyStatsPage.vue'
-import WearableStatsPage from '@/features/wearable/presentation/WearableStatsPage.vue'
-import MultiDeviceStatsPage from '@/features/multi_device/presentation/MultiDeviceStatsPage.vue'
-import ScreenStatsPage from '@/features/screen/presentation/ScreenStatsPage.vue'
 import { useAuthStore } from '@/features/auth/application/authStore'
 import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
-import ForbiddenPage from '@/features/auth/presentation/ForbiddenPage.vue'
+
+const DashboardPage = () =>
+  import('@/features/dashboard/presentation/DashboardPage.vue')
+const DevicePage = () => import('@/features/device/presentation/DevicePage.vue')
+const UITextPage = () => import('@/features/ui_text/presentation/UITextPage.vue')
+const LoginPage = () => import('@/features/auth/presentation/LoginPage.vue')
+const FamilyAccountsPage = () =>
+  import('@/features/family/presentation/FamilyAccountsPage.vue')
+const ChildProfilesPage = () =>
+  import('@/features/child/presentation/ChildProfilesPage.vue')
+const ReleasePage = () => import('@/features/ota/presentation/ReleasePage.vue')
+const DeviceOtaPage = () =>
+  import('@/features/ota/presentation/DeviceOtaPage.vue')
+const SystemSettingsPage = () =>
+  import('@/features/system/presentation/SystemSettingsPage.vue')
+const AdminPermissionPage = () =>
+  import('@/features/admin_permission/presentation/AdminPermissionPage.vue')
+const VersionManagementPage = () =>
+  import('@/features/version_management/presentation/VersionManagementPage.vue')
+const FeatureCenterPage = () =>
+  import('@/features/feature_center/presentation/FeatureCenterPage.vue')
+const DownloadFilesPage = () =>
+  import('@/features/downloads/presentation/DownloadFilesPage.vue')
+const ContentLibraryPage = () =>
+  import('@/features/content/presentation/ContentLibraryPage.vue')
+const ThemePackPage = () =>
+  import('@/features/content/presentation/ThemePackPage.vue')
+const OfflinePolicyPage = () =>
+  import('@/features/content/presentation/OfflinePolicyPage.vue')
+const DeviceDiagnosticsPage = () =>
+  import('@/features/audit/presentation/DeviceDiagnosticsPage.vue')
+const OperationAuditPage = () =>
+  import('@/features/audit/presentation/OperationAuditPage.vue')
+const UsageReportPage = () =>
+  import('@/features/usage_report/presentation/UsageReportPage.vue')
+const NotificationCenterPage = () =>
+  import('@/features/notifications/presentation/NotificationCenterPage.vue')
+const VisionStatsPage = () =>
+  import('@/features/vision/presentation/VisionStatsPage.vue')
+const DisplayStatsPage = () =>
+  import('@/features/display/presentation/DisplayStatsPage.vue')
+const TouchStatsPage = () =>
+  import('@/features/touch/presentation/TouchStatsPage.vue')
+const CellularStatsPage = () =>
+  import('@/features/cellular/presentation/CellularStatsPage.vue')
+const PowerStatsPage = () =>
+  import('@/features/power/presentation/PowerStatsPage.vue')
+const MotionStatsPage = () =>
+  import('@/features/motion/presentation/MotionStatsPage.vue')
+const FormFactorStatsPage = () =>
+  import('@/features/form_factor/presentation/FormFactorStatsPage.vue')
+const VideoStatsPage = () =>
+  import('@/features/video_companion/presentation/VideoStatsPage.vue')
+const VideoSessionStatsPage = () =>
+  import('@/features/video_session/presentation/VideoSessionStatsPage.vue')
+const BluetoothAudioStatsPage = () =>
+  import('@/features/bluetooth_audio/presentation/BluetoothAudioStatsPage.vue')
+const LearningVisualizationStatsPage = () =>
+  import(
+    '@/features/learning_visualization/presentation/LearningVisualizationStatsPage.vue'
+  )
+const ImagePrivacyStatsPage = () =>
+  import('@/features/image_privacy/presentation/ImagePrivacyStatsPage.vue')
+const WearableStatsPage = () =>
+  import('@/features/wearable/presentation/WearableStatsPage.vue')
+const MultiDeviceStatsPage = () =>
+  import('@/features/multi_device/presentation/MultiDeviceStatsPage.vue')
+const ScreenStatsPage = () =>
+  import('@/features/screen/presentation/ScreenStatsPage.vue')
+const ForbiddenPage = () =>
+  import('@/features/auth/presentation/ForbiddenPage.vue')
 
 /// Feature routes are registered here so removing a feature only changes its
 /// page import and route entry.

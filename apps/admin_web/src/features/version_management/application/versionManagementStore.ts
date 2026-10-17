@@ -42,6 +42,7 @@ export const useVersionManagementStore = defineStore('admin-version-management',
   const releaseStates = ref<Record<string, ServiceReleaseState>>({})
   const error = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  const checkWarning = ref('')
 
   const services = computed(() => snapshot.value?.services ?? [])
   const outdatedServices = computed(() =>
@@ -64,6 +65,7 @@ export const useVersionManagementStore = defineStore('admin-version-management',
       snapshot.value = await client.loadServiceVersions()
       operations.value = await client.loadServiceVersionOperations()
       await loadReleaseStates(services.value)
+      checkWarning.value = ''
     } catch (caught: unknown) {
       error.value = mapApiError(caught)
     } finally {
@@ -75,6 +77,7 @@ export const useVersionManagementStore = defineStore('admin-version-management',
     isChecking.value = true
     error.value = null
     lastMessage.value = ''
+    checkWarning.value = ''
     try {
       const requestedSnapshot = await client.checkServiceVersions()
       // The worker refreshes asynchronously. Poll briefly for a newer
@@ -90,10 +93,8 @@ export const useVersionManagementStore = defineStore('admin-version-management',
         count === 0 ? '所有服务都已是当前版本。' : `检查完成，有 ${count} 个服务可以升级。`
     } catch (caught: unknown) {
       const mappedError = mapApiError(caught)
-      // A check request can fail while the last complete snapshot is still
-      // useful. Keep the page readable and tell the operator what to retry.
       if (mappedError.retryable && snapshot.value !== null) {
-        lastMessage.value = '暂时无法请求新的检查结果，正在显示上次检查结果。'
+        checkWarning.value = '本次检查未完成，当前显示的是上次检查结果，请稍后重试。'
       } else {
         error.value = mappedError
       }
@@ -309,6 +310,7 @@ export const useVersionManagementStore = defineStore('admin-version-management',
   }
 
   return {
+    checkWarning,
     closeOperation,
     error,
     hasActiveOperations,

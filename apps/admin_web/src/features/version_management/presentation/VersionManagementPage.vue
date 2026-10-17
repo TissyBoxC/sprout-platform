@@ -21,6 +21,9 @@ const currentServiceCount = computed(
 )
 const upgradeableServiceCount = computed(() => store.outdatedServices.length)
 const serviceRows = computed(() => store.services)
+const upgradeActionsBlocked = computed(
+  () => store.checkWarning !== '' || store.isUpgrading || store.isChecking,
+)
 
 onMounted(async () => {
   await store.load()
@@ -132,7 +135,7 @@ function canStartUpgrade(service: AdminServiceVersion): boolean {
     selectedVersion !== '' &&
     selectedVersion !== service.currentVersion &&
     !store.isServiceUpgrading(service.id) &&
-    !store.isUpgradingAll
+    !upgradeActionsBlocked.value
   )
 }
 
@@ -249,7 +252,7 @@ function operationLog(operation: AdminServiceVersionOperation | null): string {
         <button
           type="button"
           class="primary"
-          :disabled="upgradeableServiceCount === 0 || store.isUpgrading || store.isChecking"
+          :disabled="upgradeableServiceCount === 0 || upgradeActionsBlocked"
           @click="isUpgradeAllOpen = true"
         >
           {{ store.isUpgradingAll ? '正在升级…' : '全部升级' }}
@@ -263,6 +266,12 @@ function operationLog(operation: AdminServiceVersionOperation | null): string {
     </div>
 
     <Transition name="toast">
+      <div v-if="store.checkWarning" class="check-warning" role="alert">
+        <strong>检查结果未刷新</strong>
+        <p>{{ store.checkWarning }}</p>
+      </div>
+    </Transition>
+    <Transition name="toast">
       <p v-if="store.lastMessage" class="success-message" role="status">
         {{ store.lastMessage }}
       </p>
@@ -273,7 +282,11 @@ function operationLog(operation: AdminServiceVersionOperation | null): string {
       </p>
     </Transition>
     <Transition name="toast">
-      <p v-if="store.snapshot?.allUpToDate" class="up-to-date-message" role="status">
+      <p
+        v-if="store.snapshot?.allUpToDate && !store.checkWarning"
+        class="up-to-date-message"
+        role="status"
+      >
         所有受管服务均已是最新版本，目前没有可执行的升级。
       </p>
     </Transition>
@@ -319,8 +332,8 @@ function operationLog(operation: AdminServiceVersionOperation | null): string {
             <span>可以升级</span>
             <strong>{{ upgradeableServiceCount }}</strong>
           </div>
-          <div>
-            <span>最近检查</span>
+          <div :class="{ stale: store.checkWarning }">
+            <span>{{ store.checkWarning ? '上次检查' : '最近检查' }}</span>
             <strong class="time-value">
               {{ formatTime(store.snapshot?.checkedAt ?? '') }}
             </strong>
@@ -705,6 +718,26 @@ button:disabled {
   margin: 14px 0 0;
 }
 
+.check-warning {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid #e8b84a;
+  border-left-width: 4px;
+  border-radius: 14px;
+  background: #fff8e6;
+  color: #694d12;
+}
+
+.check-warning strong,
+.check-warning p {
+  margin: 0;
+}
+
+.check-warning p {
+  margin-top: 5px;
+  line-height: 1.55;
+}
+
 .success-message {
   color: #1d6b3f;
 }
@@ -747,6 +780,11 @@ button:disabled {
 .summary-grid .attention {
   border-color: #efb4c5;
   background: #fff7fa;
+}
+
+.summary-grid .stale {
+  border-color: #e8b84a;
+  background: #fff8e6;
 }
 
 .summary-grid .time-value {

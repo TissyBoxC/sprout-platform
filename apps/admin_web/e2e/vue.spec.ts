@@ -697,6 +697,136 @@ test('checks and upgrades brand services from the service version page', async (
   await expect(page.getByRole('button', { name: '查看进度' })).toBeVisible()
 })
 
+test('marks the previous service snapshot when a version check does not complete', async ({
+  page,
+}) => {
+  await useAdminSession(page)
+
+  let checkAttempts = 0
+  let checkedSnapshot = {
+    checked_at: '2026-10-16T10:00:00Z',
+    services: [
+      {
+        id: 'admin_web',
+        display_name: '品牌管理端',
+        role: '平台服务',
+        image: 'ghcr.io/tissyboxc/sprout-admin-web:0.22.0',
+        current_version: '0.22.0',
+        latest_version: '0.22.1',
+        status: 'outdated',
+        release_url: '',
+        is_self: true,
+        upgrade_supported: true,
+        can_upgrade: true,
+        last_checked_at: '2026-10-16T10:00:00Z',
+        updated_at: '2026-10-16T10:00:00Z',
+      },
+    ],
+  }
+
+  await page.route('**/api/v1/admin/service-versions', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          ...checkedSnapshot,
+          all_up_to_date: checkedSnapshot.services.every((service) => service.status === 'current'),
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/service-versions/check', async (route) => {
+    checkAttempts += 1
+    if (checkAttempts === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: null,
+          error: {
+            code: 'service_unavailable',
+            message: '版本检查暂时不可用',
+            retryable: true,
+          },
+        }),
+      })
+      return
+    }
+
+    checkedSnapshot = {
+      checked_at: '2026-10-17T10:05:00Z',
+      services: checkedSnapshot.services.map((service) => ({
+        ...service,
+        latest_version: '0.22.0',
+        status: 'current',
+        can_upgrade: false,
+        last_checked_at: '2026-10-17T10:05:00Z',
+        updated_at: '2026-10-17T10:05:00Z',
+      })),
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          ...checkedSnapshot,
+          all_up_to_date: true,
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/service-versions/*/releases**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          service: 'admin_web',
+          releases: checkedSnapshot.services[0].status === 'current'
+            ? []
+            : [
+                {
+                  version: '0.22.1',
+                  release_url: '',
+                  published_at: '2026-10-16T10:00:00Z',
+                  is_current: false,
+                  is_latest: true,
+                },
+              ],
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/service-version-operations', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { operations: [] } }),
+    })
+  })
+
+  await page.goto('/services')
+  await expect(page.getByText('0.22.1', { exact: true }).first()).toBeVisible()
+
+  await page.getByRole('button', { name: '检查更新' }).click()
+
+  await expect(page.getByRole('alert')).toContainText('检查结果未刷新')
+  await expect(
+    page.getByText('本次检查未完成，当前显示的是上次检查结果，请稍后重试。'),
+  ).toBeVisible()
+  await expect(page.getByText('0.22.1', { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: '升级到 0.22.1' })).toBeDisabled()
+  await expect(
+    page.getByText('所有受管服务均已是最新版本，目前没有可执行的升级。'),
+  ).toHaveCount(0)
+
+  await page.getByRole('button', { name: '检查更新' }).click()
+
+  await expect(page.getByText('所有服务都已是当前版本。')).toBeVisible()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await expect(
+    page.getByText('所有受管服务均已是最新版本，目前没有可执行的升级。'),
+  ).toBeVisible()
+  expect(checkAttempts).toBe(2)
+})
+
 test('distinguishes a release catalog that is still preparing from a real failure', async ({
   page,
 }) => {

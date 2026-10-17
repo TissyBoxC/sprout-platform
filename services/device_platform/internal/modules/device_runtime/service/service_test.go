@@ -93,6 +93,72 @@ func TestStaleHeartbeatDoesNotReportOnlineOrReplaceNewerSnapshot(t *testing.T) {
 	}
 }
 
+func TestHeartbeatCapabilitySnapshotRequiresRevisionAndRejectsUnknownValues(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
+	service, err := New(Options{
+		Repository:     newMemoryRepository(),
+		BindingService: &memoryBindingReader{deviceID: "device_test_001"},
+		Clock:          fixedClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+
+	withoutRevision := validHeartbeatInput(now)
+	withoutRevision.Capabilities = []string{"wifi"}
+	if _, err := service.RecordHeartbeat(
+		context.Background(),
+		"session",
+		withoutRevision,
+	); err != domain.ErrInvalidHeartbeat {
+		t.Fatalf("expected a list without revision to be rejected, got %v", err)
+	}
+
+	withoutCapabilities := validHeartbeatInput(now)
+	withoutCapabilities.CapabilityRevision = 2
+	if _, err := service.RecordHeartbeat(
+		context.Background(),
+		"session",
+		withoutCapabilities,
+	); err != domain.ErrInvalidHeartbeat {
+		t.Fatalf("expected a revision without a list to be rejected, got %v", err)
+	}
+
+	unknown := validHeartbeatInput(now)
+	unknown.Capabilities = []string{"wifi", "teleportation"}
+	unknown.CapabilityRevision = 2
+	if _, err := service.RecordHeartbeat(
+		context.Background(),
+		"session",
+		unknown,
+	); err != domain.ErrInvalidHeartbeat {
+		t.Fatalf("expected an unknown capability to be rejected, got %v", err)
+	}
+
+	empty := validHeartbeatInput(now)
+	empty.Capabilities = []string{}
+	empty.CapabilityRevision = 2
+	if _, err := service.RecordHeartbeat(
+		context.Background(),
+		"session",
+		empty,
+	); err != domain.ErrInvalidHeartbeat {
+		t.Fatalf("expected an empty capability snapshot to be rejected, got %v", err)
+	}
+
+	legacy := validHeartbeatInput(now)
+	legacy.Capabilities = nil
+	legacy.CapabilityRevision = 0
+	if _, err := service.RecordHeartbeat(
+		context.Background(),
+		"session",
+		legacy,
+	); err != nil {
+		t.Fatalf("expected legacy firmware without snapshots to stay accepted, got %v", err)
+	}
+}
+
 func TestRecordHeartbeatRejectsUnknownDeviceAndBadMetrics(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
@@ -559,6 +625,64 @@ func TestListDeviceStatusesReturnsOnlineAndMissingRuntimeStates(t *testing.T) {
 	}
 	if statuses[2].Runtime != nil {
 		t.Fatal("expected a device without runtime data to remain safely unknown")
+	}
+}
+
+func TestDeviceStatusUsesRevisionedRuntimeSnapshotForSingleAndListViews(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
+	binding := bindingdomain.Binding{
+		ParentAccountID:    "parent-001",
+		DeviceID:           "device_test_001",
+		DeviceName:         "初芽",
+		FirmwareVersion:    "1.0.0",
+		Capabilities:       []string{"wifi", "display"},
+		CapabilityRevision: 1,
+	}
+	repository := newMemoryRepository()
+	repository.statuses[binding.DeviceID] = domain.RuntimeStatus{
+		Heartbeat: domain.Heartbeat{
+			DeviceID:           binding.DeviceID,
+			FirmwareVersion:    "1.1.0",
+			Capabilities:       []string{"wifi", "display", "camera"},
+			CapabilityRevision: 2,
+			ConnectionState:    domain.ConnectionStateOnline,
+			ReceivedAt:         now,
+		},
+	}
+	service, err := New(Options{
+		Repository: repository,
+		BindingService: &memoryBindingReader{
+			deviceID: binding.DeviceID,
+			bindings: []bindingdomain.Binding{binding},
+		},
+		Clock: fixedClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+
+	single, err := service.GetDeviceStatus(
+		context.Background(),
+		binding.ParentAccountID,
+		binding.DeviceID,
+	)
+	if err != nil {
+		t.Fatalf("get device status: %v", err)
+	}
+	list, err := service.ListDeviceStatuses(context.Background(), binding.ParentAccountID)
+	if err != nil {
+		t.Fatalf("list device statuses: %v", err)
+	}
+	for name, status := range map[string]*domain.DeviceStatus{
+		"single": single,
+		"list":   &list[0],
+	} {
+		if status.FirmwareVersion != "1.1.0" ||
+			status.CapabilityRevision != 2 ||
+			len(status.Capabilities) != 3 {
+			t.Fatalf("%s view did not project the runtime snapshot: %#v", name, status)
+		}
 	}
 }
 

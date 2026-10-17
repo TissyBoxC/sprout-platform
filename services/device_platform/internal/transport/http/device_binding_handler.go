@@ -108,11 +108,12 @@ func (handler deviceBindingHandler) registerDevice(
 		return
 	}
 	writeSuccess(response, request, http.StatusCreated, map[string]any{
-		"device_id":        credential.DeviceID,
-		"hardware_model":   credential.HardwareModel,
-		"firmware_version": credential.FirmwareVersion,
-		"capabilities":     credential.CapabilitySet,
-		"registered_at":    credential.RegisteredAt,
+		"device_id":           credential.DeviceID,
+		"hardware_model":      credential.HardwareModel,
+		"firmware_version":    credential.FirmwareVersion,
+		"capabilities":        credential.CapabilitySet,
+		"capability_revision": credential.CapabilityRevision,
+		"registered_at":       credential.RegisteredAt,
 	})
 }
 
@@ -368,13 +369,14 @@ func (handler deviceBindingHandler) remove(
 
 func bindingResponse(binding *bindingdomain.Binding) map[string]any {
 	return map[string]any{
-		"device_id":        binding.DeviceID,
-		"device_name":      binding.DeviceName,
-		"hardware_model":   binding.HardwareModel,
-		"firmware_version": binding.FirmwareVersion,
-		"capabilities":     binding.Capabilities,
-		"bound_at":         binding.BoundAt,
-		"updated_at":       binding.UpdatedAt,
+		"device_id":           binding.DeviceID,
+		"device_name":         binding.DeviceName,
+		"hardware_model":      binding.HardwareModel,
+		"firmware_version":    binding.FirmwareVersion,
+		"capabilities":        binding.Capabilities,
+		"capability_revision": binding.CapabilityRevision,
+		"bound_at":            binding.BoundAt,
+		"updated_at":          binding.UpdatedAt,
 	}
 }
 

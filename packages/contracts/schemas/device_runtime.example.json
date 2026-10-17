@@ -4,6 +4,14 @@
   "heartbeat_id": "heartbeat_demo_001",
   "reported_at": "2026-10-03T10:00:00Z",
   "firmware_version": "0.3.0",
+  "capabilities": [
+    "audio_input",
+    "audio_output",
+    "wifi",
+    "display",
+    "touch"
+  ],
+  "capability_revision": 3,
   "connection": {
     "state": "online",
     "transport": "wifi"

@@ -161,6 +161,24 @@ func (s *Service) RecordHeartbeat(
 	if input.Temperature == "" {
 		input.Temperature = domain.TemperatureStateUnknown
 	}
+	if input.CapabilityRevision != 0 {
+		if input.Capabilities == nil {
+			return nil, domain.ErrInvalidHeartbeat
+		}
+		capabilities, capabilityErr := bindingdomain.NormalizeCapabilities(
+			input.Capabilities,
+		)
+		if capabilityErr != nil {
+			return nil, domain.ErrInvalidHeartbeat
+		}
+		input.Capabilities = capabilities
+	}
+	// Capabilities are optional so a firmware built before the runtime snapshot
+	// contract can still report status. A capability list without a revision is
+	// ambiguous and must never mutate the durable snapshot.
+	if input.Capabilities != nil && input.CapabilityRevision == 0 {
+		return nil, domain.ErrInvalidHeartbeat
+	}
 	if err := validateHeartbeatMetrics(input); err != nil {
 		return nil, err
 	}
@@ -175,28 +193,30 @@ func (s *Service) RecordHeartbeat(
 		return nil, domain.ErrInvalidHeartbeat
 	}
 	heartbeat := &domain.Heartbeat{
-		DeviceID:          deviceID,
-		HeartbeatID:       strings.TrimSpace(input.HeartbeatID),
-		ReportedAt:        reportedAt,
-		FirmwareVersion:   strings.TrimSpace(input.FirmwareVersion),
-		ConnectionState:   input.ConnectionState,
-		Transport:         input.Transport,
-		NetworkQuality:    input.NetworkQuality,
-		RSSIDBM:           input.RSSIDBM,
-		LatencyMS:         input.LatencyMS,
-		PacketLossPercent: input.PacketLossPercent,
-		Temperature:       input.Temperature,
-		TemperatureTenths: input.TemperatureTenths,
-		TimeSyncState:     input.TimeSyncState,
-		TimeSyncSource:    input.TimeSyncSource,
-		TimeSyncedAt:      input.TimeSyncedAt,
-		TimeOffsetMS:      input.TimeOffsetMS,
-		OfflineState:      input.OfflineState,
-		OfflineReason:     input.OfflineReason,
-		FallbackActive:    input.FallbackActive,
-		PendingTelemetry:  input.PendingTelemetry,
-		ReceivedAt:        now,
-		UpdatedAt:         now,
+		DeviceID:           deviceID,
+		HeartbeatID:        strings.TrimSpace(input.HeartbeatID),
+		ReportedAt:         reportedAt,
+		FirmwareVersion:    strings.TrimSpace(input.FirmwareVersion),
+		Capabilities:       append([]string(nil), input.Capabilities...),
+		CapabilityRevision: input.CapabilityRevision,
+		ConnectionState:    input.ConnectionState,
+		Transport:          input.Transport,
+		NetworkQuality:     input.NetworkQuality,
+		RSSIDBM:            input.RSSIDBM,
+		LatencyMS:          input.LatencyMS,
+		PacketLossPercent:  input.PacketLossPercent,
+		Temperature:        input.Temperature,
+		TemperatureTenths:  input.TemperatureTenths,
+		TimeSyncState:      input.TimeSyncState,
+		TimeSyncSource:     input.TimeSyncSource,
+		TimeSyncedAt:       input.TimeSyncedAt,
+		TimeOffsetMS:       input.TimeOffsetMS,
+		OfflineState:       input.OfflineState,
+		OfflineReason:      input.OfflineReason,
+		FallbackActive:     input.FallbackActive,
+		PendingTelemetry:   input.PendingTelemetry,
+		ReceivedAt:         now,
+		UpdatedAt:          now,
 	}
 	inserted, err := s.repository.SaveHeartbeat(ctx, heartbeat)
 	if err != nil {
@@ -277,6 +297,7 @@ func (s *Service) GetDeviceStatus(
 		if runtimeErr != nil && !errors.Is(runtimeErr, domain.ErrDeviceNotFound) {
 			return nil, runtimeErr
 		}
+		applyRuntimeSnapshot(status, runtime)
 		status.Runtime = runtime
 		return status, nil
 	}
@@ -323,8 +344,8 @@ func (s *Service) ListDeviceStatuses(
 			UpdatedAt:       bindings[index].UpdatedAt,
 		}
 		if runtime, exists := runtimeByDeviceID[bindings[index].DeviceID]; exists {
-			runtimeCopy := runtime
-			status.Runtime = &runtimeCopy
+			applyRuntimeSnapshot(&status, &runtime)
+			status.Runtime = &runtime
 		}
 		result = append(result, status)
 	}
@@ -364,12 +385,26 @@ func (s *Service) ListAllDeviceStatuses(
 			UpdatedAt:       bindings[index].UpdatedAt,
 		}
 		if runtime, exists := runtimeByDeviceID[bindings[index].DeviceID]; exists {
-			runtimeCopy := runtime
-			status.Runtime = &runtimeCopy
+			applyRuntimeSnapshot(&status, &runtime)
+			status.Runtime = &runtime
 		}
 		result = append(result, status)
 	}
 	return result, nil
+}
+
+// applyRuntimeSnapshot uses the accepted runtime projection for guardian and
+// operator views. Capabilities only become authoritative with a positive
+// revision so legacy heartbeats cannot erase the registered feature set.
+func applyRuntimeSnapshot(status *domain.DeviceStatus, runtime *domain.RuntimeStatus) {
+	if status == nil || runtime == nil {
+		return
+	}
+	status.FirmwareVersion = runtime.FirmwareVersion
+	if runtime.CapabilityRevision > 0 {
+		status.Capabilities = append([]string(nil), runtime.Capabilities...)
+		status.CapabilityRevision = runtime.CapabilityRevision
+	}
 }
 
 // CreateCommand validates and stores one operator maintenance action.

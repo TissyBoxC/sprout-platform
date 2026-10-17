@@ -58,10 +58,12 @@ type deviceRuntimePolicyService interface {
 }
 
 type recordHeartbeatRequest struct {
-	HeartbeatID     string `json:"heartbeat_id"`
-	ReportedAt      string `json:"reported_at"`
-	FirmwareVersion string `json:"firmware_version"`
-	Connection      struct {
+	HeartbeatID        string   `json:"heartbeat_id"`
+	ReportedAt         string   `json:"reported_at"`
+	FirmwareVersion    string   `json:"firmware_version"`
+	Capabilities       []string `json:"capabilities"`
+	CapabilityRevision uint64   `json:"capability_revision"`
+	Connection         struct {
 		State     string `json:"state"`
 		Transport string `json:"transport"`
 	} `json:"connection"`
@@ -167,26 +169,28 @@ func (handler deviceRuntimeHandler) recordHeartbeat(
 		request.Context(),
 		deviceSessionToken,
 		domain.HeartbeatInput{
-			DeviceID:          deviceID,
-			HeartbeatID:       payload.HeartbeatID,
-			ReportedAt:        reportedAt,
-			FirmwareVersion:   payload.FirmwareVersion,
-			ConnectionState:   domain.ConnectionState(payload.Connection.State),
-			Transport:         domain.Transport(payload.Connection.Transport),
-			NetworkQuality:    domain.NetworkQualityLevel(payload.NetworkQuality.Level),
-			RSSIDBM:           payload.NetworkQuality.RSSIDBM,
-			LatencyMS:         payload.NetworkQuality.LatencyMS,
-			PacketLossPercent: payload.NetworkQuality.PacketLossPercent,
-			Temperature:       normalizedTemperatureState(payload.Temperature.State),
-			TemperatureTenths: payload.Temperature.CelsiusTenths,
-			TimeSyncState:     domain.TimeSyncState(payload.TimeSync.State),
-			TimeSyncSource:    domain.TimeSyncSource(payload.TimeSync.Source),
-			TimeSyncedAt:      timeSyncedAt,
-			TimeOffsetMS:      payload.TimeSync.OffsetMS,
-			OfflineState:      domain.OfflineState(payload.Offline.State),
-			OfflineReason:     domain.OfflineReason(payload.Offline.Reason),
-			FallbackActive:    payload.Offline.FallbackActive,
-			PendingTelemetry:  payload.Offline.PendingTelemetry,
+			DeviceID:           deviceID,
+			HeartbeatID:        payload.HeartbeatID,
+			ReportedAt:         reportedAt,
+			FirmwareVersion:    payload.FirmwareVersion,
+			Capabilities:       payload.Capabilities,
+			CapabilityRevision: payload.CapabilityRevision,
+			ConnectionState:    domain.ConnectionState(payload.Connection.State),
+			Transport:          domain.Transport(payload.Connection.Transport),
+			NetworkQuality:     domain.NetworkQualityLevel(payload.NetworkQuality.Level),
+			RSSIDBM:            payload.NetworkQuality.RSSIDBM,
+			LatencyMS:          payload.NetworkQuality.LatencyMS,
+			PacketLossPercent:  payload.NetworkQuality.PacketLossPercent,
+			Temperature:        normalizedTemperatureState(payload.Temperature.State),
+			TemperatureTenths:  payload.Temperature.CelsiusTenths,
+			TimeSyncState:      domain.TimeSyncState(payload.TimeSync.State),
+			TimeSyncSource:     domain.TimeSyncSource(payload.TimeSync.Source),
+			TimeSyncedAt:       timeSyncedAt,
+			TimeOffsetMS:       payload.TimeSync.OffsetMS,
+			OfflineState:       domain.OfflineState(payload.Offline.State),
+			OfflineReason:      domain.OfflineReason(payload.Offline.Reason),
+			FallbackActive:     payload.Offline.FallbackActive,
+			PendingTelemetry:   payload.Offline.PendingTelemetry,
 		},
 	)
 	if err != nil {
@@ -501,12 +505,14 @@ func runtimeStatusResponse(status *domain.RuntimeStatus) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"device_id":        status.DeviceID,
-		"heartbeat_id":     status.HeartbeatID,
-		"reported_at":      status.ReportedAt,
-		"received_at":      status.ReceivedAt,
-		"firmware_version": status.FirmwareVersion,
-		"is_online":        status.IsOnline,
+		"device_id":           status.DeviceID,
+		"heartbeat_id":        status.HeartbeatID,
+		"reported_at":         status.ReportedAt,
+		"received_at":         status.ReceivedAt,
+		"firmware_version":    status.FirmwareVersion,
+		"capabilities":        status.Capabilities,
+		"capability_revision": status.CapabilityRevision,
+		"is_online":           status.IsOnline,
 		"connection": map[string]any{
 			"state":     status.ConnectionState,
 			"transport": status.Transport,
@@ -551,16 +557,17 @@ func deviceStatusResponse(status *domain.DeviceStatus) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"parent_account_id": status.ParentAccountID,
-		"device_id":         status.DeviceID,
-		"device_name":       status.DeviceName,
-		"hardware_model":    status.HardwareModel,
-		"firmware_version":  status.FirmwareVersion,
-		"capabilities":      status.Capabilities,
-		"lifecycle_status":  status.LifecycleStatus,
-		"bound_at":          status.BoundAt,
-		"updated_at":        status.UpdatedAt,
-		"runtime":           runtimeStatusResponse(status.Runtime),
+		"parent_account_id":   status.ParentAccountID,
+		"device_id":           status.DeviceID,
+		"device_name":         status.DeviceName,
+		"hardware_model":      status.HardwareModel,
+		"firmware_version":    status.FirmwareVersion,
+		"capabilities":        status.Capabilities,
+		"capability_revision": status.CapabilityRevision,
+		"lifecycle_status":    status.LifecycleStatus,
+		"bound_at":            status.BoundAt,
+		"updated_at":          status.UpdatedAt,
+		"runtime":             runtimeStatusResponse(status.Runtime),
 	}
 }
 

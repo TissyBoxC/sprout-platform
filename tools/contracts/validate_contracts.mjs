@@ -10,6 +10,17 @@ const repositoryRoot = resolve(toolsRoot, '..', '..');
 const contractsRoot = resolve(repositoryRoot, 'packages', 'contracts');
 const mqttTopicsPath = resolve(contractsRoot, 'mqtt', 'topics.example.json');
 const mqttReadmePath = resolve(contractsRoot, 'mqtt', 'README.md');
+const commonSchemaPath = resolve(contractsRoot, 'schemas', 'common.schema.json');
+const capabilitiesDomainPath = resolve(
+  repositoryRoot,
+  'services',
+  'device_platform',
+  'internal',
+  'modules',
+  'device_binding',
+  'domain',
+  'capabilities.go',
+);
 
 const contractNamespace = 'https://sprout.example/contracts/';
 const expectedSchemaVersion = '1.0.0';
@@ -148,6 +159,7 @@ for (const fixturePath of fixtureFiles.sort()) {
 
 await validateResponseContractVersions();
 await validateMQTTTransportContract();
+await validateDeviceCapabilityVocabulary();
 
 async function validateResponseContractVersions() {
   for (const filePath of responseSchemaPaths) {
@@ -213,6 +225,45 @@ async function validateMQTTTransportContract() {
     if (!readme.includes(`\`${topicName}\``)) {
       throw new Error(`${mqttReadmePath}: missing documented topic ${topicName}`);
     }
+  }
+}
+
+async function validateDeviceCapabilityVocabulary() {
+  const commonSchema = JSON.parse(await readFile(commonSchemaPath, 'utf8'));
+  const schemaCapabilities = commonSchema.$defs?.device_capability?.enum;
+  if (
+    !Array.isArray(schemaCapabilities) ||
+    schemaCapabilities.length === 0 ||
+    new Set(schemaCapabilities).size !== schemaCapabilities.length
+  ) {
+    throw new Error(
+      `${commonSchemaPath}: device_capability enum must be a non-empty unique array`,
+    );
+  }
+
+  const source = await readFile(capabilitiesDomainPath, 'utf8');
+  const vocabularyMatch = source.match(
+    /var deviceCapabilities = \[\]string\{([\s\S]*?)\n\}/,
+  );
+  if (!vocabularyMatch) {
+    throw new Error(
+      `${capabilitiesDomainPath}: device capability vocabulary was not found`,
+    );
+  }
+  const domainCapabilities = [
+    ...vocabularyMatch[1].matchAll(/"([a-z0-9_]+)"/g),
+  ].map((match) => match[1]);
+  const expected = [...schemaCapabilities].sort();
+  const actual = [...domainCapabilities].sort();
+  if (
+    expected.length !== actual.length ||
+    expected.some((capability, index) => capability !== actual[index])
+  ) {
+    throw new Error(
+      `${capabilitiesDomainPath}: device capabilities differ from `
+        + `${commonSchemaPath} (schema=${expected.join(',')}; `
+        + `domain=${actual.join(',')})`,
+    );
   }
 }
 

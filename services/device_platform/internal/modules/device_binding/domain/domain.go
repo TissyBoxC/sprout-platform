@@ -47,15 +47,16 @@ type RegistrationToken struct {
 
 // Binding is the durable relationship between a parent and a device.
 type Binding struct {
-	ID              string
-	ParentAccountID string
-	DeviceID        string
-	DeviceName      string
-	HardwareModel   string
-	FirmwareVersion string
-	Capabilities    []string
-	BoundAt         time.Time
-	UpdatedAt       time.Time
+	ID                 string
+	ParentAccountID    string
+	DeviceID           string
+	DeviceName         string
+	HardwareModel      string
+	FirmwareVersion    string
+	Capabilities       []string
+	CapabilityRevision uint64
+	BoundAt            time.Time
+	UpdatedAt          time.Time
 }
 
 // DeviceCredential stores the public device identity used for challenge
@@ -65,6 +66,7 @@ type DeviceCredential struct {
 	HardwareModel       string
 	FirmwareVersion     string
 	CapabilitySet       []string
+	CapabilityRevision  uint64
 	PublicKey           string
 	Status              string
 	RegisteredAt        time.Time

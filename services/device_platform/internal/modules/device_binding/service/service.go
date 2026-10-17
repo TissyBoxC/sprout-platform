@@ -19,29 +19,6 @@ import (
 
 var deviceIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`)
 
-// Keep this set in lockstep with common.schema.json::device_capability and the
-// firmware device_capabilities component. Unknown capabilities are rejected
-// at registration so clients never render an unreviewed feature or hardware
-// claim.
-var deviceCapabilities = map[string]struct{}{
-	"audio_input":     {},
-	"audio_output":    {},
-	"wifi":            {},
-	"camera":          {},
-	"display":         {},
-	"touch":           {},
-	"led":             {},
-	"battery":         {},
-	"cellular_4g":     {},
-	"motion":          {},
-	"bluetooth_audio": {},
-	"video_call":      {},
-	"location":        {},
-	"geofence":        {},
-	"sos":             {},
-	"multi_device":    {},
-}
-
 // DeviceProofVerifier validates a device signature over a platform nonce.
 // Implementations must reject malformed keys and never trust device metadata.
 type DeviceProofVerifier interface {
@@ -185,7 +162,7 @@ func (s *Service) RegisterDevice(
 	}
 	now := s.timeSource.Now().UTC()
 	if token.ConsumedAt != nil {
-		return nil, domain.ErrRegistrationTokenConsumed
+		return s.recoverConsumedRegistration(ctx, token, input)
 	}
 	if !token.ExpiresAt.After(now) {
 		return nil, domain.ErrRegistrationTokenExpired
@@ -197,22 +174,24 @@ func (s *Service) RegisterDevice(
 	if token.DeviceID != strings.TrimSpace(input.DeviceID) {
 		return nil, domain.ErrInvalidDeviceProof
 	}
+	capabilities, err := domain.NormalizeCapabilities(input.Capabilities)
+	if err != nil {
+		return nil, err
+	}
 	credential := &domain.DeviceCredential{
-		DeviceID:        token.DeviceID,
-		HardwareModel:   strings.TrimSpace(input.HardwareModel),
-		FirmwareVersion: strings.TrimSpace(input.FirmwareVersion),
-		CapabilitySet:   normalizeCapabilities(input.Capabilities),
-		PublicKey:       strings.TrimSpace(input.PublicKey),
-		Status:          "active",
-		RegisteredAt:    now,
-		UpdatedAt:       now,
+		DeviceID:           token.DeviceID,
+		HardwareModel:      strings.TrimSpace(input.HardwareModel),
+		FirmwareVersion:    strings.TrimSpace(input.FirmwareVersion),
+		CapabilitySet:      capabilities,
+		CapabilityRevision: 1,
+		PublicKey:          strings.TrimSpace(input.PublicKey),
+		Status:             "active",
+		RegisteredAt:       now,
+		UpdatedAt:          now,
 	}
 	if len([]rune(credential.HardwareModel)) > 64 ||
 		len([]rune(credential.FirmwareVersion)) > 64 ||
 		len(credential.PublicKey) > 4096 {
-		return nil, domain.ErrInvalidDeviceID
-	}
-	if len(credential.CapabilitySet) == 0 {
 		return nil, domain.ErrInvalidDeviceID
 	}
 	if err := s.proofVerifier.ValidatePublicKey(credential.PublicKey); err != nil {
@@ -224,6 +203,29 @@ func (s *Service) RegisterDevice(
 		credential,
 	); err != nil {
 		return nil, err
+	}
+	return credential, nil
+}
+
+// recoverConsumedRegistration makes a lost success response safe to retry.
+// Recovery requires the grant's device id, an active credential, and the same
+// public key; a holder of only the registration token cannot impersonate the
+// device.
+func (s *Service) recoverConsumedRegistration(
+	ctx context.Context,
+	token *domain.RegistrationToken,
+	input domain.DeviceRegistrationInput,
+) (*domain.DeviceCredential, error) {
+	deviceID := strings.TrimSpace(input.DeviceID)
+	publicKey := strings.TrimSpace(input.PublicKey)
+	if deviceID != token.DeviceID || publicKey == "" {
+		return nil, domain.ErrRegistrationTokenConsumed
+	}
+	credential, err := s.repository.GetDeviceCredential(ctx, token.DeviceID)
+	if err != nil ||
+		credential.Status != "active" ||
+		credential.PublicKey != publicKey {
+		return nil, domain.ErrRegistrationTokenConsumed
 	}
 	return credential, nil
 }
@@ -394,15 +396,16 @@ func (s *Service) Bind(
 	}
 
 	binding := &domain.Binding{
-		ID:              uuid.NewString(),
-		ParentAccountID: parentAccountID,
-		DeviceID:        token.DeviceID,
-		DeviceName:      deviceName,
-		HardwareModel:   credential.HardwareModel,
-		FirmwareVersion: credential.FirmwareVersion,
-		Capabilities:    append([]string(nil), credential.CapabilitySet...),
-		BoundAt:         now,
-		UpdatedAt:       now,
+		ID:                 uuid.NewString(),
+		ParentAccountID:    parentAccountID,
+		DeviceID:           token.DeviceID,
+		DeviceName:         deviceName,
+		HardwareModel:      credential.HardwareModel,
+		FirmwareVersion:    credential.FirmwareVersion,
+		Capabilities:       append([]string(nil), credential.CapabilitySet...),
+		CapabilityRevision: credential.CapabilityRevision,
+		BoundAt:            now,
+		UpdatedAt:          now,
 	}
 	if err := s.repository.ConsumeTokenAndUpsertBinding(
 		ctx,
@@ -529,23 +532,6 @@ func (s *Service) RevokeSessions(
 		return err
 	}
 	return s.repository.RevokeDeviceSessions(ctx, deviceID, disableDevice)
-}
-
-func normalizeCapabilities(capabilities []string) []string {
-	normalized := make([]string, 0, len(capabilities))
-	seen := make(map[string]struct{}, len(capabilities))
-	for _, capability := range capabilities {
-		capability = strings.TrimSpace(capability)
-		if _, supported := deviceCapabilities[capability]; !supported {
-			continue
-		}
-		if _, exists := seen[capability]; exists {
-			continue
-		}
-		seen[capability] = struct{}{}
-		normalized = append(normalized, capability)
-	}
-	return normalized
 }
 
 func randomToken() (string, error) {

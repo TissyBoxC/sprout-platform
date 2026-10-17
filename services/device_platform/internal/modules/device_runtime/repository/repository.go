@@ -82,7 +82,7 @@ func (r *PostgresRepository) SaveHeartbeat(
 		return false, nil
 	}
 
-	_, err = transaction.Exec(ctx, `
+	statusTag, err := transaction.Exec(ctx, `
 		INSERT INTO device_runtime_status (
 			device_id,
 			last_heartbeat_id,
@@ -103,6 +103,8 @@ func (r *PostgresRepository) SaveHeartbeat(
 			fallback_active,
 			pending_telemetry,
 			firmware_version,
+			capabilities,
+			capability_revision,
 			reported_at,
 			received_at,
 			updated_at
@@ -110,7 +112,7 @@ func (r *PostgresRepository) SaveHeartbeat(
 		VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
 			$11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-			$21, $22
+			$21, $22, $23, $24
 		)
 		ON CONFLICT (device_id) DO UPDATE
 		SET last_heartbeat_id = EXCLUDED.last_heartbeat_id,
@@ -130,7 +132,25 @@ func (r *PostgresRepository) SaveHeartbeat(
 		    offline_reason = EXCLUDED.offline_reason,
 		    fallback_active = EXCLUDED.fallback_active,
 		    pending_telemetry = EXCLUDED.pending_telemetry,
-		    firmware_version = EXCLUDED.firmware_version,
+		    firmware_version = CASE
+		        WHEN EXCLUDED.capability_revision > 0
+		             AND device_runtime_status.capability_revision <= EXCLUDED.capability_revision
+		        THEN EXCLUDED.firmware_version
+		        WHEN EXCLUDED.capability_revision = 0
+		             AND device_runtime_status.capability_revision = 0
+		        THEN EXCLUDED.firmware_version
+		        ELSE device_runtime_status.firmware_version
+		    END,
+		    capabilities = CASE
+		        WHEN EXCLUDED.capability_revision > 0
+		             AND device_runtime_status.capability_revision <= EXCLUDED.capability_revision
+		        THEN EXCLUDED.capabilities
+		        ELSE device_runtime_status.capabilities
+		    END,
+		    capability_revision = GREATEST(
+		        device_runtime_status.capability_revision,
+		        EXCLUDED.capability_revision
+		    ),
 		    reported_at = EXCLUDED.reported_at,
 		    received_at = EXCLUDED.received_at,
 		    updated_at = EXCLUDED.updated_at
@@ -156,12 +176,52 @@ func (r *PostgresRepository) SaveHeartbeat(
 		heartbeat.FallbackActive,
 		heartbeat.PendingTelemetry,
 		heartbeat.FirmwareVersion,
+		nonNilCapabilities(heartbeat.Capabilities),
+		heartbeat.CapabilityRevision,
 		heartbeat.ReportedAt,
 		heartbeat.ReceivedAt,
 		heartbeat.UpdatedAt,
 	)
 	if err != nil {
 		return false, fmt.Errorf("upsert device runtime status: %w", err)
+	}
+	// Reordered heartbeats still contribute to idempotency history, but a
+	// rejected status update must never mutate the durable OTA/feature snapshot.
+	if statusTag.RowsAffected() > 0 && heartbeat.CapabilityRevision > 0 {
+		if _, err := transaction.Exec(ctx, `
+			UPDATE device_credentials
+			SET firmware_version = $2,
+			    capability_set = $3,
+			    capability_revision = GREATEST(capability_revision, $4),
+			    updated_at = $5
+			WHERE device_id = $1
+			  AND capability_revision < $4
+		`,
+			heartbeat.DeviceID,
+			heartbeat.FirmwareVersion,
+			nonNilCapabilities(heartbeat.Capabilities),
+			heartbeat.CapabilityRevision,
+			heartbeat.ReceivedAt,
+		); err != nil {
+			return false, fmt.Errorf("update device credential snapshot: %w", err)
+		}
+		if _, err := transaction.Exec(ctx, `
+			UPDATE device_bindings
+			SET firmware_version = $2,
+			    capability_set = $3,
+			    capability_revision = GREATEST(capability_revision, $4),
+			    updated_at = $5
+			WHERE device_id = $1
+			  AND capability_revision < $4
+		`,
+			heartbeat.DeviceID,
+			heartbeat.FirmwareVersion,
+			nonNilCapabilities(heartbeat.Capabilities),
+			heartbeat.CapabilityRevision,
+			heartbeat.ReceivedAt,
+		); err != nil {
+			return false, fmt.Errorf("update device binding snapshot: %w", err)
+		}
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return false, fmt.Errorf("commit heartbeat transaction: %w", err)
@@ -435,6 +495,8 @@ const runtimeStatusSelect = `
 		status.session_state,
 		status.last_provisioned_at,
 		status.provisioning_dropped_events,
+		status.capabilities,
+		status.capability_revision,
 		status.received_at,
 		status.updated_at
 	FROM device_runtime_status AS status
@@ -496,6 +558,8 @@ func scanRuntimeStatus(row runtimeScanner) (*domain.RuntimeStatus, error) {
 		&sessionState,
 		&status.LastProvisionedAt,
 		&droppedEvents,
+		&status.Capabilities,
+		&status.CapabilityRevision,
 		&status.ReceivedAt,
 		&status.UpdatedAt,
 	)
@@ -532,6 +596,13 @@ func scanRuntimeStatuses(rows pgx.Rows) ([]domain.RuntimeStatus, error) {
 		return nil, fmt.Errorf("iterate device runtime statuses: %w", err)
 	}
 	return statuses, nil
+}
+
+func nonNilCapabilities(capabilities []string) []string {
+	if capabilities == nil {
+		return []string{}
+	}
+	return capabilities
 }
 
 func scanRuntimeCommand(row runtimeScanner) (*domain.Command, error) {

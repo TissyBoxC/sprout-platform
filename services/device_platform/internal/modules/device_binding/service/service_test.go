@@ -43,7 +43,7 @@ func TestDeviceRegistrationAndAuthenticationFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create registration token: %v", err)
 	}
-	if _, err := service.RegisterDevice(
+	registered, err := service.RegisterDevice(
 		context.Background(),
 		registrationToken,
 		domain.DeviceRegistrationInput{
@@ -53,8 +53,31 @@ func TestDeviceRegistrationAndAuthenticationFlow(t *testing.T) {
 			Capabilities:    []string{"wifi", "display"},
 			PublicKey:       base64.StdEncoding.EncodeToString(publicKey),
 		},
-	); err != nil {
+	)
+	if err != nil {
 		t.Fatalf("register device: %v", err)
+	}
+	if registered.CapabilityRevision != 1 {
+		t.Fatalf("expected initial capability revision 1, got %d", registered.CapabilityRevision)
+	}
+	recovered, err := service.RegisterDevice(
+		context.Background(),
+		registrationToken,
+		domain.DeviceRegistrationInput{
+			DeviceID:        "device_test_001",
+			HardwareModel:   "esp32-s3-n16r8",
+			FirmwareVersion: "0.1.0",
+			Capabilities:    []string{"wifi", "display"},
+			PublicKey:       base64.StdEncoding.EncodeToString(publicKey),
+		},
+	)
+	if err != nil {
+		t.Fatalf("recover consumed registration response: %v", err)
+	}
+	if recovered.DeviceID != registered.DeviceID ||
+		recovered.RegisteredAt != registered.RegisteredAt ||
+		recovered.CapabilityRevision != registered.CapabilityRevision {
+		t.Fatalf("expected the existing credential, got %#v", recovered)
 	}
 	if _, err := service.RegisterDevice(
 		context.Background(),
@@ -62,10 +85,10 @@ func TestDeviceRegistrationAndAuthenticationFlow(t *testing.T) {
 		domain.DeviceRegistrationInput{
 			DeviceID:     "device_test_001",
 			Capabilities: []string{"wifi"},
-			PublicKey:    base64.StdEncoding.EncodeToString(publicKey),
+			PublicKey:    "different-public-key",
 		},
 	); !errors.Is(err, domain.ErrRegistrationTokenConsumed) {
-		t.Fatalf("expected consumed registration token, got %v", err)
+		t.Fatalf("expected a different public key to remain rejected, got %v", err)
 	}
 
 	nonce, _, err := service.StartDeviceAuthentication(
@@ -147,6 +170,43 @@ func TestRegisterDeviceRejectsUnknownAndEmptyCapabilities(t *testing.T) {
 				t.Fatalf("expected invalid device error, got %v", err)
 			}
 		})
+	}
+}
+
+func TestRegisterDeviceRecoveryRejectsInactiveCredential(t *testing.T) {
+	t.Parallel()
+	repository := newMemoryRepository()
+	service, err := New(Options{
+		Repository:    repository,
+		ProofVerifier: security.ECDSAProofVerifier{},
+		TokenTTL:      time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	registrationToken, details, err := service.CreateRegistrationToken(
+		context.Background(),
+		"device_test_003",
+	)
+	if err != nil {
+		t.Fatalf("create registration token: %v", err)
+	}
+	consumedAt := time.Now().UTC()
+	repository.registrationTokens[details.TokenHash].ConsumedAt = &consumedAt
+	repository.credentials["device_test_003"] = &domain.DeviceCredential{
+		DeviceID:  "device_test_003",
+		PublicKey: "same-public-key",
+		Status:    "disabled",
+	}
+	if _, err := service.RegisterDevice(
+		context.Background(),
+		registrationToken,
+		domain.DeviceRegistrationInput{
+			DeviceID:  "device_test_003",
+			PublicKey: "same-public-key",
+		},
+	); !errors.Is(err, domain.ErrRegistrationTokenConsumed) {
+		t.Fatalf("expected a disabled credential to remain rejected, got %v", err)
 	}
 }
 

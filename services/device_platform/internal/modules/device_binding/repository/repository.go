@@ -165,16 +165,18 @@ func upsertBinding(
 			hardware_model,
 			firmware_version,
 			capability_set,
+			capability_revision,
 			bound_at,
 			updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (device_id) DO UPDATE
 		SET parent_account_id = EXCLUDED.parent_account_id,
 		    device_name = EXCLUDED.device_name,
 		    hardware_model = EXCLUDED.hardware_model,
 		    firmware_version = EXCLUDED.firmware_version,
 		    capability_set = EXCLUDED.capability_set,
+		    capability_revision = EXCLUDED.capability_revision,
 		    updated_at = EXCLUDED.updated_at
 	`,
 		binding.ID,
@@ -184,6 +186,7 @@ func upsertBinding(
 		binding.HardwareModel,
 		binding.FirmwareVersion,
 		binding.Capabilities,
+		binding.CapabilityRevision,
 		binding.BoundAt,
 		binding.UpdatedAt,
 	)
@@ -233,6 +236,7 @@ func (r *PostgresRepository) ListByParentAccountID(
 			hardware_model,
 			firmware_version,
 			capability_set,
+			capability_revision,
 			bound_at,
 			updated_at
 		FROM device_bindings
@@ -274,6 +278,7 @@ func (r *PostgresRepository) ListAllBindings(
 			hardware_model,
 			firmware_version,
 			capability_set,
+			capability_revision,
 			bound_at,
 			updated_at
 		FROM device_bindings
@@ -312,6 +317,7 @@ func (r *PostgresRepository) GetByDeviceID(
 			hardware_model,
 			firmware_version,
 			capability_set,
+			capability_revision,
 			bound_at,
 			updated_at
 		FROM device_bindings
@@ -535,6 +541,7 @@ func (r *PostgresRepository) GetDeviceCredential(
 			hardware_model,
 			firmware_version,
 			capability_set,
+			capability_revision,
 			public_key,
 			status,
 			registered_at,
@@ -550,6 +557,7 @@ func (r *PostgresRepository) GetDeviceCredential(
 		&credential.HardwareModel,
 		&credential.FirmwareVersion,
 		&credential.CapabilitySet,
+		&credential.CapabilityRevision,
 		&credential.PublicKey,
 		&credential.Status,
 		&credential.RegisteredAt,
@@ -576,17 +584,19 @@ func upsertDeviceCredential(
 			hardware_model,
 			firmware_version,
 			capability_set,
+			capability_revision,
 			public_key,
 			status,
 			registered_at,
 			last_authenticated_at,
 			updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (device_id) DO UPDATE
 		SET hardware_model = EXCLUDED.hardware_model,
 		    firmware_version = EXCLUDED.firmware_version,
 		    capability_set = EXCLUDED.capability_set,
+		    capability_revision = EXCLUDED.capability_revision,
 		    public_key = EXCLUDED.public_key,
 		    status = EXCLUDED.status,
 		    updated_at = EXCLUDED.updated_at
@@ -595,6 +605,7 @@ func upsertDeviceCredential(
 		credential.HardwareModel,
 		credential.FirmwareVersion,
 		credential.CapabilitySet,
+		credential.CapabilityRevision,
 		credential.PublicKey,
 		credential.Status,
 		credential.RegisteredAt,
@@ -777,6 +788,7 @@ func scanBinding(row bindingScanner) (*domain.Binding, error) {
 		&binding.HardwareModel,
 		&binding.FirmwareVersion,
 		&binding.Capabilities,
+		&binding.CapabilityRevision,
 		&binding.BoundAt,
 		&binding.UpdatedAt,
 	)

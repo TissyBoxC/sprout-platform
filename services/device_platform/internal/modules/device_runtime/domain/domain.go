@@ -116,17 +116,19 @@ const (
 
 // Heartbeat contains one complete device runtime snapshot.
 type Heartbeat struct {
-	DeviceID          string
-	HeartbeatID       string
-	ReportedAt        time.Time
-	FirmwareVersion   string
-	ConnectionState   ConnectionState
-	Transport         Transport
-	NetworkQuality    NetworkQualityLevel
-	RSSIDBM           int
-	LatencyMS         int
-	PacketLossPercent int
-	Temperature       TemperatureState
+	DeviceID           string
+	HeartbeatID        string
+	ReportedAt         time.Time
+	FirmwareVersion    string
+	Capabilities       []string
+	CapabilityRevision uint64
+	ConnectionState    ConnectionState
+	Transport          Transport
+	NetworkQuality     NetworkQualityLevel
+	RSSIDBM            int
+	LatencyMS          int
+	PacketLossPercent  int
+	Temperature        TemperatureState
 	// TemperatureTenths is the reading in tenths of a degree Celsius, or nil
 	// when the device reported no measurement.
 	TemperatureTenths *int
@@ -235,39 +237,42 @@ type Command struct {
 
 // HeartbeatInput is a validated device report ready for persistence.
 type HeartbeatInput struct {
-	DeviceID          string
-	HeartbeatID       string
-	ReportedAt        time.Time
-	FirmwareVersion   string
-	ConnectionState   ConnectionState
-	Transport         Transport
-	NetworkQuality    NetworkQualityLevel
-	RSSIDBM           int
-	LatencyMS         int
-	PacketLossPercent int
-	Temperature       TemperatureState
-	TemperatureTenths *int
-	TimeSyncState     TimeSyncState
-	TimeSyncSource    TimeSyncSource
-	TimeSyncedAt      *time.Time
-	TimeOffsetMS      int
-	OfflineState      OfflineState
-	OfflineReason     OfflineReason
-	FallbackActive    bool
-	PendingTelemetry  int
+	DeviceID           string
+	HeartbeatID        string
+	ReportedAt         time.Time
+	FirmwareVersion    string
+	Capabilities       []string
+	CapabilityRevision uint64
+	ConnectionState    ConnectionState
+	Transport          Transport
+	NetworkQuality     NetworkQualityLevel
+	RSSIDBM            int
+	LatencyMS          int
+	PacketLossPercent  int
+	Temperature        TemperatureState
+	TemperatureTenths  *int
+	TimeSyncState      TimeSyncState
+	TimeSyncSource     TimeSyncSource
+	TimeSyncedAt       *time.Time
+	TimeOffsetMS       int
+	OfflineState       OfflineState
+	OfflineReason      OfflineReason
+	FallbackActive     bool
+	PendingTelemetry   int
 }
 
 // DeviceStatus is the guardian-facing combination of a binding and the
 // latest runtime snapshot. Runtime is nil until the device reports once.
 type DeviceStatus struct {
-	ParentAccountID string
-	DeviceID        string
-	DeviceName      string
-	HardwareModel   string
-	FirmwareVersion string
-	Capabilities    []string
-	LifecycleStatus string
-	BoundAt         time.Time
-	UpdatedAt       time.Time
-	Runtime         *RuntimeStatus
+	ParentAccountID    string
+	DeviceID           string
+	DeviceName         string
+	HardwareModel      string
+	FirmwareVersion    string
+	Capabilities       []string
+	CapabilityRevision uint64
+	LifecycleStatus    string
+	BoundAt            time.Time
+	UpdatedAt          time.Time
+	Runtime            *RuntimeStatus
 }

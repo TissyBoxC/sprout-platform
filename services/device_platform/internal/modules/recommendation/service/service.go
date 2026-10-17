@@ -27,7 +27,7 @@ const (
 // CatalogReader returns the published catalog candidates the recommender may
 // rank. It must only return packages with a currently published version.
 type CatalogReader interface {
-	ListCandidates(ctx context.Context, ageTier string) ([]domain.Candidate, error)
+	ListCandidates(ctx context.Context, familyID string, ageTier string) ([]domain.Candidate, error)
 }
 
 // FamilySignalReader reads the family's favourites and recent plays, which the
@@ -75,7 +75,7 @@ func (s *Service) Recommend(
 	if s.catalog == nil {
 		return []domain.Recommendation{}, nil
 	}
-	candidates, err := s.catalog.ListCandidates(ctx, normalized.AgeTier)
+	candidates, err := s.catalog.ListCandidates(ctx, familyID, normalized.AgeTier)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func (s *Service) CheckReadiness(ctx context.Context) error {
 	if s == nil || s.catalog == nil {
 		return errors.New("recommendation catalog is unavailable")
 	}
-	_, err := s.catalog.ListCandidates(ctx, "")
+	_, err := s.catalog.ListCandidates(ctx, "", "")
 	return err
 }
 

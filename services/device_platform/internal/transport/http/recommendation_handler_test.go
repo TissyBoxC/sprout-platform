@@ -20,6 +20,7 @@ type recommendationTestCatalog struct {
 
 func (c recommendationTestCatalog) ListCandidates(
 	_ context.Context,
+	_ string,
 	ageTier string,
 ) ([]recommendationdomain.Candidate, error) {
 	result := make([]recommendationdomain.Candidate, 0, len(c.candidates))

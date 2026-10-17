@@ -17,17 +17,20 @@ type ContentCatalogReader struct {
 	Repository contentrepository.Repository
 }
 
-// ListCandidates returns published catalog packages for one age tier. An empty
-// age tier returns every published package.
+// ListCandidates returns published catalog packages for one age tier. The
+// content service intersects the candidate set with the family's effective
+// category policy; an empty age tier returns every eligible package.
 func (reader ContentCatalogReader) ListCandidates(
 	ctx context.Context,
+	familyID string,
 	ageTier string,
 ) ([]domain.Candidate, error) {
 	if reader.Repository == nil {
 		return nil, nil
 	}
 	catalog, err := reader.Repository.Catalog(ctx, contentdomain.CatalogQuery{
-		AgeTier: ageTier,
+		FamilyID: familyID,
+		AgeTier:  ageTier,
 	})
 	if err != nil {
 		return nil, err

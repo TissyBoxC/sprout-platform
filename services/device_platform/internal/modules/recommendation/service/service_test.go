@@ -17,6 +17,7 @@ type stubCatalog struct {
 func (c stubCatalog) ListCandidates(
 	_ context.Context,
 	_ string,
+	_ string,
 ) ([]domain.Candidate, error) {
 	return c.candidates, c.err
 }

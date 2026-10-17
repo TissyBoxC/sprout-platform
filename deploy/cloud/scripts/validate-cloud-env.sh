@@ -54,6 +54,10 @@ SPROUT_RELEASE_UPLOAD_TOKEN
 SPROUT_AUTH_ACCESS_TOKEN_SECRET
 SPROUT_AI_CREDENTIAL_KEY
 SPROUT_MFA_CREDENTIAL_KEY
+SPROUT_DEVICE_PLATFORM_UID
+SPROUT_DEVICE_PLATFORM_GID
+SPROUT_SERVICE_VERSION_STATE_UID
+SPROUT_SERVICE_VERSION_STATE_GID
 SPROUT_SUB2API_API_KEY
 SPROUT_SUB2API_ADMIN_EMAIL
 SPROUT_SUB2API_ADMIN_PASSWORD
@@ -69,6 +73,38 @@ SPROUT_DOWNLOAD_PUBLIC_BASE_URL
 for key in $required_keys; do
   require_value "$key"
 done
+
+require_numeric_id() {
+  key="$1"
+  value="$(read_value "$key")"
+  if [ -n "$value" ] && ! printf '%s' "$value" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid cloud environment: $key must be a numeric container UID or GID." >&2
+    validation_failed=1
+  fi
+}
+
+for key in \
+  SPROUT_DEVICE_PLATFORM_UID \
+  SPROUT_DEVICE_PLATFORM_GID \
+  SPROUT_SERVICE_VERSION_STATE_UID \
+  SPROUT_SERVICE_VERSION_STATE_GID; do
+  require_numeric_id "$key"
+done
+
+platform_uid="$(read_value SPROUT_DEVICE_PLATFORM_UID)"
+platform_gid="$(read_value SPROUT_DEVICE_PLATFORM_GID)"
+state_uid="$(read_value SPROUT_SERVICE_VERSION_STATE_UID)"
+state_gid="$(read_value SPROUT_SERVICE_VERSION_STATE_GID)"
+
+if [ -n "$platform_uid" ] && [ -n "$state_uid" ] && [ "$platform_uid" != "$state_uid" ]; then
+  echo "Invalid cloud environment: SPROUT_SERVICE_VERSION_STATE_UID must match SPROUT_DEVICE_PLATFORM_UID so the console can write upgrade requests." >&2
+  validation_failed=1
+fi
+
+if [ -n "$platform_gid" ] && [ -n "$state_gid" ] && [ "$platform_gid" != "$state_gid" ]; then
+  echo "Invalid cloud environment: SPROUT_SERVICE_VERSION_STATE_GID must match SPROUT_DEVICE_PLATFORM_GID so the console and worker share upgrade volume access." >&2
+  validation_failed=1
+fi
 
 totp_key="$(read_value SPROUT_SUB2API_TOTP_ENCRYPTION_KEY)"
 if [ -n "$totp_key" ] && ! is_hex_64 "$totp_key"; then

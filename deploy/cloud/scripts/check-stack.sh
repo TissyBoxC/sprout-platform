@@ -66,6 +66,9 @@ docker compose -f "$compose_file" --env-file "$env_file" \
     [ "$age" -ge 0 ]
     [ "$age" -le 300 ]
     jq -e "[.services[] | select(.status == \"updating\" or .status == \"failed\")] | length == 0" "$state/status.json" >/dev/null
+    test -r "$state" -a -w "$state" -a -x "$state"
+    test -r "$state/queue" -a -w "$state/queue" -a -x "$state/queue"
+    test -r "$state/results" -a -w "$state/results" -a -x "$state/results"
     echo "status.json fresh (${age}s), releases.json present, no active or failed upgrade"
   '
 
@@ -89,3 +92,15 @@ check_service "device platform" "device_platform" "http://127.0.0.1:8081/readyz"
 check_service "voice gateway" "voice_gateway" "http://127.0.0.1:8082/readyz"
 check_service "sub2api" "sub2api" "http://127.0.0.1:8080/health"
 check_service "admin console" "admin_web" "http://127.0.0.1:8080/healthz"
+
+echo
+echo "== device platform upgrade state access =="
+docker compose -f "$compose_file" --env-file "$env_file" \
+  exec -T device_platform sh -c '
+    set -e
+    state="${DEVICE_PLATFORM_SERVICE_VERSION_STATE_DIR:-/var/lib/sprout-upgrades}"
+    test -r "$state" -a -w "$state" -a -x "$state"
+    test -w "$state/queue"
+    test -r "$state/results"
+    echo "device platform can write the upgrade queue and read results"
+  '

@@ -453,6 +453,44 @@ if ! grep -Fq 'upgrade_worker' "$check_stack_script"; then
   exit 1
 fi
 
+check_stack_block="$(cat "$check_stack_script")"
+for permission_probe in \
+  'test -r "$state" -a -w "$state" -a -x "$state"' \
+  'test -r "$state/queue" -a -w "$state/queue" -a -x "$state/queue"' \
+  'test -r "$state/results" -a -w "$state/results" -a -x "$state/results"'; do
+  if ! printf '%s\n' "$check_stack_block" | grep -Fq "$permission_probe"; then
+    echo "check-stack.sh 缺少升级状态目录权限检查: $permission_probe" >&2
+    exit 1
+  fi
+done
+
+if ! printf '%s\n' "$check_stack_block" | grep -Fq 'device platform can write the upgrade queue'; then
+  echo "check-stack.sh 未验证 device_platform 对升级队列的访问。" >&2
+  exit 1
+fi
+
+compose_check_block="$(cat "$compose_file")"
+if ! printf '%s\n' "$compose_check_block" |
+  grep -Fq 'user: "${SPROUT_DEVICE_PLATFORM_UID}:${SPROUT_DEVICE_PLATFORM_GID}"'; then
+  echo "device_platform 必须使用平台 UID/GID 运行以匹配升级卷权限。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$compose_check_block" |
+  grep -Fq 'group_add:'; then
+  echo "服务缺少共享卷组。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$compose_check_block" |
+  grep -Fq '${SPROUT_DOWNLOAD_SFTP_GID}'; then
+  echo "device_platform 缺少共享发布文件组。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$compose_check_block" |
+  grep -Fq 'SPROUT_SERVICE_VERSION_STATE_GID'; then
+  echo "upgrade_worker 未使用共享升级卷 GID。" >&2
+  exit 1
+fi
+
 # read_running_image_tag must strip an @sha256 digest before extracting the
 # tag; otherwise digest-pinned images surface the digest as the version.
 read_tag_block="$(

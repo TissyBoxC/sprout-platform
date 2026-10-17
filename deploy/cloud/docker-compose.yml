@@ -129,7 +129,11 @@ services:
 
   device_platform:
     image: ghcr.io/tissyboxc/sprout-device-platform:${SPROUT_PLATFORM_VERSION}
-    user: "${SPROUT_DEVICE_PLATFORM_UID}:${SPROUT_DOWNLOAD_SFTP_GID}"
+    # The platform writes release files through the download group and writes
+    # upgrade requests through its own group. Keep both capabilities explicit.
+    user: "${SPROUT_DEVICE_PLATFORM_UID}:${SPROUT_DEVICE_PLATFORM_GID}"
+    group_add:
+      - "${SPROUT_DOWNLOAD_SFTP_GID}"
     security_opt:
       - no-new-privileges:true
     ports:
@@ -348,7 +352,11 @@ services:
 
   upgrade_worker:
     image: ghcr.io/tissyboxc/sprout-upgrade-worker:${SPROUT_PLATFORM_VERSION}
+    # group_add gives the worker the shared upgrade-volume group without
+    # changing its root-owned Docker socket access or its image identity.
     user: "0:0"
+    group_add:
+      - "${SPROUT_DEVICE_PLATFORM_GID}"
     security_opt:
       - no-new-privileges:true
     environment:
@@ -361,8 +369,8 @@ services:
       SPROUT_SERVICE_VERSION_RELEASE_CATALOG_LIMIT: "${SPROUT_SERVICE_VERSION_RELEASE_CATALOG_LIMIT:-100}"
       SPROUT_SERVICE_VERSION_POLL_INTERVAL_SECONDS: "${SPROUT_SERVICE_VERSION_POLL_INTERVAL_SECONDS:-5}"
       SPROUT_SERVICE_VERSION_MAX_REQUEST_BYTES: "${SPROUT_SERVICE_VERSION_MAX_REQUEST_BYTES:-65536}"
-      SPROUT_SERVICE_VERSION_STATE_UID: "${SPROUT_SERVICE_VERSION_STATE_UID:-65532}"
-      SPROUT_SERVICE_VERSION_STATE_GID: "${SPROUT_SERVICE_VERSION_STATE_GID:-65532}"
+      SPROUT_SERVICE_VERSION_STATE_UID: "${SPROUT_SERVICE_VERSION_STATE_UID:-${SPROUT_DEVICE_PLATFORM_UID}}"
+      SPROUT_SERVICE_VERSION_STATE_GID: "${SPROUT_SERVICE_VERSION_STATE_GID:-${SPROUT_DEVICE_PLATFORM_GID}}"
       SPROUT_UPGRADE_HEALTH_TIMEOUT_SECONDS: "${SPROUT_UPGRADE_HEALTH_TIMEOUT_SECONDS:-180}"
       SPROUT_UPGRADE_PLATFORM_REPOSITORY: "${SPROUT_UPGRADE_PLATFORM_REPOSITORY:-TissyBoxC/sprout-platform}"
       SPROUT_UPGRADE_SUB2API_REPOSITORY: "${SPROUT_UPGRADE_SUB2API_REPOSITORY:-TissyBoxC/sprout-sub2api-fork}"

@@ -9,6 +9,8 @@
     "schema_version",
     "report_date",
     "timezone_offset_minutes",
+    "has_policy",
+    "has_daily_limit",
     "active_minutes",
     "conversation_count",
     "conversation_minutes",
@@ -35,6 +37,14 @@
       "type": "integer",
       "minimum": -840,
       "maximum": 840
+    },
+    "has_policy": {
+      "type": "boolean",
+      "description": "Whether the family has an effective guardian policy. False distinguishes an unset policy from an unlimited one."
+    },
+    "has_daily_limit": {
+      "type": "boolean",
+      "description": "Whether a daily duration limit applies. False means duration is unlimited."
     },
     "active_minutes": {
       "type": "integer",

@@ -11,6 +11,8 @@ void main() {
     expect(report.days, hasLength(1));
     final day = report.days.single;
     expect(day.reportDate, DateTime(2026, 10, 7));
+    expect(day.hasPolicy, isTrue);
+    expect(day.hasDailyLimit, isTrue);
     expect(day.activeMinutes, 42);
     expect(day.conversationCount, 18);
     expect(day.contentPlayCount, 6);
@@ -56,6 +58,20 @@ void main() {
     expect(day.isUnlimited, isTrue);
     expect(day.usagePercent, 0);
   });
+
+  test('does not treat a missing policy as an unlimited policy', () {
+    final day = UsageReportDay.fromJson(
+      _reportJson(
+        dailyLimitMinutes: 0,
+        remainingMinutes: 0,
+        hasPolicy: false,
+        hasDailyLimit: false,
+      ),
+    );
+
+    expect(day.hasPolicy, isFalse);
+    expect(day.isUnlimited, isFalse);
+  });
 }
 
 Map<String, Object?> _reportJson({
@@ -65,12 +81,16 @@ Map<String, Object?> _reportJson({
   int contentPlayCount = 6,
   int dailyLimitMinutes = 60,
   int remainingMinutes = 18,
+  bool hasPolicy = true,
+  bool? hasDailyLimit,
   Map<String, Object?>? blocked,
 }) {
   return {
     'schema_version': '1.0.0',
     'report_date': reportDate,
     'timezone_offset_minutes': 480,
+    'has_policy': hasPolicy,
+    'has_daily_limit': hasDailyLimit ?? dailyLimitMinutes > 0,
     'active_minutes': activeMinutes,
     'conversation_count': conversationCount,
     'conversation_minutes': 24,

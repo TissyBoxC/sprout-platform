@@ -29,6 +29,8 @@ export interface UsageReportDay {
   schemaVersion: string
   reportDate: string
   timezoneOffsetMinutes: number
+  hasPolicy: boolean
+  hasDailyLimit: boolean
   activeMinutes: number
   conversationCount: number
   conversationMinutes: number
@@ -85,6 +87,8 @@ export function parseUsageReportDay(value: unknown): UsageReportDay | null {
     schemaVersion: stringValue(value.schema_version),
     reportDate,
     timezoneOffsetMinutes: numberValue(value.timezone_offset_minutes),
+    hasPolicy: value.has_policy === true,
+    hasDailyLimit: value.has_daily_limit === true,
     activeMinutes: nonNegativeNumber(value.active_minutes),
     conversationCount: nonNegativeNumber(value.conversation_count),
     conversationMinutes: nonNegativeNumber(value.conversation_minutes),

@@ -6,6 +6,8 @@ class UsageReportDay {
     required this.schemaVersion,
     required this.reportDate,
     required this.timezoneOffsetMinutes,
+    required this.hasPolicy,
+    required this.hasDailyLimit,
     required this.activeMinutes,
     required this.conversationCount,
     required this.conversationMinutes,
@@ -23,6 +25,8 @@ class UsageReportDay {
   final String schemaVersion;
   final DateTime reportDate;
   final int timezoneOffsetMinutes;
+  final bool hasPolicy;
+  final bool hasDailyLimit;
   final int activeMinutes;
   final int conversationCount;
   final int conversationMinutes;
@@ -43,7 +47,7 @@ class UsageReportDay {
       categories.isNotEmpty ||
       devices.isNotEmpty;
 
-  bool get isUnlimited => dailyLimitMinutes == 0;
+  bool get isUnlimited => hasPolicy && !hasDailyLimit;
 
   int get usagePercent {
     if (dailyLimitMinutes <= 0) {
@@ -60,6 +64,8 @@ class UsageReportDay {
         json['timezone_offset_minutes'],
         'timezone_offset_minutes',
       ),
+      hasPolicy: json['has_policy'] == true,
+      hasDailyLimit: json['has_daily_limit'] == true,
       activeMinutes: _requiredInt(json['active_minutes'], 'active_minutes'),
       conversationCount: _requiredInt(
         json['conversation_count'],

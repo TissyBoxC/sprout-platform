@@ -42,13 +42,14 @@ func (repository usageTestBindingRepository) GetByDeviceID(
 
 type usageTestPolicyService struct {
 	effective *policydomain.EffectivePolicy
+	err       error
 }
 
 func (service usageTestPolicyService) GetEffective(
 	_ context.Context,
 	_ string,
 ) (*policydomain.EffectivePolicy, error) {
-	return service.effective, nil
+	return service.effective, service.err
 }
 
 func TestDeviceUsageUploadRequiresMatchingSessionAndWritesFamily(t *testing.T) {
@@ -72,6 +73,17 @@ func TestDeviceUsageUploadRequiresMatchingSessionAndWritesFamily(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("create usage service: %v", err)
+	}
+	if _, err := usageService.RecordDeviceUsage(
+		context.Background(),
+		"family_001",
+		"sprout_device_001",
+		domain.UsageUpload{
+			ReportDate:    "2026-10-08",
+			ActiveSeconds: 60,
+		},
+	); err != nil {
+		t.Fatalf("seed usage: %v", err)
 	}
 	handler := usageReportHandler{
 		service: usageService,
@@ -198,6 +210,63 @@ func TestGuardianUsageReportIsFamilyScoped(t *testing.T) {
 	if len(payload.Data.Reports) != 1 ||
 		payload.Data.Reports[0].ActiveMinutes != 10 {
 		t.Fatalf("unexpected family report: %s", recorder.Body.String())
+	}
+}
+
+func TestGuardianUsageReportReturnsMissingPolicyWithoutInventingALimit(t *testing.T) {
+	usageService, err := usageservice.New(usageservice.Options{
+		Repository: &usageMemoryRepository{usages: map[string]*domain.DailyUsage{}},
+		PolicyService: usageTestPolicyService{
+			err: policydomain.ErrNoFamilyPolicy,
+		},
+		Clock: usageHandlerClock{},
+	})
+	if err != nil {
+		t.Fatalf("create usage service: %v", err)
+	}
+	if _, err := usageService.RecordDeviceUsage(
+		context.Background(),
+		"family_001",
+		"sprout_device_001",
+		domain.UsageUpload{
+			ReportDate:    "2026-10-08",
+			ActiveSeconds: 60,
+		},
+	); err != nil {
+		t.Fatalf("seed usage: %v", err)
+	}
+	handler := usageReportHandler{
+		service: usageService,
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/usage-reports?days=1", nil)
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		authenticatedAccountKey{},
+		"family_001",
+	))
+	recorder := httptest.NewRecorder()
+	handler.listGuardianUsageReports(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Reports []struct {
+				HasPolicy     bool `json:"has_policy"`
+				HasDailyLimit bool `json:"has_daily_limit"`
+				DailyLimit    int  `json:"daily_limit_minutes"`
+			} `json:"reports"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data.Reports) != 1 {
+		t.Fatalf("report count = %d, want 1", len(payload.Data.Reports))
+	}
+	report := payload.Data.Reports[0]
+	if report.HasPolicy || report.HasDailyLimit || report.DailyLimit != 0 {
+		t.Fatalf("unexpected missing-policy report: %+v", report)
 	}
 }
 

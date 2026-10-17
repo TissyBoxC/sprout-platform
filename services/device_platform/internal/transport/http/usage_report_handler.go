@@ -227,6 +227,8 @@ func usageReportResponse(report *domain.Report) map[string]any {
 		"schema_version":          report.SchemaVersion,
 		"report_date":             report.ReportDate,
 		"timezone_offset_minutes": report.TimezoneOffsetMinutes,
+		"has_policy":              report.HasPolicy,
+		"has_daily_limit":         report.HasDailyLimit,
 		"active_minutes":          report.ActiveMinutes,
 		"conversation_count":      report.ConversationCount,
 		"conversation_minutes":    report.ConversationMinutes,

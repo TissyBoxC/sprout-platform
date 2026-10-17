@@ -2,6 +2,8 @@
   "schema_version": "1.0.0",
   "report_date": "2026-10-07",
   "timezone_offset_minutes": 480,
+  "has_policy": true,
+  "has_daily_limit": true,
   "active_minutes": 42,
   "conversation_count": 18,
   "conversation_minutes": 24,

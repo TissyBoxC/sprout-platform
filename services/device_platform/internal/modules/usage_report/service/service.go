@@ -112,7 +112,7 @@ func (s *Service) ListForFamily(
 		return nil, err
 	}
 	effective, err := s.policyService.GetEffective(ctx, parentAccountID)
-	if err != nil {
+	if err != nil && !errors.Is(err, policydomain.ErrNoFamilyPolicy) {
 		return nil, err
 	}
 	fromDate := s.timeSource.Now().UTC().AddDate(0, 0, -(days - 1))
@@ -223,11 +223,15 @@ func shapeReport(
 	effective *policydomain.EffectivePolicy,
 ) domain.Report {
 	report := domain.Report{
-		SchemaVersion:     "1.0.0",
-		ReportDate:        reportDate,
-		DailyLimitMinutes: effective.DailyLimitMinutes,
-		Categories:        []domain.CategoryUsage{},
-		Devices:           []domain.DeviceUsage{},
+		SchemaVersion: "1.0.0",
+		ReportDate:    reportDate,
+		HasPolicy:     effective != nil,
+		Categories:    []domain.CategoryUsage{},
+		Devices:       []domain.DeviceUsage{},
+	}
+	if effective != nil {
+		report.DailyLimitMinutes = effective.DailyLimitMinutes
+		report.HasDailyLimit = effective.DailyLimitMinutes > 0
 	}
 	categoryTotals := make(map[string]domain.CategoryUsage)
 	activeSeconds := 0
@@ -283,7 +287,7 @@ func shapeReport(
 	sort.Slice(report.Devices, func(left int, right int) bool {
 		return report.Devices[left].DeviceID < report.Devices[right].DeviceID
 	})
-	if report.DailyLimitMinutes > 0 {
+	if report.HasDailyLimit {
 		remaining := report.DailyLimitMinutes - report.ActiveMinutes
 		if remaining < 0 {
 			remaining = 0

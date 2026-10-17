@@ -63,18 +63,24 @@ function reportDateLabel(value: string): string {
 }
 
 function allowedText(report: UsageReportDay): string {
-  if (report.dailyLimitMinutes === 0) {
+  if (!report.hasPolicy) {
+    return '尚未设置守护策略'
+  }
+  if (!report.hasDailyLimit) {
     return '不限使用时长'
   }
   return `每日 ${report.dailyLimitMinutes} 分钟`
 }
 
 function limitText(report: UsageReportDay): string {
+  if (!report.hasPolicy) {
+    return '等待设置守护策略'
+  }
   if (report.limitReached) {
     return '今日额度已用完'
   }
-  if (report.dailyLimitMinutes === 0) {
-    return '未设置每日上限'
+  if (!report.hasDailyLimit) {
+    return '当前不限使用时长'
   }
   return `剩余 ${report.remainingMinutes} 分钟`
 }

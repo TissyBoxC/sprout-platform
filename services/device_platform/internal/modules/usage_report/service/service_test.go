@@ -197,3 +197,89 @@ func TestListForFamilyComputesLimitAndOnlyOwnRows(t *testing.T) {
 		t.Fatalf("device count = %d, want 2", len(reports[0].Devices))
 	}
 }
+
+func TestListForFamilyDistinguishesMissingPolicyFromUnlimitedPolicy(t *testing.T) {
+	for _, testCase := range []struct {
+		name          string
+		effective     *policydomain.EffectivePolicy
+		policyError   error
+		hasPolicy     bool
+		hasDailyLimit bool
+	}{
+		{
+			name:        "missing policy",
+			policyError: policydomain.ErrNoFamilyPolicy,
+		},
+		{
+			name:          "policy with unlimited duration",
+			effective:     &policydomain.EffectivePolicy{DailyLimitMinutes: 0},
+			hasPolicy:     true,
+			hasDailyLimit: false,
+		},
+		{
+			name:          "policy with duration limit",
+			effective:     &policydomain.EffectivePolicy{DailyLimitMinutes: 60},
+			hasPolicy:     true,
+			hasDailyLimit: true,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repository := newMemoryUsageRepository()
+			service, err := New(Options{
+				Repository: repository,
+				PolicyService: fixedPolicyReader{
+					effective: testCase.effective,
+					err:       testCase.policyError,
+				},
+				Clock: usageFixedClock{},
+			})
+			if err != nil {
+				t.Fatalf("create usage report service: %v", err)
+			}
+			if _, err := service.RecordDeviceUsage(
+				context.Background(),
+				"family_1",
+				"sprout_device_1",
+				domain.UsageUpload{
+					ReportDate:    "2026-10-08",
+					ActiveSeconds: 60,
+				},
+			); err != nil {
+				t.Fatalf("seed usage: %v", err)
+			}
+			reports, err := service.ListForFamily(context.Background(), "family_1", 1)
+			if err != nil {
+				t.Fatalf("list reports: %v", err)
+			}
+			if len(reports) != 1 {
+				t.Fatalf("report count = %d, want 1", len(reports))
+			}
+			if reports[0].HasPolicy != testCase.hasPolicy ||
+				reports[0].HasDailyLimit != testCase.hasDailyLimit {
+				t.Fatalf("policy flags = (%t, %t), want (%t, %t)",
+					reports[0].HasPolicy,
+					reports[0].HasDailyLimit,
+					testCase.hasPolicy,
+					testCase.hasDailyLimit,
+				)
+			}
+		})
+	}
+}
+
+func TestListForFamilyStillFailsOnPolicyReadError(t *testing.T) {
+	repository := newMemoryUsageRepository()
+	service, err := New(Options{
+		Repository: repository,
+		PolicyService: fixedPolicyReader{
+			err: errors.New("database unavailable"),
+		},
+		Clock: usageFixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create usage report service: %v", err)
+	}
+	if _, err := service.ListForFamily(context.Background(), "family_1", 1); err == nil {
+		t.Fatal("expected policy read error")
+	}
+}

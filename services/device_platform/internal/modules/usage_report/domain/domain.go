@@ -68,6 +68,8 @@ type Report struct {
 	SchemaVersion         string
 	ReportDate            string
 	TimezoneOffsetMinutes int
+	HasPolicy             bool
+	HasDailyLimit         bool
 	ActiveMinutes         int
 	ConversationCount     int
 	ConversationMinutes   int

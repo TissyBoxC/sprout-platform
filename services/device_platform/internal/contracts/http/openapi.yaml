@@ -17680,7 +17680,7 @@ components:
           type: integer
           format: int64
           minimum: 1
-          maximum: 4294967296
+          maximum: 786432
         status:
           $ref: "#/components/schemas/ContentStatus"
         submitted_at:
@@ -17742,7 +17742,7 @@ components:
           type: integer
           format: int64
           minimum: 1
-          maximum: 4294967296
+          maximum: 786432
     ContentPackageUpdateRequest:
       type: object
       additionalProperties: false
@@ -17778,7 +17778,7 @@ components:
           type: integer
           format: int64
           minimum: 1
-          maximum: 4294967296
+          maximum: 786432
     ContentDecisionRequest:
       type: object
       additionalProperties: false
@@ -17949,7 +17949,7 @@ components:
           type: integer
           format: int64
           minimum: 1
-          maximum: 4294967296
+          maximum: 786432
         download_url:
           type: string
           format: uri

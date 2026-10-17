@@ -56,6 +56,11 @@ const (
 	AgeTier7To8 AgeTier = "age_7_8"
 )
 
+// MaxPackageBytes is the package ceiling shared by the platform and the
+// production content downloader. Keep it aligned with
+// CONTENT_DOWNLOADER_MAX_PACKAGE_BYTES in the firmware.
+const MaxPackageBytes int64 = 768 * 1024
+
 var (
 	// ErrInvalidTransition reports a lifecycle move that is not allowed.
 	ErrInvalidTransition = errors.New("content lifecycle transition invalid")
@@ -462,7 +467,7 @@ func ValidateMetadata(input MetadataInput) (MetadataInput, error) {
 	if !sha256Pattern.MatchString(input.SHA256) {
 		return MetadataInput{}, ErrInvalidMetadata
 	}
-	if input.SizeBytes < 1 || input.SizeBytes > 4*1024*1024*1024 {
+	if input.SizeBytes < 1 || input.SizeBytes > MaxPackageBytes {
 		return MetadataInput{}, ErrInvalidMetadata
 	}
 	input.AgeTiers = normalizedAgeTiers

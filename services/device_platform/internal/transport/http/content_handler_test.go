@@ -368,6 +368,7 @@ func TestContentDownloadReturnsVerifiedAsset(t *testing.T) {
 		Title:          "月亮晚安故事",
 		AssetKey:       "content/story/moon-night-v1.bin",
 		SHA256:         sha256,
+		SizeBytes:      1024,
 		Status:         contentdomain.StatusPublished,
 	}
 	service, err := contentservice.New(contentservice.Options{

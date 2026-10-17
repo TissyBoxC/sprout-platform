@@ -1793,7 +1793,9 @@ test('manages the content library lifecycle from draft to published', async ({ p
   await expect(page.getByRole('heading', { name: '内容库' })).toBeVisible()
   await expect(page.locator('table tbody tr')).toHaveCount(1)
   await expect(page.getByText('小兔子的一天', { exact: true })).toBeVisible()
-  await expect(page.getByText('草稿', { exact: true }).first()).toBeVisible()
+  await expect(
+    page.locator('table tbody tr').getByText('草稿', { exact: true }),
+  ).toBeVisible()
 
   await page.getByRole('button', { name: '新建内容' }).click()
   const createDialog = page.getByRole('dialog', { name: '新建内容草稿' })
@@ -1807,6 +1809,13 @@ test('manages the content library lifecycle from draft to published', async ({ p
   )
   await expect(createDialog.getByLabel('校验值')).toHaveValue('a'.repeat(64))
   await expect(createDialog.getByLabel('文件大小（字节）')).toHaveValue('2048')
+  await createDialog.getByLabel('文件大小（字节）').fill('786433')
+  await createDialog.getByRole('button', { name: '创建草稿' }).click()
+  await expect(
+    createDialog.getByText('文件大小需要在 1 字节到 768 KiB 之间。'),
+  ).toBeVisible()
+  expect(createPayload).toBe('')
+  await createDialog.getByLabel('文件大小（字节）').fill('2048')
   await createDialog.getByRole('button', { name: '创建草稿' }).click()
 
   await expect(page.getByText('内容草稿已创建。')).toBeVisible()
@@ -1821,6 +1830,9 @@ test('manages the content library lifecycle from draft to published', async ({ p
   await expect(drawer).toBeVisible()
   await expect(page.getByRole('heading', { name: '第 1 版' })).toBeVisible()
   await expect(page.getByText('还没有审核记录。')).toBeVisible()
+
+  await page.getByRole('button', { name: '提交审核' }).click()
+  await expect(page.getByText('已提交审核。')).toBeVisible()
 
   await page.getByRole('button', { name: '审核驳回' }).click()
   const rejectDialog = page.getByRole('dialog', { name: '驳回第 1 版？' })
@@ -1837,11 +1849,15 @@ test('manages the content library lifecycle from draft to published', async ({ p
 
   await page.getByRole('button', { name: '提交审核' }).click()
   await expect(page.getByText('已提交审核。')).toBeVisible()
-  await expect(page.getByText('待审核', { exact: true }).first()).toBeVisible()
+  await expect(
+    page.locator('table tbody tr').getByText('待审核', { exact: true }).first(),
+  ).toBeVisible()
 
   await page.getByRole('button', { name: '发布' }).click()
   await expect(page.getByText('内容已发布。')).toBeVisible()
-  await expect(page.getByText('已发布', { exact: true }).first()).toBeVisible()
+  await expect(
+    page.locator('table tbody tr').getByText('已发布', { exact: true }).first(),
+  ).toBeVisible()
 })
 
 test('shows family usage reports and recovers from a report read failure', async ({ page }) => {

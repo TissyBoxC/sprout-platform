@@ -362,7 +362,7 @@ function validateDraft(form: DraftForm): boolean {
 
   const size = Number(form.sizeBytes)
   if (!Number.isFinite(size) || size < 1 || size > MAX_CONTENT_SIZE_BYTES) {
-    formErrors.sizeBytes = '文件大小需要在 1 字节到 4 GiB 之间。'
+    formErrors.sizeBytes = '文件大小需要在 1 字节到 768 KiB 之间。'
   }
 
   return Object.keys(formErrors).length === 0
@@ -978,7 +978,6 @@ function ageTierSummary(value: ContentPackage): string {
               v-model.trim="rejectReason"
               rows="4"
               placeholder="例如 音频里有明显的杂音，请重新录制"
-              required
             ></textarea>
           </label>
           <small v-if="rejectError" class="field-error">{{ rejectError }}</small>

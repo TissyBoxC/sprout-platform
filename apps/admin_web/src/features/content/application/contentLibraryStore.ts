@@ -118,12 +118,10 @@ export const useContentLibraryStore = defineStore('admin-content-library', () =>
   }
 
   async function createPackage(input: ContentPackageCreateInput): Promise<ContentStatusResult> {
+    closePackage()
     const result = await runMutation(async () => {
-      const created = await client.createPackage(input)
+      await client.createPackage(input)
       await load()
-      if (created !== null) {
-        await openPackage(created.packageId)
-      }
     })
     if (result.succeeded) {
       lastMessage.value = '内容草稿已创建。'
@@ -397,4 +395,4 @@ export function isSha256Valid(value: string): boolean {
   return /^[0-9a-f]{64}$/.test(value.trim())
 }
 
-export const MAX_CONTENT_SIZE_BYTES = 4 * 1024 * 1024 * 1024
+export const MAX_CONTENT_SIZE_BYTES = 768 * 1024

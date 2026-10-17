@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS content_package_versions (
     CONSTRAINT content_package_versions_sha256_valid
         CHECK (sha256 ~ '^[0-9a-f]{64}$'),
     CONSTRAINT content_package_versions_size_valid
-        CHECK (size_bytes BETWEEN 1 AND 4294967296),
+        CHECK (size_bytes BETWEEN 1 AND 786432),
     CONSTRAINT content_package_versions_status_valid
         CHECK (status IN (
             'draft',

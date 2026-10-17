@@ -1196,6 +1196,51 @@ func TestDownloadReportsMissingBlob(t *testing.T) {
 	}
 }
 
+func TestPackageSizeMatchesFirmwareCeiling(t *testing.T) {
+	repository := newMemoryRepository()
+	service := newContentService(t, repository, validAssetReader())
+
+	atLimit := validMetadata()
+	atLimit.SizeBytes = domain.MaxPackageBytes
+	if _, err := service.CreateDraft(context.Background(), atLimit); err != nil {
+		t.Fatalf("create package at firmware ceiling: %v", err)
+	}
+
+	overLimit := validMetadataWithID("content_story_large")
+	overLimit.SizeBytes = domain.MaxPackageBytes + 1
+	if _, err := service.CreateDraft(
+		context.Background(),
+		overLimit,
+	); !errors.Is(err, domain.ErrInvalidMetadata) {
+		t.Fatalf("create package above firmware ceiling error = %v, want ErrInvalidMetadata", err)
+	}
+}
+
+func TestDownloadRejectsAssetSizeMismatch(t *testing.T) {
+	repository := newMemoryRepository()
+	reader := &mutableAssetReader{asset: &domain.Asset{
+		Key:         validMetadata().AssetKey,
+		SHA256:      validMetadata().SHA256,
+		SizeBytes:   1024,
+		DownloadURL: "https://download.example.test/content/story/moon-night-v1.bin",
+	}}
+	service := newContentService(t, repository, reader)
+	created := publishPackage(t, service, validMetadata())
+
+	reader.asset = &domain.Asset{
+		Key:         created.AssetKey,
+		SHA256:      created.SHA256,
+		SizeBytes:   created.SizeBytes + 1,
+		DownloadURL: "https://download.example.test/content/story/moon-night-v1.bin",
+	}
+	if _, err := service.Download(
+		context.Background(),
+		created.PackageID,
+	); !errors.Is(err, domain.ErrAssetChecksumMismatch) {
+		t.Fatalf("expected size-mismatch rejection, got %v", err)
+	}
+}
+
 func TestNextStatusRejectsIllegalMoves(t *testing.T) {
 	for _, test := range []struct {
 		current domain.Status

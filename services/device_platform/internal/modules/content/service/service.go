@@ -453,6 +453,9 @@ func (s *Service) downloadVersion(
 	if asset.SHA256 != version.SHA256 {
 		return nil, domain.ErrAssetChecksumMismatch
 	}
+	if asset.SizeBytes != version.SizeBytes {
+		return nil, domain.ErrAssetChecksumMismatch
+	}
 	return &domain.DownloadInfo{
 		PackageID:      version.PackageID,
 		PackageVersion: version.PackageVersion,

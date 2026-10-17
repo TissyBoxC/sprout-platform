@@ -8,9 +8,7 @@ import 'package:parent_app/features/content_management/domain/content_package.da
 void main() {
   test('loads bookmarks from the platform on first build', () async {
     final api = _FakeContentManagementApi(
-      favorites: [
-        _favorite('story_001', '会发光的种子'),
-      ],
+      favorites: [_favorite('story_001', '会发光的种子')],
     );
     final container = ProviderContainer(
       overrides: [contentManagementApiProvider.overrideWithValue(api)],
@@ -43,9 +41,10 @@ void main() {
 
     expect(api.added, <String>['story_001']);
     expect(
-      container.read(contentFavoritesControllerProvider).value?.isFavorite(
-        'story_001',
-      ),
+      container
+          .read(contentFavoritesControllerProvider)
+          .value
+          ?.isFavorite('story_001'),
       isTrue,
     );
 
@@ -53,17 +52,41 @@ void main() {
 
     expect(api.removed, <String>['story_001']);
     expect(
-      container.read(contentFavoritesControllerProvider).value?.isFavorite(
-        'story_001',
-      ),
+      container
+          .read(contentFavoritesControllerProvider)
+          .value
+          ?.isFavorite('story_001'),
       isFalse,
     );
   });
 
-  test('a failed toggle keeps the previous state and reports an error', () async {
+  test(
+    'a failed toggle keeps the previous state and reports an error',
+    () async {
+      final api = _FakeContentManagementApi(favorites: const [], failAdd: true);
+      final container = ProviderContainer(
+        overrides: [contentManagementApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(contentFavoritesControllerProvider.future);
+      final controller = container.read(
+        contentFavoritesControllerProvider.notifier,
+      );
+
+      await controller.toggle('story_001');
+
+      final state = container.read(contentFavoritesControllerProvider).value;
+      expect(state?.isFavorite('story_001'), isFalse);
+      expect(state?.isPending('story_001'), isFalse);
+      expect(state?.errorMessage, isNotNull);
+    },
+  );
+
+  test('a failed removal restores the bookmark and reports an error', () async {
     final api = _FakeContentManagementApi(
-      favorites: const [],
-      failAdd: true,
+      favorites: [_favorite('story_001', '会发光的种子')],
+      failRemove: true,
     );
     final container = ProviderContainer(
       overrides: [contentManagementApiProvider.overrideWithValue(api)],
@@ -78,7 +101,7 @@ void main() {
     await controller.toggle('story_001');
 
     final state = container.read(contentFavoritesControllerProvider).value;
-    expect(state?.isFavorite('story_001'), isFalse);
+    expect(state?.isFavorite('story_001'), isTrue);
     expect(state?.isPending('story_001'), isFalse);
     expect(state?.errorMessage, isNotNull);
   });
@@ -100,14 +123,15 @@ class _FakeContentManagementApi implements ContentManagementApi {
   _FakeContentManagementApi({
     required List<ContentFavorite> favorites,
     this.failAdd = false,
+    this.failRemove = false,
   }) : _favorites = [...favorites];
 
   final List<ContentFavorite> _favorites;
   final bool failAdd;
+  final bool failRemove;
   int fetchCount = 0;
   final List<String> added = <String>[];
   final List<String> removed = <String>[];
-
   @override
   Future<List<ContentFavorite>> fetchFavorites() async {
     fetchCount += 1;
@@ -125,6 +149,9 @@ class _FakeContentManagementApi implements ContentManagementApi {
 
   @override
   Future<void> removeFavorite(String packageId) async {
+    if (failRemove) {
+      throw Exception('network down');
+    }
     removed.add(packageId);
     _favorites.removeWhere((favorite) => favorite.packageId == packageId);
   }

@@ -58,33 +58,36 @@ class ContentFavoritesState {
 /// leaves the two views out of sync.
 class ContentFavoritesController extends AsyncNotifier<ContentFavoritesState> {
   late final ContentManagementApi _api;
+  ContentFavoritesState _latest = const ContentFavoritesState.initial();
 
   @override
   Future<ContentFavoritesState> build() async {
     _api = ref.read(contentManagementApiProvider);
-    return _load(const ContentFavoritesState.initial());
+    _latest = await _load(const ContentFavoritesState.initial());
+    return _latest;
   }
 
   Future<void> refresh() async {
-    final current = state.value ?? const ContentFavoritesState.initial();
-    state = await AsyncValue.guard(() => _load(current));
+    final current = _latest;
+    final result = await AsyncValue.guard(() => _load(current));
+    if (result case AsyncData(:final value)) {
+      _latest = value;
+    }
+    state = result;
   }
 
   /// Adds or removes the bookmark depending on the current state. The star is
   /// optimistic so tapping feels immediate; a failure rolls the change back and
   /// surfaces the reason.
   Future<void> toggle(String packageId) async {
-    final current = state.value;
-    if (current == null || current.isPending(packageId)) {
+    final current = _latest;
+    if (current.isPending(packageId)) {
       return;
     }
     final wasFavorite = current.isFavorite(packageId);
     final pending = {...current.pendingPackageIds, packageId};
-    state = AsyncData(
-      current.copyWith(
-        pendingPackageIds: pending,
-        clearErrorMessage: true,
-      ),
+    _setState(
+      current.copyWith(pendingPackageIds: pending, clearErrorMessage: true),
     );
     try {
       if (wasFavorite) {
@@ -92,13 +95,13 @@ class ContentFavoritesController extends AsyncNotifier<ContentFavoritesState> {
       } else {
         await _api.addFavorite(packageId);
       }
-      final next = state.value ?? current;
+      final next = _latest;
       final updated = wasFavorite
           ? next.favorites
                 .where((favorite) => favorite.packageId != packageId)
                 .toList(growable: false)
           : next.favorites;
-      state = AsyncData(
+      _setState(
         next.copyWith(
           favorites: updated,
           pendingPackageIds: {...next.pendingPackageIds}..remove(packageId),
@@ -109,9 +112,15 @@ class ContentFavoritesController extends AsyncNotifier<ContentFavoritesState> {
       // title, version, and availability the server recorded.
       await _reconcile();
     } on Object catch (error) {
-      final latest = state.value ?? current;
-      state = AsyncData(
+      final latest = _latest;
+      final restoredFavorites = wasFavorite
+          ? latest.favorites
+          : latest.favorites
+                .where((favorite) => favorite.packageId != packageId)
+                .toList(growable: false);
+      _setState(
         latest.copyWith(
+          favorites: restoredFavorites,
           pendingPackageIds: {...latest.pendingPackageIds}..remove(packageId),
           errorMessage: _messageFor(error),
         ),
@@ -129,17 +138,23 @@ class ContentFavoritesController extends AsyncNotifier<ContentFavoritesState> {
   }
 
   Future<void> _reconcile() async {
-    final latest = state.value;
-    if (latest == null) {
-      return;
-    }
+    final latest = _latest;
     try {
       final favorites = await _api.fetchFavorites();
-      state = AsyncData(latest.copyWith(favorites: favorites));
+      // A mutation started after this reconcile request began must remain
+      // authoritative. Only apply the snapshot once no toggle is in flight.
+      if (_latest.pendingPackageIds.isEmpty) {
+        _setState(latest.copyWith(favorites: favorites));
+      }
     } on Object {
       // A failed reconcile keeps the optimistic result; the next refresh or
       // page open will resync. Only the mutation itself must report errors.
     }
+  }
+
+  void _setState(ContentFavoritesState next) {
+    _latest = next;
+    state = AsyncData(next);
   }
 
   String _messageFor(Object error) {

@@ -201,9 +201,13 @@ services:
       DEVICE_PLATFORM_OTA_MANIFEST_BASE_URL: ${SPROUT_OTA_MANIFEST_BASE_URL:-}
       DEVICE_PLATFORM_OTA_RESOURCE_BASE_URL: ${SPROUT_OTA_RESOURCE_BASE_URL:-}
       DEVICE_PLATFORM_OTA_CLIENT_BASE_URL: ${SPROUT_OTA_CLIENT_BASE_URL:-}
+      DEVICE_PLATFORM_DOWNLOAD_STORE_DIR: "/srv/releases"
+      DEVICE_PLATFORM_SERVICE_VERSION_STATE_DIR: "/var/lib/sprout-upgrades"
       DEVICE_PLATFORM_UI_TEXT_SIGNATURE_PUBLIC_KEYS: ${SPROUT_UI_TEXT_SIGNATURE_PUBLIC_KEYS:-}
     volumes:
       - ./mosquitto/certs:/run/sprout/mqtt:ro
+      - sprout_local_releases:/srv/releases
+      - sprout_local_upgrades:/var/lib/sprout-upgrades
     depends_on:
       postgres:
         condition: service_healthy
@@ -213,6 +217,14 @@ services:
         condition: service_healthy
       sub2api:
         condition: service_healthy
+      sprout_local_volume_init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://127.0.0.1:8081/readyz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
 
   voice_gateway:
@@ -237,7 +249,29 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://127.0.0.1:8082/readyz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
+
+  sprout_local_volume_init:
+    image: alpine:3.22
+    user: "0:0"
+    security_opt:
+      - no-new-privileges:true
+    command:
+      [
+        "sh",
+        "-c",
+        "mkdir -p /srv/releases /var/lib/sprout-upgrades && chown 65532:65532 /srv/releases /var/lib/sprout-upgrades && chmod 0750 /srv/releases /var/lib/sprout-upgrades",
+      ]
+    volumes:
+      - sprout_local_releases:/srv/releases
+      - sprout_local_upgrades:/var/lib/sprout-upgrades
+    restart: "no"
 
 volumes:
   sprout_postgres_data:
@@ -245,3 +279,5 @@ volumes:
   sprout_mqtt_data:
   sprout_mqtt_log:
   sprout_sub2api_data:
+  sprout_local_releases:
+  sprout_local_upgrades:

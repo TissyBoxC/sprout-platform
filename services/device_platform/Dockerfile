@@ -15,7 +15,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/device-platform ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/device-platform-admin ./cmd/device-platform-admin
 
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates && adduser -D -H -u 65532 sprout
+RUN apk add --no-cache ca-certificates wget && adduser -D -H -u 65532 sprout
 USER 65532:65532
 COPY --from=build /out/device-platform /device-platform
 COPY --from=build /out/device-platform-admin /device-platform-admin

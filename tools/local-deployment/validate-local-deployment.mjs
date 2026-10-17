@@ -20,11 +20,54 @@ const requiredServices = [
   'device_platform',
   'voice_gateway',
   'admin_web',
+  'sprout_local_volume_init',
 ]
 
 for (const serviceName of requiredServices) {
   if (!compose.services?.[serviceName]) {
     throw new Error(`Missing required Compose service: ${serviceName}`)
+  }
+}
+
+function requireVolume(serviceName, target) {
+  const service = compose.services[serviceName]
+  const volumes = Array.isArray(service?.volumes) ? service.volumes : []
+  if (!volumes.some((volume) => String(volume).endsWith(`:${target}`))) {
+    throw new Error(`${serviceName} must mount a persistent volume at ${target}`)
+  }
+}
+
+function requireHealthcheck(serviceName, endpoint) {
+  const test = compose.services[serviceName]?.healthcheck?.test
+  if (!Array.isArray(test) || !test.some((part) => String(part).includes(endpoint))) {
+    throw new Error(`${serviceName} healthcheck must probe ${endpoint}`)
+  }
+}
+
+requireVolume('device_platform', '/srv/releases')
+requireVolume('device_platform', '/var/lib/sprout-upgrades')
+requireHealthcheck('device_platform', '/readyz')
+requireHealthcheck('voice_gateway', '/readyz')
+
+const volumeInit = compose.services.sprout_local_volume_init
+if (
+  volumeInit.user !== '0:0' ||
+  !String(volumeInit.command?.at(-1)).includes('chown 65532:65532')
+) {
+  throw new Error('sprout_local_volume_init must prepare runtime-owned writable volumes')
+}
+
+const deviceDependsOn = compose.services.device_platform.depends_on ?? {}
+if (
+  deviceDependsOn.sprout_local_volume_init?.condition !==
+  'service_completed_successfully'
+) {
+  throw new Error('device_platform must wait for volume initialization to complete')
+}
+
+for (const volumeName of ['sprout_local_releases', 'sprout_local_upgrades']) {
+  if (!Object.hasOwn(compose.volumes ?? {}, volumeName)) {
+    throw new Error(`Missing declared local volume: ${volumeName}`)
   }
 }
 

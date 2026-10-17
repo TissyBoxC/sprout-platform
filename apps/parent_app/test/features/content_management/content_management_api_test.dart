@@ -80,7 +80,8 @@ void main() {
     expect(favorites.single.available, isTrue);
   });
 
-  test('treats a withdrawn favorite as unavailable', () async {
+  test('keeps a withdrawn favorite renderable when metadata was retained',
+      () async {
     final api = HttpContentManagementApi(
       _FakeApiClient(
         response: <String, Object?>{
@@ -104,6 +105,40 @@ void main() {
     final favorites = await api.fetchFavorites();
 
     expect(favorites.single.available, isFalse);
+    expect(favorites.single.title, '会发光的种子');
+    expect(favorites.single.category, ContentCategory.story);
+    expect(favorites.single.packageVersion, 3);
+    expect(favorites.single.hasMetadata, isTrue);
+  });
+
+  test('keeps parsing when an older server omits withdrawn metadata', () async {
+    final api = HttpContentManagementApi(
+      _FakeApiClient(
+        response: <String, Object?>{
+          'data': <String, Object?>{
+            'favorites': <Object?>[
+              <String, Object?>{
+                'package_id': 'story_001',
+                'title': '',
+                'category': '',
+                'age_tiers': <Object?>[],
+                'package_version': 0,
+                'available': false,
+                'created_at': '2026-10-09T08:30:00Z',
+              },
+            ],
+          },
+        },
+      ),
+    );
+
+    final favorites = await api.fetchFavorites();
+
+    expect(favorites, hasLength(1));
+    expect(favorites.single.available, isFalse);
+    expect(favorites.single.title, '已下架内容');
+    expect(favorites.single.hasMetadata, isFalse);
+    expect(favorites.single.ageTiers, isEmpty);
   });
 
   test('add and remove favorite target the package path', () async {

@@ -191,26 +191,35 @@ class ContentFavorite {
   final bool available;
   final DateTime createdAt;
 
+  /// Whether this bookmark still has enough server metadata to describe the
+  /// saved item. Older nodes may return an unavailable bookmark without the
+  /// latest-version fields that current nodes preserve.
+  bool get hasMetadata =>
+      title != '已下架内容' && packageVersion > 0 && ageTiers.isNotEmpty;
+
   factory ContentFavorite.fromJson(Map<String, Object?> json) {
-    final category = ContentCategory.fromApiValue(
-      _requiredString(json['category'], 'category'),
-    );
-    if (category == null) {
-      throw const FormatException('unknown content category');
+    final categoryValue = _optionalString(json['category']);
+    final category = ContentCategory.fromApiValue(categoryValue);
+    final available = json['available'] == true;
+    if (available && (category == null || categoryValue.isEmpty)) {
+      throw const FormatException('published content is missing its category');
+    }
+    final packageVersion = _optionalInt(json['package_version']) ?? 0;
+    if (available && packageVersion < 1) {
+      throw const FormatException('published content is missing its version');
     }
     return ContentFavorite(
       packageId: _requiredString(json['package_id'], 'package_id'),
-      title: _requiredString(json['title'], 'title'),
-      category: category,
+      title: available
+          ? _requiredString(json['title'], 'title')
+          : _optionalString(json['title'], fallback: '已下架内容'),
+      category: category ?? ContentCategory.story,
       ageTiers: _stringList(json['age_tiers'])
           .map(ContentAgeTier.fromApiValue)
           .whereType<ContentAgeTier>()
           .toList(growable: false),
-      packageVersion: _requiredInt(
-        json['package_version'],
-        'package_version',
-      ),
-      available: json['available'] == true,
+      packageVersion: packageVersion,
+      available: available,
       createdAt: _requiredDateTime(json['created_at'], 'created_at'),
     );
   }
@@ -538,6 +547,10 @@ String _requiredString(Object? value, String field) {
   throw FormatException('missing $field');
 }
 
+String _optionalString(Object? value, {String fallback = ''}) {
+  return value is String && value.isNotEmpty ? value : fallback;
+}
+
 String _requiredSha256(Object? value) {
   final sha256 = _requiredString(value, 'sha256').toLowerCase();
   if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(sha256)) {
@@ -551,6 +564,10 @@ int _requiredInt(Object? value, String field) {
     return value.toInt();
   }
   throw FormatException('missing $field');
+}
+
+int? _optionalInt(Object? value) {
+  return value is num && value >= 0 ? value.toInt() : null;
 }
 
 DateTime _requiredDateTime(Object? value, String field) {

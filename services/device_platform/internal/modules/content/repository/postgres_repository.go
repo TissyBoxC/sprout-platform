@@ -766,7 +766,8 @@ func (r *PostgresRepository) RemoveFavorite(
 }
 
 // ListFavorites returns the guardian's bookmarks joined with the currently
-// published version so a withdrawn package still appears with Available false.
+// published version. Withdrawn bookmarks retain their latest metadata so the
+// guardian still sees what was saved rather than an anonymous placeholder.
 func (r *PostgresRepository) ListFavorites(
 	ctx context.Context,
 	parentAccountID string,
@@ -774,16 +775,31 @@ func (r *PostgresRepository) ListFavorites(
 	rows, err := r.pool.Query(
 		ctx,
 		`SELECT f.package_id,
-		        COALESCE(v.title, ''),
-		        COALESCE(v.category, ''),
-		        COALESCE(v.age_tiers, ARRAY[]::TEXT[]),
-		        COALESCE(v.package_version, 0),
-		        (v.package_id IS NOT NULL) AS available,
+		        COALESCE(published.title, latest.title, ''),
+		        COALESCE(published.category, latest.category, ''),
+		        COALESCE(
+		            published.age_tiers,
+		            latest.age_tiers,
+		            ARRAY[]::TEXT[]
+		        ),
+		        COALESCE(published.package_version, latest.package_version, 0),
+		        (published.package_id IS NOT NULL) AS available,
 		        f.created_at
 		 FROM content_favorites f
-		 LEFT JOIN content_package_versions v
-		   ON v.package_id = f.package_id
-		  AND v.status = 'published'
+		 LEFT JOIN LATERAL (
+		     SELECT package_id, title, category, age_tiers, package_version
+		     FROM content_package_versions
+		     WHERE package_id = f.package_id
+		       AND status = 'published'
+		     LIMIT 1
+		 ) published ON TRUE
+		 LEFT JOIN LATERAL (
+		     SELECT package_id, title, category, age_tiers, package_version
+		     FROM content_package_versions
+		     WHERE package_id = f.package_id
+		     ORDER BY package_version DESC
+		     LIMIT 1
+		 ) latest ON TRUE
 		 WHERE f.parent_account_id = $1
 		 ORDER BY f.created_at DESC, f.package_id ASC`,
 		parentAccountID,

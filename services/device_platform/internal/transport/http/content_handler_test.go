@@ -1121,9 +1121,15 @@ func (repository *contentTestRepository) ListFavorites(
 			CreatedAt: favorite.CreatedAt,
 			AgeTiers:  []contentdomain.AgeTier{},
 		}
+		var latest *contentdomain.PackageVersion
 		for _, version := range repository.versions {
-			if version.PackageID == favorite.PackageID &&
-				version.Status == contentdomain.StatusPublished {
+			if version.PackageID != favorite.PackageID {
+				continue
+			}
+			if latest == nil || version.PackageVersion > latest.PackageVersion {
+				latest = version
+			}
+			if version.Status == contentdomain.StatusPublished {
 				view.Title = version.Title
 				view.Category = version.Category
 				view.AgeTiers = append([]contentdomain.AgeTier(nil), version.AgeTiers...)
@@ -1131,6 +1137,12 @@ func (repository *contentTestRepository) ListFavorites(
 				view.Available = true
 				break
 			}
+		}
+		if !view.Available && latest != nil {
+			view.Title = latest.Title
+			view.Category = latest.Category
+			view.AgeTiers = append([]contentdomain.AgeTier(nil), latest.AgeTiers...)
+			view.PackageVersion = latest.PackageVersion
 		}
 		views = append(views, view)
 	}

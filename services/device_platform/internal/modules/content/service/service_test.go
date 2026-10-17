@@ -1323,9 +1323,15 @@ func (repository *memoryRepository) ListFavorites(
 			CreatedAt: favorite.CreatedAt,
 			AgeTiers:  []domain.AgeTier{},
 		}
+		var latest *domain.PackageVersion
 		for _, version := range repository.versions {
-			if version.PackageID == favorite.PackageID &&
-				version.Status == domain.StatusPublished {
+			if version.PackageID != favorite.PackageID {
+				continue
+			}
+			if latest == nil || version.PackageVersion > latest.PackageVersion {
+				latest = version
+			}
+			if version.Status == domain.StatusPublished {
 				view.Title = version.Title
 				view.Category = version.Category
 				view.AgeTiers = append([]domain.AgeTier(nil), version.AgeTiers...)
@@ -1333,6 +1339,12 @@ func (repository *memoryRepository) ListFavorites(
 				view.Available = true
 				break
 			}
+		}
+		if !view.Available && latest != nil {
+			view.Title = latest.Title
+			view.Category = latest.Category
+			view.AgeTiers = append([]domain.AgeTier(nil), latest.AgeTiers...)
+			view.PackageVersion = latest.PackageVersion
 		}
 		views = append(views, view)
 	}
@@ -1635,6 +1647,11 @@ func TestFavoriteAvailabilityFollowsPublishedVersion(t *testing.T) {
 	}
 	if views[0].AgeTiers == nil {
 		t.Fatalf("available=false favorite must still carry empty age tiers slice")
+	}
+	if views[0].Title != published.Title ||
+		views[0].Category != published.Category ||
+		views[0].PackageVersion != published.PackageVersion {
+		t.Fatalf("withdrawn favorite lost latest metadata: %+v", views[0])
 	}
 }
 

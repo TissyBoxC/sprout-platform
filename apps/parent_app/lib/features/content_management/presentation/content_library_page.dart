@@ -439,7 +439,9 @@ class _FavoriteCard extends ConsumerWidget {
         title: Text(favorite.title),
         subtitle: Padding(
           padding: const EdgeInsets.only(top: 6),
-          child: Text(_favoriteSubtitle(favorite)),
+          child: Text(
+            favorite.hasMetadata ? _favoriteSubtitle(favorite) : '已下架，暂时无法查看详情',
+          ),
         ),
         trailing: IconButton(
           tooltip: '取消收藏',

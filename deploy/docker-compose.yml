@@ -218,6 +218,8 @@ services:
         condition: service_healthy
       sub2api:
         condition: service_healthy
+      sprout_local_version_worker:
+        condition: service_started
       sprout_local_volume_init:
         condition: service_completed_successfully
     healthcheck:
@@ -273,6 +275,40 @@ services:
       - sprout_local_releases:/srv/releases
       - sprout_local_upgrades:/var/lib/sprout-upgrades
     restart: "no"
+
+  sprout_local_version_worker:
+    build:
+      context: ..
+      dockerfile: deploy/local_version_worker/Dockerfile
+    image: sprout-local-version-worker:${SPROUT_PLATFORM_VERSION:-local}
+    profiles:
+      - services
+    security_opt:
+      - no-new-privileges:true
+    user: "65532:65532"
+    environment:
+      SPROUT_LOCAL_VERSION_STATE_DIR: "/var/lib/sprout-upgrades"
+      SPROUT_LOCAL_VERSION_CHECK_INTERVAL_SECONDS: "${SPROUT_LOCAL_VERSION_CHECK_INTERVAL_SECONDS:-300}"
+      SPROUT_LOCAL_VERSION_PLATFORM_REPOSITORY: "TissyBoxC/sprout-platform"
+      SPROUT_LOCAL_VERSION_SUB2API_REPOSITORY: "TissyBoxC/sprout-sub2api-fork"
+      SPROUT_PLATFORM_VERSION: "${SPROUT_PLATFORM_VERSION:-local}"
+      SPROUT_SUB2API_VERSION: "${SPROUT_SUB2API_VERSION:-local}"
+    volumes:
+      - sprout_local_upgrades:/var/lib/sprout-upgrades
+    depends_on:
+      sprout_local_volume_init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "test -s /var/lib/sprout-upgrades/status.json && test -s /var/lib/sprout-upgrades/releases.json",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
 
 volumes:
   sprout_postgres_data:

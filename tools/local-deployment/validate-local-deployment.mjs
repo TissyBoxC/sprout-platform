@@ -20,6 +20,7 @@ const requiredServices = [
   'device_platform',
   'voice_gateway',
   'admin_web',
+  'sprout_local_version_worker',
   'sprout_local_volume_init',
 ]
 
@@ -46,8 +47,30 @@ function requireHealthcheck(serviceName, endpoint) {
 
 requireVolume('device_platform', '/srv/releases')
 requireVolume('device_platform', '/var/lib/sprout-upgrades')
+requireVolume('sprout_local_version_worker', '/var/lib/sprout-upgrades')
 requireHealthcheck('device_platform', '/readyz')
 requireHealthcheck('voice_gateway', '/readyz')
+requireHealthcheck('sprout_local_version_worker', 'status.json')
+
+if (compose.services.sprout_local_version_worker.user !== '65532:65532') {
+  throw new Error('local version worker must run without a privileged user')
+}
+
+const localWorkerVolumes = compose.services.sprout_local_version_worker.volumes ?? []
+if (
+  localWorkerVolumes.some((volume) =>
+    String(volume).includes('/var/run/docker.sock'),
+  )
+) {
+  throw new Error('local version worker must never mount the Docker socket')
+}
+
+const localExecutorEnvironment =
+  compose.services.device_platform.environment
+    ?.DEVICE_PLATFORM_SERVICE_VERSION_UPGRADE_EXECUTION
+if (localExecutorEnvironment !== 'false') {
+  throw new Error('local deployment must keep upgrade execution disabled')
+}
 
 const volumeInit = compose.services.sprout_local_volume_init
 if (
@@ -63,6 +86,12 @@ if (
   'service_completed_successfully'
 ) {
   throw new Error('device_platform must wait for volume initialization to complete')
+}
+
+if (
+  deviceDependsOn.sprout_local_version_worker?.condition !== 'service_started'
+) {
+  throw new Error('device_platform must start with the local version snapshot worker')
 }
 
 for (const volumeName of ['sprout_local_releases', 'sprout_local_upgrades']) {

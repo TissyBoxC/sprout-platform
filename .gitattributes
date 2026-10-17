@@ -1,3 +1,4 @@
 # Keep cloud deployment assets portable between Windows and Linux hosts.
 deploy/cloud/scripts/*.sh text eol=lf
+deploy/local_version_worker/*.sh text eol=lf
 deploy/cloud/docker-compose.yml text eol=lf

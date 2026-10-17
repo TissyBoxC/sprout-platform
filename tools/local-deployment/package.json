@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "validate": "node validate-local-deployment.mjs"
+    "validate": "node validate-local-deployment.mjs",
+    "test": "node test-local-version-worker.mjs"
   },
   "dependencies": {
     "yaml": "2.8.1"

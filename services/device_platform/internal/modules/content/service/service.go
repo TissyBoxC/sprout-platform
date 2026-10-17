@@ -653,10 +653,31 @@ func (s *Service) UpsertThemePack(
 }
 
 // PublishThemePack moves a draft pack to published.
+//
+// Draft editing is intentionally permissive, but publication is the last
+// point where the platform can guarantee every member is downloadable. A
+// member may have been withdrawn since the draft was saved, so re-read the
+// current pack immediately before the lifecycle transition.
 func (s *Service) PublishThemePack(
 	ctx context.Context,
 	themeID string,
 ) (*domain.ThemePack, error) {
+	themeID = strings.TrimSpace(themeID)
+	if themeID == "" {
+		return nil, domain.ErrInvalidMetadata
+	}
+	pack, err := s.repository.GetThemePack(ctx, themeID)
+	if err != nil {
+		return nil, err
+	}
+	for _, packageID := range pack.PackageIDs {
+		if _, err := s.repository.PublishedDownload(ctx, packageID); err != nil {
+			if errors.Is(err, domain.ErrPackageNotFound) {
+				return nil, domain.ErrThemeMembersInvalid
+			}
+			return nil, err
+		}
+	}
 	return s.transitionThemePack(ctx, themeID, domain.ActionPublish)
 }
 

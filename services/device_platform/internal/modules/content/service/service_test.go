@@ -1883,7 +1883,35 @@ func TestThemePackLifecycle(t *testing.T) {
 		t.Fatalf("unknown member error = %v, want ErrPackageNotFound", err)
 	}
 
-	published, err := service.PublishThemePack(context.Background(), "theme_ocean")
+	// A member that was withdrawn after the draft was saved must block
+	// publication; the draft remains editable and unpublished.
+	repository.mu.Lock()
+	stored := repository.versions[repository.key(
+		second.PackageID,
+		second.PackageVersion,
+	)]
+	stored.Status = domain.StatusWithdrawn
+	repository.mu.Unlock()
+	if _, err := service.PublishThemePack(
+		context.Background(),
+		"theme_ocean",
+	); !errors.Is(err, domain.ErrThemeMembersInvalid) {
+		t.Fatalf("publish theme with withdrawn member error = %v, want ErrThemeMembersInvalid", err)
+	}
+	draft, err := service.GetThemePack(context.Background(), "theme_ocean")
+	if err != nil {
+		t.Fatalf("get blocked theme draft: %v", err)
+	}
+	if draft.Status != domain.ThemePackDraft {
+		t.Fatalf("blocked theme status = %q, want draft", draft.Status)
+	}
+	repository.mu.Lock()
+	stored.Status = domain.StatusPublished
+	repository.mu.Unlock()
+	published, err := service.PublishThemePack(
+		context.Background(),
+		"theme_ocean",
+	)
 	if err != nil {
 		t.Fatalf("publish theme pack: %v", err)
 	}

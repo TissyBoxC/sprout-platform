@@ -217,14 +217,17 @@ const (
 
 // Command is a durable, idempotent network maintenance request.
 type Command struct {
-	ID             string
-	DeviceID       string
-	Type           CommandType
-	Payload        map[string]any
-	Status         CommandStatus
-	RequestedBy    string
-	RequestID      string
-	CreatedAt      time.Time
+	ID          string
+	DeviceID    string
+	Type        CommandType
+	Payload     map[string]any
+	Status      CommandStatus
+	RequestedBy string
+	RequestID   string
+	CreatedAt   time.Time
+	// ExpiresAt is the durable delivery deadline. A pending or delivered
+	// command at this instant is terminal and must not be sent or acknowledged.
+	ExpiresAt      time.Time
 	DeliveredAt    *time.Time
 	AcknowledgedAt *time.Time
 	ResultCode     string

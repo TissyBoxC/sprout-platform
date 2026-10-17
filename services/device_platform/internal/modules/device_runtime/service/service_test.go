@@ -240,6 +240,64 @@ func TestListPendingCommandsMarksFirstDeliveryOnce(t *testing.T) {
 	}
 }
 
+func TestExpiredCommandIsNotDeliveredOrAcknowledged(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
+	repository := newMemoryRepository()
+	repository.now = now
+	service, err := New(Options{
+		Repository: repository,
+		BindingService: &memoryBindingReader{
+			deviceID: "device_test_001",
+		},
+		Clock:      fixedClock{now: now},
+		CommandTTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+	command, err := service.CreateCommand(
+		context.Background(),
+		"device_test_001",
+		domain.CommandReconnectNetwork,
+		"admin_test_001",
+		map[string]any{},
+	)
+	if err != nil {
+		t.Fatalf("create command: %v", err)
+	}
+	if !command.ExpiresAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("expected expiry %v, got %v", now.Add(time.Minute), command.ExpiresAt)
+	}
+	if !repository.commands[command.ID].ExpiresAt.Equal(command.ExpiresAt) {
+		t.Fatal("expected expiry to be persisted")
+	}
+
+	later := now.Add(time.Minute)
+	service.timeSource = fixedClock{now: later}
+	repository.now = later
+	commands, err := service.ListPendingCommands(context.Background(), "session")
+	if err != nil {
+		t.Fatalf("list expired commands: %v", err)
+	}
+	if len(commands) != 0 {
+		t.Fatalf("expected expired command to be withheld, got %#v", commands)
+	}
+	if err := service.AcknowledgeCommand(
+		context.Background(),
+		"session",
+		"device_test_001",
+		command.ID,
+		domain.CommandStatusAcknowledged,
+		"late",
+	); err != domain.ErrCommandNotFound {
+		t.Fatalf("expected expired acknowledgement to be rejected, got %v", err)
+	}
+	if stored := repository.commands[command.ID]; stored.Status != domain.CommandStatusExpired {
+		t.Fatalf("expected durable expired status, got %#v", stored)
+	}
+}
+
 func TestCommandAcknowledgementNotifiesDeliverySink(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
@@ -799,10 +857,20 @@ func (repository *memoryRepository) ListPendingCommands(
 	deviceID string,
 ) ([]domain.Command, error) {
 	result := make([]domain.Command, 0)
-	for _, command := range repository.commands {
+	for commandID, command := range repository.commands {
 		if command.DeviceID == deviceID &&
 			(command.Status == domain.CommandStatusPending ||
-				command.Status == domain.CommandStatusDelivered) {
+				command.Status == domain.CommandStatusDelivered) &&
+			!command.ExpiresAt.IsZero() &&
+			!command.ExpiresAt.After(repository.now) {
+			command.Status = domain.CommandStatusExpired
+			repository.commands[commandID] = command
+			continue
+		}
+		if command.DeviceID == deviceID &&
+			(command.Status == domain.CommandStatusPending ||
+				command.Status == domain.CommandStatusDelivered) &&
+			(command.ExpiresAt.IsZero() || command.ExpiresAt.After(repository.now)) {
 			result = append(result, command)
 		}
 	}
@@ -817,7 +885,8 @@ func (repository *memoryRepository) MarkCommandsDelivered(
 	for _, commandID := range commandIDs {
 		command, exists := repository.commands[commandID]
 		if !exists || command.DeviceID != deviceID ||
-			command.Status != domain.CommandStatusPending {
+			command.Status != domain.CommandStatusPending ||
+			(!command.ExpiresAt.IsZero() && !command.ExpiresAt.After(repository.now)) {
 			continue
 		}
 		deliveredAt := repository.now
@@ -841,7 +910,8 @@ func (repository *memoryRepository) AcknowledgeCommand(
 	command, exists := repository.commands[commandID]
 	if !exists || command.DeviceID != deviceID ||
 		(command.Status != domain.CommandStatusPending &&
-			command.Status != domain.CommandStatusDelivered) {
+			command.Status != domain.CommandStatusDelivered) ||
+		(!command.ExpiresAt.IsZero() && !command.ExpiresAt.After(repository.now)) {
 		return domain.ErrCommandNotFound
 	}
 	command.Status = status

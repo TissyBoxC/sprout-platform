@@ -400,6 +400,7 @@ func (s *Service) CreateCommand(
 		RequestedBy: strings.TrimSpace(requestedBy),
 		RequestID:   requestID,
 		CreatedAt:   now,
+		ExpiresAt:   now.Add(s.commandTTL),
 	}
 	if err := s.repository.CreateCommand(ctx, command); err != nil {
 		return nil, err
@@ -438,15 +439,23 @@ func (s *Service) ListPendingCommands(
 	if err != nil {
 		return nil, err
 	}
+	now := s.timeSource.Now().UTC()
+	activeCommands := make([]domain.Command, 0, len(commands))
+	for _, command := range commands {
+		if !command.ExpiresAt.IsZero() && !command.ExpiresAt.After(now) {
+			continue
+		}
+		activeCommands = append(activeCommands, command)
+	}
+	commands = activeCommands
 	commandIDs := make([]string, 0, len(commands))
-	deliveredAt := s.timeSource.Now().UTC()
 	for index := range commands {
 		if commands[index].Status != domain.CommandStatusPending {
 			continue
 		}
 		commandIDs = append(commandIDs, commands[index].ID)
 		commands[index].Status = domain.CommandStatusDelivered
-		commands[index].DeliveredAt = &deliveredAt
+		commands[index].DeliveredAt = &now
 	}
 	if err := s.repository.MarkCommandsDelivered(ctx, commandIDs, deviceID); err != nil {
 		return nil, err

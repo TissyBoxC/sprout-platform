@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
 	"github.com/jackc/pgx/v5"
@@ -236,9 +237,10 @@ func (r *PostgresRepository) CreateCommand(
 			status,
 			requested_by,
 			request_id,
-			created_at
+			created_at,
+			expires_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`,
 		command.ID,
 		command.DeviceID,
@@ -248,6 +250,7 @@ func (r *PostgresRepository) CreateCommand(
 		command.RequestedBy,
 		command.RequestID,
 		command.CreatedAt,
+		command.ExpiresAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert device runtime command: %w", err)
@@ -302,17 +305,32 @@ func (r *PostgresRepository) ListCommands(
 	return commands, nil
 }
 
-// ListPendingCommands returns commands a device has not acknowledged yet.
+// ListPendingCommands marks overdue rows expired and returns commands that are
+// still within their delivery deadline. A row can cross its deadline between
+// the two statements; callers must still apply the deadline before handing a
+// command to a device.
 func (r *PostgresRepository) ListPendingCommands(
 	ctx context.Context,
 	deviceID string,
 ) ([]domain.Command, error) {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE device_runtime_commands
+		SET status = 'expired'
+		WHERE device_id = $1
+		  AND status IN ('pending', 'delivered')
+		  AND expires_at <= NOW()
+	`, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("expire device runtime commands: %w", err)
+	}
+	now := time.Now().UTC()
 	rows, err := r.pool.Query(ctx, runtimeCommandSelect+`
 		WHERE device_id = $1
 		  AND status IN ('pending', 'delivered')
+		  AND expires_at > $2
 		ORDER BY created_at ASC
 		LIMIT 20
-	`, deviceID)
+	`, deviceID, now)
 	if err != nil {
 		return nil, fmt.Errorf("list pending device runtime commands: %w", err)
 	}
@@ -323,6 +341,9 @@ func (r *PostgresRepository) ListPendingCommands(
 		command, err := scanRuntimeCommand(rows)
 		if err != nil {
 			return nil, err
+		}
+		if !command.ExpiresAt.After(now) {
+			continue
 		}
 		commands = append(commands, *command)
 	}
@@ -350,6 +371,7 @@ func (r *PostgresRepository) MarkCommandsDelivered(
 		WHERE device_id = $1
 		  AND id = ANY($2::uuid[])
 		  AND status = 'pending'
+		  AND expires_at > NOW()
 	`, deviceID, commandIDs)
 	if err != nil {
 		return fmt.Errorf("mark runtime commands delivered: %w", err)
@@ -374,6 +396,7 @@ func (r *PostgresRepository) AcknowledgeCommand(
 		WHERE id = $1
 		  AND device_id = $2
 		  AND status IN ('pending', 'delivered')
+		  AND expires_at > NOW()
 	`, commandID, deviceID, status, resultCode)
 	if err != nil {
 		return fmt.Errorf("acknowledge runtime command: %w", err)
@@ -426,6 +449,7 @@ const runtimeCommandSelect = `
 		requested_by,
 		request_id,
 		created_at,
+		expires_at,
 		delivered_at,
 		acknowledged_at,
 		result_code
@@ -521,6 +545,7 @@ func scanRuntimeCommand(row runtimeScanner) (*domain.Command, error) {
 		&command.RequestedBy,
 		&command.RequestID,
 		&command.CreatedAt,
+		&command.ExpiresAt,
 		&command.DeliveredAt,
 		&command.AcknowledgedAt,
 		&command.ResultCode,

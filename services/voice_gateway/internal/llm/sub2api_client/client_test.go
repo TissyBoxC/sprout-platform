@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -143,6 +144,120 @@ func TestChatReturnsProviderStatusSynchronously(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "status=502") {
 		t.Fatalf("expected status error, got %v", err)
 	}
+}
+
+func TestChatRetriesTransientProviderStatus(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		if requests < 3 {
+			http.Error(writer, "temporarily unavailable", http.StatusBadGateway)
+			return
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"好\"}}]}\n"))
+		_, _ = writer.Write([]byte("data: [DONE]\n"))
+	}))
+	defer server.Close()
+
+	client := New(server.URL, "secret")
+	client.RetryBackoff = time.Millisecond
+	stream, err := client.Chat(context.Background(), llm.Request{
+		Model:    "sprout-chat",
+		Messages: []llm.Message{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("chat after retries: %v", err)
+	}
+	defer stream.Close()
+	var output strings.Builder
+	for chunk := range stream.Chunks() {
+		output.WriteString(chunk)
+	}
+	if output.String() != "好" || stream.Err() != nil {
+		t.Fatalf("output = %q, error = %v", output.String(), stream.Err())
+	}
+	if requests != 3 {
+		t.Fatalf("requests = %d, want 3", requests)
+	}
+}
+
+func TestChatDoesNotRetryPermanentProviderStatus(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		http.Error(writer, "invalid request", http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	client := New(server.URL, "secret")
+	client.RetryBackoff = time.Millisecond
+	_, err := client.Chat(context.Background(), llm.Request{
+		Model:    "sprout-chat",
+		Messages: []llm.Message{{Role: "user", Content: "hello"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "status=400") {
+		t.Fatalf("expected status error, got %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+}
+
+func TestChatStopsRetryWhenContextCancels(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		http.Error(writer, "temporarily unavailable", http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	client := New(server.URL, "secret")
+	client.RetryBackoff = time.Hour
+	client.Sleep = func(context.Context, time.Duration) error {
+		cancel()
+		return ctx.Err()
+	}
+	_, err := client.Chat(ctx, llm.Request{
+		Model:    "sprout-chat",
+		Messages: []llm.Message{{Role: "user", Content: "hello"}},
+	})
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled retry, got %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+}
+
+func TestChatRetriesTransientNetworkError(t *testing.T) {
+	attempts := 0
+	client := New("http://sub2api.invalid", "secret")
+	client.MaxAttempts = 2
+	client.RetryBackoff = time.Millisecond
+	client.HTTPClient = &http.Client{
+		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			attempts++
+			return nil, &net.DNSError{Err: "temporary failure", Name: "sub2api.invalid", IsTemporary: true}
+		}),
+	}
+	_, err := client.Chat(context.Background(), llm.Request{
+		Model:    "sprout-chat",
+		Messages: []llm.Message{{Role: "user", Content: "hello"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "request failed") {
+		t.Fatalf("expected request error, got %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (roundTrip roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return roundTrip(request)
 }
 
 func TestChatReportsMalformedSSE(t *testing.T) {

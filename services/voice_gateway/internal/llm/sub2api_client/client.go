@@ -22,6 +22,8 @@ import (
 
 const (
 	defaultTimeout      = 90 * time.Second
+	defaultMaxAttempts  = 3
+	defaultRetryBackoff = 250 * time.Millisecond
 	maxResponseLineSize = 1 << 20
 	maxErrorBodyBytes   = 64 << 10
 )
@@ -31,18 +33,23 @@ const (
 // The configured APIKey is sent only in the Authorization header and is never
 // included in errors or logs. A single Client is safe for concurrent use.
 type Client struct {
-	BaseURL    string
-	APIKey     string
-	HTTPClient *http.Client
-	Timeout    time.Duration
+	BaseURL      string
+	APIKey       string
+	HTTPClient   *http.Client
+	Timeout      time.Duration
+	MaxAttempts  int
+	RetryBackoff time.Duration
+	Sleep        func(context.Context, time.Duration) error
 }
 
 // New creates a sub2api client with sensible production defaults.
 func New(baseURL string, apiKey string) *Client {
 	return &Client{
-		BaseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
-		APIKey:  strings.TrimSpace(apiKey),
-		Timeout: defaultTimeout,
+		BaseURL:      strings.TrimRight(strings.TrimSpace(baseURL), "/"),
+		APIKey:       strings.TrimSpace(apiKey),
+		Timeout:      defaultTimeout,
+		MaxAttempts:  defaultMaxAttempts,
+		RetryBackoff: defaultRetryBackoff,
 	}
 }
 
@@ -84,6 +91,78 @@ func (c *Client) Chat(ctx context.Context, request llm.Request) (llm.Stream, err
 	if err != nil {
 		return nil, fmt.Errorf("encode sub2api chat request: %w", err)
 	}
+	httpClient := c.HTTPClient
+	if httpClient == nil {
+		timeout := c.Timeout
+		if timeout <= 0 {
+			timeout = defaultTimeout
+		}
+		httpClient = &http.Client{Timeout: timeout}
+	}
+	maxAttempts := c.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = defaultMaxAttempts
+	}
+	retryBackoff := c.RetryBackoff
+	if retryBackoff <= 0 {
+		retryBackoff = defaultRetryBackoff
+	}
+	sleep := c.Sleep
+	if sleep == nil {
+		sleep = waitForRetry
+	}
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		httpRequest, err := newChatRequest(ctx, endpoint, c.APIKey, request, encoded)
+		if err != nil {
+			return nil, err
+		}
+		response, err := httpClient.Do(httpRequest)
+		if err != nil {
+			if !isRetryableTransportError(err) || attempt == maxAttempts {
+				return nil, fmt.Errorf("sub2api chat request failed: %w", err)
+			}
+			if err := sleep(ctx, retryDelay(retryBackoff, attempt)); err != nil {
+				return nil, fmt.Errorf("sub2api chat retry canceled: %w", err)
+			}
+			continue
+		}
+		if response.StatusCode >= 200 && response.StatusCode < 300 {
+			if !strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
+				_ = response.Body.Close()
+				return nil, observability.NewSafeError(
+					"AI service returned an unsupported response",
+					nil,
+				)
+			}
+			stream := &chatStream{
+				response: response,
+				chunks:   make(chan string, 8),
+				done:     make(chan struct{}),
+				closed:   make(chan struct{}),
+			}
+			go stream.read()
+			return stream, nil
+		}
+
+		statusErr := readProviderStatusError(response)
+		if !isRetryableStatus(response.StatusCode) || attempt == maxAttempts {
+			return nil, statusErr
+		}
+		if err := sleep(ctx, retryDelay(retryBackoff, attempt)); err != nil {
+			return nil, fmt.Errorf("sub2api chat retry canceled: %w", err)
+		}
+	}
+	return nil, errors.New("sub2api chat request failed")
+}
+
+func newChatRequest(
+	ctx context.Context,
+	endpoint string,
+	apiKey string,
+	request llm.Request,
+	encoded []byte,
+) (*http.Request, error) {
 	httpRequest, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
@@ -93,7 +172,7 @@ func (c *Client) Chat(ctx context.Context, request llm.Request) (llm.Stream, err
 	if err != nil {
 		return nil, fmt.Errorf("create sub2api chat request: %w", err)
 	}
-	httpRequest.Header.Set("Authorization", "Bearer "+c.APIKey)
+	httpRequest.Header.Set("Authorization", "Bearer "+apiKey)
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Accept", "text/event-stream")
 	// Provenance labels let the AI gateway attribute usage to the originating
@@ -112,52 +191,62 @@ func (c *Client) Chat(ctx context.Context, request llm.Request) (llm.Stream, err
 		httpRequest.Header.Set("X-Sprout-Policy-Version", policyVersion)
 	}
 	httpRequest.Header.Set("X-Sprout-Project", "voice")
+	return httpRequest, nil
+}
 
-	httpClient := c.HTTPClient
-	if httpClient == nil {
-		timeout := c.Timeout
-		if timeout <= 0 {
-			timeout = defaultTimeout
-		}
-		httpClient = &http.Client{Timeout: timeout}
-	}
-	response, err := httpClient.Do(httpRequest)
-	if err != nil {
-		return nil, fmt.Errorf("sub2api chat request failed: %w", err)
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		defer response.Body.Close()
-		body, readErr := io.ReadAll(io.LimitReader(response.Body, maxErrorBodyBytes+1))
-		if readErr != nil {
-			return nil, observability.NewSafeError(
-				fmt.Sprintf("sub2api chat request failed status=%d", response.StatusCode),
-				readErr,
-			)
-		}
-		if len(body) > maxErrorBodyBytes {
-			body = body[:maxErrorBodyBytes]
-		}
-		return nil, observability.NewSafeError(
+func readProviderStatusError(response *http.Response) error {
+	defer response.Body.Close()
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, maxErrorBodyBytes+1))
+	if readErr != nil {
+		return observability.NewSafeError(
 			fmt.Sprintf("sub2api chat request failed status=%d", response.StatusCode),
-			errors.New(observability.RedactString(string(body))),
+			readErr,
 		)
 	}
-	if !strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
-		defer response.Body.Close()
-		return nil, observability.NewSafeError(
-			"AI service returned an unsupported response",
-			nil,
-		)
+	if len(body) > maxErrorBodyBytes {
+		body = body[:maxErrorBodyBytes]
 	}
+	return observability.NewSafeError(
+		fmt.Sprintf("sub2api chat request failed status=%d", response.StatusCode),
+		errors.New(observability.RedactString(string(body))),
+	)
+}
 
-	stream := &chatStream{
-		response: response,
-		chunks:   make(chan string, 8),
-		done:     make(chan struct{}),
-		closed:   make(chan struct{}),
+func isRetryableStatus(statusCode int) bool {
+	return statusCode == http.StatusTooManyRequests || statusCode >= http.StatusInternalServerError
+}
+
+func isRetryableTransportError(err error) bool {
+	if err == nil {
+		return false
 	}
-	go stream.read()
-	return stream, nil
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netError net.Error
+	return errors.As(err, &netError) && (netError.Timeout() || netError.Temporary())
+}
+
+func retryDelay(base time.Duration, attempt int) time.Duration {
+	delay := base
+	for index := 1; index < attempt; index++ {
+		delay *= 2
+	}
+	return delay
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 type chatRequest struct {

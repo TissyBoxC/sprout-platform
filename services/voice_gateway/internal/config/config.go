@@ -140,8 +140,9 @@ type TTSProviderConfig struct {
 
 // LLMProviderConfig carries the conversation gateway credentials.
 type LLMProviderConfig struct {
-	BaseURL string
-	APIKey  string
+	BaseURL     string
+	APIKey      string
+	MaxAttempts int
 }
 
 // DatabaseConfig contains the read/write connection used for usage records.
@@ -319,8 +320,9 @@ func Load() (Config, error) {
 				Voice:       env("VOICE_GATEWAY_TTS_VOICE", ""),
 			},
 			LLMConfig: LLMProviderConfig{
-				BaseURL: env("VOICE_GATEWAY_LLM_BASE_URL", "http://127.0.0.1:8080"),
-				APIKey:  env("VOICE_GATEWAY_LLM_API_KEY", ""),
+				BaseURL:     env("VOICE_GATEWAY_LLM_BASE_URL", "http://127.0.0.1:8080"),
+				APIKey:      env("VOICE_GATEWAY_LLM_API_KEY", ""),
+				MaxAttempts: envInt("VOICE_GATEWAY_LLM_MAX_ATTEMPTS", 3),
 			},
 		},
 	}
@@ -389,6 +391,9 @@ func Load() (Config, error) {
 	}
 	if cfg.Security.MaxInputRunes < 64 || cfg.Security.MaxInputRunes > 8000 {
 		return Config{}, fmt.Errorf("VOICE_GATEWAY_MAX_INPUT_RUNES must be between 64 and 8000")
+	}
+	if cfg.Audio.LLMConfig.MaxAttempts < 1 || cfg.Audio.LLMConfig.MaxAttempts > 5 {
+		return Config{}, fmt.Errorf("VOICE_GATEWAY_LLM_MAX_ATTEMPTS must be between 1 and 5")
 	}
 	if cfg.Vision.Enabled && strings.TrimSpace(cfg.Vision.Model) == "" {
 		return Config{}, fmt.Errorf("VOICE_GATEWAY_VISION_MODEL must be set when vision is enabled")

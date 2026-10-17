@@ -8,6 +8,7 @@ import (
 func TestLoadReadsServiceSettings(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_HTTP_PORT", "9090")
 	t.Setenv("VOICE_GATEWAY_SUB2API_BASE_URL", "http://sub2api.internal")
+	t.Setenv("VOICE_GATEWAY_LLM_MAX_ATTEMPTS", "4")
 
 	cfg, err := Load()
 	if err != nil {
@@ -18,6 +19,9 @@ func TestLoadReadsServiceSettings(t *testing.T) {
 	}
 	if cfg.Sub2API.BaseURL != "http://sub2api.internal" {
 		t.Fatalf("unexpected sub2api URL: %q", cfg.Sub2API.BaseURL)
+	}
+	if cfg.Audio.LLMConfig.MaxAttempts != 4 {
+		t.Fatalf("LLM max attempts = %d, want 4", cfg.Audio.LLMConfig.MaxAttempts)
 	}
 }
 
@@ -189,6 +193,17 @@ func TestLoadRejectsInvalidMaxInputRunes(t *testing.T) {
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected tiny max input runes to be rejected")
+	}
+}
+
+func TestLoadRejectsInvalidLLMMaxAttempts(t *testing.T) {
+	for _, value := range []string{"0", "6"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("VOICE_GATEWAY_LLM_MAX_ATTEMPTS", value)
+			if _, err := Load(); err == nil {
+				t.Fatalf("expected max attempts %s to be rejected", value)
+			}
+		})
 	}
 }
 

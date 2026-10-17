@@ -159,7 +159,11 @@ func buildTTS(provider string, providerConfig config.TTSProviderConfig) (tts.Syn
 func buildLLM(provider string, providerConfig config.LLMProviderConfig) (llm.Client, error) {
 	switch provider {
 	case ProviderSub2API:
-		return sub2api_client.New(providerConfig.BaseURL, providerConfig.APIKey), nil
+		client := sub2api_client.New(providerConfig.BaseURL, providerConfig.APIKey)
+		if providerConfig.MaxAttempts > 0 {
+			client.MaxAttempts = providerConfig.MaxAttempts
+		}
+		return client, nil
 	default:
 		return nil, fmt.Errorf("unsupported llm provider: %q", provider)
 	}

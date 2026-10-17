@@ -596,8 +596,14 @@ func (s *Service) OfflineThreshold() time.Duration {
 }
 
 func (s *Service) isOnline(heartbeat domain.Heartbeat) bool {
+	freshnessSource := heartbeat.ReportedAt
+	if freshnessSource.IsZero() {
+		// Status rows written before reported_at was available still have a
+		// trustworthy server receive time. New heartbeats always set both.
+		freshnessSource = heartbeat.ReceivedAt
+	}
 	return heartbeat.ConnectionState == domain.ConnectionStateOnline &&
-		s.timeSource.Now().UTC().Sub(heartbeat.ReceivedAt) <= s.offlineThreshold
+		s.timeSource.Now().UTC().Sub(freshnessSource) <= s.offlineThreshold
 }
 
 func validateHeartbeatMetrics(input domain.HeartbeatInput) error {

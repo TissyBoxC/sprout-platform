@@ -59,6 +59,40 @@ func TestRecordHeartbeatIsIdempotentAndComputesOnlineState(t *testing.T) {
 	}
 }
 
+func TestStaleHeartbeatDoesNotReportOnlineOrReplaceNewerSnapshot(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
+	repository := newMemoryRepository()
+	service, err := New(Options{
+		Repository:       repository,
+		BindingService:   &memoryBindingReader{deviceID: "device_test_001"},
+		Clock:            fixedClock{now: now},
+		OfflineThreshold: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+	newer := validHeartbeatInput(now)
+	newer.HeartbeatID = "heartbeat_newer"
+	if _, err := service.RecordHeartbeat(context.Background(), "session", newer); err != nil {
+		t.Fatalf("record newer heartbeat: %v", err)
+	}
+
+	stale := validHeartbeatInput(now.Add(-5 * time.Minute))
+	stale.HeartbeatID = "heartbeat_stale"
+	stale.ConnectionState = domain.ConnectionStateOffline
+	stale.OfflineState = domain.OfflineStateOffline
+	stale.OfflineReason = domain.OfflineReasonNetworkUnavailable
+	stale.FallbackActive = true
+	status, err := service.RecordHeartbeat(context.Background(), "session", stale)
+	if err != nil {
+		t.Fatalf("send stale heartbeat: %v", err)
+	}
+	if status.HeartbeatID != "heartbeat_newer" || !status.IsOnline {
+		t.Fatalf("expected newer online snapshot to remain current, got %#v", status)
+	}
+}
+
 func TestRecordHeartbeatRejectsUnknownDeviceAndBadMetrics(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
@@ -819,6 +853,13 @@ func (repository *memoryRepository) SaveHeartbeat(
 	}
 	repository.heartbeats[key] = *heartbeat
 	repository.heartbeatCount++
+	if current, exists := repository.statuses[heartbeat.DeviceID]; exists {
+		if current.ReportedAt.After(heartbeat.ReportedAt) ||
+			(current.ReportedAt.Equal(heartbeat.ReportedAt) &&
+				current.ReceivedAt.After(heartbeat.ReceivedAt)) {
+			return true, nil
+		}
+	}
 	repository.statuses[heartbeat.DeviceID] = domain.RuntimeStatus{
 		Heartbeat: *heartbeat,
 	}

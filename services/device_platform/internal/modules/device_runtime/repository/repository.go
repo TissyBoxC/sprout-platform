@@ -134,7 +134,8 @@ func (r *PostgresRepository) SaveHeartbeat(
 		    reported_at = EXCLUDED.reported_at,
 		    received_at = EXCLUDED.received_at,
 		    updated_at = EXCLUDED.updated_at
-		WHERE device_runtime_status.received_at <= EXCLUDED.received_at
+		WHERE (device_runtime_status.reported_at, device_runtime_status.received_at) <=
+		      (EXCLUDED.reported_at, EXCLUDED.received_at)
 	`,
 		heartbeat.DeviceID,
 		heartbeat.HeartbeatID,

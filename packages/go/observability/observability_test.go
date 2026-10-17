@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -163,6 +165,117 @@ func TestWithAccessLogIncludesValidatedLabels(t *testing.T) {
 	}
 	if record[RequestPurposeField] != "voice_conversation" {
 		t.Fatalf("expected purpose in access log, got %v", record[RequestPurposeField])
+	}
+}
+
+func TestRedactingHandlerRecursesNestedValues(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(NewRedactingHandler(slog.NewJSONHandler(&output, nil)))
+	type credentials struct {
+		Token string `json:"token"`
+		Email string `json:"email"`
+	}
+	type namedSecret string
+
+	logger.Info("nested",
+		slog.Group("request",
+			slog.String("token", "group-secret"),
+			slog.String("email", "nested@example.com"),
+			slog.Any("payload", map[string]any{
+				"authorization": "Bearer map-secret",
+				"items": []any{
+					map[string]any{"password": "slice-secret"},
+				},
+			}),
+			slog.Any("credentials", credentials{
+				Token: "struct-secret",
+				Email: "struct@example.com",
+			}),
+			slog.Any(
+				"cause",
+				errors.New("Bearer error-secret guardian@example.com"),
+			),
+			slog.Any("named", namedSecret("named@example.com")),
+		),
+	)
+
+	var record map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &record); err != nil {
+		t.Fatalf("decode log record: %v", err)
+	}
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		t.Fatalf("encode decoded log: %v", err)
+	}
+	for _, secret := range []string{
+		"group-secret",
+		"nested@example.com",
+		"map-secret",
+		"slice-secret",
+		"struct-secret",
+		"struct@example.com",
+		"error-secret",
+		"guardian@example.com",
+		"named@example.com",
+	} {
+		if strings.Contains(string(encoded), secret) {
+			t.Fatalf("log leaked %q: %s", secret, encoded)
+		}
+	}
+}
+
+func TestRedactValueHandlesBoundedCompositeValues(t *testing.T) {
+	cyclic := map[string]any{}
+	cyclic["self"] = cyclic
+	sanitized := RedactValue(cyclic).(map[string]any)
+	if sanitized["self"] != redactedValue {
+		t.Fatalf("expected cycle to be cut off, got %v", sanitized["self"])
+	}
+
+	large := make([]any, maxRedactionCollection+1)
+	if got := RedactValue(large); got != redactedValue {
+		t.Fatalf("expected large slice to fail closed, got %v", got)
+	}
+
+	var deep any = "safe"
+	for range maxRedactionDepth {
+		deep = []any{deep}
+	}
+	if got := RedactValue(deep); got == redactedValue {
+		t.Fatal("expected nested values to be redacted within the depth limit")
+	}
+}
+
+func TestRedactingHandlerMasksErrorAndMapAttributes(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(NewRedactingHandler(slog.NewJSONHandler(&output, nil)))
+
+	logger.Error(
+		"request failed",
+		slog.Any("error", errors.New("Bearer service-secret guardian@example.com")),
+		slog.Any("payload", map[string]any{
+			"token": "map-secret",
+			"email": "map@example.com",
+		}),
+	)
+
+	var record map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &record); err != nil {
+		t.Fatalf("decode log record: %v", err)
+	}
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		t.Fatalf("encode decoded log: %v", err)
+	}
+	for _, secret := range []string{
+		"service-secret",
+		"guardian@example.com",
+		"map-secret",
+		"map@example.com",
+	} {
+		if strings.Contains(string(encoded), secret) {
+			t.Fatalf("log leaked %q: %s", secret, encoded)
+		}
 	}
 }
 

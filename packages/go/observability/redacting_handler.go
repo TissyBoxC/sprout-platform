@@ -47,8 +47,8 @@ func sanitizeAttribute(attribute slog.Attr) slog.Attr {
 	if isSensitiveField(attribute.Key) {
 		return slog.String(attribute.Key, redactedValue)
 	}
-	if attribute.Value.Kind() == slog.KindString {
-		return slog.String(attribute.Key, RedactValue(attribute.Value.String()).(string))
+	return slog.Attr{
+		Key:   attribute.Key,
+		Value: redactSlogValue(attribute.Value, 0),
 	}
-	return attribute
 }

@@ -63,11 +63,22 @@ func TestFeatureCenterProbeMapCoversEveryActiveFeature(t *testing.T) {
 		}
 	}
 
-	assembled := make(map[string]struct{})
+	assembled := make(map[string]bool)
 	ast.Inspect(file, func(node ast.Node) bool {
 		assignment, ok := node.(*ast.AssignStmt)
 		if !ok || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 {
 			return true
+		}
+		if index, ok := assignment.Lhs[0].(*ast.IndexExpr); ok {
+			identifier, ok := index.X.(*ast.Ident)
+			key, keyOK := index.Index.(*ast.BasicLit)
+			if !ok || identifier.Name != "featureCenterHealthProbes" ||
+				!keyOK || key.Kind != token.STRING {
+				return true
+			}
+			featureID := strings.Trim(key.Value, `"`)
+			assembled[featureID] = probeExpressionReady(assignment.Rhs[0])
+			return false
 		}
 		identifier, ok := assignment.Lhs[0].(*ast.Ident)
 		if !ok || identifier.Name != "featureCenterHealthProbes" {
@@ -86,20 +97,45 @@ func TestFeatureCenterProbeMapCoversEveryActiveFeature(t *testing.T) {
 			if !ok || key.Kind != token.STRING {
 				continue
 			}
-			assembled[strings.Trim(key.Value, `"`)] = struct{}{}
+			featureID := strings.Trim(key.Value, `"`)
+			assembled[featureID] = probeExpressionReady(keyValue.Value)
 		}
 		return false
 	})
 
 	missing := make([]string, 0)
 	for featureID := range registered {
-		if _, exists := assembled[featureID]; !exists {
+		if ready, exists := assembled[featureID]; !exists || !ready {
 			missing = append(missing, featureID)
 		}
 	}
 	sort.Strings(missing)
 	if len(missing) > 0 {
 		t.Fatalf("active features missing from production health probe map: %s", strings.Join(missing, ", "))
+	}
+}
+
+// probeExpressionReady rejects an explicit assembly placeholder. A value that
+// is replaced later in the composition root is still a real expression, so the
+// final ValidateHealthProbeCoverage call remains responsible for runtime
+// readiness after all delayed dependencies have been wired.
+func probeExpressionReady(expression ast.Expr) bool {
+	literal, ok := expression.(*ast.CompositeLit)
+	if !ok {
+		return true
+	}
+	identifier, ok := literal.Type.(*ast.Ident)
+	return !ok || identifier.Name != "placeholderHealthProbe"
+}
+
+func TestProbeExpressionReadyRejectsAssemblyPlaceholder(t *testing.T) {
+	if probeExpressionReady(&ast.CompositeLit{
+		Type: ast.NewIdent("placeholderHealthProbe"),
+	}) {
+		t.Fatal("assembly placeholder was accepted as a real health probe")
+	}
+	if !probeExpressionReady(ast.NewIdent("recommendationReadinessProbe")) {
+		t.Fatal("delayed real health probe was rejected")
 	}
 }
 

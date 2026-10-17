@@ -14,6 +14,16 @@ import (
 // as an online device.
 const defaultOnlineThreshold = 90 * time.Second
 
+const offlinePolicyDeviceMetricQuery = `SELECT COUNT(*)
+	FROM device_bindings AS bindings
+	JOIN content_offline_policy_acks AS acks
+	  ON acks.device_id = bindings.device_id
+	 AND acks.family_id = bindings.parent_account_id
+	JOIN content_offline_policy AS policy
+	  ON policy.singleton = TRUE
+	 AND policy.offline_enabled = TRUE
+	 AND acks.applied_revision = policy.revision`
+
 // MetricsRepository answers the read-only metric keys declared by the feature
 // registry. Every query is a plain count against a table owned by another
 // module, so the feature center never invents an operational value it cannot
@@ -282,7 +292,7 @@ func (r *MetricsRepository) FeatureMetrics(
 		)
 	case "offline_content":
 		return r.scalar(ctx,
-			"SELECT COUNT(*) FROM content_offline_policy",
+			offlinePolicyDeviceMetricQuery,
 			"offline_policy_device_count",
 		)
 	case "content_engagement":

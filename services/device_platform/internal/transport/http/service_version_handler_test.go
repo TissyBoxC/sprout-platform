@@ -14,6 +14,11 @@ type fakeServiceVersionAdminService struct {
 	serviceVersionAdminService
 	listReleasesCalls []listReleasesCall
 	listReleasesErr   error
+	executionEnabled  bool
+}
+
+func (service *fakeServiceVersionAdminService) UpgradeExecutionEnabled() bool {
+	return service.executionEnabled
 }
 
 type listReleasesCall struct {

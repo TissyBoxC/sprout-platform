@@ -15,7 +15,7 @@ import { createHttpClient } from '@/api/httpClient'
 const activeOperationStatuses = new Set(['queued', 'running', 'recovering'])
 
 export function isUpgradeableService(service: AdminServiceVersion): boolean {
-  return service.upgradeSupported
+  return service.upgradeSupported && service.upgradeExecutable
 }
 
 export interface ServiceReleaseState {

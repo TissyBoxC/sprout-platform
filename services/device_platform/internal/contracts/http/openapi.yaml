@@ -24584,6 +24584,7 @@ components:
         - release_url
         - is_self
         - upgrade_supported
+        - upgrade_executable
         - can_upgrade
         - last_checked_at
         - updated_at
@@ -24609,6 +24610,8 @@ components:
           type: boolean
         upgrade_supported:
           type: boolean
+        upgrade_executable:
+          type: boolean
         can_upgrade:
           type: boolean
         last_checked_at:
@@ -24626,6 +24629,7 @@ components:
         - services
         - checked_at
         - all_up_to_date
+        - execution_enabled
       properties:
         services:
           type: array
@@ -24636,6 +24640,8 @@ components:
           type: string
           format: date-time
         all_up_to_date:
+          type: boolean
+        execution_enabled:
           type: boolean
     ServiceVersionSnapshotEnvelope:
       allOf:

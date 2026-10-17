@@ -59,7 +59,8 @@ func TestFeatureCenterMetricsReaderMergesOutdatedServices(t *testing.T) {
 		t.Fatalf("write status snapshot: %v", err)
 	}
 	serviceVersions, err := serviceVersionService.New(serviceVersionService.Options{
-		Repository: serviceVersionRepository.NewFileRepository(stateDir),
+		Repository:       serviceVersionRepository.NewFileRepository(stateDir),
+		UpgradeExecution: true,
 	})
 	if err != nil {
 		t.Fatalf("create service version service: %v", err)
@@ -130,7 +131,8 @@ func TestFeatureCenterMetricsReaderReportsRunningServiceCount(t *testing.T) {
 		t.Fatalf("write status snapshot: %v", err)
 	}
 	serviceVersions, err := serviceVersionService.New(serviceVersionService.Options{
-		Repository: serviceVersionRepository.NewFileRepository(stateDir),
+		Repository:       serviceVersionRepository.NewFileRepository(stateDir),
+		UpgradeExecution: true,
 	})
 	if err != nil {
 		t.Fatalf("create service version service: %v", err)

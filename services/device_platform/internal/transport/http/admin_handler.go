@@ -99,6 +99,7 @@ type serviceVersionAdminService interface {
 		ctx context.Context,
 	) ([]serviceversiondomain.Service, time.Time, error)
 	AllCurrent(services []serviceversiondomain.Service) bool
+	UpgradeExecutionEnabled() bool
 	RequestCheck(ctx context.Context) error
 	PlanUpgrade(
 		ctx context.Context,

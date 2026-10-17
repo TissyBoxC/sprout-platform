@@ -15,9 +15,10 @@ import (
 
 // versionSnapshotResponse is the console-facing service inventory.
 type versionSnapshotResponse struct {
-	Services    []domain.Service `json:"services"`
-	CheckedAt   *time.Time       `json:"checked_at"`
-	AllUpToDate bool             `json:"all_up_to_date"`
+	Services         []domain.Service `json:"services"`
+	CheckedAt        *time.Time       `json:"checked_at"`
+	AllUpToDate      bool             `json:"all_up_to_date"`
+	ExecutionEnabled bool             `json:"execution_enabled"`
 }
 
 type upgradeServiceRequest struct {
@@ -34,9 +35,10 @@ func (handler adminHandler) listServiceVersions(
 		return
 	}
 	writeSuccess(response, request, http.StatusOK, versionSnapshotResponse{
-		Services:    services,
-		CheckedAt:   timePointer(checkedAt),
-		AllUpToDate: handler.serviceVersionService.AllCurrent(services),
+		Services:         services,
+		CheckedAt:        timePointer(checkedAt),
+		AllUpToDate:      handler.serviceVersionService.AllCurrent(services),
+		ExecutionEnabled: handler.serviceVersionService.UpgradeExecutionEnabled(),
 	})
 }
 
@@ -56,9 +58,10 @@ func (handler adminHandler) checkServiceVersions(
 		return
 	}
 	writeSuccess(response, request, http.StatusOK, versionSnapshotResponse{
-		Services:    services,
-		CheckedAt:   timePointer(checkedAt),
-		AllUpToDate: handler.serviceVersionService.AllCurrent(services),
+		Services:         services,
+		CheckedAt:        timePointer(checkedAt),
+		AllUpToDate:      handler.serviceVersionService.AllCurrent(services),
+		ExecutionEnabled: handler.serviceVersionService.UpgradeExecutionEnabled(),
 	})
 }
 

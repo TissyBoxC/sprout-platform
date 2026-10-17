@@ -17,17 +17,19 @@ import (
 
 // Service owns the read-mostly service inventory and its upgrade commands.
 type Service struct {
-	repository repository.Repository
-	releases   ReleaseSource
-	catalog    []domain.CatalogEntry
-	clock      func() time.Time
+	repository       repository.Repository
+	releases         ReleaseSource
+	catalog          []domain.CatalogEntry
+	clock            func() time.Time
+	upgradeExecution bool
 }
 
 // Options contains service version dependencies.
 type Options struct {
-	Repository repository.Repository
-	Releases   ReleaseSource
-	Clock      func() time.Time
+	Repository       repository.Repository
+	Releases         ReleaseSource
+	Clock            func() time.Time
+	UpgradeExecution bool
 }
 
 // SnapshotResult is one console-facing view of the worker snapshot.
@@ -76,10 +78,11 @@ func New(options Options) (*Service, error) {
 		timeSource = func() time.Time { return time.Now().UTC() }
 	}
 	return &Service{
-		repository: options.Repository,
-		releases:   releaseSource,
-		catalog:    defaultCatalog(),
-		clock:      timeSource,
+		repository:       options.Repository,
+		releases:         releaseSource,
+		catalog:          defaultCatalog(),
+		clock:            timeSource,
+		upgradeExecution: options.UpgradeExecution,
 	}, nil
 }
 
@@ -114,12 +117,13 @@ func (s *Service) SnapshotResult(ctx context.Context) (SnapshotResult, error) {
 		service.Image = entry.Image
 		service.IsSelf = entry.IsSelf
 		service.UpgradeSupported = entry.AutoUpgrade
+		service.UpgradeExecutable = entry.AutoUpgrade && s.upgradeExecution
 		if service.Status == "" {
 			service.Status = domain.ServiceStatusUnknown
 		}
 		// An infrastructure image is detected but never auto-upgraded, so the
 		// console must not offer an action the worker would refuse.
-		service.CanUpgrade = entry.AutoUpgrade &&
+		service.CanUpgrade = service.UpgradeExecutable &&
 			service.Status == domain.ServiceStatusOutdated &&
 			service.LatestVersion != "" &&
 			CompareVersions(service.LatestVersion, service.CurrentVersion) > 0
@@ -167,6 +171,12 @@ func (s *Service) AllCurrent(services []domain.Service) bool {
 	return managed > 0
 }
 
+// UpgradeExecutionEnabled reports whether this deployment can queue upgrades.
+// Read-only deployments still expose release metadata and history.
+func (s *Service) UpgradeExecutionEnabled() bool {
+	return s.upgradeExecution
+}
+
 // RequestCheck asks the worker to refresh its snapshot immediately.
 func (s *Service) RequestCheck(ctx context.Context) error {
 	return s.repository.RequestCheck(ctx)
@@ -189,6 +199,9 @@ func (s *Service) PlanUpgradeTo(
 	serviceID string,
 	targetVersion string,
 ) (UpgradePlan, error) {
+	if !s.upgradeExecution {
+		return UpgradePlan{}, domain.ErrServiceNotUpgradable
+	}
 	services, _, err := s.Snapshot(ctx)
 	if err != nil {
 		return UpgradePlan{}, err
@@ -388,6 +401,9 @@ func (s *Service) Enqueue(
 	plan UpgradePlan,
 	actorAccountID string,
 ) (*domain.Operation, error) {
+	if !s.upgradeExecution {
+		return nil, domain.ErrServiceNotUpgradable
+	}
 	if err := s.ensureIdle(ctx); err != nil {
 		return nil, err
 	}
@@ -426,6 +442,9 @@ func (s *Service) EnqueueAll(
 	plans []UpgradePlan,
 	actorAccountID string,
 ) ([]domain.Operation, error) {
+	if !s.upgradeExecution {
+		return nil, domain.ErrServiceNotUpgradable
+	}
 	if len(plans) == 0 {
 		return nil, domain.ErrNoUpgradeAvailable
 	}

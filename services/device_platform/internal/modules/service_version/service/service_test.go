@@ -57,8 +57,9 @@ func newTestReleaseSource(
 		}
 	}
 	service, err := New(Options{
-		Repository: repository.NewFileRepository(stateDir),
-		Clock:      func() time.Time { return time.Unix(0, 0).UTC() },
+		Repository:       repository.NewFileRepository(stateDir),
+		Clock:            func() time.Time { return time.Unix(0, 0).UTC() },
+		UpgradeExecution: true,
 	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
@@ -135,9 +136,10 @@ func newTestServiceWithReleases(
 		}
 	}
 	service, err := New(Options{
-		Repository: repository.NewFileRepository(stateDir),
-		Releases:   releases,
-		Clock:      func() time.Time { return time.Unix(0, 0).UTC() },
+		Repository:       repository.NewFileRepository(stateDir),
+		Releases:         releases,
+		Clock:            func() time.Time { return time.Unix(0, 0).UTC() },
+		UpgradeExecution: true,
 	})
 	if err != nil {
 		t.Fatalf("New() returned unexpected error: %v", err)
@@ -175,6 +177,9 @@ func TestSnapshotMergesCatalogAndMarksUpgradable(t *testing.T) {
 	if !platform.UpgradeSupported {
 		t.Fatal("expected the platform to support version selection")
 	}
+	if !platform.UpgradeExecutable {
+		t.Fatal("expected the executable deployment to expose upgrades")
+	}
 	if platform.DisplayName == "" {
 		t.Fatal("expected the catalogue to supply a display name")
 	}
@@ -202,6 +207,54 @@ func TestInfrastructureNeverUpgradable(t *testing.T) {
 				t.Fatalf("infrastructure image %s must not be auto-upgraded", item.ID)
 			}
 		}
+	}
+}
+
+func TestReadOnlyDeploymentNeverExposesUpgradeActions(t *testing.T) {
+	stateDir := t.TempDir()
+	snapshot := `{
+		"generated_at": "2026-10-03T00:00:00Z",
+		"services": [
+			{"id":"device_platform","current_version":"0.22.0","latest_version":"0.23.0","status":"outdated"}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(stateDir, "status.json"), []byte(snapshot), 0o600); err != nil {
+		t.Fatalf("write status snapshot: %v", err)
+	}
+	service, err := New(Options{
+		Repository: repository.NewFileRepository(stateDir),
+		Clock:      func() time.Time { return time.Unix(0, 0).UTC() },
+	})
+	if err != nil {
+		t.Fatalf("New() returned unexpected error: %v", err)
+	}
+
+	services, _, err := service.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() returned unexpected error: %v", err)
+	}
+	for _, item := range services {
+		if item.ID != "device_platform" {
+			continue
+		}
+		if !item.UpgradeSupported {
+			t.Fatal("release metadata should remain visible in read-only mode")
+		}
+		if item.UpgradeExecutable {
+			t.Fatal("read-only mode must not advertise an upgrade executor")
+		}
+		if item.CanUpgrade {
+			t.Fatal("read-only mode must not expose upgrade actions")
+		}
+	}
+	if service.UpgradeExecutionEnabled() {
+		t.Fatal("expected upgrade execution to be disabled")
+	}
+	if _, err := service.PlanUpgrade(context.Background(), "device_platform"); !errors.Is(
+		err,
+		domain.ErrServiceNotUpgradable,
+	) {
+		t.Fatalf("expected read-only upgrade rejection, got %v", err)
 	}
 }
 

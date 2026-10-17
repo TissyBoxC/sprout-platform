@@ -447,6 +447,7 @@ test('checks and upgrades brand services from the service version page', async (
       release_url: 'https://github.com/TissyBoxC/sprout-platform/releases/tag/v0.9.1',
       is_self: true,
       upgrade_supported: true,
+      upgrade_executable: true,
       can_upgrade: true,
       last_checked_at: '2026-10-03T10:00:00Z',
       updated_at: '2026-10-03T10:00:00Z',
@@ -462,6 +463,7 @@ test('checks and upgrades brand services from the service version page', async (
       release_url: 'https://github.com/TissyBoxC/sprout-sub2api-fork/releases/tag/v0.2.16',
       is_self: false,
       upgrade_supported: true,
+      upgrade_executable: true,
       can_upgrade: true,
       last_checked_at: '2026-10-03T10:00:00Z',
       updated_at: '2026-10-03T10:00:00Z',
@@ -477,6 +479,7 @@ test('checks and upgrades brand services from the service version page', async (
       release_url: 'https://github.com/TissyBoxC/sprout-platform/releases/tag/v0.9.1',
       is_self: false,
       upgrade_supported: true,
+      upgrade_executable: true,
       can_upgrade: true,
       last_checked_at: '2026-10-03T10:00:00Z',
       updated_at: '2026-10-03T10:00:00Z',
@@ -492,6 +495,7 @@ test('checks and upgrades brand services from the service version page', async (
       release_url: 'https://github.com/TissyBoxC/sprout-platform/releases/tag/v0.9.1',
       is_self: false,
       upgrade_supported: true,
+      upgrade_executable: true,
       can_upgrade: true,
       last_checked_at: '2026-10-03T10:00:00Z',
       updated_at: '2026-10-03T10:00:00Z',
@@ -507,6 +511,7 @@ test('checks and upgrades brand services from the service version page', async (
       release_url: '',
       is_self: false,
       upgrade_supported: false,
+      upgrade_executable: false,
       can_upgrade: false,
       last_checked_at: '2026-10-03T10:00:00Z',
       updated_at: '2026-10-03T10:00:00Z',
@@ -522,6 +527,7 @@ test('checks and upgrades brand services from the service version page', async (
       release_url: '',
       is_self: false,
       upgrade_supported: false,
+      upgrade_executable: false,
       can_upgrade: false,
       last_checked_at: '2026-10-03T10:00:00Z',
       updated_at: '2026-10-03T10:00:00Z',
@@ -537,6 +543,7 @@ test('checks and upgrades brand services from the service version page', async (
       release_url: '',
       is_self: false,
       upgrade_supported: false,
+      upgrade_executable: false,
       can_upgrade: false,
       last_checked_at: '2026-10-03T10:00:00Z',
       updated_at: '2026-10-03T10:00:00Z',
@@ -552,6 +559,7 @@ test('checks and upgrades brand services from the service version page', async (
       release_url: '',
       is_self: false,
       upgrade_supported: false,
+      upgrade_executable: false,
       can_upgrade: true,
       last_checked_at: '2026-10-03T10:00:00Z',
       updated_at: '2026-10-03T10:00:00Z',
@@ -567,6 +575,7 @@ test('checks and upgrades brand services from the service version page', async (
       release_url: '',
       is_self: false,
       upgrade_supported: false,
+      upgrade_executable: false,
       can_upgrade: false,
       last_checked_at: '2026-10-03T10:00:00Z',
       updated_at: '2026-10-03T10:00:00Z',
@@ -582,6 +591,7 @@ test('checks and upgrades brand services from the service version page', async (
           services: serviceVersions,
           checked_at: '2026-10-03T10:00:00Z',
           all_up_to_date: false,
+          execution_enabled: true,
         },
       }),
     })
@@ -717,6 +727,7 @@ test('marks the previous service snapshot when a version check does not complete
         release_url: '',
         is_self: true,
         upgrade_supported: true,
+        upgrade_executable: true,
         can_upgrade: true,
         last_checked_at: '2026-10-16T10:00:00Z',
         updated_at: '2026-10-16T10:00:00Z',
@@ -827,6 +838,67 @@ test('marks the previous service snapshot when a version check does not complete
   expect(checkAttempts).toBe(2)
 })
 
+test('keeps a read-only service snapshot visible without offering upgrades', async ({ page }) => {
+  await useAdminSession(page)
+
+  let upgradeRequests = 0
+  await page.route('**/api/v1/admin/service-versions', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          services: [
+            {
+              id: 'device_platform',
+              display_name: '设备平台',
+              role: '平台服务',
+              image: 'ghcr.io/tissyboxc/sprout-device-platform:0.23.0',
+              current_version: '0.22.0',
+              latest_version: '0.23.0',
+              status: 'outdated',
+              release_url: '',
+              is_self: false,
+              upgrade_supported: true,
+              upgrade_executable: false,
+              can_upgrade: false,
+              last_checked_at: '2026-10-17T10:00:00Z',
+              updated_at: '2026-10-17T10:00:00Z',
+            },
+          ],
+          checked_at: '2026-10-17T10:00:00Z',
+          all_up_to_date: false,
+          execution_enabled: false,
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/service-versions/*/releases**', async (route) => {
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ data: null, error: { code: 'not_found' } }),
+    })
+  })
+  await page.route('**/api/v1/admin/service-versions/*/upgrade', async (route) => {
+    upgradeRequests += 1
+    await route.fulfill({ status: 500 })
+  })
+  await page.route('**/api/v1/admin/service-version-operations', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { operations: [] } }),
+    })
+  })
+
+  await page.goto('/services')
+
+  await expect(page.getByText('0.23.0', { exact: true })).toBeVisible()
+  await expect(page.getByText('当前部署仅同步版本，不执行自动升级')).toBeVisible()
+  await expect(page.getByRole('button', { name: '全部升级' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: /升级到/ })).toHaveCount(0)
+  expect(upgradeRequests).toBe(0)
+})
+
 test('distinguishes a release catalog that is still preparing from a real failure', async ({
   page,
 }) => {
@@ -850,6 +922,7 @@ test('distinguishes a release catalog that is still preparing from a real failur
               release_url: '',
               is_self: false,
               upgrade_supported: true,
+              upgrade_executable: true,
               can_upgrade: true,
               last_checked_at: '2026-10-08T10:00:00Z',
               updated_at: '2026-10-08T10:00:00Z',
@@ -857,6 +930,7 @@ test('distinguishes a release catalog that is still preparing from a real failur
           ],
           checked_at: '2026-10-08T10:00:00Z',
           all_up_to_date: false,
+          execution_enabled: true,
         },
       }),
     })
@@ -935,6 +1009,7 @@ test('shows an explicit no-upgrade state when all managed services are current',
               release_url: '',
               is_self: true,
               upgrade_supported: true,
+              upgrade_executable: true,
               can_upgrade: false,
               last_checked_at: '2026-10-14T10:00:00Z',
               updated_at: '2026-10-14T10:00:00Z',
@@ -942,6 +1017,7 @@ test('shows an explicit no-upgrade state when all managed services are current',
           ],
           checked_at: '2026-10-14T10:00:00Z',
           all_up_to_date: true,
+          execution_enabled: true,
         },
       }),
     })
@@ -1003,6 +1079,7 @@ test('explains when the backend reports that an upgrade is not needed', async ({
               release_url: '',
               is_self: true,
               upgrade_supported: true,
+              upgrade_executable: true,
               can_upgrade: true,
               last_checked_at: '2026-10-14T10:00:00Z',
               updated_at: '2026-10-14T10:00:00Z',
@@ -1010,6 +1087,7 @@ test('explains when the backend reports that an upgrade is not needed', async ({
           ],
           checked_at: '2026-10-14T10:00:00Z',
           all_up_to_date: false,
+          execution_enabled: true,
         },
       }),
     })

@@ -260,7 +260,11 @@ function operationLog(operation: AdminServiceVersionOperation | null): string {
       </div>
     </header>
 
-    <div class="self-upgrade-note">
+    <div v-if="store.snapshot?.executionEnabled === false" class="self-upgrade-note">
+      <span aria-hidden="true">☆</span>
+      <p>当前部署只同步版本信息，自动升级由云端部署工作器执行。这里不会创建升级任务。</p>
+    </div>
+    <div v-else class="self-upgrade-note">
       <span aria-hidden="true">☆</span>
       <p>管理端自身升级时，页面会短暂重载，完成后自动恢复。升级记录会保留，不需要重复操作。</p>
     </div>
@@ -436,6 +440,12 @@ function operationLog(operation: AdminServiceVersionOperation | null): string {
                         </button>
                       </template>
                     </template>
+                    <small
+                      v-else-if="service.upgradeSupported"
+                      class="read-only-copy"
+                    >
+                      当前部署仅同步版本，不执行自动升级
+                    </small>
                     <small v-else class="read-only-copy">
                       固定镜像，由部署配置统一维护
                     </small>

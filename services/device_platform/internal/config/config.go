@@ -147,7 +147,8 @@ type DeviceRuntimeConfig struct {
 // upgrade worker. The device platform only reads status and writes command
 // files there; it never receives the Docker socket.
 type ServiceVersionConfig struct {
-	StateDir string
+	StateDir         string
+	UpgradeExecution bool
 }
 
 // ReleaseStoreConfig points at the shared release volume consumed by the
@@ -267,6 +268,10 @@ func Load() (Config, error) {
 			StateDir: env(
 				"DEVICE_PLATFORM_SERVICE_VERSION_STATE_DIR",
 				"/var/lib/sprout-upgrades",
+			),
+			UpgradeExecution: envBool(
+				"DEVICE_PLATFORM_SERVICE_VERSION_UPGRADE_EXECUTION",
+				false,
 			),
 		},
 		ReleaseStore: ReleaseStoreConfig{

@@ -18,6 +18,7 @@ export interface AdminServiceVersion {
   releaseUrl: string
   isSelf: boolean
   upgradeSupported: boolean
+  upgradeExecutable: boolean
   canUpgrade: boolean
   lastCheckedAt: string
   updatedAt: string
@@ -27,6 +28,7 @@ export interface ServiceVersionSnapshot {
   services: AdminServiceVersion[]
   checkedAt: string
   allUpToDate: boolean
+  executionEnabled: boolean
 }
 
 export interface ServiceVersionRelease {
@@ -197,6 +199,10 @@ function toSnapshot(value: unknown): ServiceVersionSnapshot {
       typeof record.all_up_to_date === 'boolean'
         ? record.all_up_to_date
         : services.length > 0 && services.every((service) => service.status === 'current'),
+    executionEnabled:
+      typeof record.execution_enabled === 'boolean'
+        ? record.execution_enabled
+        : services.some((service) => service.upgradeExecutable),
   }
 }
 
@@ -218,6 +224,7 @@ function toNullableServiceVersion(value: unknown): AdminServiceVersion | null {
     releaseUrl: stringValue(record.release_url),
     isSelf: record.is_self === true,
     upgradeSupported: record.upgrade_supported === true,
+    upgradeExecutable: record.upgrade_executable === true,
     canUpgrade: record.can_upgrade === true,
     lastCheckedAt: stringValue(record.last_checked_at),
     updatedAt: stringValue(record.updated_at),

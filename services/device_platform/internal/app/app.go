@@ -308,6 +308,7 @@ func Run() error {
 		Repository: serviceVersionRepository.NewFileRepository(
 			cfg.ServiceVersion.StateDir,
 		),
+		UpgradeExecution: cfg.ServiceVersion.UpgradeExecution,
 	})
 	if err != nil {
 		return fmt.Errorf("create service version service: %w", err)

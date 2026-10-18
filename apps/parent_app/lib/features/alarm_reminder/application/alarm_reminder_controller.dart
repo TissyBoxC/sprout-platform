@@ -30,7 +30,7 @@ class AlarmReminderState {
 /// Owns the family alarm schedule so the page can refresh and mutate it without
 /// holding a device session.
 class AlarmReminderController extends AsyncNotifier<AlarmReminderState> {
-  late final AlarmReminderApi _api;
+  late AlarmReminderApi _api;
 
   @override
   Future<AlarmReminderState> build() async {

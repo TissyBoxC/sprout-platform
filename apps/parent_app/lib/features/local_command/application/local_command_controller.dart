@@ -8,7 +8,7 @@ import '../domain/local_command.dart';
 
 /// Owns the guardian's editable local command set.
 class LocalCommandController extends AsyncNotifier<LocalCommandSet> {
-  late final LocalCommandApi _api;
+  late LocalCommandApi _api;
 
   @override
   Future<LocalCommandSet> build() async {

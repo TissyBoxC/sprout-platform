@@ -4,11 +4,15 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_motion.dart';
 import '../../../shared/widgets/app_reveal.dart';
+import '../../../app/router/app_router.dart';
 import '../application/auth_controller.dart';
 
 /// Guardian registration screen with an explicit consent requirement.
 class RegisterPage extends ConsumerStatefulWidget {
-  const RegisterPage({super.key});
+  const RegisterPage({required this.destination, super.key});
+
+  /// Restores the protected page that led the guardian into registration.
+  final LoginDestination destination;
 
   @override
   ConsumerState<RegisterPage> createState() => _RegisterPageState();
@@ -97,7 +101,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
         return;
       }
       if (succeeded) {
-        context.go('/home');
+        context.go(widget.destination.take() ?? '/home');
         return;
       }
       setState(() {

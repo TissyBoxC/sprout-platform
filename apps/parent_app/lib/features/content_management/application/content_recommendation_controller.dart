@@ -17,7 +17,7 @@ class ContentRecommendationController
     extends AsyncNotifier<List<ContentRecommendation>> {
   static const int _limit = 8;
 
-  late final ContentManagementApi _api;
+  late ContentManagementApi _api;
 
   @override
   Future<List<ContentRecommendation>> build() async {

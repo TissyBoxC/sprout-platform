@@ -26,7 +26,7 @@ class VideoContactsState {
 
 /// Owns video contacts and call history for the family.
 class VideoCompanionController extends AsyncNotifier<VideoContactsState> {
-  late final VideoCompanionApi _api;
+  late VideoCompanionApi _api;
 
   @override
   Future<VideoContactsState> build() async {
@@ -42,10 +42,12 @@ class VideoCompanionController extends AsyncNotifier<VideoContactsState> {
 
   Future<VideoContact> createContact(VideoContact contact) async {
     final created = await _api.createContact(contact);
-    final current = state.value ?? const VideoContactsState(
-      contacts: <VideoContact>[],
-      calls: <VideoCall>[],
-    );
+    final current =
+        state.value ??
+        const VideoContactsState(
+          contacts: <VideoContact>[],
+          calls: <VideoCall>[],
+        );
     state = AsyncValue.data(
       current.copyWith(contacts: <VideoContact>[created, ...current.contacts]),
     );
@@ -105,8 +107,10 @@ class VideoCompanionController extends AsyncNotifier<VideoContactsState> {
 }
 
 /// Read-only video capability for one device.
-final videoCapabilityProvider =
-    FutureProvider.family<VideoCapability, String>((ref, deviceId) {
+final videoCapabilityProvider = FutureProvider.family<VideoCapability, String>((
+  ref,
+  deviceId,
+) {
   return ref.read(videoCompanionApiProvider).fetchCapability(deviceId);
 });
 

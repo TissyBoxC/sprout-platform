@@ -4,11 +4,15 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_motion.dart';
 import '../../../shared/widgets/app_reveal.dart';
+import '../../../app/router/app_router.dart';
 import '../application/auth_controller.dart';
 
 /// Parent sign-in screen for returning guardians.
 class LoginPage extends ConsumerStatefulWidget {
-  const LoginPage({super.key});
+  const LoginPage({required this.destination, super.key});
+
+  /// Restores the protected page that redirected an unauthenticated visitor.
+  final LoginDestination destination;
 
   @override
   ConsumerState<LoginPage> createState() => _LoginPageState();
@@ -47,7 +51,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         return;
       }
       if (succeeded) {
-        context.go('/home');
+        context.go(widget.destination.take() ?? '/home');
         return;
       }
       setState(() {

@@ -7,7 +7,7 @@ import '../domain/usage_report.dart';
 
 /// Loads the signed-in guardian usage report with a bounded day range.
 class UsageReportController extends AsyncNotifier<UsageReport> {
-  late final UsageReportApi _api;
+  late UsageReportApi _api;
   int _days = 30;
   UsageReport? _lastSuccessful;
 
@@ -16,6 +16,8 @@ class UsageReportController extends AsyncNotifier<UsageReport> {
   @override
   Future<UsageReport> build() {
     _api = ref.read(usageReportApiProvider);
+    _days = 30;
+    _lastSuccessful = null;
     return _api.list(days: _days);
   }
 

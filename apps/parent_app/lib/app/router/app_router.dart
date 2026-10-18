@@ -47,35 +47,49 @@ import '../../shared/widgets/parent_shell.dart';
 
 /// Creates the application router with authentication-aware redirects.
 GoRouter createAppRouter(ProviderContainer container) {
+  final loginDestination = LoginDestination();
   return GoRouter(
     refreshListenable: _AuthRefreshListenable(container),
     initialLocation: '/home',
-    redirect: (context, state) {
+    redirect: (context, routeState) {
       final authState = container.read(authControllerProvider);
       if (authState.isLoading) {
         return null;
       }
       final authValue = authState.value;
       final canRetryRestore = authValue?.canRetryRestore ?? false;
-      final location = state.matchedLocation;
-      final isPublicRoute = location == '/login' || location == '/register';
+      final location = routeState.matchedLocation;
+      final isLoginRoute = location == '/login';
+      final isRegisterRoute = location == '/register';
+      final isPublicRoute = isLoginRoute || isRegisterRoute;
       if (canRetryRestore && !isPublicRoute) {
         return null;
       }
       final isSignedIn = authValue?.isSignedIn ?? false;
       if (!isSignedIn && !isPublicRoute) {
+        loginDestination.capture(
+          routeState.uri,
+          rawLocation: routeState.uri.toString(),
+        );
         return '/login';
       }
-      if (isSignedIn && isPublicRoute) {
-        return '/home';
+      if (isSignedIn) {
+        if (isLoginRoute || isRegisterRoute) {
+          return loginDestination.take() ?? '/home';
+        }
+        loginDestination.clear();
       }
       return null;
     },
     routes: [
-      GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
+      GoRoute(
+        path: '/login',
+        builder: (context, state) => LoginPage(destination: loginDestination),
+      ),
       GoRoute(
         path: '/register',
-        builder: (context, state) => const RegisterPage(),
+        builder: (context, state) =>
+            RegisterPage(destination: loginDestination),
       ),
       GoRoute(path: '/family', redirect: (context, state) => '/home'),
       GoRoute(
@@ -282,6 +296,86 @@ GoRouter createAppRouter(ProviderContainer container) {
     ],
     errorBuilder: (context, state) => const _RouteNotFoundPage(),
   );
+}
+
+/// Holds one authenticated in-app destination across a sign-in redirect.
+///
+/// Only a path and query from this app are accepted. Scheme, host, fragment,
+/// control characters, and path traversal are rejected to prevent open
+/// redirects or malformed routes from being replayed.
+class LoginDestination {
+  String? _pending;
+
+  String? get pending => _pending;
+
+  void capture(Uri uri, {String? rawLocation}) {
+    final raw = rawLocation ?? uri.toString();
+    final path = uri.path;
+    final decodedRaw = _decodeForSafety(raw);
+    final decodedPath = _decodeForSafety(path);
+    final decodedQuery = _decodeForSafety(uri.query);
+    if (decodedRaw == null ||
+        !_hasSafeRawPath(raw) ||
+        !path.startsWith('/') ||
+        path.startsWith('//') ||
+        uri.hasScheme ||
+        uri.hasAuthority ||
+        uri.hasFragment ||
+        raw.contains('..') ||
+        raw.contains('\\') ||
+        decodedPath == null ||
+        decodedQuery == null ||
+        decodedPath.contains('..') ||
+        decodedPath.contains('\\') ||
+        _containsControlCharacter(decodedPath) ||
+        _containsControlCharacter(decodedQuery)) {
+      _pending = null;
+      return;
+    }
+    if (path == '/login' || path == '/register') {
+      _pending = null;
+      return;
+    }
+    _pending = uri.toString();
+  }
+
+  String? take() {
+    final destination = _pending;
+    _pending = null;
+    return destination;
+  }
+
+  void clear() {
+    _pending = null;
+  }
+}
+
+bool _hasSafeRawPath(String raw) {
+  if (!raw.startsWith('/') || raw.startsWith('//')) {
+    return false;
+  }
+  // Uri.parse normalizes percent-encoded dot segments before routing. Check
+  // the original location as well so crafted deep links cannot become an
+  // in-app path with traversal segments.
+  final pathEnd = raw.indexOf(RegExp(r'[?#]'));
+  final rawPath = pathEnd == -1 ? raw : raw.substring(0, pathEnd);
+  final lowerPath = rawPath.toLowerCase();
+  return !lowerPath.contains('%2e') &&
+      !lowerPath.contains('%2f') &&
+      !lowerPath.contains('%5c') &&
+      !RegExp(r'%(?:0[0-9a-f]|1[0-9a-f]|7f)').hasMatch(lowerPath);
+}
+
+bool _containsControlCharacter(String value) {
+  return value.codeUnits.any((codeUnit) => codeUnit < 0x20 || codeUnit == 0x7f);
+}
+
+String? _decodeForSafety(String value) {
+  try {
+    return Uri.decodeComponent(value);
+  } on FormatException {
+    return null;
+  }
 }
 
 class _AuthRefreshListenable extends ChangeNotifier {

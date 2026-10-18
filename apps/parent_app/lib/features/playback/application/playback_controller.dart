@@ -10,9 +10,7 @@ import '../domain/playback_request.dart';
 class PlaybackState {
   const PlaybackState({required this.requests, this.deviceFilter});
 
-  const PlaybackState.initial()
-    : requests = const [],
-      deviceFilter = null;
+  const PlaybackState.initial() : requests = const [], deviceFilter = null;
 
   final List<PlaybackRequest> requests;
 
@@ -33,12 +31,13 @@ class PlaybackState {
 /// Owns the family's on-demand playback requests so the page can refresh,
 /// filter, queue, and cancel without holding a device session.
 class PlaybackController extends AsyncNotifier<PlaybackState> {
-  late final PlaybackApi _api;
+  late PlaybackApi _api;
   String? _deviceFilter;
 
   @override
   Future<PlaybackState> build() async {
     _api = ref.read(playbackApiProvider);
+    _deviceFilter = null;
     return _load();
   }
 
@@ -48,7 +47,9 @@ class PlaybackController extends AsyncNotifier<PlaybackState> {
 
   /// Narrows the list to one device, or clears the filter with `null`.
   Future<void> filterByDevice(String? deviceId) async {
-    final normalized = (deviceId != null && deviceId.isNotEmpty) ? deviceId : null;
+    final normalized = (deviceId != null && deviceId.isNotEmpty)
+        ? deviceId
+        : null;
     if (normalized == _deviceFilter) {
       return;
     }

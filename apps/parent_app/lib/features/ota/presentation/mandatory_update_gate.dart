@@ -20,8 +20,8 @@ final mandatoryUpdateCheckProvider = Provider<bool>((ref) => true);
 ///
 /// Only client packages block. Resource packages do not change the installed
 /// package version, so treating them as blocking would loop forever on the
-/// same decision. Check failures never block: being unable to enter the
-/// application is worse than running one outdated build.
+/// same decision. A startup check must positively confirm that no blocking
+/// client update is required. Until then the gate fails closed.
 class MandatoryUpdateGate extends ConsumerStatefulWidget {
   const MandatoryUpdateGate({
     required this.child,
@@ -54,15 +54,22 @@ class _MandatoryUpdateGateState extends ConsumerState<MandatoryUpdateGate>
   AppUpdateInfo? _mandatoryUpdate;
   AppUpdateProgress? _progress;
   String? _actionError;
+  String? _checkError;
   CancelToken? _installCancelToken;
   bool _isInstalling = false;
   bool _awaitsInstaller = false;
+  bool _isChecking = true;
+  late bool _checkSucceeded;
+  bool _checkRunning = false;
 
   @override
   void initState() {
     super.initState();
     _updateService = widget.updateService ?? ref.read(appUpdateServiceProvider);
-    if (ref.read(mandatoryUpdateCheckProvider)) {
+    final shouldCheck = ref.read(mandatoryUpdateCheckProvider);
+    _checkSucceeded = !shouldCheck;
+    _isChecking = shouldCheck;
+    if (shouldCheck) {
       WidgetsBinding.instance.addObserver(this);
       WidgetsBinding.instance.addPostFrameCallback((_) => _check());
     }
@@ -85,6 +92,16 @@ class _MandatoryUpdateGateState extends ConsumerState<MandatoryUpdateGate>
   }
 
   Future<void> _check() async {
+    if (_checkRunning) {
+      return;
+    }
+    _checkRunning = true;
+    if (mounted) {
+      setState(() {
+        _isChecking = true;
+        _checkError = null;
+      });
+    }
     try {
       final currentVersion = await _updateService.installedVersion();
       final update = await _loadUpdate(currentVersion);
@@ -96,15 +113,29 @@ class _MandatoryUpdateGateState extends ConsumerState<MandatoryUpdateGate>
       setState(() {
         _mandatoryUpdate = isBlocking ? update : null;
         _actionError = null;
+        _checkError = null;
+        _checkSucceeded = true;
         // Returning from a cancelled installer must allow a new attempt
         // instead of leaving the action permanently disabled.
         if (!_isInstalling) {
           _awaitsInstaller = false;
         }
       });
-    } on Object {
-      // Keep the previous decision so a transient failure cannot unlock a
-      // guardian who was already told to update.
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        // Never retain a cleared decision after a failed check. A guardian who
+        // was previously allowed must be blocked until a successful check.
+        _checkSucceeded = false;
+        _checkError = _errorMessage(error);
+      });
+    } finally {
+      _checkRunning = false;
+      if (mounted) {
+        setState(() => _isChecking = false);
+      }
     }
   }
 
@@ -179,7 +210,7 @@ class _MandatoryUpdateGateState extends ConsumerState<MandatoryUpdateGate>
   @override
   Widget build(BuildContext context) {
     final update = _mandatoryUpdate;
-    if (update == null) {
+    if (_checkSucceeded && update == null) {
       return widget.child;
     }
     return PopScope(
@@ -192,19 +223,85 @@ class _MandatoryUpdateGateState extends ConsumerState<MandatoryUpdateGate>
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: AppReveal(
-                child: _MandatoryUpdateDialog(
-                  update: update,
-                  progress: _progress,
-                  actionError: _actionError,
-                  isInstalling: _isInstalling,
-                  awaitsInstaller: _awaitsInstaller,
-                  onInstall: _install,
-                  onRetryCheck: _check,
-                ),
+                child: update != null
+                    ? _MandatoryUpdateDialog(
+                        update: update,
+                        progress: _progress,
+                        actionError: _actionError,
+                        isInstalling: _isInstalling,
+                        awaitsInstaller: _awaitsInstaller,
+                        onInstall: _install,
+                        onRetryCheck: _check,
+                      )
+                    : _UpdateCheckDialog(
+                        isChecking: _isChecking,
+                        errorMessage: _checkError,
+                        onRetryCheck: _check,
+                      ),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _UpdateCheckDialog extends StatelessWidget {
+  const _UpdateCheckDialog({
+    required this.isChecking,
+    required this.errorMessage,
+    required this.onRetryCheck,
+  });
+
+  final bool isChecking;
+  final String? errorMessage;
+  final VoidCallback onRetryCheck;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 440),
+      child: Material(
+        borderRadius: BorderRadius.circular(24),
+        color: theme.colorScheme.surface,
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.verified_user_outlined,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 10),
+                  Text('安全检查', style: theme.textTheme.titleLarge),
+                ],
+              ),
+              const SizedBox(height: 14),
+              if (isChecking) ...[
+                const LinearProgressIndicator(),
+                const SizedBox(height: 12),
+                const Text('正在确认当前版本是否可以安全使用。'),
+              ] else ...[
+                Text(errorMessage ?? '暂时无法确认当前版本是否可以安全使用。'),
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: onRetryCheck,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('重新检查'),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

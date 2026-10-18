@@ -63,7 +63,7 @@ int _roleRank(String role) {
 
 /// Owns the family membership, role and invitation state for the guardian UI.
 class FamilyController extends AsyncNotifier<FamilyMembershipState> {
-  late final FamilyApi _api;
+  late FamilyApi _api;
 
   @override
   Future<FamilyMembershipState> build() async {
@@ -80,14 +80,16 @@ class FamilyController extends AsyncNotifier<FamilyMembershipState> {
     required String email,
     required String role,
   }) async {
-    final invitation = await _api.createInvitation(email: email, role: role);
+    final api = _api;
+    final invitation = await api.createInvitation(email: email, role: role);
     await refresh();
     return invitation;
   }
 
   /// Revokes one pending invitation, then reloads.
   Future<void> revokeInvitation(String invitationId) async {
-    await _api.revokeInvitation(invitationId);
+    final api = _api;
+    await api.revokeInvitation(invitationId);
     await refresh();
   }
 
@@ -96,14 +98,16 @@ class FamilyController extends AsyncNotifier<FamilyMembershipState> {
     required String userId,
     required String role,
   }) async {
-    final member = await _api.updateMemberRole(userId, role);
+    final api = _api;
+    final member = await api.updateMemberRole(userId, role);
     await refresh();
     return member;
   }
 
   /// Removes one member, then reloads.
   Future<void> removeMember(String userId) async {
-    await _api.removeMember(userId);
+    final api = _api;
+    await api.removeMember(userId);
     await refresh();
   }
 
@@ -113,7 +117,8 @@ class FamilyController extends AsyncNotifier<FamilyMembershipState> {
     required String familyId,
     required String invitationId,
   }) async {
-    final member = await _api.acceptInvitation(
+    final api = _api;
+    final member = await api.acceptInvitation(
       familyId: familyId,
       invitationId: invitationId,
     );
@@ -122,9 +127,10 @@ class FamilyController extends AsyncNotifier<FamilyMembershipState> {
   }
 
   Future<FamilyMembershipState> _load() async {
-    final capability = await _api.fetchCapability();
-    final members = await _api.fetchMembers();
-    final invitations = await _api.fetchInvitations();
+    final api = _api;
+    final capability = await api.fetchCapability();
+    final members = await api.fetchMembers();
+    final invitations = await api.fetchInvitations();
     return FamilyMembershipState(
       capability: capability,
       members: members,
@@ -153,7 +159,7 @@ final familyControllerProvider =
 /// Owns the pending invitations addressed to the signed-in account, used by an
 /// invitee that has no family membership yet.
 class MyInvitationsController extends AsyncNotifier<List<FamilyInvitation>> {
-  late final FamilyApi _api;
+  late FamilyApi _api;
 
   @override
   Future<List<FamilyInvitation>> build() async {
@@ -162,12 +168,14 @@ class MyInvitationsController extends AsyncNotifier<List<FamilyInvitation>> {
   }
 
   Future<void> refresh() async {
-    state = await AsyncValue.guard(_api.fetchMyInvitations);
+    final api = _api;
+    state = await AsyncValue.guard(api.fetchMyInvitations);
   }
 
   /// Accepts an invitation and refreshes the invitee's pending list.
   Future<FamilyMember> accept(FamilyInvitation invitation) async {
-    final member = await _api.acceptInvitation(
+    final api = _api;
+    final member = await api.acceptInvitation(
       familyId: invitation.familyId,
       invitationId: invitation.id,
     );

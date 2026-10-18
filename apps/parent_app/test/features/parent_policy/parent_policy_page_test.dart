@@ -9,6 +9,79 @@ import 'package:parent_app/features/parent_policy/domain/parent_policy.dart';
 import 'package:parent_app/features/parent_policy/presentation/parent_policy_page.dart';
 
 void main() {
+  test('accepts policies from platforms without voice controls', () {
+    final policy = ParentPolicy.fromJson({
+      'policy_id': 'policy_demo',
+      'family_id': 'family_demo',
+      'child_id': 'child_demo',
+      'policy_version': 3,
+      'daily_limit_minutes': 60,
+      'allowed_categories': ['story'],
+      'disabled_periods': [],
+      'max_volume_percent': 70,
+      'updated_at': '2026-10-08T00:00:00Z',
+    });
+
+    expect(policy.voiceConversation.continuousConversationEnabled, isFalse);
+    expect(policy.voiceConversation.idleWindowSeconds, 8);
+    expect(policy.voiceConversation.bargeInEnabled, isFalse);
+    expect(policy.voiceConversation.farFieldEnabled, isFalse);
+  });
+
+  test('defaults only missing voice subfields to conservative values', () {
+    final policy = ParentPolicy.fromJson({
+      'policy_id': 'policy_demo',
+      'family_id': 'family_demo',
+      'child_id': 'child_demo',
+      'policy_version': 3,
+      'daily_limit_minutes': 60,
+      'allowed_categories': ['story'],
+      'disabled_periods': [],
+      'max_volume_percent': 70,
+      'voice_conversation': {
+        'continuous_conversation_enabled': true,
+        'barge_in_enabled': true,
+      },
+      'updated_at': '2026-10-08T00:00:00Z',
+    });
+
+    expect(policy.voiceConversation.continuousConversationEnabled, isTrue);
+    expect(policy.voiceConversation.idleWindowSeconds, 8);
+    expect(policy.voiceConversation.bargeInEnabled, isTrue);
+    expect(policy.voiceConversation.farFieldEnabled, isFalse);
+  });
+
+  test('rejects malformed voice values without losing the whole policy', () {
+    final policy = ParentPolicy.fromJson({
+      'policy_id': 'policy_demo',
+      'family_id': 'family_demo',
+      'child_id': 'child_demo',
+      'policy_version': 3,
+      'daily_limit_minutes': 60,
+      'allowed_categories': ['story'],
+      'disabled_periods': [
+        {'start_time': '21:00'},
+        {'start_time': '22:00', 'end_time': '22:00'},
+        {'start_time': '23:00', 'end_time': '07:00'},
+      ],
+      'max_volume_percent': 70,
+      'voice_conversation': {
+        'continuous_conversation_enabled': 'yes',
+        'idle_window_seconds': null,
+        'barge_in_enabled': 1,
+        'far_field_enabled': 'true',
+      },
+      'updated_at': '2026-10-08T00:00:00Z',
+    });
+
+    expect(policy.voiceConversation.continuousConversationEnabled, isFalse);
+    expect(policy.voiceConversation.idleWindowSeconds, 8);
+    expect(policy.voiceConversation.bargeInEnabled, isFalse);
+    expect(policy.voiceConversation.farFieldEnabled, isFalse);
+    expect(policy.disabledPeriods.single.startTime, '23:00');
+    expect(policy.disabledPeriods.single.endTime, '07:00');
+  });
+
   testWidgets('asks before leaving with unsaved policy changes', (
     tester,
   ) async {

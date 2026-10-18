@@ -51,12 +51,13 @@ class CompanionshipState {
 /// Owns the growth timeline and habit reminders so the page can refresh,
 /// filter, and mutate both without holding a device session.
 class CompanionshipController extends AsyncNotifier<CompanionshipState> {
-  late final CompanionshipApi _api;
+  late CompanionshipApi _api;
   String? _childFilter;
 
   @override
   Future<CompanionshipState> build() async {
     _api = ref.read(companionshipApiProvider);
+    _childFilter = null;
     return _load();
   }
 

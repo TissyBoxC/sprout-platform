@@ -10,7 +10,7 @@ class ParentPolicyController extends AsyncNotifier<ParentPolicy> {
   ParentPolicyController(this.childId);
 
   final String childId;
-  late final ParentPolicyApi _api;
+  late ParentPolicyApi _api;
 
   @override
   Future<ParentPolicy> build() {

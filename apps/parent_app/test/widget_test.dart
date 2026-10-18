@@ -7,12 +7,16 @@ import 'package:parent_app/core/providers.dart';
 import 'package:parent_app/core/storage/secure_store.dart';
 import 'package:parent_app/features/auth/application/auth_controller.dart';
 import 'package:parent_app/features/auth/data/auth_api.dart';
+import 'package:parent_app/features/ota/presentation/mandatory_update_gate.dart';
 
 void main() {
   testWidgets('signed-out users see the parent sign-in screen', (tester) async {
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [secureStoreProvider.overrideWithValue(_EmptySecureStore())],
+        overrides: [
+          secureStoreProvider.overrideWithValue(_EmptySecureStore()),
+          mandatoryUpdateCheckProvider.overrideWithValue(false),
+        ],
         child: const ParentApp(),
       ),
     );
@@ -32,6 +36,7 @@ void main() {
         overrides: [
           secureStoreProvider.overrideWithValue(_EmptySecureStore()),
           authApiProvider.overrideWithValue(_FailingAuthApi()),
+          mandatoryUpdateCheckProvider.overrideWithValue(false),
         ],
         child: const ParentApp(),
       ),
@@ -59,6 +64,7 @@ void main() {
         overrides: [
           secureStoreProvider.overrideWithValue(_EmptySecureStore()),
           authApiProvider.overrideWithValue(_InvalidCredentialsAuthApi()),
+          mandatoryUpdateCheckProvider.overrideWithValue(false),
         ],
         child: const ParentApp(),
       ),
@@ -83,6 +89,7 @@ void main() {
         overrides: [
           secureStoreProvider.overrideWithValue(_EmptySecureStore()),
           authApiProvider.overrideWithValue(_FailingRegisterAuthApi()),
+          mandatoryUpdateCheckProvider.overrideWithValue(false),
         ],
         child: const ParentApp(),
       ),

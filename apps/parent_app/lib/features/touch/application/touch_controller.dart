@@ -8,7 +8,7 @@ import '../domain/touch_config.dart';
 
 /// Owns the guardian's touch configuration for the family.
 class TouchController extends AsyncNotifier<TouchConfig> {
-  late final TouchApi _api;
+  late TouchApi _api;
 
   @override
   Future<TouchConfig> build() async {
@@ -38,10 +38,12 @@ class TouchController extends AsyncNotifier<TouchConfig> {
 }
 
 /// Read-only touch capability for one device.
-final touchCapabilityProvider =
-    FutureProvider.family<TouchCapability, String>((ref, deviceId) {
-      return ref.read(touchApiProvider).fetchCapability(deviceId);
-    });
+final touchCapabilityProvider = FutureProvider.family<TouchCapability, String>((
+  ref,
+  deviceId,
+) {
+  return ref.read(touchApiProvider).fetchCapability(deviceId);
+});
 
 final touchApiProvider = Provider<TouchApi>((ref) {
   return HttpTouchApi(ref.read(apiClientProvider));

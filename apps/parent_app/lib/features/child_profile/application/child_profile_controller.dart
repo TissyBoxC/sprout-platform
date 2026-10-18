@@ -7,7 +7,7 @@ import '../domain/child_profile.dart';
 
 /// Loads and mutates every child profile owned by the signed-in guardian.
 class ChildProfileController extends AsyncNotifier<List<ChildProfile>> {
-  late final ChildProfileApi _api;
+  late ChildProfileApi _api;
 
   @override
   Future<List<ChildProfile>> build() {

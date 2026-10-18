@@ -8,7 +8,7 @@ import '../domain/power_policy.dart';
 
 /// Owns the guardian's battery and low-power policy for the family.
 class PowerController extends AsyncNotifier<PowerPolicy> {
-  late final PowerApi _api;
+  late PowerApi _api;
 
   @override
   Future<PowerPolicy> build() async {

@@ -8,7 +8,7 @@ import '../domain/display_policy.dart';
 
 /// Owns the guardian's eye-care display policy for the family.
 class DisplayController extends AsyncNotifier<DisplayPolicy> {
-  late final DisplayApi _api;
+  late DisplayApi _api;
 
   @override
   Future<DisplayPolicy> build() async {

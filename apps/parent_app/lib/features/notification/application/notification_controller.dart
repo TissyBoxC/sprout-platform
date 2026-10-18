@@ -44,7 +44,7 @@ class NotificationInboxState {
 class NotificationController extends AsyncNotifier<NotificationInboxState> {
   static const _pageSize = 20;
 
-  late final NotificationApi _api;
+  late NotificationApi _api;
   bool _isLoadingMore = false;
 
   bool get isLoadingMore => _isLoadingMore;
@@ -52,6 +52,7 @@ class NotificationController extends AsyncNotifier<NotificationInboxState> {
   @override
   Future<NotificationInboxState> build() async {
     _api = ref.read(notificationApiProvider);
+    _isLoadingMore = false;
     return _loadFirstPage();
   }
 
@@ -88,7 +89,10 @@ class NotificationController extends AsyncNotifier<NotificationInboxState> {
     }
     _isLoadingMore = true;
     try {
-      final page = await _api.list(limit: _pageSize, cursor: current.nextCursor);
+      final page = await _api.list(
+        limit: _pageSize,
+        cursor: current.nextCursor,
+      );
       state = AsyncData(
         current.copyWith(
           items: [...current.items, ...page.items],
@@ -113,11 +117,7 @@ class NotificationController extends AsyncNotifier<NotificationInboxState> {
       return;
     }
     final updated = current.items
-        .map(
-          (item) => item.id == notification.id
-              ? _copyAsRead(item)
-              : item,
-        )
+        .map((item) => item.id == notification.id ? _copyAsRead(item) : item)
         .toList(growable: false);
     state = AsyncData(
       current.copyWith(

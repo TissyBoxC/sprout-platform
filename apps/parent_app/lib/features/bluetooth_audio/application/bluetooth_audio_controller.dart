@@ -24,7 +24,7 @@ class BluetoothAudioState {
 /// Owns the family Bluetooth audio policy so the page can read, publish and
 /// refresh it without holding a device session.
 class BluetoothAudioController extends AsyncNotifier<BluetoothAudioState> {
-  late final BluetoothAudioApi _api;
+  late BluetoothAudioApi _api;
 
   @override
   Future<BluetoothAudioState> build() async {

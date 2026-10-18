@@ -69,14 +69,21 @@ class ContentLibraryState {
 
 /// Owns incremental catalog sync, local index merge, and download actions.
 class ContentLibraryController extends AsyncNotifier<ContentLibraryState> {
-  late final ContentManagementApi _api;
-  late final ContentLibraryStore _store;
+  late ContentManagementApi _api;
+  late ContentLibraryStore _store;
   final Map<String, CancelToken> _activeDownloads = {};
   ContentLibraryIndex _index = const ContentLibraryIndex.empty();
   List<ContentPackage> _remoteCatalog = const [];
 
   @override
   Future<ContentLibraryState> build() async {
+    final previousDownloads = _activeDownloads.values.toList(growable: false);
+    _activeDownloads.clear();
+    for (final download in previousDownloads) {
+      download.cancel('guardian session changed');
+    }
+    _index = const ContentLibraryIndex.empty();
+    _remoteCatalog = const [];
     _api = ref.read(contentManagementApiProvider);
     _store = ref.read(contentLibraryStoreProvider);
     _index = await _store.loadIndex();

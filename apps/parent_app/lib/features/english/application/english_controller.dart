@@ -43,13 +43,15 @@ class EnglishLearningState {
 /// family-scoped on the platform, so this controller only forwards an optional
 /// child filter and never an owner id.
 class EnglishController extends AsyncNotifier<EnglishLearningState> {
-  late final EnglishApi _api;
+  late EnglishApi _api;
   EnglishAgeTier? _ageTier;
   String? _childFilter;
 
   @override
   Future<EnglishLearningState> build() async {
     _api = ref.read(englishApiProvider);
+    _ageTier = null;
+    _childFilter = null;
     return _load();
   }
 

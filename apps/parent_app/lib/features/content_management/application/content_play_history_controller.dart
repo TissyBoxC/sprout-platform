@@ -8,10 +8,7 @@ import 'content_library_controller.dart' show contentManagementApiProvider;
 
 /// State rendered by the guardian playback history view.
 class ContentPlayHistoryState {
-  const ContentPlayHistoryState({
-    required this.records,
-    this.deviceFilter,
-  });
+  const ContentPlayHistoryState({required this.records, this.deviceFilter});
 
   const ContentPlayHistoryState.initial()
     : records = const [],
@@ -41,18 +38,31 @@ class ContentPlayHistoryState {
 /// without holding a device session.
 class ContentPlayHistoryController
     extends AsyncNotifier<ContentPlayHistoryState> {
-  late final ContentManagementApi _api;
+  late ContentManagementApi _api;
   String? _deviceFilter;
+  int _requestGeneration = 0;
 
   @override
   Future<ContentPlayHistoryState> build() async {
     _api = ref.read(contentManagementApiProvider);
-    return _load(const ContentPlayHistoryState.initial());
+    _deviceFilter = null;
+    _requestGeneration += 1;
+    return _load(
+      const ContentPlayHistoryState.initial(),
+      deviceFilter: _deviceFilter,
+    );
   }
 
   Future<void> refresh() async {
     final current = state.value ?? const ContentPlayHistoryState.initial();
-    state = await AsyncValue.guard(() => _load(current));
+    final generation = ++_requestGeneration;
+    final result = await AsyncValue.guard(
+      () => _load(current, deviceFilter: _deviceFilter),
+    );
+    if (generation != _requestGeneration) {
+      return;
+    }
+    state = result;
   }
 
   /// Narrows the list to one device, or clears the filter with `null`.
@@ -65,9 +75,15 @@ class ContentPlayHistoryController
     }
     _deviceFilter = normalized;
     final current = state.value ?? const ContentPlayHistoryState.initial();
-    await refresh();
+    final generation = ++_requestGeneration;
+    final result = await AsyncValue.guard(
+      () => _load(current, deviceFilter: normalized),
+    );
+    if (generation != _requestGeneration) {
+      return;
+    }
     // Keep the filter on the rendered state even when the reload errored.
-    final latest = state.value ?? current;
+    final latest = result.hasValue ? result.requireValue : current;
     state = AsyncData(
       ContentPlayHistoryState(
         records: latest.records,
@@ -77,12 +93,13 @@ class ContentPlayHistoryController
   }
 
   Future<ContentPlayHistoryState> _load(
-    ContentPlayHistoryState current,
-  ) async {
-    final records = await _api.fetchPlayHistory(deviceId: _deviceFilter);
+    ContentPlayHistoryState current, {
+    required String? deviceFilter,
+  }) async {
+    final records = await _api.fetchPlayHistory(deviceId: deviceFilter);
     return ContentPlayHistoryState(
       records: records,
-      deviceFilter: _deviceFilter,
+      deviceFilter: deviceFilter,
     );
   }
 

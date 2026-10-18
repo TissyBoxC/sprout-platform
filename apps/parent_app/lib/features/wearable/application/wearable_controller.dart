@@ -49,7 +49,7 @@ class WearableState {
 
 /// Owns the wearable location settings for the family.
 class WearableController extends AsyncNotifier<WearableState> {
-  late final WearableApi _api;
+  late WearableApi _api;
 
   @override
   Future<WearableState> build() async {
@@ -83,7 +83,9 @@ class WearableController extends AsyncNotifier<WearableState> {
       final devices = saved.permissionGranted
           ? current.devices
           : const <WearableDeviceStatus>[];
-      state = AsyncValue.data(current.copyWith(policy: saved, devices: devices));
+      state = AsyncValue.data(
+        current.copyWith(policy: saved, devices: devices),
+      );
     }
   }
 

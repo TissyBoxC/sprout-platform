@@ -35,7 +35,7 @@ class MultiDeviceState {
 
 /// Owns the multi-device settings for the family.
 class MultiDeviceController extends AsyncNotifier<MultiDeviceState> {
-  late final MultiDeviceApi _api;
+  late MultiDeviceApi _api;
 
   @override
   Future<MultiDeviceState> build() async {

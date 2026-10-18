@@ -8,7 +8,7 @@ import '../domain/motion_policy.dart';
 
 /// Owns the guardian's motion and motor policy for the family.
 class MotionController extends AsyncNotifier<MotionPolicy> {
-  late final MotionApi _api;
+  late MotionApi _api;
 
   @override
   Future<MotionPolicy> build() async {
@@ -40,8 +40,8 @@ class MotionController extends AsyncNotifier<MotionPolicy> {
 /// Read-only motion capability for one device.
 final motionCapabilityProvider =
     FutureProvider.family<MotionCapability, String>((ref, deviceId) {
-  return ref.read(motionApiProvider).fetchCapability(deviceId);
-});
+      return ref.read(motionApiProvider).fetchCapability(deviceId);
+    });
 
 final motionApiProvider = Provider<MotionApi>((ref) {
   return HttpMotionApi(ref.read(apiClientProvider));

@@ -4,6 +4,38 @@ import '../../../core/error/app_exception.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/session_manager.dart';
 import '../../../core/providers.dart';
+import '../../alarm_reminder/application/alarm_reminder_controller.dart';
+import '../../bluetooth_audio/application/bluetooth_audio_controller.dart';
+import '../../child_profile/application/child_profile_controller.dart';
+import '../../companionship/application/companionship_controller.dart';
+import '../../connectivity/application/cellular_controller.dart';
+import '../../content_management/application/content_favorites_controller.dart';
+import '../../content_management/application/content_library_controller.dart';
+import '../../content_management/application/content_play_history_controller.dart';
+import '../../content_management/application/content_recommendation_controller.dart';
+import '../../content_management/application/content_theme_pack_controller.dart';
+import '../../device/application/device_binding_controller.dart';
+import '../../display/application/display_controller.dart';
+import '../../english/application/english_controller.dart';
+import '../../family/application/family_controller.dart';
+import '../../form_factor/application/form_factor_controller.dart';
+import '../../image_privacy/application/image_privacy_controller.dart';
+import '../../learning_visualization/application/learning_visualization_controller.dart';
+import '../../local_command/application/local_command_controller.dart';
+import '../../motion/application/motion_controller.dart';
+import '../../multi_device/application/multi_device_controller.dart';
+import '../../notification/application/notification_controller.dart';
+import '../../offline_policy/application/offline_policy_controller.dart';
+import '../../parent_policy/application/parent_policy_controller.dart';
+import '../../playback/application/playback_controller.dart';
+import '../../power/application/power_controller.dart';
+import '../../screen/application/screen_controller.dart';
+import '../../settings/application/privacy_controller.dart';
+import '../../touch/application/touch_controller.dart';
+import '../../usage_report/application/usage_report_controller.dart';
+import '../../video_companion/application/video_companion_controller.dart';
+import '../../vision/application/vision_controller.dart';
+import '../../wearable/application/wearable_controller.dart';
 import '../data/auth_api.dart';
 
 const guardianConsentVersion = '2026-01';
@@ -59,8 +91,8 @@ class AuthState {
 
 /// Owns session restoration, registration, login, and sign-out.
 class AuthController extends AsyncNotifier<AuthState> {
-  late final AuthApi _authApi;
-  late final SessionManager _sessionManager;
+  late AuthApi _authApi;
+  late SessionManager _sessionManager;
 
   @override
   Future<AuthState> build() async {
@@ -94,6 +126,7 @@ class AuthController extends AsyncNotifier<AuthState> {
     try {
       await _sessionManager.refreshCurrent();
       final account = await _authApi.me();
+      _resetUserData();
       return AuthState(
         isLoading: false,
         account: account.account,
@@ -102,6 +135,7 @@ class AuthController extends AsyncNotifier<AuthState> {
     } on Object catch (error) {
       if (isSessionRejected(error)) {
         await _clearSession();
+        _resetUserData();
         return AuthState.signedOut(errorMessage: authErrorMessage(error));
       }
       return AuthState.restoreFailed(errorMessage: authErrorMessage(error));
@@ -128,6 +162,7 @@ class AuthController extends AsyncNotifier<AuthState> {
         guardianConsentVersion: guardianConsentVersion,
       );
       await _saveSession(session);
+      _resetUserData();
       return AuthState(
         isLoading: false,
         account: session.account,
@@ -149,6 +184,7 @@ class AuthController extends AsyncNotifier<AuthState> {
         password: password,
       );
       await _saveSession(session);
+      _resetUserData();
       return AuthState(
         isLoading: false,
         account: session.account,
@@ -193,6 +229,7 @@ class AuthController extends AsyncNotifier<AuthState> {
       }
     }
     await _clearSession();
+    _resetUserData();
     state = const AsyncData(AuthState.signedOut());
   }
 
@@ -266,6 +303,55 @@ class AuthController extends AsyncNotifier<AuthState> {
 
   Future<void> _clearSession() async {
     await _sessionManager.clear();
+  }
+
+  /// Invalidates every family-scoped provider before exposing a new identity.
+  ///
+  /// These providers outlive pages because their state backs the persistent
+  /// navigation shell. Clearing them here prevents a subsequent sign-in from
+  /// rendering the previous guardian's family, devices, content or favorites.
+  void _resetUserData() {
+    ref.invalidate(alarmReminderControllerProvider);
+    ref.invalidate(bluetoothAudioControllerProvider);
+    ref.invalidate(childProfileControllerProvider);
+    ref.invalidate(companionshipControllerProvider);
+    ref.invalidate(cellularControllerProvider);
+    ref.invalidate(cellularCapabilityProvider);
+    ref.invalidate(contentFavoritesControllerProvider);
+    ref.invalidate(contentLibraryControllerProvider);
+    ref.invalidate(contentPlayHistoryControllerProvider);
+    ref.invalidate(contentRecommendationControllerProvider);
+    ref.invalidate(contentThemePackControllerProvider);
+    ref.invalidate(deviceBindingControllerProvider);
+    ref.invalidate(displayControllerProvider);
+    ref.invalidate(displayCapabilityProvider);
+    ref.invalidate(englishControllerProvider);
+    ref.invalidate(familyControllerProvider);
+    ref.invalidate(imagePrivacyControllerProvider);
+    ref.invalidate(learningVisualizationControllerProvider);
+    ref.invalidate(localCommandControllerProvider);
+    ref.invalidate(motionControllerProvider);
+    ref.invalidate(motionCapabilityProvider);
+    ref.invalidate(multiDeviceControllerProvider);
+    ref.invalidate(myInvitationsControllerProvider);
+    ref.invalidate(notificationControllerProvider);
+    ref.invalidate(offlinePolicyControllerProvider);
+    ref.invalidate(parentPolicyControllerProvider);
+    ref.invalidate(playbackControllerProvider);
+    ref.invalidate(powerControllerProvider);
+    ref.invalidate(powerCapabilityProvider);
+    ref.invalidate(privacyControllerProvider);
+    ref.invalidate(screenControllerProvider);
+    ref.invalidate(touchControllerProvider);
+    ref.invalidate(touchCapabilityProvider);
+    ref.invalidate(usageReportControllerProvider);
+    ref.invalidate(videoCompanionControllerProvider);
+    ref.invalidate(videoCapabilityProvider);
+    ref.invalidate(wearableControllerProvider);
+    // Capability snapshots are account-scoped too, even though they are not
+    // AsyncNotifier controllers.
+    ref.invalidate(formFactorCapabilityProvider);
+    ref.invalidate(visionControllerProvider);
   }
 }
 

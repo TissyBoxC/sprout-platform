@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parent_app/features/content_management/application/content_library_controller.dart';
@@ -28,46 +30,51 @@ void main() {
     expect(api.lastDeviceFilter, isNull);
   });
 
-  test('filters the history to one device and clears the filter again',
-      () async {
-    final api = _FakeContentManagementApi(
-      history: [_record('play-1', 'sprout_device_001', seconds: 30)],
-    );
-    final container = ProviderContainer(
-      overrides: [contentManagementApiProvider.overrideWithValue(api)],
-    );
-    addTearDown(container.dispose);
+  test(
+    'filters the history to one device and clears the filter again',
+    () async {
+      final api = _FakeContentManagementApi(
+        history: [_record('play-1', 'sprout_device_001', seconds: 30)],
+      );
+      final container = ProviderContainer(
+        overrides: [contentManagementApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
 
-    await container.read(contentPlayHistoryControllerProvider.future);
-    final controller = container.read(
-      contentPlayHistoryControllerProvider.notifier,
-    );
+      await container.read(contentPlayHistoryControllerProvider.future);
+      final controller = container.read(
+        contentPlayHistoryControllerProvider.notifier,
+      );
 
-    await controller.filterByDevice('sprout_device_001');
-    expect(api.lastDeviceFilter, 'sprout_device_001');
-    expect(
-      container.read(contentPlayHistoryControllerProvider).value?.deviceFilter,
-      'sprout_device_001',
-    );
+      await controller.filterByDevice('sprout_device_001');
+      expect(api.lastDeviceFilter, 'sprout_device_001');
+      expect(
+        container
+            .read(contentPlayHistoryControllerProvider)
+            .value
+            ?.deviceFilter,
+        'sprout_device_001',
+      );
 
-    // Filtering by the same device is a no-op: no extra request is sent.
-    final before = api.calls;
-    await controller.filterByDevice('sprout_device_001');
-    expect(api.calls, before);
+      // Filtering by the same device is a no-op: no extra request is sent.
+      final before = api.calls;
+      await controller.filterByDevice('sprout_device_001');
+      expect(api.calls, before);
 
-    await controller.filterByDevice(null);
-    expect(api.lastDeviceFilter, isNull);
-    expect(
-      container.read(contentPlayHistoryControllerProvider).value?.deviceFilter,
-      isNull,
-    );
-  });
+      await controller.filterByDevice(null);
+      expect(api.lastDeviceFilter, isNull);
+      expect(
+        container
+            .read(contentPlayHistoryControllerProvider)
+            .value
+            ?.deviceFilter,
+        isNull,
+      );
+    },
+  );
 
   test('propagates a load failure as an error state', () async {
-    final api = _FakeContentManagementApi(
-      history: const [],
-      failHistory: true,
-    );
+    final api = _FakeContentManagementApi(history: const [], failHistory: true);
     final container = ProviderContainer(
       overrides: [contentManagementApiProvider.overrideWithValue(api)],
     );
@@ -83,7 +90,47 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     await Future<void>.delayed(Duration.zero);
 
-    expect(container.read(contentPlayHistoryControllerProvider).hasError, isTrue);
+    expect(
+      container.read(contentPlayHistoryControllerProvider).hasError,
+      isTrue,
+    );
+  });
+
+  test('drops a slower response from an older device filter', () async {
+    final api = _DelayedContentManagementApi(
+      history: [
+        _record('play-1', 'sprout_device_001', seconds: 30),
+        _record('play-2', 'sprout_device_002', seconds: 60),
+      ],
+    );
+    final container = ProviderContainer(
+      overrides: [contentManagementApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(contentPlayHistoryControllerProvider.future);
+    final controller = container.read(
+      contentPlayHistoryControllerProvider.notifier,
+    );
+
+    api.delayNext('sprout_device_001');
+    final firstStarted = api.started.first;
+    final first = controller.filterByDevice('sprout_device_001');
+    await firstStarted;
+
+    api.delayNext('sprout_device_002');
+    final secondStarted = api.started.first;
+    final second = controller.filterByDevice('sprout_device_002');
+    await secondStarted;
+
+    api.release('sprout_device_002');
+    await second;
+    api.release('sprout_device_001');
+    await first;
+
+    final state = container.read(contentPlayHistoryControllerProvider).value;
+    expect(state?.deviceFilter, 'sprout_device_002');
+    expect(state?.records.single.deviceId, 'sprout_device_002');
   });
 }
 
@@ -159,4 +206,34 @@ class _FakeContentManagementApi implements ContentManagementApi {
     int limit = 8,
     List<String> excludePackageIds = const <String>[],
   }) async => const <ContentRecommendation>[];
+}
+
+class _DelayedContentManagementApi extends _FakeContentManagementApi {
+  _DelayedContentManagementApi({required super.history});
+
+  final Map<String, Completer<void>> _gates = {};
+  final StreamController<void> _startedController =
+      StreamController<void>.broadcast();
+
+  Stream<void> get started => _startedController.stream;
+
+  void delayNext(String deviceId) {
+    _gates[deviceId] = Completer<void>();
+  }
+
+  void release(String deviceId) {
+    final gate = _gates.remove(deviceId);
+    if (gate != null && !gate.isCompleted) {
+      gate.complete();
+    }
+  }
+
+  @override
+  Future<List<ContentPlayRecord>> fetchPlayHistory({String? deviceId}) async {
+    if (deviceId != null) {
+      _startedController.add(null);
+      await _gates[deviceId]?.future;
+    }
+    return super.fetchPlayHistory(deviceId: deviceId);
+  }
 }

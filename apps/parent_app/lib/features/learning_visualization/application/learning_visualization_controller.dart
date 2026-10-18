@@ -28,7 +28,7 @@ class LearningVisualizationState {
 /// and refresh it without holding a device session.
 class LearningVisualizationController
     extends AsyncNotifier<LearningVisualizationState> {
-  late final LearningVisualizationApi _api;
+  late LearningVisualizationApi _api;
 
   @override
   Future<LearningVisualizationState> build() async {

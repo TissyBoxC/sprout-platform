@@ -57,12 +57,13 @@ class ContentFavoritesState {
 /// Owns the guardian's bookmarks so a star toggle stays responsive and never
 /// leaves the two views out of sync.
 class ContentFavoritesController extends AsyncNotifier<ContentFavoritesState> {
-  late final ContentManagementApi _api;
+  late ContentManagementApi _api;
   ContentFavoritesState _latest = const ContentFavoritesState.initial();
 
   @override
   Future<ContentFavoritesState> build() async {
     _api = ref.read(contentManagementApiProvider);
+    _latest = const ContentFavoritesState.initial();
     _latest = await _load(const ContentFavoritesState.initial());
     return _latest;
   }

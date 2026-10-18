@@ -25,7 +25,7 @@ class VisionController extends AsyncNotifier<VisionOverview> {
   VisionController(this.deviceId);
 
   final String deviceId;
-  late final VisionApi _api;
+  late VisionApi _api;
 
   @override
   Future<VisionOverview> build() async {

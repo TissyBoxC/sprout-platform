@@ -8,7 +8,7 @@ import 'content_library_controller.dart' show contentManagementApiProvider;
 
 /// Owns the published theme packs shown to the guardian.
 class ContentThemePackController extends AsyncNotifier<List<ContentThemePack>> {
-  late final ContentManagementApi _api;
+  late ContentManagementApi _api;
 
   @override
   Future<List<ContentThemePack>> build() async {
@@ -30,7 +30,6 @@ class ContentThemePackController extends AsyncNotifier<List<ContentThemePack>> {
 }
 
 final contentThemePackControllerProvider =
-    AsyncNotifierProvider<
-      ContentThemePackController,
-      List<ContentThemePack>
-    >(ContentThemePackController.new);
+    AsyncNotifierProvider<ContentThemePackController, List<ContentThemePack>>(
+      ContentThemePackController.new,
+    );

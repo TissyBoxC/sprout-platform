@@ -41,22 +41,19 @@ class VoiceConversationPolicy {
   final bool farFieldEnabled;
 
   factory VoiceConversationPolicy.fromJson(Map<String, Object?> json) {
+    final idleWindow = json['idle_window_seconds'];
     return VoiceConversationPolicy(
-      continuousConversationEnabled: _requiredBool(
+      continuousConversationEnabled: _optionalBool(
         json['continuous_conversation_enabled'],
-        'continuous_conversation_enabled',
+        fallback: false,
       ),
-      idleWindowSeconds: _requiredInt(
-        json['idle_window_seconds'],
-        'idle_window_seconds',
-      ),
-      bargeInEnabled: _requiredBool(
-        json['barge_in_enabled'],
-        'barge_in_enabled',
-      ),
-      farFieldEnabled: _requiredBool(
+      idleWindowSeconds: idleWindow is num && idleWindow.isFinite
+          ? idleWindow.toInt().clamp(1, 120)
+          : 8,
+      bargeInEnabled: _optionalBool(json['barge_in_enabled'], fallback: false),
+      farFieldEnabled: _optionalBool(
         json['far_field_enabled'],
-        'far_field_enabled',
+        fallback: false,
       ),
     );
   }
@@ -116,12 +113,24 @@ class ParentPolicy {
         json['max_volume_percent'],
         'max_volume_percent',
       ),
-      voiceConversation: VoiceConversationPolicy.fromJson(
-        _requiredMap(json['voice_conversation'], 'voice_conversation'),
-      ),
+      voiceConversation: _voiceConversation(json['voice_conversation']),
       updatedAt: _requiredDateTime(json['updated_at'], 'updated_at'),
     );
   }
+}
+
+VoiceConversationPolicy _voiceConversation(Object? value) {
+  if (value is Map) {
+    return VoiceConversationPolicy.fromJson(Map<String, Object?>.from(value));
+  }
+  // Older platforms predate the voice controls. Disable features that may
+  // change microphone behavior and keep the existing eight-second idle default.
+  return const VoiceConversationPolicy(
+    continuousConversationEnabled: false,
+    idleWindowSeconds: 8,
+    bargeInEnabled: false,
+    farFieldEnabled: false,
+  );
 }
 
 /// Validated values collected by the time and content policy form.
@@ -172,18 +181,11 @@ int _requiredInt(Object? value, String field) {
   throw FormatException('missing $field');
 }
 
-bool _requiredBool(Object? value, String field) {
+bool _optionalBool(Object? value, {required bool fallback}) {
   if (value is bool) {
     return value;
   }
-  throw FormatException('missing $field');
-}
-
-Map<String, Object?> _requiredMap(Object? value, String field) {
-  if (value is Map) {
-    return Map<String, Object?>.from(value);
-  }
-  throw FormatException('missing $field');
+  return fallback;
 }
 
 DateTime _requiredDateTime(Object? value, String field) {
@@ -217,5 +219,16 @@ List<Map<String, Object?>> _mapList(Object? value) {
   return value
       .whereType<Map>()
       .map((item) => Map<String, Object?>.from(item))
+      .where(_isDisabledPeriod)
       .toList(growable: false);
+}
+
+bool _isDisabledPeriod(Map<String, Object?> period) {
+  final start = period['start_time'];
+  final end = period['end_time'];
+  return start is String &&
+      start.isNotEmpty &&
+      end is String &&
+      end.isNotEmpty &&
+      start != end;
 }

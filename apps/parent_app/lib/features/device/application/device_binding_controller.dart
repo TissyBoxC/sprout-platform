@@ -33,12 +33,15 @@ class DeviceBindingState {
     List<DiscoveredDevice>? devices,
     List<BoundDevice>? bindings,
     String? errorMessage,
+    bool clearErrorMessage = false,
   }) {
     return DeviceBindingState(
       isScanning: isScanning ?? this.isScanning,
       devices: devices ?? this.devices,
       bindings: bindings ?? this.bindings,
-      errorMessage: errorMessage,
+      errorMessage: clearErrorMessage
+          ? null
+          : (errorMessage ?? this.errorMessage),
     );
   }
 }
@@ -60,20 +63,24 @@ class DiscoveredDevice {
 
 /// Owns discovery, scanned-token binding, and bound-device refresh.
 class DeviceBindingController extends AsyncNotifier<DeviceBindingState> {
-  late final DeviceBindingApi _api;
+  late DeviceBindingApi _api;
   final _provisioningService = EspProvisioningService();
+  final Set<String> _removingDeviceIds = <String>{};
 
   @override
   Future<DeviceBindingState> build() async {
     _api = ref.read(deviceBindingApiProvider);
+    _removingDeviceIds.clear();
     try {
       final bindings = await _api.list();
+      _removingDeviceIds.clear();
       return DeviceBindingState(
         isScanning: false,
         devices: const [],
         bindings: bindings,
       );
     } on Object catch (error) {
+      _removingDeviceIds.clear();
       // A device API outage must not invalidate an otherwise valid parent
       // session. The family page renders this as an inline retry state.
       return DeviceBindingState(
@@ -99,7 +106,9 @@ class DeviceBindingController extends AsyncNotifier<DeviceBindingState> {
 
   Future<void> scanNearby() async {
     final current = state.value ?? const DeviceBindingState.initial();
-    state = AsyncData(current.copyWith(isScanning: true, errorMessage: null));
+    state = AsyncData(
+      current.copyWith(isScanning: true, clearErrorMessage: true),
+    );
     try {
       await FlutterBluePlus.startScan(timeout: const Duration(seconds: 8));
       final results = await FlutterBluePlus.scanResults.firstWhere(
@@ -271,29 +280,57 @@ class DeviceBindingController extends AsyncNotifier<DeviceBindingState> {
   }
 
   Future<void> remove(String deviceId) async {
-    final previous = state.value;
-    final cached = previous?.bindings ?? const <BoundDevice>[];
-    if (previous != null) {
-      // Remove the device immediately so the confirmation cannot be followed
-      // by a stale row if the refresh request is slow or briefly unavailable.
-      state = AsyncData(
-        previous.copyWith(
-          bindings: cached
-              .where((device) => device.deviceId != deviceId)
-              .toList(growable: false),
-          errorMessage: null,
-        ),
-      );
+    if (_removingDeviceIds.contains(deviceId)) {
+      return;
     }
+    final previous = state.value;
+    if (previous == null) {
+      return;
+    }
+    final removedDevice = previous.bindings
+        .where((device) => device.deviceId == deviceId)
+        .firstOrNull;
+    if (removedDevice == null) {
+      return;
+    }
+    _removingDeviceIds.add(deviceId);
+    // Remove the device immediately so the confirmation cannot be followed by
+    // a stale row if the refresh request is slow or briefly unavailable.
+    state = AsyncData(
+      previous.copyWith(
+        bindings: previous.bindings
+            .where((device) => device.deviceId != deviceId)
+            .toList(growable: false),
+        clearErrorMessage: true,
+      ),
+    );
     try {
       await _api.remove(deviceId);
+      // Refresh failures keep the optimistic result rather than resurrecting
+      // a successfully deleted row. The next page refresh reconciles the list.
+      await refresh();
     } on Object {
-      if (previous != null) {
-        state = AsyncData(previous);
+      final current = state.value;
+      if (current != null) {
+        // Restore only this device. Another concurrent successful deletion
+        // must remain deleted instead of being overwritten by the snapshot
+        // that existed before either request started.
+        final bindings = [...current.bindings];
+        if (!bindings.any((device) => device.deviceId == deviceId)) {
+          bindings.add(removedDevice);
+        }
+        bindings.sort((left, right) => right.boundAt.compareTo(left.boundAt));
+        state = AsyncData(
+          current.copyWith(
+            bindings: List<BoundDevice>.unmodifiable(bindings),
+            errorMessage: '设备没有移除，请稍后重试',
+          ),
+        );
       }
       rethrow;
+    } finally {
+      _removingDeviceIds.remove(deviceId);
     }
-    await refresh();
   }
 }
 

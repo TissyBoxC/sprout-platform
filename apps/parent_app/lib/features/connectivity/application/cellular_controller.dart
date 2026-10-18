@@ -8,7 +8,7 @@ import '../domain/cellular_policy.dart';
 
 /// Owns the guardian's cellular policy for the family.
 class CellularController extends AsyncNotifier<CellularPolicy> {
-  late final CellularApi _api;
+  late CellularApi _api;
 
   @override
   Future<CellularPolicy> build() async {

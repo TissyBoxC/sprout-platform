@@ -8,7 +8,7 @@ import '../domain/offline_policy.dart';
 
 /// Owns the guardian's view of the platform-wide offline download policy.
 class OfflinePolicyController extends AsyncNotifier<OfflinePolicy> {
-  late final OfflinePolicyApi _api;
+  late OfflinePolicyApi _api;
 
   @override
   Future<OfflinePolicy> build() async {

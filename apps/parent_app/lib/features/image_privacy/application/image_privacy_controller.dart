@@ -32,7 +32,7 @@ class ImagePrivacyState {
 /// Owns the family image-privacy policy so the page can read, publish and
 /// refresh it without holding a device session.
 class ImagePrivacyController extends AsyncNotifier<ImagePrivacyState> {
-  late final ImagePrivacyApi _api;
+  late ImagePrivacyApi _api;
 
   @override
   Future<ImagePrivacyState> build() async {

@@ -20,6 +20,7 @@ class FamilyHomePage extends ConsumerStatefulWidget {
 
 class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
   Future<ParentOverview>? _overviewFuture;
+  String? _refreshError;
 
   Future<ParentOverview> _loadOverview() {
     return ref.read(authApiProvider).overview();
@@ -27,12 +28,33 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
 
   Future<void> _refresh() async {
     final overviewFuture = _loadOverview();
-    setState(() => _overviewFuture = overviewFuture);
-    await Future.wait<void>([
-      overviewFuture,
-      ref.read(authControllerProvider.notifier).refreshAccount(),
-      ref.read(deviceBindingControllerProvider.notifier).refresh(),
+    setState(() {
+      _overviewFuture = overviewFuture;
+      _refreshError = null;
+    });
+    Future<Object?> capture(Future<void> request) {
+      return request.then<Object?>((_) => null).catchError((Object error) {
+        return error;
+      });
+    }
+
+    final results = await Future.wait<Object?>([
+      overviewFuture.then<Object?>(
+        (_) => null,
+        onError: (Object error, StackTrace _) => error,
+      ),
+      capture(ref.read(authControllerProvider.notifier).refreshAccount()),
+      capture(ref.read(deviceBindingControllerProvider.notifier).refresh()),
     ]);
+    final failures = results.whereType<Object>().toList(growable: false);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _refreshError = failures.isEmpty
+          ? null
+          : _overviewErrorMessage(failures.first);
+    });
   }
 
   @override
@@ -109,6 +131,10 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
                       },
                     ),
                   ),
+                  if (_refreshError != null) ...[
+                    const SizedBox(height: 12),
+                    _InlineError(message: _refreshError!, onRetry: _refresh),
+                  ],
                   const SizedBox(height: 20),
                   AppReveal(
                     delay: const Duration(milliseconds: 120),

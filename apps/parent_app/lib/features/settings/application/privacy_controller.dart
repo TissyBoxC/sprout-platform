@@ -9,8 +9,8 @@ import 'privacy_export_store.dart';
 
 /// Loads privacy state and performs data export and account lifecycle actions.
 class PrivacyController extends AsyncNotifier<PrivacyStatus> {
-  late final PrivacyApi _api;
-  late final PrivacyExportStore _exportStore;
+  late PrivacyApi _api;
+  late PrivacyExportStore _exportStore;
   PrivacyStatus? _lastSuccessful;
   PrivacyExportFile? _lastExport;
 
@@ -20,6 +20,8 @@ class PrivacyController extends AsyncNotifier<PrivacyStatus> {
   Future<PrivacyStatus> build() async {
     _api = ref.read(privacyApiProvider);
     _exportStore = ref.read(privacyExportStoreProvider);
+    _lastSuccessful = null;
+    _lastExport = null;
     final status = await _api.status();
     _lastSuccessful = status;
     return status;
@@ -67,8 +69,7 @@ class PrivacyController extends AsyncNotifier<PrivacyStatus> {
   /// still end the local session afterwards; the returned status simply keeps
   /// the per-type list correct for the re-login that follows.
   Future<PrivacyStatus> withdrawConsent({
-    GuardianConsentKind consentType =
-        GuardianConsentKind.childDataProcessing,
+    GuardianConsentKind consentType = GuardianConsentKind.childDataProcessing,
   }) async {
     final status = await _api.withdrawConsent(consentType: consentType);
     _applyStatus(status);
@@ -77,8 +78,7 @@ class PrivacyController extends AsyncNotifier<PrivacyStatus> {
 
   /// Restores one consent type and applies the refreshed projection.
   Future<PrivacyStatus> grantConsent({
-    GuardianConsentKind consentType =
-        GuardianConsentKind.childDataProcessing,
+    GuardianConsentKind consentType = GuardianConsentKind.childDataProcessing,
   }) async {
     final status = await _api.grantConsent(consentType: consentType);
     _applyStatus(status);

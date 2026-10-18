@@ -34,7 +34,7 @@ class ScreenState {
 
 /// Owns the guardian's screen surface settings for the family.
 class ScreenController extends AsyncNotifier<ScreenState> {
-  late final ScreenApi _api;
+  late ScreenApi _api;
 
   @override
   Future<ScreenState> build() async {

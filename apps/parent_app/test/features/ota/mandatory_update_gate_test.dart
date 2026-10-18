@@ -90,6 +90,60 @@ void main() {
     expect(find.text('等待安装完成'), findsOneWidget);
     expect(find.text('稍后更新'), findsNothing);
   });
+
+  testWidgets('a failed first check blocks entry and can be retried', (
+    tester,
+  ) async {
+    final service = _FakeUpdateCoordinator();
+    var attempts = 0;
+    await tester.pumpWidget(
+      _gateApp(
+        service: service,
+        updateLoader: (_, _) async {
+          attempts += 1;
+          if (attempts == 1) {
+            throw StateError('update service offline');
+          }
+          return null;
+        },
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('安全检查'), findsOneWidget);
+    expect(find.text('重新检查'), findsOneWidget);
+    expect(find.byType(ModalBarrier), findsWidgets);
+
+    await tester.tap(find.text('重新检查'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(attempts, 2);
+    expect(find.text('安全检查'), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+  });
+
+  testWidgets('disabling the startup check skips the blocking overlay', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mandatoryUpdateCheckProvider.overrideWithValue(false)],
+        child: MaterialApp(
+          home: MandatoryUpdateGate(
+            updateService: _FakeUpdateCoordinator(),
+            child: const Scaffold(body: Center(child: Text('应用首页'))),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('应用首页'), findsOneWidget);
+    expect(find.text('安全检查'), findsNothing);
+    expect(find.text('暂时无法确认当前版本是否可以安全使用。'), findsNothing);
+  });
 }
 
 Widget _gateApp({

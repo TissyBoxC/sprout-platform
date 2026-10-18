@@ -116,9 +116,34 @@ void main() {
     expect(update?.isClientUpdate, isFalse);
     expect(update?.version, '1.0.1');
   });
+
+  test('204 update check means the client is current', () async {
+    final client = _RecordingApiClient(updateResponse: _noContentEnvelope());
+    final api = AuthApi(client);
+
+    final update = await api.appUpdate(
+      platform: 'android',
+      currentVersion: '1.0.0',
+    );
+
+    expect(update, isNull);
+  });
+
+  test('malformed 200 update check fails closed', () async {
+    final client = _RecordingApiClient(updateResponse: const {'data': null});
+    final api = AuthApi(client);
+
+    await expectLater(
+      api.appUpdate(platform: 'android', currentVersion: '1.0.0'),
+      throwsA(isA<FormatException>()),
+    );
+  });
 }
 
 class _RecordingApiClient implements ApiClient {
+  _RecordingApiClient({this.updateResponse});
+
+  final Map<String, Object?>? updateResponse;
   String? path;
   Object? body;
   Map<String, String>? queryParameters;
@@ -150,17 +175,18 @@ class _RecordingApiClient implements ApiClient {
       };
     }
     if (path == '/api/v1/app/update') {
-      return {
-        'data': {
-          'kind': 'resource',
-          'version': '1.0.1',
-          'download_url': 'https://example.com/sprout-resource.zip',
-          'sha256': 'abc123',
-          'release_notes': '更新了新的故事和儿歌内容。',
-          'is_mandatory': false,
-          'min_supported_version': '0.9.0',
-        },
-      };
+      return updateResponse ??
+          {
+            'data': {
+              'kind': 'resource',
+              'version': '1.0.1',
+              'download_url': 'https://example.com/sprout-resource.zip',
+              'sha256': 'abc123',
+              'release_notes': '更新了新的故事和儿歌内容。',
+              'is_mandatory': false,
+              'min_supported_version': '0.9.0',
+            },
+          };
     }
     throw UnimplementedError();
   }
@@ -207,4 +233,8 @@ Map<String, Object?> _successEnvelope({String email = ''}) {
       'ai_account': null,
     },
   };
+}
+
+Map<String, Object?> _noContentEnvelope() {
+  return ApiClientNoContent.emptyNoContent;
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parent_app/core/error/app_exception.dart';
@@ -24,38 +25,46 @@ void main() {
   });
 
   test('polls an in-progress deployment with backoff', () async {
-    final api = _FakeDeviceFirmwareApi(
-      fetched: _update(status: 'downloading', progress: 20),
-      statuses: [
-        _update(status: 'validating', progress: 50),
-        _update(status: 'succeeded', progress: 100),
-      ],
-    );
-    final container = ProviderContainer(
-      overrides: [
-        deviceFirmwareApiProvider.overrideWithValue(api),
-        deviceFirmwarePollBackoffProvider.overrideWithValue(const [
-          Duration(milliseconds: 10),
-        ]),
-      ],
-    );
-    addTearDown(container.dispose);
-    final provider = deviceFirmwareControllerProvider('device_demo_001');
-    final subscription = container.listen(
-      provider,
-      (_, _) {},
-      fireImmediately: true,
-    );
-    addTearDown(subscription.close);
-    await container.read(provider.future);
+    fakeAsync((async) {
+      final api = _FakeDeviceFirmwareApi(
+        fetched: _update(status: 'downloading', progress: 20),
+        statuses: [
+          _update(status: 'validating', progress: 50),
+          _update(status: 'succeeded', progress: 100),
+        ],
+      );
+      final container = ProviderContainer(
+        overrides: [
+          deviceFirmwareApiProvider.overrideWithValue(api),
+          deviceFirmwarePollBackoffProvider.overrideWithValue(const [
+            Duration(milliseconds: 10),
+          ]),
+        ],
+      );
+      final provider = deviceFirmwareControllerProvider('device_demo_001');
+      final subscription = container.listen(
+        provider,
+        (_, _) {},
+        fireImmediately: true,
+      );
+      container.read(provider.future).then((_) {});
+      async.flushMicrotasks();
 
-    await Future<void>.delayed(const Duration(milliseconds: 35));
+      async.elapse(const Duration(milliseconds: 10));
+      async.flushMicrotasks();
+      expect(api.statusCalls, 1);
 
-    expect(api.statusCalls, greaterThanOrEqualTo(1));
-    expect(
-      container.read(provider).value?.update?.status,
-      DeviceFirmwareUpdateStatus.succeeded,
-    );
+      async.elapse(const Duration(milliseconds: 10));
+      async.flushMicrotasks();
+      expect(
+        container.read(provider).value?.update?.status,
+        DeviceFirmwareUpdateStatus.succeeded,
+      );
+      expect(api.statusCalls, 2);
+
+      subscription.close();
+      container.dispose();
+    });
   });
 
   test('startInstall refuses duplicate actions while one is running', () async {
@@ -128,30 +137,34 @@ void main() {
   });
 
   test('disposing the family provider cancels pending polling', () async {
-    final api = _FakeDeviceFirmwareApi(
-      fetched: _update(status: 'downloading', progress: 10),
-    );
-    final container = ProviderContainer(
-      overrides: [
-        deviceFirmwareApiProvider.overrideWithValue(api),
-        deviceFirmwarePollBackoffProvider.overrideWithValue(const [
-          Duration(milliseconds: 10),
-        ]),
-      ],
-    );
-    final provider = deviceFirmwareControllerProvider('device_demo_001');
-    final subscription = container.listen(
-      provider,
-      (_, _) {},
-      fireImmediately: true,
-    );
-    await container.read(provider.future);
+    fakeAsync((async) {
+      final api = _FakeDeviceFirmwareApi(
+        fetched: _update(status: 'downloading', progress: 10),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          deviceFirmwareApiProvider.overrideWithValue(api),
+          deviceFirmwarePollBackoffProvider.overrideWithValue(const [
+            Duration(milliseconds: 10),
+          ]),
+        ],
+      );
+      final provider = deviceFirmwareControllerProvider('device_demo_001');
+      final subscription = container.listen(
+        provider,
+        (_, _) {},
+        fireImmediately: true,
+      );
+      container.read(provider.future).then((_) {});
+      async.flushMicrotasks();
 
-    subscription.close();
-    await Future<void>.delayed(const Duration(milliseconds: 40));
+      subscription.close();
+      async.elapse(const Duration(milliseconds: 40));
+      async.flushMicrotasks();
 
-    expect(api.statusCalls, 0);
-    container.dispose();
+      expect(api.statusCalls, 0);
+      container.dispose();
+    });
   });
 }
 

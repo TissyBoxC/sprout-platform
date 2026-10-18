@@ -126,7 +126,7 @@ void main() {
 
     final response = await client.get('/api/v1/app/update');
 
-    expect(response, isEmpty);
+    expect(ApiClientNoContent.isEmptyNoContent(response), isTrue);
   });
 
   test('keeps the refresh token when refresh fails transiently', () async {
@@ -194,6 +194,40 @@ void main() {
     );
     expect(await secureStore.read(DioApiClient.refreshTokenKey), isNull);
     expect(await secureStore.read(DioApiClient.accessTokenKey), isNull);
+  });
+
+  test('keeps the session when refresh reports a disabled account', () async {
+    final secureStore = InMemorySecureStore();
+    await secureStore.write(DioApiClient.accessTokenKey, 'expired');
+    await secureStore.write(DioApiClient.refreshTokenKey, 'refresh');
+
+    final dio = Dio(BaseOptions(baseUrl: 'https://api.example.test'));
+    dio.httpClientAdapter = _UnauthorizedAdapter();
+
+    final client = DioApiClient(
+      config: ApiClientConfig(
+        appConfig: AppConfig(
+          apiBaseUrl: Uri.parse('https://api.example.test'),
+          requestTimeout: const Duration(seconds: 1),
+        ),
+      ),
+      secureStore: secureStore,
+      refreshSession: (refreshToken) {
+        throw const AppException(
+          kind: AppErrorKind.accountDisabled,
+          message: '账号暂时无法使用，请联系客服处理',
+          retryable: false,
+        );
+      },
+      dio: dio,
+    );
+
+    await expectLater(
+      client.get('/api/parent/v1/devices'),
+      throwsA(isA<AppException>()),
+    );
+    expect(await secureStore.read(DioApiClient.refreshTokenKey), 'refresh');
+    expect(await secureStore.read(DioApiClient.accessTokenKey), 'expired');
   });
 
   test('does not refresh a public login failure', () async {

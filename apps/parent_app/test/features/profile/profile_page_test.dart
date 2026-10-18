@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -96,6 +98,111 @@ void main() {
     expect(controller.retryAiCalls, 1);
   });
 
+  testWidgets('hides AI balance and models until the provider is ready', (
+    tester,
+  ) async {
+    final controller = _FakeAuthController(
+      AuthState(
+        isLoading: false,
+        account: _account(),
+        aiAccount: _aiAccount(providerReady: false),
+      ),
+    );
+    await tester.pumpWidget(_wrap(controller));
+    await tester.pumpAndSettle();
+
+    expect(find.text('AI 陪伴服务尚未就绪'), findsOneWidget);
+    expect(find.text('12.50'), findsNothing);
+    expect(find.text('选择可用模型'), findsNothing);
+
+    await tester.tap(find.text('重新检查'));
+    await tester.pumpAndSettle();
+
+    expect(controller.retryAiCalls, 1);
+  });
+
+  testWidgets('shows retry failures inline instead of swallowing them', (
+    tester,
+  ) async {
+    final controller =
+        _FakeAuthController(
+            AuthState(
+              isLoading: false,
+              account: _account(),
+              aiAccount: _aiAccount(providerReady: false),
+            ),
+          )
+          ..retryError = const AppException(
+            kind: AppErrorKind.network,
+            message: '网络连接不稳定，请检查后重试',
+            retryable: true,
+          );
+    await tester.pumpWidget(_wrap(controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('重新检查'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('网络连接不稳定，请检查后重试'), findsOneWidget);
+    expect(find.text('重新检查'), findsOneWidget);
+  });
+
+  testWidgets('saving all models sends an explicit empty selection', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(800, 2400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = _FakeAuthController(
+      AuthState(isLoading: false, account: _account(), aiAccount: _aiAccount()),
+    );
+    await tester.pumpWidget(_wrap(controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('选择可用模型'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('全部已开通模型'), findsOneWidget);
+    await tester.tap(find.text('全部已开通模型'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('保存模型选择'));
+    await tester.pumpAndSettle();
+
+    expect(controller.savedModels, [<String>[]]);
+  });
+
+  testWidgets('shows model-save failures and prevents duplicate saves', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(800, 2400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final saveCompleter = Completer<void>();
+    final controller = _FakeAuthController(
+      AuthState(isLoading: false, account: _account(), aiAccount: _aiAccount()),
+    )..modelSaveCompleter = saveCompleter;
+    await tester.pumpWidget(_wrap(controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('选择可用模型'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('保存模型选择'));
+    await tester.pump();
+
+    expect(find.text('正在保存…'), findsOneWidget);
+    expect(controller.modelSaveCalls, 1);
+
+    saveCompleter.completeError(
+      const AppException(
+        kind: AppErrorKind.network,
+        message: '保存没有完成，请检查网络后重试',
+        retryable: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('保存没有完成，请检查网络后重试'), findsOneWidget);
+    expect(controller.modelSaveCalls, 1);
+  });
+
   testWidgets('confirms before signing out', (tester) async {
     await tester.binding.setSurfaceSize(const Size(800, 2400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -145,15 +252,15 @@ ParentAccount _account({
   );
 }
 
-AiAccount _aiAccount() {
-  return const AiAccount(
+AiAccount _aiAccount({bool providerReady = true}) {
+  return AiAccount(
     status: 'active',
     balanceUsd: 12.5,
     concurrencyLimit: 2,
-    availableModels: ['sprout-mini'],
-    selectedModels: ['sprout-mini'],
-    allowedModels: ['sprout-mini'],
-    providerReady: true,
+    availableModels: const ['sprout-mini'],
+    selectedModels: const ['sprout-mini'],
+    allowedModels: const ['sprout-mini'],
+    providerReady: providerReady,
   );
 }
 
@@ -162,8 +269,13 @@ class _FakeAuthController extends AuthController {
 
   final AuthState _initial;
   Object? error;
+  Object? retryError;
+  Object? modelSaveError;
+  Completer<void>? modelSaveCompleter;
   int retryAiCalls = 0;
   int logoutCalls = 0;
+  int modelSaveCalls = 0;
+  final List<List<String>> savedModels = [];
 
   @override
   Future<AuthState> build() async {
@@ -176,6 +288,21 @@ class _FakeAuthController extends AuthController {
   @override
   Future<void> retryAIService() async {
     retryAiCalls += 1;
+    if (retryError != null) {
+      throw retryError!;
+    }
+  }
+
+  @override
+  Future<void> updateSelectedModels(List<String> selectedModels) async {
+    modelSaveCalls += 1;
+    savedModels.add(List<String>.of(selectedModels));
+    if (modelSaveCompleter != null) {
+      await modelSaveCompleter!.future;
+    }
+    if (modelSaveError != null) {
+      throw modelSaveError!;
+    }
   }
 
   @override

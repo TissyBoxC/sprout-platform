@@ -14,10 +14,17 @@ typedef DeviceScannerViewBuilder =
 
 /// Scans the one-time provisioning QR shown by a display-equipped device.
 class DeviceQrScanPage extends ConsumerStatefulWidget {
-  const DeviceQrScanPage({super.key, this.scannerViewBuilder});
+  const DeviceQrScanPage({
+    super.key,
+    this.scannerViewBuilder,
+    this.initialPayload,
+  });
 
   /// Test seam that keeps camera platform channels out of widget tests.
   final DeviceScannerViewBuilder? scannerViewBuilder;
+
+  /// Test seam for a scan result when no camera platform is available.
+  final String? initialPayload;
 
   @override
   ConsumerState<DeviceQrScanPage> createState() => _DeviceQrScanPageState();
@@ -33,6 +40,19 @@ class _DeviceQrScanPageState extends ConsumerState<DeviceQrScanPage> {
   bool _isScannerReleased = false;
   String? _errorMessage;
   DeviceBindingPayload? _failedBindingPayload;
+
+  @override
+  void initState() {
+    super.initState();
+    final payload = widget.initialPayload;
+    if (payload != null && payload.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _handleRawValue(payload);
+        }
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -65,6 +85,10 @@ class _DeviceQrScanPageState extends ConsumerState<DeviceQrScanPage> {
     if (rawValue == null || rawValue.isEmpty) {
       return;
     }
+    await _handleRawValue(rawValue);
+  }
+
+  Future<void> _handleRawValue(String rawValue) async {
     _isHandlingResult = true;
     await _controller.stop();
     if (!mounted || _isLeaving) {
@@ -86,7 +110,17 @@ class _DeviceQrScanPageState extends ConsumerState<DeviceQrScanPage> {
     try {
       if (payload is DeviceSetupPayload) {
         if (mounted) {
-          await context.push('/devices/provision', extra: payload);
+          final completed = await context.push<bool>(
+            '/devices/provision',
+            extra: payload,
+          );
+          if (completed == true && mounted) {
+            await ref.read(deviceBindingControllerProvider.notifier).refresh();
+            if (mounted) {
+              context.go('/devices');
+            }
+            return;
+          }
         }
         _isHandlingResult = false;
         if (mounted && !_isLeaving) {

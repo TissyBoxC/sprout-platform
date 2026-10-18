@@ -38,6 +38,9 @@ import '../../vision/application/vision_controller.dart';
 import '../../wearable/application/wearable_controller.dart';
 import '../data/auth_api.dart';
 
+// Registration currently has no public consent-metadata endpoint. Keep this
+// value aligned with the server's accepted version, and show the consent
+// details in-app rather than calling the authenticated privacy endpoint.
 const guardianConsentVersion = '2026-01';
 
 /// Immutable authentication state consumed by the router and pages.

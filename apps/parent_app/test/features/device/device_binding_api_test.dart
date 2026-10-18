@@ -72,19 +72,49 @@ void main() {
     expect(devices.single.runtime?.provisioning?.lastProvisionedAt, isNull);
   });
 
-  test('device status defaults missing dropped events for older firmware', () async {
-    final client = _RecordingApiClient(
-      provisioning: {
-        'state': 'provisioned',
-        'wifi_configured': true,
-        'session_state': 'ready',
-      },
+  test(
+    'device status defaults missing dropped events for older firmware',
+    () async {
+      final client = _RecordingApiClient(
+        provisioning: {
+          'state': 'provisioned',
+          'wifi_configured': true,
+          'session_state': 'ready',
+        },
+      );
+      final api = DeviceBindingApi(client);
+
+      final devices = await api.list();
+
+      expect(devices.single.runtime?.provisioning?.droppedEvents, 0);
+    },
+  );
+
+  test(
+    'a missing devices collection is a contract error, not an empty list',
+    () {
+      final api = DeviceBindingApi(_RawApiClient(const {'data': {}}));
+
+      expect(api.list(), throwsA(isA<FormatException>()));
+    },
+  );
+
+  test('a malformed binding time is not replaced with now', () {
+    final api = DeviceBindingApi(
+      _RawApiClient({
+        'data': {
+          'devices': [
+            {
+              'device_id': 'device_demo_001',
+              'device_name': '初芽',
+              'bound_at': 'not-a-date',
+            },
+          ],
+        },
+      }),
     );
-    final api = DeviceBindingApi(client);
 
-    final devices = await api.list();
-
-    expect(devices.single.runtime?.provisioning?.droppedEvents, 0);
+    expect(api.list(), throwsA(isA<FormatException>()));
   });
 }
 
@@ -165,4 +195,35 @@ class _RecordingApiClient implements ApiClient {
   Future<Map<String, Object?>> delete(String path) {
     throw UnimplementedError();
   }
+}
+
+class _RawApiClient implements ApiClient {
+  _RawApiClient(this.response);
+
+  final Map<String, Object?> response;
+
+  @override
+  Future<Map<String, Object?>> get(
+    String path, {
+    Map<String, String>? queryParameters,
+  }) async => response;
+
+  @override
+  Future<Map<String, Object?>> post(String path, {Object? body}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Map<String, Object?>> put(String path, {Object? body}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Map<String, Object?>> postWithBearerToken(
+    String path, {
+    Object? body,
+    required String bearerToken,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<Map<String, Object?>> delete(String path) =>
+      throw UnimplementedError();
 }

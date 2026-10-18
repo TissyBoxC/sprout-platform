@@ -24,7 +24,6 @@ class BoundDevice {
   final DeviceRuntimeStatus? runtime;
 
   factory BoundDevice.fromJson(Map<String, Object?> json) {
-    final boundAtValue = json['bound_at'];
     final runtimeValue = json['runtime'];
     return BoundDevice(
       deviceId: _requiredString(json['device_id'], 'device_id'),
@@ -33,9 +32,7 @@ class BoundDevice {
       firmwareVersion: _asString(json['firmware_version']),
       capabilities: _stringList(json['capabilities']),
       lifecycleStatus: _asString(json['lifecycle_status']),
-      boundAt: boundAtValue is String
-          ? DateTime.tryParse(boundAtValue) ?? DateTime.now()
-          : DateTime.now(),
+      boundAt: _requiredDateTime(json['bound_at'], 'bound_at'),
       runtime: runtimeValue is Map
           ? DeviceRuntimeStatus.fromJson(
               Map<String, Object?>.from(runtimeValue),
@@ -76,10 +73,13 @@ class DeviceRuntimeStatus {
   final int rssiDbm;
   final int latencyMs;
   final int packetLossPercent;
+
   /// Normalized thermal band: unknown, normal, warm, hot, or critical.
   final String temperatureState;
+
   /// Reading in tenths of a degree Celsius, or null when none was reported.
   final int? temperatureCelsiusTenths;
+
   /// Number of retained abnormal restarts, used for a calm stability hint.
   final int recentCrashCount;
   final String timeSyncState;
@@ -136,10 +136,10 @@ class DeviceBindingApi {
 
   Future<List<BoundDevice>> list() async {
     final response = await _apiClient.get('/api/v1/devices/status');
-    final data = response['data'] as Map<String, Object?>;
+    final data = _requiredMap(response['data'], 'data');
     final devices = data['devices'];
     if (devices is! List) {
-      return const [];
+      throw const FormatException('missing devices');
     }
     return devices
         .whereType<Map>()
@@ -191,13 +191,10 @@ class DeviceProvisioningTicket {
   final DateTime expiresAt;
 
   factory DeviceProvisioningTicket.fromJson(Map<String, Object?> json) {
-    final expiresAtValue = json['expires_at'];
     return DeviceProvisioningTicket(
       token: _requiredString(json['token'], 'token'),
       deviceId: _requiredString(json['device_id'], 'device_id'),
-      expiresAt: expiresAtValue is String
-          ? DateTime.tryParse(expiresAtValue) ?? DateTime.now()
-          : DateTime.now(),
+      expiresAt: _requiredDateTime(json['expires_at'], 'expires_at'),
     );
   }
 }
@@ -227,6 +224,13 @@ Map<String, Object?> _map(Object? value) {
   return const {};
 }
 
+Map<String, Object?> _requiredMap(Object? value, String field) {
+  if (value is Map) {
+    return Map<String, Object?>.from(value);
+  }
+  throw FormatException('missing $field');
+}
+
 int _asInt(Object? value) {
   return value is num ? value.toInt() : 0;
 }
@@ -240,4 +244,14 @@ DateTime? _asDateTime(Object? value) {
     return null;
   }
   return DateTime.tryParse(value);
+}
+
+DateTime _requiredDateTime(Object? value, String field) {
+  if (value is String) {
+    final parsed = DateTime.tryParse(value);
+    if (parsed != null) {
+      return parsed;
+    }
+  }
+  throw FormatException('missing $field');
 }

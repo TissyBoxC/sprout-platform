@@ -291,6 +291,22 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                         title: const Text('我是孩子的监护人，并同意创建家长账号'),
                         subtitle: const Text('孩子使用设备前，请先由家长完成账号和绑定设置。'),
                       ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: _isSubmitting ? null : _showConsentDetails,
+                          icon: const Icon(
+                            Icons.description_outlined,
+                            size: 18,
+                          ),
+                          label: const Text('查看监护人协议与儿童隐私说明'),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '当前监护人协议版本：$guardianConsentVersion',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
                       AnimatedSize(
                         duration: AppMotion.standard,
                         curve: AppMotion.enterCurve,
@@ -316,6 +332,45 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                   ),
                 ),
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showConsentDetails() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 28),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('监护人说明', style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 12),
+                Text(
+                  '当前版本：$guardianConsentVersion',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  '创建账号前，请确认你是孩子的监护人。平台只为提供陪伴和设备管理功能处理必要信息，'
+                  '不会把儿童信息用于广告或未经同意的模型训练。',
+                ),
+                const SizedBox(height: 12),
+                const Text('你可以在账号设置中查看或调整隐私授权；撤回必要授权后，相关功能会停止提供服务。'),
+                const SizedBox(height: 18),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('我知道了'),
+                ),
+              ],
             ),
           ),
         ),

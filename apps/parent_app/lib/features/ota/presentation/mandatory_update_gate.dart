@@ -16,6 +16,26 @@ import '../application/app_update_service.dart';
 /// live update endpoint.
 final mandatoryUpdateCheckProvider = Provider<bool>((ref) => true);
 
+/// Platform distribution text for the current client.
+abstract interface class MandatoryUpdatePlatform {
+  bool get canInstallInApp;
+  String get storeLabel;
+}
+
+class _HostUpdatePlatform implements MandatoryUpdatePlatform {
+  const _HostUpdatePlatform();
+
+  @override
+  bool get canInstallInApp => Platform.isAndroid;
+
+  @override
+  String get storeLabel => Platform.isIOS ? 'App Store' : '官方商店';
+}
+
+final mandatoryUpdatePlatformProvider = Provider<MandatoryUpdatePlatform>(
+  (ref) => const _HostUpdatePlatform(),
+);
+
 /// Blocks the guardian application until a mandatory client update is opened.
 ///
 /// Only client packages block. Resource packages do not change the installed
@@ -61,11 +81,13 @@ class _MandatoryUpdateGateState extends ConsumerState<MandatoryUpdateGate>
   bool _isChecking = true;
   late bool _checkSucceeded;
   bool _checkRunning = false;
+  late final MandatoryUpdatePlatform _platform;
 
   @override
   void initState() {
     super.initState();
     _updateService = widget.updateService ?? ref.read(appUpdateServiceProvider);
+    _platform = ref.read(mandatoryUpdatePlatformProvider);
     final shouldCheck = ref.read(mandatoryUpdateCheckProvider);
     _checkSucceeded = !shouldCheck;
     _isChecking = shouldCheck;
@@ -157,6 +179,15 @@ class _MandatoryUpdateGateState extends ConsumerState<MandatoryUpdateGate>
     if (update == null || _isInstalling) {
       return;
     }
+    if (!_platform.canInstallInApp) {
+      // iOS builds from the current pipeline are not distributed with an
+      // installable in-app package. Never route them through the Android APK
+      // installer, and keep a clear exit instead of trapping the guardian.
+      setState(() {
+        _actionError = '请在 ${_platform.storeLabel} 更新到新版本后继续使用';
+      });
+      return;
+    }
     final blockingProblem = _updateService.updateProblem(update);
     if (blockingProblem != null) {
       setState(() => _actionError = blockingProblem);
@@ -230,8 +261,11 @@ class _MandatoryUpdateGateState extends ConsumerState<MandatoryUpdateGate>
                         actionError: _actionError,
                         isInstalling: _isInstalling,
                         awaitsInstaller: _awaitsInstaller,
+                        canClose: !_platform.canInstallInApp,
+                        storeLabel: _platform.storeLabel,
                         onInstall: _install,
                         onRetryCheck: _check,
+                        onClose: _leaveGate,
                       )
                     : _UpdateCheckDialog(
                         isChecking: _isChecking,
@@ -244,6 +278,19 @@ class _MandatoryUpdateGateState extends ConsumerState<MandatoryUpdateGate>
         ],
       ),
     );
+  }
+
+  void _leaveGate() {
+    if (_platform.canInstallInApp) {
+      return;
+    }
+    // There is no installable iOS distribution path yet. Leaving the gate is
+    // safer than trapping the guardian in an impossible action, while the
+    // startup check will still block again after a real update is detected.
+    setState(() {
+      _mandatoryUpdate = null;
+      _checkSucceeded = true;
+    });
   }
 }
 
@@ -314,8 +361,11 @@ class _MandatoryUpdateDialog extends StatelessWidget {
     required this.actionError,
     required this.isInstalling,
     required this.awaitsInstaller,
+    required this.canClose,
+    required this.storeLabel,
     required this.onInstall,
     required this.onRetryCheck,
+    required this.onClose,
   });
 
   final AppUpdateInfo update;
@@ -323,8 +373,11 @@ class _MandatoryUpdateDialog extends StatelessWidget {
   final String? actionError;
   final bool isInstalling;
   final bool awaitsInstaller;
+  final bool canClose;
+  final String storeLabel;
   final VoidCallback onInstall;
   final VoidCallback onRetryCheck;
+  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
@@ -389,6 +442,16 @@ class _MandatoryUpdateDialog extends StatelessWidget {
                   ),
                 ),
               ),
+              if (canClose) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: isInstalling ? null : onClose,
+                    child: Text('稍后去 $storeLabel 更新'),
+                  ),
+                ),
+              ],
               const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,

@@ -346,7 +346,7 @@ class _DashboardCard extends StatelessWidget {
                     Text('今日陪伴', style: Theme.of(context).textTheme.titleLarge),
                     const Spacer(),
                     _StatusPill(
-                      label: overview.onlineDeviceCount > 0 ? '设备在线' : '设备离线',
+                      label: _deviceStatusLabel(overview),
                       isActive: overview.onlineDeviceCount > 0,
                     ),
                   ],
@@ -380,7 +380,9 @@ class _DashboardCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  '${overview.deviceCount} 台设备 · ${overview.onlineDeviceCount} 台在线',
+                  overview.deviceCount == 0
+                      ? '还没有绑定设备'
+                      : '${overview.deviceCount} 台设备 · ${overview.onlineDeviceCount} 台在线',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -389,6 +391,19 @@ class _DashboardCard extends StatelessWidget {
         );
       },
     );
+  }
+
+  String _deviceStatusLabel(ParentOverview overview) {
+    if (overview.deviceCount == 0) {
+      return '尚未绑定';
+    }
+    if (overview.onlineDeviceCount > 0) {
+      return '设备在线';
+    }
+    // The overview endpoint does not include per-device runtime snapshots.
+    // Zero online devices can mean offline or simply not reported yet, so
+    // avoid claiming a definitive offline state here.
+    return '状态待同步';
   }
 }
 
@@ -545,18 +560,23 @@ class _RecentDeviceTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isOnline = device.runtime?.isOnline ?? false;
+    final runtime = device.runtime;
+    final status = runtime == null
+        ? '状态尚未同步'
+        : runtime.isOnline
+        ? '在线 · 随时可以开始陪伴'
+        : '离线 · 设备联网后会自动同步';
     return Card(
       child: ListTile(
         onTap: onTap,
         leading: Icon(
           Icons.toys_rounded,
-          color: isOnline
+          color: runtime?.isOnline == true
               ? const Color(0xFF2E7D5B)
               : Theme.of(context).colorScheme.onSurfaceVariant,
         ),
         title: Text(device.deviceName),
-        subtitle: Text(isOnline ? '在线 · 随时可以开始陪伴' : '离线 · 设备联网后会自动同步'),
+        subtitle: Text(status),
         trailing: const Icon(Icons.chevron_right_rounded),
       ),
     );

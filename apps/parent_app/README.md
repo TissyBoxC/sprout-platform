@@ -44,11 +44,14 @@ Android 模拟器访问本机服务使用 `10.0.2.2`；真机请改为电脑在�
 Android 模拟器未传入 `API_BASE_URL` 时默认连接 `http://10.0.2.2:8081`。
 其他平台或真机必须传入实际服务地址。
 
-构建可安装的 Android 包：
+构建可安装的 Android 包时，必须显式传入 HTTPS 服务地址：
 
 ```powershell
-flutter build apk --release
+flutter build apk --release --dart-define=API_BASE_URL=https://api.clarkhub.cn
 ```
+
+Release 构建会拒绝回退到模拟器地址或非 HTTPS 地址。需要覆盖请求超时时，可同时传入
+`--dart-define=API_TIMEOUT_SECONDS=15`。
 
 当前维护范围只有 Android 和 iOS。Linux、Windows、macOS 和 Web
 不属于家长端交付目标，因此没有保留对应平台目录。

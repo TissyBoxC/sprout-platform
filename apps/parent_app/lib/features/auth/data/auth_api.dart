@@ -342,11 +342,17 @@ class AuthApi {
         'current_version': currentVersion,
       },
     );
-    final data = response['data'];
-    if (data is! Map) {
+    if (ApiClientNoContent.isEmptyNoContent(response)) {
       return null;
     }
-    return AppUpdateInfo.fromJson(Map<String, Object?>.from(data));
+    final data = response['data'];
+    if (data is Map) {
+      return AppUpdateInfo.fromJson(Map<String, Object?>.from(data));
+    }
+    // A 200 must carry an update envelope. Treating a missing or malformed
+    // body as "current" would let a broken update service bypass a mandatory
+    // release gate.
+    throw const FormatException('missing app update data');
   }
 }
 

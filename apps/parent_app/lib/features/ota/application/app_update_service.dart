@@ -82,6 +82,11 @@ class AppUpdateService implements AppUpdateCoordinator {
   /// after the guardian starts the download.
   @override
   String? updateProblem(AppUpdateInfo update) {
+    // iOS delivery is not wired to an App Store/TestFlight URL yet. Do not
+    // pretend an APK or arbitrary URL can install on iOS.
+    if (Platform.isIOS && update.isClientUpdate) {
+      return '请在 App Store 更新到新版本后继续使用';
+    }
     if (update.downloadUrl.isEmpty) {
       return '更新还没有准备好，请稍后再试';
     }
@@ -109,10 +114,17 @@ class AppUpdateService implements AppUpdateCoordinator {
     required void Function(AppUpdateProgress progress) onProgress,
     CancelToken? cancelToken,
   }) async {
+    if (Platform.isIOS) {
+      throw const AppException(
+        kind: AppErrorKind.serviceUnavailable,
+        message: '请在 App Store 更新到新版本后继续使用',
+        retryable: false,
+      );
+    }
     if (!Platform.isAndroid) {
       throw const AppException(
         kind: AppErrorKind.serviceUnavailable,
-        message: '请在应用商店更新到新版本',
+        message: '当前设备不支持应用内更新，请在官方商店更新',
         retryable: false,
       );
     }

@@ -15,7 +15,10 @@ import '../domain/device_payload.dart';
 
 /// Guided first-run flow for a display-equipped or nearby 初芽 device.
 class DeviceProvisioningPage extends ConsumerStatefulWidget {
-  const DeviceProvisioningPage({super.key, required this.setup});
+  const DeviceProvisioningPage({
+    super.key,
+    required this.setup,
+  });
 
   final DeviceSetupPayload setup;
 
@@ -511,7 +514,7 @@ class _DeviceProvisioningPageState
             onPressed: () {
               ref.read(deviceBindingControllerProvider.notifier).refresh();
               if (context.canPop()) {
-                context.pop();
+                context.pop(true);
               } else {
                 context.go('/devices');
               }

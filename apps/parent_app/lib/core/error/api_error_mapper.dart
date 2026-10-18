@@ -10,6 +10,12 @@ AppException mapApiError(Object error) {
     final status = error.response?.statusCode;
     final errorCode = _readErrorCode(error.response?.data);
 
+    // Domain errors carry actionable meanings and must be resolved before
+    // generic 403/404/409 handling.
+    final domainError = _mapDomainError(errorCode, error);
+    if (domainError != null) {
+      return domainError;
+    }
     if (errorCode == 'invalid_credentials') {
       return AppException(
         kind: AppErrorKind.unauthenticated,
@@ -98,7 +104,8 @@ AppException mapApiError(Object error) {
         cause: error,
       );
     }
-    if (errorCode == 'invitation_expired' || errorCode == 'invalid_invitation') {
+    if (errorCode == 'invitation_expired' ||
+        errorCode == 'invalid_invitation') {
       return AppException(
         kind: AppErrorKind.validation,
         message: '邀请无效或已过期，请让家人重新邀请',
@@ -118,6 +125,14 @@ AppException mapApiError(Object error) {
       return AppException(
         kind: AppErrorKind.notFound,
         message: '没有找到这个成员或邀请',
+        retryable: false,
+        cause: error,
+      );
+    }
+    if (errorCode == 'account_disabled') {
+      return AppException(
+        kind: AppErrorKind.accountDisabled,
+        message: '账号暂时无法使用，请联系客服处理',
         retryable: false,
         cause: error,
       );
@@ -155,10 +170,9 @@ AppException mapApiError(Object error) {
       );
     }
     if (status == 422 || errorCode == 'invalid_request') {
-      final message = _readErrorMessage(error.response?.data);
       return AppException(
         kind: AppErrorKind.validation,
-        message: message ?? '请检查填写的内容',
+        message: '请检查填写的内容',
         retryable: false,
         cause: error,
       );
@@ -208,17 +222,40 @@ AppException mapApiError(Object error) {
   );
 }
 
+AppException? _mapDomainError(String? code, DioException error) {
+  final message = switch (code) {
+    'token_expired' => '绑定码已过期，请在设备上重新生成',
+    'token_used' => '这个绑定码已经使用过，请在设备上重新生成',
+    'device_already_bound' => '这台设备已经绑定到当前账号或其他家庭',
+    'device_disabled' => '这台设备暂时停用，请联系客服处理',
+    'token_not_found' => '没有找到这个绑定码，请重新扫描设备上的二维码',
+    'device_not_found' => '没有找到这台设备，请确认设备已开机后重试',
+    _ => null,
+  };
+  if (message == null) {
+    return null;
+  }
+  final kind = switch (code) {
+    'token_expired' => AppErrorKind.validation,
+    'token_used' || 'device_already_bound' => AppErrorKind.conflict,
+    'device_disabled' => AppErrorKind.accountDisabled,
+    'token_not_found' || 'device_not_found' => AppErrorKind.notFound,
+    _ => AppErrorKind.unexpected,
+  };
+  return AppException(
+    kind: kind,
+    message: message,
+    retryable: code == 'device_not_found',
+    cause: error,
+  );
+}
+
 String? _readErrorCode(Object? responseData) {
   final ErrorResponseSchema? error = _readError(responseData);
   if (error == null) {
     return null;
   }
   return error.code;
-}
-
-String? _readErrorMessage(Object? responseData) {
-  final error = _readError(responseData);
-  return error?.message;
 }
 
 ErrorResponseSchema? _readError(Object? responseData) {

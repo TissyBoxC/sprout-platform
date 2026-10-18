@@ -242,7 +242,7 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-class _AiAccountCard extends StatelessWidget {
+class _AiAccountCard extends StatefulWidget {
   const _AiAccountCard({
     required this.aiAccount,
     required this.onRetry,
@@ -254,16 +254,80 @@ class _AiAccountCard extends StatelessWidget {
   final Future<void> Function(List<String>) onModelsChanged;
 
   @override
+  State<_AiAccountCard> createState() => _AiAccountCardState();
+}
+
+class _AiAccountCardState extends State<_AiAccountCard> {
+  bool _isRetrying = false;
+  bool _isSavingModels = false;
+  String? _operationError;
+
+  Future<void> _retry() async {
+    if (_isRetrying) {
+      return;
+    }
+    setState(() {
+      _isRetrying = true;
+      _operationError = null;
+    });
+    try {
+      await widget.onRetry();
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() => _operationError = authErrorMessage(error));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isRetrying = false);
+      }
+    }
+  }
+
+  Future<void> _saveModels(List<String> models) async {
+    if (_isSavingModels) {
+      return;
+    }
+    setState(() {
+      _isSavingModels = true;
+      _operationError = null;
+    });
+    try {
+      await widget.onModelsChanged(models);
+      if (mounted) {
+        setState(() => _operationError = null);
+      }
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() => _operationError = authErrorMessage(error));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSavingModels = false);
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final account = aiAccount;
+    final account = widget.aiAccount;
     if (account == null) {
-      return Card(
-        child: ListTile(
-          leading: const Icon(Icons.cloud_off_outlined),
-          title: const Text('AI 陪伴服务正在准备'),
-          subtitle: const Text('准备期间不会产生费用，也不用重新注册。'),
-          trailing: TextButton(onPressed: onRetry, child: const Text('重新准备')),
-        ),
+      return _AiServiceStateCard(
+        title: 'AI 陪伴服务正在准备',
+        description: '准备期间不会产生费用，也不用重新注册。',
+        actionLabel: _isRetrying ? '正在准备…' : '重新准备',
+        isBusy: _isRetrying,
+        errorMessage: _operationError,
+        onAction: _retry,
+      );
+    }
+    if (!account.providerReady) {
+      return _AiServiceStateCard(
+        title: 'AI 陪伴服务尚未就绪',
+        description: '额度与模型选择会在服务准备完成后显示。你可以先稍后重试。',
+        actionLabel: _isRetrying ? '正在检查…' : '重新检查',
+        isBusy: _isRetrying,
+        errorMessage: _operationError,
+        onAction: _retry,
       );
     }
     return Card(
@@ -309,13 +373,25 @@ class _AiAccountCard extends StatelessWidget {
                   ? '使用全部已开通模型'
                   : account.selectedModels.join('、'),
             ),
+            if (_operationError != null) ...[
+              const SizedBox(height: 12),
+              _InlineError(message: _operationError!),
+            ],
             const SizedBox(height: 12),
             Align(
               alignment: Alignment.centerLeft,
               child: OutlinedButton.icon(
-                onPressed: () => _showModelPicker(context, account),
-                icon: const Icon(Icons.tune_rounded),
-                label: const Text('选择可用模型'),
+                onPressed: _isSavingModels
+                    ? null
+                    : () => _showModelPicker(context, account),
+                icon: _isSavingModels
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.tune_rounded),
+                label: Text(_isSavingModels ? '正在保存…' : '选择可用模型'),
               ),
             ),
           ],
@@ -325,13 +401,9 @@ class _AiAccountCard extends StatelessWidget {
   }
 
   Future<void> _showModelPicker(BuildContext context, AiAccount account) async {
-    final selectedModels = <String>{
-      if (account.selectedModels.isEmpty)
-        ...account.availableModels
-      else
-        ...account.selectedModels,
-    };
-    final saved = await showModalBottomSheet<bool>(
+    var allModels = account.selectedModels.isEmpty;
+    final selectedModels = <String>{...account.selectedModels};
+    final saved = await showModalBottomSheet<List<String>?>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
@@ -345,7 +417,7 @@ class _AiAccountCard extends StatelessWidget {
               children: [
                 Text('选择对话模型', style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 6),
-                const Text('只勾选允许孩子使用的模型，至少要保留一个。'),
+                const Text('可以指定模型，也可以让新增模型自动跟随全部已开通范围。'),
                 const SizedBox(height: 12),
                 if (account.availableModels.isEmpty)
                   const ListTile(
@@ -359,18 +431,33 @@ class _AiAccountCard extends StatelessWidget {
                     child: SingleChildScrollView(
                       child: Column(
                         children: [
+                          SwitchListTile(
+                            value: allModels,
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('全部已开通模型'),
+                            subtitle: const Text('以后新增的可用模型会自动加入'),
+                            onChanged: (value) => setModalState(() {
+                              allModels = value;
+                              if (value) {
+                                selectedModels.clear();
+                              }
+                            }),
+                          ),
+                          const Divider(height: 1),
                           for (final model in account.availableModels)
                             CheckboxListTile(
                               value: selectedModels.contains(model),
                               contentPadding: EdgeInsets.zero,
                               title: Text(model),
-                              onChanged: (isSelected) => setModalState(() {
-                                if (isSelected == true) {
-                                  selectedModels.add(model);
-                                } else {
-                                  selectedModels.remove(model);
-                                }
-                              }),
+                              onChanged: allModels
+                                  ? null
+                                  : (isSelected) => setModalState(() {
+                                      if (isSelected == true) {
+                                        selectedModels.add(model);
+                                      } else {
+                                        selectedModels.remove(model);
+                                      }
+                                    }),
                             ),
                         ],
                       ),
@@ -378,9 +465,11 @@ class _AiAccountCard extends StatelessWidget {
                   ),
                 const SizedBox(height: 12),
                 FilledButton(
-                  onPressed: selectedModels.isEmpty
-                      ? null
-                      : () => Navigator.of(context).pop(true),
+                  onPressed: () => Navigator.of(context).pop(
+                    allModels
+                        ? const <String>[]
+                        : selectedModels.toList(growable: false),
+                  ),
                   child: const Text('保存模型选择'),
                 ),
               ],
@@ -389,9 +478,91 @@ class _AiAccountCard extends StatelessWidget {
         ),
       ),
     );
-    if (saved == true) {
-      await onModelsChanged(selectedModels.toList(growable: false));
+    if (saved != null) {
+      await _saveModels(saved);
     }
+  }
+}
+
+class _AiServiceStateCard extends StatelessWidget {
+  const _AiServiceStateCard({
+    required this.title,
+    required this.description,
+    required this.actionLabel,
+    required this.isBusy,
+    required this.errorMessage,
+    required this.onAction,
+  });
+
+  final String title;
+  final String description;
+  final String actionLabel;
+  final bool isBusy;
+  final String? errorMessage;
+  final Future<void> Function() onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.cloud_off_outlined),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(description),
+            if (errorMessage != null) ...[
+              const SizedBox(height: 10),
+              _InlineError(message: errorMessage!),
+            ],
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: isBusy ? null : onAction,
+              child: Text(actionLabel),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _InlineError extends StatelessWidget {
+  const _InlineError({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Theme.of(
+          context,
+        ).colorScheme.errorContainer.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Text(
+          message,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onErrorContainer,
+          ),
+        ),
+      ),
+    );
   }
 }
 

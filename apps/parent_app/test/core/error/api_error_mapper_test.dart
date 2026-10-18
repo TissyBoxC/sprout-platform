@@ -144,7 +144,7 @@ void main() {
     expect(emailException.message, '这个邮箱已经注册过');
   });
 
-  test('keeps a safe service message for validation failures', () {
+  test('uses a stable safe message for validation failures', () {
     final exception = mapApiError(
       DioException(
         requestOptions: RequestOptions(path: '/api/v1/auth/register'),
@@ -163,6 +163,71 @@ void main() {
     );
 
     expect(exception.kind, AppErrorKind.validation);
-    expect(exception.message, '请输入有效的手机号');
+    expect(exception.message, '请检查填写的内容');
+  });
+
+  test('maps binding errors before generic status handling', () {
+    final cases = <(int, String, String, AppErrorKind)>[
+      (410, 'token_expired', '绑定码已过期，请在设备上重新生成', AppErrorKind.validation),
+      (409, 'token_used', '这个绑定码已经使用过，请在设备上重新生成', AppErrorKind.conflict),
+      (
+        409,
+        'device_already_bound',
+        '这台设备已经绑定到当前账号或其他家庭',
+        AppErrorKind.conflict,
+      ),
+      (
+        403,
+        'device_disabled',
+        '这台设备暂时停用，请联系客服处理',
+        AppErrorKind.accountDisabled,
+      ),
+      (404, 'token_not_found', '没有找到这个绑定码，请重新扫描设备上的二维码', AppErrorKind.notFound),
+      (404, 'device_not_found', '没有找到这台设备，请确认设备已开机后重试', AppErrorKind.notFound),
+    ];
+
+    for (final (status, code, message, kind) in cases) {
+      final exception = mapApiError(
+        DioException(
+          requestOptions: RequestOptions(path: '/api/v1/devices/bind'),
+          response: Response<Map<String, Object?>>(
+            requestOptions: RequestOptions(path: '/api/v1/devices/bind'),
+            statusCode: status,
+            data: {
+              'error': {
+                'code': code,
+                'message': 'internal backend wording',
+                'retryable': false,
+              },
+            },
+          ),
+        ),
+      );
+
+      expect(exception.kind, kind, reason: code);
+      expect(exception.message, message, reason: code);
+    }
+  });
+
+  test('keeps the session for a disabled account', () {
+    final exception = mapApiError(
+      DioException(
+        requestOptions: RequestOptions(path: '/api/v1/auth/me'),
+        response: Response<Map<String, Object?>>(
+          requestOptions: RequestOptions(path: '/api/v1/auth/me'),
+          statusCode: 403,
+          data: const {
+            'error': {
+              'code': 'account_disabled',
+              'message': 'backend wording',
+              'retryable': false,
+            },
+          },
+        ),
+      ),
+    );
+
+    expect(exception.kind, AppErrorKind.accountDisabled);
+    expect(isSessionRejected(exception), isFalse);
   });
 }

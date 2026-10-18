@@ -13,6 +13,7 @@ void main() {
       _gateApp(
         service: service,
         updateLoader: (_, _) async => _clientUpdate(isMandatory: true),
+        platform: const _AndroidUpdatePlatform(),
       ),
     );
     await tester.pump();
@@ -144,6 +145,59 @@ void main() {
     expect(find.text('安全检查'), findsNothing);
     expect(find.text('暂时无法确认当前版本是否可以安全使用。'), findsNothing);
   });
+
+  testWidgets('an iOS client update does not expose an APK install flow', (
+    tester,
+  ) async {
+    final service = _FakeUpdateCoordinator();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mandatoryUpdateCheckProvider.overrideWithValue(true),
+          mandatoryUpdatePlatformProvider.overrideWithValue(
+            const _TestUpdatePlatform(),
+          ),
+        ],
+        child: MaterialApp(
+          home: MandatoryUpdateGate(
+            updateService: service,
+            updateLoader: (_, _) async => _clientUpdate(isMandatory: true),
+            child: const Scaffold(body: Center(child: Text('应用首页'))),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    await tester.tap(find.text('立即更新'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(service.didInstallClientUpdate, isFalse);
+    expect(find.text('稍后去 App Store 更新'), findsOneWidget);
+    expect(find.text('请在 App Store 更新到新版本后继续使用'), findsOneWidget);
+  });
+}
+
+class _TestUpdatePlatform implements MandatoryUpdatePlatform {
+  const _TestUpdatePlatform();
+
+  @override
+  bool get canInstallInApp => false;
+
+  @override
+  String get storeLabel => 'App Store';
+}
+
+class _AndroidUpdatePlatform implements MandatoryUpdatePlatform {
+  const _AndroidUpdatePlatform();
+
+  @override
+  bool get canInstallInApp => true;
+
+  @override
+  String get storeLabel => 'Google Play';
 }
 
 Widget _gateApp({
@@ -153,9 +207,13 @@ Widget _gateApp({
     String currentVersion,
   )
   updateLoader,
+  MandatoryUpdatePlatform platform = const _AndroidUpdatePlatform(),
 }) {
   return ProviderScope(
-    overrides: [mandatoryUpdateCheckProvider.overrideWithValue(true)],
+    overrides: [
+      mandatoryUpdateCheckProvider.overrideWithValue(true),
+      mandatoryUpdatePlatformProvider.overrideWithValue(platform),
+    ],
     child: MaterialApp(
       home: MandatoryUpdateGate(
         updateService: service,

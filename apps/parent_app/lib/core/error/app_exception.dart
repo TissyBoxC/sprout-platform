@@ -1,6 +1,7 @@
 /// Category used by UI layers to choose a safe next action.
 enum AppErrorKind {
   unauthenticated,
+  accountDisabled,
   deviceSessionExpired,
   insufficientPermission,
   notFound,
@@ -32,14 +33,14 @@ class AppException implements Exception {
 
 /// Returns whether the server explicitly rejected the current session.
 ///
-/// Network failures, timeouts, and server errors are transient and must keep
-/// the local session so the user can retry without signing in again.
+/// A disabled account is a business state, not an expired session. Its
+/// credentials stay available so the interface can explain the restriction
+/// and support can restore the account without forcing a new sign-in.
 bool isSessionRejected(Object error) {
   if (error is! AppException) {
     return false;
   }
-  return error.kind == AppErrorKind.unauthenticated ||
-      error.kind == AppErrorKind.insufficientPermission;
+  return error.kind == AppErrorKind.unauthenticated;
 }
 
 /// Returns whether a device rejected its own authentication session.

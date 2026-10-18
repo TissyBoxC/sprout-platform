@@ -9,6 +9,9 @@ import '../storage/secure_store.dart';
 
 /// HTTP boundary used by feature data sources.
 abstract interface class ApiClient {
+  /// Internal key used only to identify a 204 response at the data boundary.
+  static const noContentMarker = r'$no_content';
+
   Future<Map<String, Object?>> get(
     String path, {
     Map<String, String>? queryParameters,
@@ -25,6 +28,16 @@ abstract interface class ApiClient {
   });
 
   Future<Map<String, Object?>> delete(String path);
+}
+
+/// Marker returned for a successful HTTP 204 response with no JSON envelope.
+extension ApiClientNoContent on ApiClient {
+  static const emptyNoContent = <String, Object?>{
+    ApiClient.noContentMarker: true,
+  };
+
+  static bool isEmptyNoContent(Map<String, Object?> response) =>
+      response[ApiClient.noContentMarker] == true;
 }
 
 /// Configuration needed to construct the production API client.
@@ -119,7 +132,7 @@ class DioApiClient implements ApiClient {
       // which has no JSON envelope to decode. Surfacing that as a failure
       // would turn a normal result into an error.
       if (response.statusCode == 204) {
-        return const <String, Object?>{};
+        return ApiClientNoContent.emptyNoContent;
       }
       return _requireResponseMap(response.data);
     } on Object catch (error) {

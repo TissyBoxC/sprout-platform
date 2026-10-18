@@ -19,13 +19,14 @@ type VisionService interface {
 }
 
 type visionAnalyzeRequest struct {
-	TaskID      string `json:"task_id"`
-	DeviceID    string `json:"device_id"`
-	TaskType    string `json:"task_type"`
-	Prompt      string `json:"prompt"`
-	FrameWidth  int    `json:"frame_width"`
-	FrameHeight int    `json:"frame_height"`
-	FrameBytes  int    `json:"frame_bytes"`
+	TaskID        string `json:"task_id"`
+	DeviceID      string `json:"device_id"`
+	TaskType      string `json:"task_type"`
+	PolicyVersion string `json:"policy_version"`
+	Prompt        string `json:"prompt"`
+	FrameWidth    int    `json:"frame_width"`
+	FrameHeight   int    `json:"frame_height"`
+	FrameBytes    int    `json:"frame_bytes"`
 }
 
 type visionHandler struct {
@@ -54,13 +55,14 @@ func (handler visionHandler) analyzeTask(
 		return
 	}
 	result, err := handler.service.Analyze(request.Context(), vision.Request{
-		TaskID:      strings.TrimSpace(payload.TaskID),
-		DeviceID:    strings.TrimSpace(payload.DeviceID),
-		TaskType:    vision.TaskType(strings.TrimSpace(payload.TaskType)),
-		Prompt:      payload.Prompt,
-		FrameWidth:  payload.FrameWidth,
-		FrameHeight: payload.FrameHeight,
-		FrameBytes:  payload.FrameBytes,
+		TaskID:        strings.TrimSpace(payload.TaskID),
+		DeviceID:      strings.TrimSpace(payload.DeviceID),
+		TaskType:      vision.TaskType(strings.TrimSpace(payload.TaskType)),
+		PolicyVersion: strings.TrimSpace(payload.PolicyVersion),
+		Prompt:        payload.Prompt,
+		FrameWidth:    payload.FrameWidth,
+		FrameHeight:   payload.FrameHeight,
+		FrameBytes:    payload.FrameBytes,
 	})
 	if err != nil {
 		writeVisionError(response, request, err)

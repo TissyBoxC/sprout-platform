@@ -101,11 +101,11 @@ type ServerConfig struct {
 	// AllowedOrigins is the exact Origin allowlist for browser WebSocket
 	// clients. Native clients without an Origin header remain supported.
 	AllowedOrigins []string
-	// TokenRevoker invalidates the authenticated session token when this
-	// connection closes. Production uses the HMAC verifier's in-process
-	// revocation list. This list is authoritative only for a single gateway
-	// replica; multi-replica deployments must use sticky sessions or shared
-	// revocation before enabling more than one process.
+	// TokenRevoker extends the authenticated token's shared revocation record
+	// when this connection closes. Production wires the HMAC verifier backed by
+	// Redis, so the record is visible to every gateway replica. The verification
+	// path also consumes the token atomically before upgrade, making reconnect
+	// replay fail even while another replica owns the live connection.
 	TokenRevoker func(identity DeviceIdentity)
 	// SegmentHandler, when set, owns the conversation pipeline. It receives each
 	// completed utterance plus a sink that streams synthesized reply audio back

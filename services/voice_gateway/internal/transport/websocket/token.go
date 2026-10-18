@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -10,7 +11,127 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
+
+// TokenClaimStore makes token consumption and revocation shared across gateway
+// replicas. Claim must atomically return false when the token was already
+// consumed or revoked. Implementations must fail closed: a store error is an
+// authentication failure, never an implicit successful claim.
+type TokenClaimStore interface {
+	Claim(ctx context.Context, tokenID string, expiresAt time.Time) (bool, error)
+	Revoke(ctx context.Context, tokenID string, expiresAt time.Time) error
+}
+
+// redisTokenCommandClient is the subset of the Redis client used by the claim
+// store. Keeping it narrow makes the atomic command behavior testable without
+// requiring a live Redis server.
+type redisTokenCommandClient interface {
+	SetNX(
+		ctx context.Context,
+		key string,
+		value interface{},
+		expiration time.Duration,
+	) *redis.BoolCmd
+	Eval(
+		ctx context.Context,
+		script string,
+		keys []string,
+		args ...interface{},
+	) *redis.Cmd
+}
+
+// RedisTokenClaimStore stores consumed and revoked token identifiers in Redis.
+// The key expires at the signed token expiry plus the verifier leeway, so the
+// store stays bounded without a separate cleanup job.
+type RedisTokenClaimStore struct {
+	client redisTokenCommandClient
+	prefix string
+}
+
+// NewRedisTokenClaimStore creates a shared claim store.
+func NewRedisTokenClaimStore(client *redis.Client, prefix string) *RedisTokenClaimStore {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		prefix = "sprout:voice:token:"
+	}
+	if !strings.HasSuffix(prefix, ":") {
+		prefix += ":"
+	}
+	return &RedisTokenClaimStore{client: client, prefix: prefix}
+}
+
+// Claim uses SET NX so exactly one replica can accept a token.
+func (store *RedisTokenClaimStore) Claim(
+	ctx context.Context,
+	tokenID string,
+	expiresAt time.Time,
+) (bool, error) {
+	if store == nil || store.client == nil {
+		return false, errors.New("token claim store is unavailable")
+	}
+	tokenID = strings.TrimSpace(tokenID)
+	if tokenID == "" {
+		return false, errors.New("token id is required")
+	}
+	ttl := time.Until(expiresAt)
+	if ttl <= 0 {
+		return false, nil
+	}
+	accepted, err := store.client.SetNX(
+		ctx,
+		store.prefix+tokenID,
+		"claimed",
+		ttl,
+	).Result()
+	if err != nil {
+		return false, fmt.Errorf("claim device token: %w", err)
+	}
+	return accepted, nil
+}
+
+// Revoke extends the shared record through the token expiry. It never shortens
+// an existing claim, so a disconnect cannot reopen a consumed token.
+func (store *RedisTokenClaimStore) Revoke(
+	ctx context.Context,
+	tokenID string,
+	expiresAt time.Time,
+) error {
+	if store == nil || store.client == nil {
+		return errors.New("token claim store is unavailable")
+	}
+	tokenID = strings.TrimSpace(tokenID)
+	if tokenID == "" {
+		return errors.New("token id is required")
+	}
+	ttl := time.Until(expiresAt)
+	if ttl <= 0 {
+		return nil
+	}
+	ttlMillis := ttl.Milliseconds()
+	if ttlMillis <= 0 {
+		ttlMillis = 1
+	}
+	key := store.prefix + tokenID
+	script := `
+local current = redis.call("PTTL", KEYS[1])
+local requested = tonumber(ARGV[1])
+if current < requested then
+  redis.call("SET", KEYS[1], "revoked", "PX", requested)
+end
+return 1
+`
+	if err := store.client.Eval(
+		ctx,
+		script,
+		[]string{key},
+		ttlMillis,
+	).Err(); err != nil {
+		return fmt.Errorf("revoke device token: %w", err)
+	}
+	return nil
+}
 
 // HMACDeviceTokenVerifier verifies the short-lived device tokens that the
 // platform issues before a device opens the realtime audio socket.
@@ -27,21 +148,12 @@ type HMACDeviceTokenVerifier struct {
 	// leeway tolerates small clock differences between the platform issuer and
 	// the gateway without widening the accepted validity window materially.
 	leeway time.Duration
-	// revoked maps consumed or expressly revoked token identifiers to their
-	// signed expiry. Verification atomically claims the identifier before the
-	// upgrade, so concurrent attempts cannot both authenticate with one token.
-	// Entries are pruned once their own expiry (plus leeway) has passed so the
-	// set stays bounded by the number of live tokens. A zero expiry means
-	// "unknown" and is retained, which happens only for tokens revoked without
-	// a parsed payload.
-	//
-	// This is process-local state. A deployment with more than one gateway
-	// replica must move revocation to shared state, such as Redis or the
-	// platform database, otherwise a token closed on one replica can still be
-	// accepted by another. Do not describe this implementation as global
-	// revocation until that shared capability exists.
+	// revoked is a bounded local mirror used as a fallback for unit tests and
+	// single-process tooling. Production supplies claimStore so every replica
+	// shares one atomic consumption and revocation record.
 	revokedMutex sync.Mutex
 	revoked      map[string]time.Time
+	claimStore   TokenClaimStore
 }
 
 // deviceTokenPayload is the signed body of one device session token.
@@ -64,6 +176,17 @@ var (
 // A short secret is rejected so a truncated or placeholder value cannot weaken
 // device authentication. A nil clock uses the wall clock.
 func NewHMACDeviceTokenVerifier(secret string, now func() time.Time) (*HMACDeviceTokenVerifier, error) {
+	return NewHMACDeviceTokenVerifierWithStore(secret, now, nil)
+}
+
+// NewHMACDeviceTokenVerifierWithStore creates a verifier backed by shared
+// atomic token state. A nil store retains process-local behavior for tests; a
+// production gateway must provide a store.
+func NewHMACDeviceTokenVerifierWithStore(
+	secret string,
+	now func() time.Time,
+	claimStore TokenClaimStore,
+) (*HMACDeviceTokenVerifier, error) {
 	trimmed := strings.TrimSpace(secret)
 	if len(trimmed) < 32 {
 		return nil, ErrTokenSecret
@@ -72,10 +195,11 @@ func NewHMACDeviceTokenVerifier(secret string, now func() time.Time) (*HMACDevic
 		now = time.Now
 	}
 	return &HMACDeviceTokenVerifier{
-		secret:  []byte(trimmed),
-		now:     now,
-		leeway:  30 * time.Second,
-		revoked: make(map[string]time.Time),
+		secret:     []byte(trimmed),
+		now:        now,
+		leeway:     30 * time.Second,
+		revoked:    make(map[string]time.Time),
+		claimStore: claimStore,
 	}, nil
 }
 
@@ -85,6 +209,16 @@ func NewHMACDeviceTokenVerifier(secret string, now func() time.Time) (*HMACDevic
 // with a small leeway, and every failure maps to the same opaque error so a
 // caller cannot distinguish "bad signature" from "expired".
 func (v *HMACDeviceTokenVerifier) VerifyDeviceToken(token string) (DeviceIdentity, error) {
+	return v.VerifyDeviceTokenContext(context.Background(), token)
+}
+
+// VerifyDeviceTokenContext validates and atomically claims one token. It uses
+// the caller's context so a slow Redis operation is bounded by request
+// cancellation and always fails closed.
+func (v *HMACDeviceTokenVerifier) VerifyDeviceTokenContext(
+	ctx context.Context,
+	token string,
+) (DeviceIdentity, error) {
 	if v == nil {
 		return DeviceIdentity{}, &AuthError{Reason: "token verifier is unavailable"}
 	}
@@ -92,7 +226,7 @@ func (v *HMACDeviceTokenVerifier) VerifyDeviceToken(token string) (DeviceIdentit
 	if err != nil {
 		return DeviceIdentity{}, err
 	}
-	if err := v.claim(payload); err != nil {
+	if err := v.claim(ctx, payload); err != nil {
 		return DeviceIdentity{}, err
 	}
 	return DeviceIdentity{
@@ -102,26 +236,62 @@ func (v *HMACDeviceTokenVerifier) VerifyDeviceToken(token string) (DeviceIdentit
 	}, nil
 }
 
-// RevokeToken invalidates one issued token in this verifier without a known
-// expiry. The entry is retained for the process lifetime, so prefer
-// RevokeTokenUntil when the signed expiry is available. An empty identifier is
-// ignored; verification already rejects empty identifiers.
-//
-// The revocation set is process-local. Single-replica deployments get full
-// disconnect revocation; multi-replica deployments need shared revocation
-// state before this guarantee holds across instances.
+// RevokeToken invalidates one issued token without a known expiry. With a
+// shared claim store the caller should use RevokeTokenContext and supply the
+// signed expiry; otherwise the local verifier retains the identifier for its
+// process lifetime and cannot make a durable cross-replica revocation.
+// An empty identifier is ignored; verification already rejects empty
+// identifiers.
 func (v *HMACDeviceTokenVerifier) RevokeToken(tokenID string) {
-	v.revoke(tokenID, time.Time{})
+	v.RevokeTokenUntil(tokenID, time.Time{})
 }
 
-// RevokeTokenUntil invalidates one issued token until the given expiry. The
-// entry is pruned automatically once expiry (plus leeway) has passed, keeping
-// the revocation set bounded by the number of live tokens.
+// RevokeTokenUntil invalidates one issued token until the given expiry. With a
+// shared claim store, the expiry is required to extend the shared record;
+// without one, the local fallback prunes the entry after expiry (plus leeway).
 func (v *HMACDeviceTokenVerifier) RevokeTokenUntil(tokenID string, expiresAt time.Time) {
-	v.revoke(tokenID, expiresAt)
+	v.revoke(context.Background(), tokenID, expiresAt)
 }
 
-func (v *HMACDeviceTokenVerifier) revoke(tokenID string, expiresAt time.Time) {
+// RevokeTokenContext invalidates a token using a bounded caller context. It
+// returns an error when the shared store cannot make the revocation durable,
+// allowing shutdown or administrative paths to report a failed cleanup.
+func (v *HMACDeviceTokenVerifier) RevokeTokenContext(
+	ctx context.Context,
+	tokenID string,
+	expiresAt time.Time,
+) error {
+	if v == nil {
+		return nil
+	}
+	tokenID = strings.TrimSpace(tokenID)
+	if tokenID == "" {
+		return nil
+	}
+	expiresAt = expiresAt.UTC()
+	if !expiresAt.IsZero() {
+		expiresAt = expiresAt.Add(v.leeway)
+	}
+	if v.claimStore != nil {
+		if expiresAt.IsZero() {
+			// A shared record needs a bounded TTL. Record locally and report the
+			// failure so an administrative path cannot claim global revocation.
+			v.recordLocal(tokenID, time.Time{})
+			return errors.New("device token expiry is required for shared revocation")
+		}
+		if err := v.claimStore.Revoke(ctx, tokenID, expiresAt); err != nil {
+			return err
+		}
+	}
+	v.recordLocal(tokenID, expiresAt)
+	return nil
+}
+
+func (v *HMACDeviceTokenVerifier) revoke(
+	ctx context.Context,
+	tokenID string,
+	expiresAt time.Time,
+) {
 	if v == nil {
 		return
 	}
@@ -130,6 +300,16 @@ func (v *HMACDeviceTokenVerifier) revoke(tokenID string, expiresAt time.Time) {
 		return
 	}
 	expiresAt = expiresAt.UTC()
+	if v.claimStore != nil && !expiresAt.IsZero() {
+		// Disconnect cleanup is best effort at the transport boundary. The token
+		// was already consumed during verification, so a failed extension does
+		// not reopen it; the existing Redis TTL remains authoritative.
+		_ = v.claimStore.Revoke(ctx, tokenID, expiresAt.Add(v.leeway))
+	}
+	v.recordLocal(tokenID, expiresAt)
+}
+
+func (v *HMACDeviceTokenVerifier) recordLocal(tokenID string, expiresAt time.Time) {
 	v.revokedMutex.Lock()
 	defer v.revokedMutex.Unlock()
 	if existing, ok := v.revoked[tokenID]; !ok || expiresAt.After(existing) {
@@ -144,18 +324,32 @@ func (v *HMACDeviceTokenVerifier) RevokeIdentity(identity DeviceIdentity) {
 	if v == nil {
 		return
 	}
-	v.revoke(identity.TokenID, identity.ExpiresAt)
+	v.revoke(context.Background(), identity.TokenID, identity.ExpiresAt)
 }
 
-// claim atomically converts an accepted token into a consumed token. This
-// closes the pre-upgrade replay window: two simultaneous Handlers cannot both
-// verify the same token before either connection revokes it on close.
-func (v *HMACDeviceTokenVerifier) claim(payload deviceTokenPayload) error {
+// claim atomically converts an accepted token into a consumed token in the
+// configured shared store, or in the process-local fallback when no store is
+// supplied. The shared-store path closes the cross-replica replay window;
+// store errors fail authentication rather than allowing an implicit claim.
+func (v *HMACDeviceTokenVerifier) claim(
+	ctx context.Context,
+	payload deviceTokenPayload,
+) error {
 	tokenID := strings.TrimSpace(payload.TokenID)
 	if tokenID == "" {
 		return &AuthError{Reason: "device token id is missing"}
 	}
-	tokenID = strings.TrimSpace(tokenID)
+	expiresAt := time.Unix(payload.ExpiresAt, 0).UTC().Add(v.leeway)
+	if v.claimStore != nil {
+		accepted, err := v.claimStore.Claim(ctx, tokenID, expiresAt)
+		if err != nil {
+			return &AuthError{Reason: "device token state is unavailable"}
+		}
+		if !accepted {
+			return &AuthError{Reason: "device token has already been used"}
+		}
+		return nil
+	}
 	v.revokedMutex.Lock()
 	defer v.revokedMutex.Unlock()
 	v.pruneLocked(v.now().UTC())

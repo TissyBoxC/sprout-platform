@@ -28,6 +28,12 @@ func (denyAllAuthorizer) AuthorizeDevice(context.Context, string) error {
 	return ErrDeviceNotAuthorized
 }
 
+type authorizerFunc func(context.Context, string) error
+
+func (fn authorizerFunc) AuthorizeDevice(ctx context.Context, deviceID string) error {
+	return fn(ctx, deviceID)
+}
+
 func validRequest() Request {
 	return Request{
 		TaskID:      "task-123456",
@@ -94,8 +100,30 @@ func TestAnalyzeRejectsUnsafePrompt(t *testing.T) {
 	}
 }
 
+func TestAnalyzeRejectsInvalidPolicyVersionBeforeAuthorization(t *testing.T) {
+	request := validRequest()
+	request.PolicyVersion = "age 5_6"
+	service, err := New(Options{
+		Client: ModelClientFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+			t.Fatal("model must not be called for an invalid policy version")
+			return ModelResult{}, nil
+		}),
+		Authorizer: authorizerFunc(func(context.Context, string) error {
+			t.Fatal("authorization must not run for an invalid policy version")
+			return nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	if _, err := service.Analyze(context.Background(), request); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+}
+
 func TestAnalyzeSanitizesAndStoresResult(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var gotPolicyVersion string
 	service, err := New(Options{
 		Client: ModelClientFunc(func(
 			_ context.Context,
@@ -104,6 +132,7 @@ func TestAnalyzeSanitizesAndStoresResult(t *testing.T) {
 			if request.TaskID != "task-123456" {
 				t.Fatalf("unexpected task id: %q", request.TaskID)
 			}
+			gotPolicyVersion = request.PolicyVersion
 			return ModelResult{
 				Model: "vision-test",
 				Labels: []Label{
@@ -119,7 +148,9 @@ func TestAnalyzeSanitizesAndStoresResult(t *testing.T) {
 		t.Fatalf("new service: %v", err)
 	}
 
-	result, err := service.Analyze(context.Background(), validRequest())
+	request := validRequest()
+	request.PolicyVersion = "age_5_6"
+	result, err := service.Analyze(context.Background(), request)
 	if err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
@@ -132,6 +163,9 @@ func TestAnalyzeSanitizesAndStoresResult(t *testing.T) {
 	if !result.ExpiresAt.Equal(now.Add(ResultRetention)) {
 		t.Fatalf("unexpected expiry: %v", result.ExpiresAt)
 	}
+	if gotPolicyVersion != "age_5_6" {
+		t.Fatalf("policy version = %q, want age_5_6", gotPolicyVersion)
+	}
 
 	stored, err := service.GetResult(context.Background(), "task-123456", "device-1234567")
 	if err != nil {
@@ -139,6 +173,43 @@ func TestAnalyzeSanitizesAndStoresResult(t *testing.T) {
 	}
 	if stored.Summary != "这是一颗苹果" {
 		t.Fatalf("unexpected stored summary: %q", stored.Summary)
+	}
+}
+
+func TestAnalyzeRejectsInvalidPolicyVersion(t *testing.T) {
+	request := validRequest()
+	request.PolicyVersion = "age 5_6"
+	service, err := New(Options{
+		Client: ModelClientFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+			t.Fatal("model must not be called for an invalid policy version")
+			return ModelResult{}, nil
+		}),
+		Authorizer: allowAllAuthorizer{},
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	if _, err := service.Analyze(context.Background(), request); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+}
+
+func TestAnalyzePreservesCancellationWithoutModelUnavailable(t *testing.T) {
+	service, err := New(Options{
+		Client: ModelClientFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+			return ModelResult{}, context.Canceled
+		}),
+		Authorizer: allowAllAuthorizer{},
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	_, err = service.Analyze(context.Background(), validRequest())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+	if errors.Is(err, ErrModelUnavailable) {
+		t.Fatalf("cancellation was classified as model unavailable: %v", err)
 	}
 }
 

@@ -84,15 +84,20 @@ func (s *Service) Analyze(ctx context.Context, request Request) (Result, error) 
 	}
 
 	modelResult, err := s.client.Analyze(ctx, ModelRequest{
-		TaskID:      request.TaskID,
-		DeviceID:    request.DeviceID,
-		TaskType:    request.TaskType,
-		Prompt:      request.Prompt,
-		FrameWidth:  request.FrameWidth,
-		FrameHeight: request.FrameHeight,
-		FrameBytes:  request.FrameBytes,
+		TaskID:        request.TaskID,
+		DeviceID:      request.DeviceID,
+		TaskType:      request.TaskType,
+		PolicyVersion: request.PolicyVersion,
+		Prompt:        request.Prompt,
+		FrameWidth:    request.FrameWidth,
+		FrameHeight:   request.FrameHeight,
+		FrameBytes:    request.FrameBytes,
 	})
 	if err != nil {
+		if errors.Is(err, context.Canceled) ||
+			errors.Is(err, context.DeadlineExceeded) {
+			return Result{}, err
+		}
 		return Result{}, errors.Join(ErrModelUnavailable, err)
 	}
 	modelResult, ok := s.gate.SanitizeResult(modelResult)
@@ -183,6 +188,9 @@ func validateRequest(request Request) error {
 	if !TaskTypeIsValid(request.TaskType) {
 		return ErrUnsupportedTask
 	}
+	if !validPolicyVersion(request.PolicyVersion) {
+		return ErrInvalidRequest
+	}
 	if utf8.RuneCountInString(strings.TrimSpace(request.Prompt)) > MaxPromptRunes {
 		return ErrInvalidRequest
 	}
@@ -200,4 +208,24 @@ func frameIsValid(width, height, byteSize int) bool {
 		return false
 	}
 	return byteSize >= 0 && byteSize <= MaxFrameBytes
+}
+
+func validPolicyVersion(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return true
+	}
+	if len(value) > 64 {
+		return false
+	}
+	for _, character := range value {
+		if (character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') ||
+			character == '_' || character == '-' || character == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }

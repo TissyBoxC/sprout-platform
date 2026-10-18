@@ -943,7 +943,10 @@ func sprintfItem(segmentID string, index int) string {
 
 type testTokenVerifier struct{}
 
-func (testTokenVerifier) VerifyDeviceToken(token string) (DeviceIdentity, error) {
+func (testTokenVerifier) VerifyDeviceTokenContext(
+	_ context.Context,
+	token string,
+) (DeviceIdentity, error) {
 	switch token {
 	case "valid-token":
 		return DeviceIdentity{DeviceID: "device_alpha", TokenID: "token_alpha"}, nil

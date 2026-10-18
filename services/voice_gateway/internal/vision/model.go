@@ -9,13 +9,16 @@ import "context"
 // privacy-reviewed channel; this request carries only the task type, the
 // guardian prompt, and bounded frame dimensions.
 type ModelRequest struct {
-	TaskID      string
-	DeviceID    string
-	TaskType    TaskType
-	Prompt      string
-	FrameWidth  int
-	FrameHeight int
-	FrameBytes  int
+	TaskID   string
+	DeviceID string
+	TaskType TaskType
+	// PolicyVersion identifies the child-safety policy revision that must be
+	// carried through the platform execution proxy.
+	PolicyVersion string
+	Prompt        string
+	FrameWidth    int
+	FrameHeight   int
+	FrameBytes    int
 }
 
 // ModelResult is the bounded model output. Implementations must not return raw

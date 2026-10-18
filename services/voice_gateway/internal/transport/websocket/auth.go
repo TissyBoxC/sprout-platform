@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -29,7 +30,7 @@ type DeviceIdentity struct {
 // verifier receives the raw token only at the transport boundary; callers must
 // not log it.
 type TokenVerifier interface {
-	VerifyDeviceToken(token string) (DeviceIdentity, error)
+	VerifyDeviceTokenContext(ctx context.Context, token string) (DeviceIdentity, error)
 }
 
 // AuthError is a stable authentication failure that never contains the token.
@@ -58,7 +59,7 @@ func authenticateDevice(request *http.Request, verifier TokenVerifier) (DeviceId
 	if token == "" {
 		return DeviceIdentity{}, &AuthError{Reason: "device token is missing"}
 	}
-	identity, err := verifier.VerifyDeviceToken(token)
+	identity, err := verifier.VerifyDeviceTokenContext(request.Context(), token)
 	if err != nil {
 		return DeviceIdentity{}, &AuthError{Reason: "device token is invalid"}
 	}

@@ -17,7 +17,7 @@ func TestBuildRealtimeTransportRejectsMissingAuthorizer(t *testing.T) {
 	cfg := config.Config{}
 	cfg.WebSocket.Enabled = true
 
-	_, _, _, err := buildRealtimeTransport(cfg, logger, nil, nil, nil)
+	_, _, _, err := buildRealtimeTransport(cfg, logger, nil, nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected a missing device authorizer to fail the realtime transport build")
 	}
@@ -27,7 +27,7 @@ func TestBuildRealtimeTransportRejectsMissingAuthorizer(t *testing.T) {
 // working without the platform database.
 func TestBuildRealtimeTransportDisabledIsNoOp(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	handler, manager, shutdown, err := buildRealtimeTransport(config.Config{}, logger, nil, nil, nil)
+	handler, manager, shutdown, err := buildRealtimeTransport(config.Config{}, logger, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildRealtimeTransport() error = %v", err)
 	}
@@ -47,8 +47,10 @@ func TestBuildRealtimeTransportRejectsIncompleteConversationPipeline(t *testing.
 	cfg.Audio.ASRProvider = "openai"
 	cfg.Audio.TTSProvider = "openai"
 	cfg.Audio.LLMProvider = ""
+	cfg.AI.DevicePlatformBaseURL = "http://device-platform:8081"
+	cfg.AI.DevicePlatformServiceToken = strings.Repeat("t", 32)
 
-	_, _, _, err := buildRealtimeTransport(cfg, logger, nil, stubAuthorizer{}, nil)
+	_, _, _, err := buildRealtimeTransport(cfg, logger, nil, stubAuthorizer{}, nil, nil)
 	if err == nil {
 		t.Fatal("expected an incomplete conversation pipeline to fail the realtime transport build")
 	}

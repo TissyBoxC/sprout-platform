@@ -7,7 +7,8 @@ import (
 
 func TestLoadReadsServiceSettings(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_HTTP_PORT", "9090")
-	t.Setenv("VOICE_GATEWAY_SUB2API_BASE_URL", "http://sub2api.internal")
+	t.Setenv("VOICE_GATEWAY_DEVICE_PLATFORM_BASE_URL", "http://device-platform.internal")
+	t.Setenv("VOICE_GATEWAY_DEVICE_PLATFORM_SERVICE_TOKEN", strings.Repeat("t", 32))
 	t.Setenv("VOICE_GATEWAY_LLM_MAX_ATTEMPTS", "4")
 
 	cfg, err := Load()
@@ -17,8 +18,8 @@ func TestLoadReadsServiceSettings(t *testing.T) {
 	if cfg.HTTP.Port != "9090" {
 		t.Fatalf("expected HTTP port 9090, got %q", cfg.HTTP.Port)
 	}
-	if cfg.Sub2API.BaseURL != "http://sub2api.internal" {
-		t.Fatalf("unexpected sub2api URL: %q", cfg.Sub2API.BaseURL)
+	if cfg.AI.DevicePlatformBaseURL != "http://device-platform.internal" {
+		t.Fatalf("unexpected device platform URL: %q", cfg.AI.DevicePlatformBaseURL)
 	}
 	if cfg.Audio.LLMConfig.MaxAttempts != 4 {
 		t.Fatalf("LLM max attempts = %d, want 4", cfg.Audio.LLMConfig.MaxAttempts)
@@ -74,6 +75,7 @@ func TestLoadReadsVisionSettings(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_VISION_ENABLED", "true")
 	t.Setenv("VOICE_GATEWAY_VISION_MODEL", "vision-model")
 	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
+	setExecutionServiceEnvironment(t)
 
 	cfg, err := Load()
 	if err != nil {
@@ -96,6 +98,7 @@ func TestLoadRejectsEnabledVisionWithoutDatabase(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_VISION_ENABLED", "true")
 	t.Setenv("VOICE_GATEWAY_VISION_MODEL", "vision-model")
 	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "")
+	setExecutionServiceEnvironment(t)
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected enabled vision without a database to fail")
@@ -164,6 +167,7 @@ func TestLoadAcceptsEnabledWebsiteSocketWithDatabase(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
+	setExecutionServiceEnvironment(t)
 
 	cfg, err := Load()
 	if err != nil {
@@ -181,6 +185,7 @@ func TestLoadRejectsUnsafeSessionTokenTTL(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
+	setExecutionServiceEnvironment(t)
 	t.Setenv("VOICE_GATEWAY_WS_SESSION_TOKEN_TTL_SECONDS", "3600")
 
 	if _, err := Load(); err == nil {
@@ -214,6 +219,7 @@ func TestLoadReadsWebsiteSocketLimits(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
+	setExecutionServiceEnvironment(t)
 	t.Setenv("VOICE_GATEWAY_WS_MAX_TOTAL_SESSIONS", "128")
 	t.Setenv("VOICE_GATEWAY_WS_MAX_FRAME_BYTES", "2048")
 
@@ -307,6 +313,7 @@ func TestContinuityWindowDefaultsAndBounds(t *testing.T) {
 			t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "mock")
 			t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "mock")
 			t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
+			setExecutionServiceEnvironment(t)
 			t.Setenv("VOICE_GATEWAY_WS_CONTINUITY_WINDOW_SECONDS", testCase.value)
 			cfg, err := Load()
 			if testCase.wantErr && err == nil {
@@ -353,6 +360,7 @@ func TestAuthRecheckDefaultsAndBounds(t *testing.T) {
 			t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "mock")
 			t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "mock")
 			t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
+			setExecutionServiceEnvironment(t)
 			t.Setenv("VOICE_GATEWAY_WS_AUTH_RECHECK_SECONDS", testCase.value)
 			if _, err := Load(); testCase.wantErr && err == nil {
 				t.Fatalf("expected auth recheck %s to be rejected", testCase.value)
@@ -368,6 +376,7 @@ func TestLoadRejectsEnabledWebsiteSocketWithoutASRProvider(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
+	setExecutionServiceEnvironment(t)
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected realtime endpoint without an ASR provider to be rejected")
@@ -381,6 +390,7 @@ func TestLoadRejectsEnabledWebsiteSocketWithoutTTSProvider(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "")
 	t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
+	setExecutionServiceEnvironment(t)
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected realtime endpoint without a TTS provider to be rejected")
@@ -394,8 +404,30 @@ func TestLoadRejectsEnabledWebsiteSocketWithoutLLMProvider(t *testing.T) {
 	t.Setenv("VOICE_GATEWAY_TTS_PROVIDER", "mock")
 	t.Setenv("VOICE_GATEWAY_LLM_PROVIDER", "")
 	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
+	setExecutionServiceEnvironment(t)
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected realtime endpoint without an LLM provider to be rejected")
 	}
+}
+
+func TestLoadRejectsModelPathWithoutDevicePlatformServiceToken(t *testing.T) {
+	t.Setenv("VOICE_GATEWAY_VISION_ENABLED", "true")
+	t.Setenv("VOICE_GATEWAY_VISION_MODEL", "vision-model")
+	t.Setenv("VOICE_GATEWAY_DATABASE_DSN", "postgres://voice:voice@localhost:5432/voice")
+	t.Setenv("VOICE_GATEWAY_DEVICE_PLATFORM_BASE_URL", "http://device-platform:8081")
+	t.Setenv("VOICE_GATEWAY_DEVICE_PLATFORM_SERVICE_TOKEN", "short")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected a weak device platform service token to fail closed")
+	}
+}
+
+func setExecutionServiceEnvironment(t *testing.T) {
+	t.Helper()
+	t.Setenv("VOICE_GATEWAY_DEVICE_PLATFORM_BASE_URL", "http://device-platform:8081")
+	t.Setenv(
+		"VOICE_GATEWAY_DEVICE_PLATFORM_SERVICE_TOKEN",
+		strings.Repeat("t", 32),
+	)
 }

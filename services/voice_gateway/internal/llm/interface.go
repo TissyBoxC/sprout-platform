@@ -1,7 +1,15 @@
 // Package llm defines text conversation gateway contracts.
 package llm
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrStreamInterrupted means the provider closed an event stream before sending
+// its terminal [DONE] marker. Consumers must treat any emitted partial text as
+// incomplete and must not speak it as a finished reply.
+var ErrStreamInterrupted = errors.New("chat stream interrupted before completion")
 
 // Message is one chat message.
 type Message struct {

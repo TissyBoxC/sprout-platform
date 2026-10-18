@@ -1,12 +1,18 @@
 package websocket
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 const testTokenSecret = "unit-test-device-token-secret-0123456789"
@@ -44,6 +50,311 @@ func TestVerifyDeviceTokenRejectsSecondUse(t *testing.T) {
 	}
 	if _, err := verifier.VerifyDeviceToken(token); err == nil {
 		t.Fatal("second VerifyDeviceToken() accepted a consumed token")
+	}
+}
+
+func TestVerifyDeviceTokenSharedStoreRejectsCrossReplicaReplay(t *testing.T) {
+	store := &memoryTokenClaimStore{}
+	first, err := NewHMACDeviceTokenVerifierWithStore(
+		testTokenSecret,
+		nil,
+		store,
+	)
+	if err != nil {
+		t.Fatalf("create first verifier: %v", err)
+	}
+	second, err := NewHMACDeviceTokenVerifierWithStore(
+		testTokenSecret,
+		nil,
+		store,
+	)
+	if err != nil {
+		t.Fatalf("create second verifier: %v", err)
+	}
+	token, err := first.IssueDeviceToken(
+		"device_a",
+		"shared_single_use",
+		5*time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("IssueDeviceToken() error = %v", err)
+	}
+	if _, err := first.VerifyDeviceTokenContext(context.Background(), token); err != nil {
+		t.Fatalf("first replica rejected the token: %v", err)
+	}
+	if _, err := second.VerifyDeviceTokenContext(context.Background(), token); err == nil {
+		t.Fatal("second replica accepted a token consumed by the first")
+	}
+}
+
+func TestVerifyDeviceTokenSharedStoreRejectsRevokedTokenAcrossVerifiers(t *testing.T) {
+	store := &memoryTokenClaimStore{}
+	first, err := NewHMACDeviceTokenVerifierWithStore(testTokenSecret, nil, store)
+	if err != nil {
+		t.Fatalf("create first verifier: %v", err)
+	}
+	second, err := NewHMACDeviceTokenVerifierWithStore(testTokenSecret, nil, store)
+	if err != nil {
+		t.Fatalf("create second verifier: %v", err)
+	}
+	token, err := first.IssueDeviceToken(
+		"device_a",
+		"shared_revoked",
+		5*time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("IssueDeviceToken() error = %v", err)
+	}
+	if err := first.RevokeTokenContext(
+		context.Background(),
+		"shared_revoked",
+		time.Now().UTC().Add(5*time.Minute),
+	); err != nil {
+		t.Fatalf("RevokeTokenContext() error = %v", err)
+	}
+	if _, err := second.VerifyDeviceTokenContext(context.Background(), token); err == nil {
+		t.Fatal("second verifier accepted a token revoked by the first")
+	}
+}
+
+func TestVerifyDeviceTokenSharedStoreIsAtomicUnderConcurrency(t *testing.T) {
+	store := &memoryTokenClaimStore{}
+	verifiers := make([]*HMACDeviceTokenVerifier, 8)
+	for index := range verifiers {
+		verifier, createErr := NewHMACDeviceTokenVerifierWithStore(
+			testTokenSecret,
+			nil,
+			store,
+		)
+		if createErr != nil {
+			t.Fatalf("create verifier %d: %v", index, createErr)
+		}
+		verifiers[index] = verifier
+	}
+	token, err := verifiers[0].IssueDeviceToken(
+		"device_a",
+		"shared_concurrent",
+		5*time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("IssueDeviceToken() error = %v", err)
+	}
+	var accepted atomic.Int32
+	var waitGroup sync.WaitGroup
+	for index := 0; index < 64; index++ {
+		waitGroup.Add(1)
+		verifier := verifiers[index%len(verifiers)]
+		go func() {
+			defer waitGroup.Done()
+			if _, verifyErr := verifier.VerifyDeviceTokenContext(
+				context.Background(),
+				token,
+			); verifyErr == nil {
+				accepted.Add(1)
+			}
+		}()
+	}
+	waitGroup.Wait()
+	if got := accepted.Load(); got != 1 {
+		t.Fatalf("accepted token %d times, want exactly 1", got)
+	}
+}
+
+func TestVerifyDeviceTokenSharedStoreUsesRequestContext(t *testing.T) {
+	store := &memoryTokenClaimStore{}
+	verifier, err := NewHMACDeviceTokenVerifierWithStore(testTokenSecret, nil, store)
+	if err != nil {
+		t.Fatalf("create verifier: %v", err)
+	}
+	token, err := verifier.IssueDeviceToken("device_a", "shared_context", time.Minute)
+	if err != nil {
+		t.Fatalf("IssueDeviceToken() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := verifier.VerifyDeviceTokenContext(ctx, token); err == nil {
+		t.Fatal("shared-store authentication accepted a cancelled request context")
+	}
+	if got := store.claimCalls.Load(); got != 1 {
+		t.Fatalf("Claim() calls = %d, want 1", got)
+	}
+}
+
+func TestVerifyDeviceTokenLocalFallbackIsProcessLocal(t *testing.T) {
+	first, err := NewHMACDeviceTokenVerifier(testTokenSecret, nil)
+	if err != nil {
+		t.Fatalf("create first verifier: %v", err)
+	}
+	second, err := NewHMACDeviceTokenVerifier(testTokenSecret, nil)
+	if err != nil {
+		t.Fatalf("create second verifier: %v", err)
+	}
+	token, err := first.IssueDeviceToken("device_a", "local_only", time.Minute)
+	if err != nil {
+		t.Fatalf("IssueDeviceToken() error = %v", err)
+	}
+	if _, err := first.VerifyDeviceToken(token); err != nil {
+		t.Fatalf("first local verifier rejected token: %v", err)
+	}
+	if _, err := second.VerifyDeviceToken(token); err != nil {
+		t.Fatalf("second independent local verifier rejected token: %v", err)
+	}
+	if _, err := first.VerifyDeviceToken(token); err == nil {
+		t.Fatal("first local verifier accepted its already consumed token")
+	}
+}
+
+func TestVerifyDeviceTokenFailsClosedWhenSharedStoreFails(t *testing.T) {
+	verifier, err := NewHMACDeviceTokenVerifierWithStore(
+		testTokenSecret,
+		nil,
+		&memoryTokenClaimStore{failure: errors.New("redis unavailable")},
+	)
+	if err != nil {
+		t.Fatalf("create verifier: %v", err)
+	}
+	token, err := verifier.IssueDeviceToken("device_a", "shared_failure", time.Minute)
+	if err != nil {
+		t.Fatalf("IssueDeviceToken() error = %v", err)
+	}
+	if _, err := verifier.VerifyDeviceTokenContext(
+		context.Background(),
+		token,
+	); err == nil {
+		t.Fatal("shared-store failure must reject device authentication")
+	}
+}
+
+func TestRevokeTokenContextFailsWhenSharedStoreFails(t *testing.T) {
+	store := &memoryTokenClaimStore{failure: errors.New("redis unavailable")}
+	verifier, err := NewHMACDeviceTokenVerifierWithStore(testTokenSecret, nil, store)
+	if err != nil {
+		t.Fatalf("create verifier: %v", err)
+	}
+	if err := verifier.RevokeTokenContext(
+		context.Background(),
+		"shared_revoke_failure",
+		time.Now().UTC().Add(time.Minute),
+	); err == nil {
+		t.Fatal("RevokeTokenContext() reported success when the shared store failed")
+	}
+}
+
+func TestRevokeTokenContextRequiresExpiryWithSharedStore(t *testing.T) {
+	store := &memoryTokenClaimStore{}
+	verifier, err := NewHMACDeviceTokenVerifierWithStore(testTokenSecret, nil, store)
+	if err != nil {
+		t.Fatalf("create verifier: %v", err)
+	}
+	if err := verifier.RevokeTokenContext(
+		context.Background(),
+		"shared_revoke_without_expiry",
+		time.Time{},
+	); err == nil {
+		t.Fatal("RevokeTokenContext() accepted an unbounded shared-store revocation")
+	}
+}
+
+func TestRedisTokenClaimStoreClaimAndRevokeTTL(t *testing.T) {
+	now := time.Now().UTC()
+	client := &fakeRedisTokenCommandClient{
+		setNXResult: true,
+		evalResult:  int64(1),
+	}
+	store := &RedisTokenClaimStore{
+		client: client,
+		prefix: "test:voice:token:",
+	}
+	expiresAt := now.Add(90 * time.Second)
+
+	accepted, err := store.Claim(context.Background(), "token_1", expiresAt)
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if !accepted {
+		t.Fatal("Claim() = false, want true")
+	}
+	if client.setNXKey != "test:voice:token:token_1" {
+		t.Fatalf("Claim() key = %q", client.setNXKey)
+	}
+	if client.setNXTTL <= 0 || client.setNXTTL > 90*time.Second {
+		t.Fatalf("Claim() ttl = %v, want a positive value <= 90s", client.setNXTTL)
+	}
+
+	if err := store.Revoke(context.Background(), "token_1", expiresAt); err != nil {
+		t.Fatalf("Revoke() error = %v", err)
+	}
+	if client.evalKey != "test:voice:token:token_1" {
+		t.Fatalf("Revoke() key = %q", client.evalKey)
+	}
+	if client.evalTTL <= 0 || client.evalTTL > 90000 {
+		t.Fatalf("Revoke() ttl = %d ms, want a positive value <= 90000", client.evalTTL)
+	}
+	if !strings.Contains(client.evalScript, `"PTTL"`) {
+		t.Fatalf("Revoke() script does not preserve the existing claim TTL: %s", client.evalScript)
+	}
+}
+
+func TestRedisTokenClaimStoreRevokeNeverInitializesShortTTL(t *testing.T) {
+	client := &fakeRedisTokenCommandClient{evalResult: int64(1)}
+	store := &RedisTokenClaimStore{client: client, prefix: "test:voice:token:"}
+	if err := store.Revoke(
+		context.Background(),
+		"token_short",
+		time.Now().UTC().Add(500*time.Microsecond),
+	); err != nil {
+		t.Fatalf("Revoke() error = %v", err)
+	}
+	if client.evalTTL != 1 {
+		t.Fatalf("Revoke() ttl = %d ms, want 1", client.evalTTL)
+	}
+}
+
+func TestRedisTokenClaimStoreFailsClosedOnUnavailableOrInvalidInput(t *testing.T) {
+	var nilStore *RedisTokenClaimStore
+	if accepted, err := nilStore.Claim(context.Background(), "token", time.Now().Add(time.Minute)); err == nil || accepted {
+		t.Fatal("nil Claim() did not fail closed")
+	}
+	if err := nilStore.Revoke(context.Background(), "token", time.Now().Add(time.Minute)); err == nil {
+		t.Fatal("nil Revoke() did not report the unavailable store")
+	}
+
+	client := &fakeRedisTokenCommandClient{setNXResult: true}
+	store := &RedisTokenClaimStore{client: client, prefix: "test:"}
+	if accepted, err := store.Claim(context.Background(), "token", time.Now().Add(-time.Second)); err != nil || accepted {
+		t.Fatal("expired Claim() did not fail closed")
+	}
+	if accepted, err := store.Claim(context.Background(), " ", time.Now().Add(time.Minute)); err == nil || accepted {
+		t.Fatal("blank token Claim() did not fail closed")
+	}
+	if err := store.Revoke(context.Background(), " ", time.Now().Add(time.Minute)); err == nil {
+		t.Fatal("blank token Revoke() did not fail")
+	}
+}
+
+func TestRedisTokenClaimStoreReportsCommandFailures(t *testing.T) {
+	claimClient := &fakeRedisTokenCommandClient{
+		setNXErr: errors.New("redis command failed"),
+	}
+	claimStore := &RedisTokenClaimStore{client: claimClient, prefix: "test:"}
+	if accepted, err := claimStore.Claim(
+		context.Background(),
+		"token_claim_error",
+		time.Now().UTC().Add(time.Minute),
+	); err == nil || accepted {
+		t.Fatal("Claim() did not fail closed when Redis returned an error")
+	}
+
+	revokeClient := &fakeRedisTokenCommandClient{
+		evalErr: errors.New("redis command failed"),
+	}
+	revokeStore := &RedisTokenClaimStore{client: revokeClient, prefix: "test:"}
+	if err := revokeStore.Revoke(
+		context.Background(),
+		"token_revoke_error",
+		time.Now().UTC().Add(time.Minute),
+	); err == nil {
+		t.Fatal("Revoke() did not report a Redis command error")
 	}
 }
 
@@ -263,4 +574,123 @@ func flipChar(value byte) string {
 		return "B"
 	}
 	return "A"
+}
+
+type memoryTokenClaimStore struct {
+	mutex      sync.Mutex
+	claimed    map[string]time.Time
+	failure    error
+	claimCalls atomic.Int32
+}
+
+func (store *memoryTokenClaimStore) Claim(
+	ctx context.Context,
+	tokenID string,
+	expiresAt time.Time,
+) (bool, error) {
+	store.claimCalls.Add(1)
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if store.failure != nil {
+		return false, store.failure
+	}
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+	if store.claimed == nil {
+		store.claimed = make(map[string]time.Time)
+	}
+	if _, exists := store.claimed[tokenID]; exists {
+		return false, nil
+	}
+	store.claimed[tokenID] = expiresAt
+	return true, nil
+}
+
+func (store *memoryTokenClaimStore) Revoke(
+	_ context.Context,
+	tokenID string,
+	expiresAt time.Time,
+) error {
+	if store.failure != nil {
+		return store.failure
+	}
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+	if store.claimed == nil {
+		store.claimed = make(map[string]time.Time)
+	}
+	if existing, exists := store.claimed[tokenID]; !exists || expiresAt.After(existing) {
+		store.claimed[tokenID] = expiresAt
+	}
+	return nil
+}
+
+type fakeRedisTokenCommandClient struct {
+	setNXResult bool
+	setNXErr    error
+	setNXKey    string
+	setNXTTL    time.Duration
+	evalResult  int64
+	evalErr     error
+	evalKey     string
+	evalScript  string
+	evalTTL     int64
+}
+
+func (client *fakeRedisTokenCommandClient) SetNX(
+	ctx context.Context,
+	key string,
+	_ interface{},
+	expiration time.Duration,
+) *redis.BoolCmd {
+	client.setNXKey = key
+	client.setNXTTL = expiration
+	cmd := redis.NewBoolCmd(ctx)
+	if client.setNXErr != nil {
+		cmd.SetErr(client.setNXErr)
+		return cmd
+	}
+	cmd.SetVal(client.setNXResult)
+	return cmd
+}
+
+func (client *fakeRedisTokenCommandClient) Eval(
+	ctx context.Context,
+	script string,
+	keys []string,
+	args ...interface{},
+) *redis.Cmd {
+	client.evalScript = script
+	if len(keys) > 0 {
+		client.evalKey = keys[0]
+	}
+	if len(args) > 0 {
+		switch value := args[0].(type) {
+		case int:
+			client.evalTTL = int64(value)
+		case int64:
+			client.evalTTL = value
+		default:
+			client.evalTTL = -1
+		}
+	}
+	cmd := redis.NewCmd(ctx)
+	if client.evalErr != nil {
+		cmd.SetErr(client.evalErr)
+		return cmd
+	}
+	cmd.SetVal(client.evalResult)
+	return cmd
+}
+
+var _ redisTokenCommandClient = (*fakeRedisTokenCommandClient)(nil)
+
+func (client *fakeRedisTokenCommandClient) String() string {
+	return fmt.Sprintf(
+		"fake redis client setnx=%q ttl=%s eval=%q",
+		client.setNXKey,
+		client.setNXTTL,
+		client.evalKey,
+	)
 }

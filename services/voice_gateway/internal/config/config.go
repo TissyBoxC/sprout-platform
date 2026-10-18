@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -17,7 +18,7 @@ type Config struct {
 	Log       LogConfig
 	Redis     RedisConfig
 	Database  DatabaseConfig
-	Sub2API   Sub2APIConfig
+	AI        AIConfig
 	Vision    VisionConfig
 	Security  SecurityConfig
 	WebSocket WebSocketConfig
@@ -107,10 +108,16 @@ type AudioConfig struct {
 	LLMProvider string
 	// LLMModel is the default conversation model; empty uses provider default.
 	LLMModel string
-	// ASRConfig, TTSConfig, and LLMConfig carry provider-specific credentials.
+	// ASRConfig and TTSConfig carry provider-specific credentials. LLMConfig
+	// carries retry policy for the platform execution adapter.
 	ASRConfig ASRProviderConfig
 	TTSConfig TTSProviderConfig
 	LLMConfig LLMProviderConfig
+	// DevicePlatformBaseURL and DevicePlatformServiceToken point model calls at
+	// the platform-owned execution proxy. pipeline.Build passes them to the
+	// execution client alongside the retry policy.
+	DevicePlatformBaseURL      string
+	DevicePlatformServiceToken string
 }
 
 // ASRProviderConfig carries the credentials of one speech recognition provider.
@@ -144,10 +151,8 @@ type TTSProviderConfig struct {
 	Voice       string
 }
 
-// LLMProviderConfig carries the conversation gateway credentials.
+// LLMProviderConfig carries the conversation gateway settings.
 type LLMProviderConfig struct {
-	BaseURL     string
-	APIKey      string
 	MaxAttempts int
 }
 
@@ -198,16 +203,21 @@ type RedisConfig struct {
 	Password string
 }
 
-// Sub2APIConfig contains the AI gateway connection.
-type Sub2APIConfig struct {
-	BaseURL string
-	APIKey  string
+// AIConfig contains the platform-owned AI execution connection.
+//
+// The voice gateway never receives a provider key. It presents a short-lived
+// execution ticket to device_platform, which alone decrypts the guardian's
+// credential and calls the upstream provider.
+type AIConfig struct {
+	DevicePlatformBaseURL      string
+	DevicePlatformServiceToken string
 }
 
 // VisionConfig turns the internal camera/vision pipeline on or off.
 //
-// Vision reuses the sub2api connection for model calls. It stays disabled by
-// default so a deployment without camera hardware exposes no vision endpoint.
+// Vision uses the same platform execution ticket path as voice conversation.
+// It stays disabled by default so a deployment without camera hardware
+// exposes no vision endpoint.
 type VisionConfig struct {
 	Enabled bool
 	// Model is the vision model identifier; empty keeps the endpoint off even
@@ -248,9 +258,15 @@ func Load() (Config, error) {
 		Database: DatabaseConfig{
 			DSN: env("VOICE_GATEWAY_DATABASE_DSN", ""),
 		},
-		Sub2API: Sub2APIConfig{
-			BaseURL: env("VOICE_GATEWAY_SUB2API_BASE_URL", "http://127.0.0.1:8080"),
-			APIKey:  env("VOICE_GATEWAY_SUB2API_API_KEY", ""),
+		AI: AIConfig{
+			DevicePlatformBaseURL: env(
+				"VOICE_GATEWAY_DEVICE_PLATFORM_BASE_URL",
+				"http://127.0.0.1:8081",
+			),
+			DevicePlatformServiceToken: env(
+				"VOICE_GATEWAY_DEVICE_PLATFORM_SERVICE_TOKEN",
+				"",
+			),
 		},
 		Vision: VisionConfig{
 			Enabled: envBool("VOICE_GATEWAY_VISION_ENABLED", false),
@@ -327,10 +343,16 @@ func Load() (Config, error) {
 				Voice:       env("VOICE_GATEWAY_TTS_VOICE", ""),
 			},
 			LLMConfig: LLMProviderConfig{
-				BaseURL:     env("VOICE_GATEWAY_LLM_BASE_URL", "http://127.0.0.1:8080"),
-				APIKey:      env("VOICE_GATEWAY_LLM_API_KEY", ""),
 				MaxAttempts: envInt("VOICE_GATEWAY_LLM_MAX_ATTEMPTS", 3),
 			},
+			DevicePlatformBaseURL: env(
+				"VOICE_GATEWAY_DEVICE_PLATFORM_BASE_URL",
+				"http://127.0.0.1:8081",
+			),
+			DevicePlatformServiceToken: env(
+				"VOICE_GATEWAY_DEVICE_PLATFORM_SERVICE_TOKEN",
+				"",
+			),
 		},
 	}
 
@@ -401,6 +423,30 @@ func Load() (Config, error) {
 	}
 	if cfg.Audio.LLMConfig.MaxAttempts < 1 || cfg.Audio.LLMConfig.MaxAttempts > 5 {
 		return Config{}, fmt.Errorf("VOICE_GATEWAY_LLM_MAX_ATTEMPTS must be between 1 and 5")
+	}
+	// Any path that can invoke a model must have a complete, authenticated
+	// platform execution connection. Startup fails closed instead of exposing
+	// a voice or vision endpoint whose first turn would fail at the network
+	// boundary.
+	requiresExecution := cfg.Vision.Enabled ||
+		(cfg.WebSocket.Enabled && strings.TrimSpace(cfg.Audio.LLMProvider) != "")
+	if requiresExecution {
+		devicePlatformURL := strings.TrimSpace(cfg.AI.DevicePlatformBaseURL)
+		if devicePlatformURL == "" {
+			return Config{}, fmt.Errorf("VOICE_GATEWAY_DEVICE_PLATFORM_BASE_URL must be set when a model-backed path is enabled")
+		}
+		parsedURL, err := url.Parse(devicePlatformURL)
+		if err != nil ||
+			(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") ||
+			parsedURL.Host == "" ||
+			parsedURL.User != nil ||
+			parsedURL.RawQuery != "" ||
+			parsedURL.Fragment != "" {
+			return Config{}, fmt.Errorf("VOICE_GATEWAY_DEVICE_PLATFORM_BASE_URL must be an absolute HTTP(S) URL without credentials, query, or fragment")
+		}
+		if len(strings.TrimSpace(cfg.AI.DevicePlatformServiceToken)) < 32 {
+			return Config{}, fmt.Errorf("VOICE_GATEWAY_DEVICE_PLATFORM_SERVICE_TOKEN must contain at least 32 characters when a model-backed path is enabled")
+		}
 	}
 	if math.IsNaN(cfg.Audio.VadSpeechThreshold) ||
 		math.IsInf(cfg.Audio.VadSpeechThreshold, 0) ||

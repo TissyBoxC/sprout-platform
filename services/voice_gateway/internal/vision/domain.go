@@ -17,7 +17,11 @@ var (
 	ErrUnsupportedTask  = errors.New("unsupported vision task")
 	ErrContentRejected  = errors.New("vision content rejected by policy")
 	ErrModelUnavailable = errors.New("vision model unavailable")
-	ErrResultNotFound   = errors.New("vision result not found")
+	// ErrModelStreamInterrupted means the model response ended before the
+	// provider's terminal SSE marker. A partial response must never be parsed
+	// or stored as a successful result.
+	ErrModelStreamInterrupted = errors.New("vision model stream interrupted")
+	ErrResultNotFound         = errors.New("vision result not found")
 	// ErrDeviceNotAuthorized means the guardian has withdrawn the consent that
 	// permits camera/vision processing for the device's family.
 	ErrDeviceNotAuthorized = errors.New("device is not authorized for vision")
@@ -79,13 +83,18 @@ type Label struct {
 // provenance and bounded symbolic metadata only; the raw frame never reaches
 // the model-call boundary without passing the content-safety gate.
 type Request struct {
-	TaskID      string
-	DeviceID    string
-	TaskType    TaskType
-	Prompt      string
-	FrameWidth  int
-	FrameHeight int
-	FrameBytes  int
+	TaskID   string
+	DeviceID string
+	TaskType TaskType
+	// PolicyVersion is the effective child-safety policy revision supplied by
+	// the trusted gateway caller. It is symbolic routing metadata, never child
+	// data, and is forwarded to the platform execution proxy as a validated
+	// policy hint.
+	PolicyVersion string
+	Prompt        string
+	FrameWidth    int
+	FrameHeight   int
+	FrameBytes    int
 }
 
 // Result is one bounded recognition result for a completed task.

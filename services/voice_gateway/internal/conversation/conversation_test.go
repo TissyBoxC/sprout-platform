@@ -53,9 +53,10 @@ func (s *fakeASRStream) Results() <-chan asr.Result {
 }
 
 type fakeLLM struct {
-	reply string
-	err   error
-	calls int
+	stream llm.Stream
+	reply  string
+	err    error
+	calls  int
 	// lastRequest captures the fully populated request the runner built so a
 	// test can prove device and session provenance reaches the AI gateway.
 	lastRequest llm.Request
@@ -67,12 +68,18 @@ func (f *fakeLLM) Chat(_ context.Context, request llm.Request) (llm.Stream, erro
 	if f.err != nil {
 		return nil, f.err
 	}
+	if f.stream != nil {
+		return f.stream, nil
+	}
 	return &fakeLLMStream{reply: f.reply}, nil
 }
 
-type fakeLLMStream struct{ reply string }
+type fakeLLMStream struct {
+	reply string
+	err   error
+}
 
-func (s *fakeLLMStream) Err() error   { return nil }
+func (s *fakeLLMStream) Err() error   { return s.err }
 func (s *fakeLLMStream) Close() error { return nil }
 func (s *fakeLLMStream) Chunks() <-chan string {
 	chunks := make(chan string, 1)
@@ -227,6 +234,32 @@ func TestTurnRunsFullPipeline(t *testing.T) {
 	}
 	if sink.count() == 0 {
 		t.Fatal("Turn() sent no audio to the sink")
+	}
+}
+
+func TestTurnNeverSpeaksAnInterruptedModelStream(t *testing.T) {
+	config := testConfig()
+	config.LLM = &fakeLLM{stream: &fakeLLMStream{
+		reply: "只有半句",
+		err:   llm.ErrStreamInterrupted,
+	}}
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	sink := &recordingSink{}
+	turnErr := runner.Turn(
+		context.Background(),
+		"session_1",
+		"device_a",
+		[]int16{1},
+		sink,
+	)
+	if turnErr == nil {
+		t.Fatal("an interrupted stream must fail the turn")
+	}
+	if sink.count() != 0 {
+		t.Fatal("a partial model reply reached the speaker")
 	}
 }
 

@@ -7,7 +7,7 @@ Realtime voice gateway for 如此萌屋 · 芽系列·初芽 products.
 - authenticated WebSocket audio sessions
 - audio framing, buffering, and playback
 - speech recognition and synthesis adapters
-- text conversation through `sub2api`
+- text and vision model execution through the platform-owned AI proxy
 - child content policy enforcement before any model call
 - latency, duration, and usage telemetry
 
@@ -54,6 +54,35 @@ instead of running without enforcement. Set
 `VOICE_GATEWAY_CONTENT_POLICY_ENABLED=false` only for local diagnostics where
 no child traffic exists.
 
+## Platform AI Execution
+
+The gateway never receives a global Sub2API or upstream provider key. It calls
+`device_platform` with the internal service token:
+
+1. `GET /internal/v1/devices/{device_id}/ai-execution-ticket` with `model`,
+   `project`, and `session_id`. Voice conversation uses `project=voice`;
+   vision uses `project=vision`.
+2. `POST /internal/v1/ai-execution?ticket=...` with the unchanged OpenAI chat
+   completions body. The platform atomically consumes the ticket, decrypts the
+   guardian account's credential, and adds the real upstream `Authorization`
+   header.
+
+The gateway only sends `Authorization: Bearer <internal-service-token>` to
+`device_platform`. Every retry requests a fresh ticket. A request without a
+real device ID and session ID is rejected before any HTTP call.
+
+Configure the internal connection with:
+
+```text
+VOICE_GATEWAY_DEVICE_PLATFORM_BASE_URL=http://device_platform:8081
+VOICE_GATEWAY_DEVICE_PLATFORM_SERVICE_TOKEN=<SPROUT_INTERNAL_SERVICE_TOKEN>
+```
+
+Do not expose this base URL or service token through a public reverse proxy,
+browser code, device firmware, or logs. Startup fails closed when vision or a
+model-backed realtime pipeline is enabled without a base URL and a service
+token of at least 32 characters.
+
 ## Errors
 
 Stable policy reasons returned in the `error` control frame include:
@@ -96,12 +125,14 @@ with an unlisted origin is rejected.
 ## Device Token Revocation
 
 The gateway rejects device tokens with a missing or blank `token_id`. When a
-WebSocket connection closes, the verifier revokes that token identifier in
-process memory until its signed expiry, closing the replay window for a closed
-conversation.
+device connects, the verifier atomically consumes the signed `token_id` in
+Redis. The token cannot be used for a second connection by any replica, even
+when two gateways receive the same token concurrently. When the connection
+closes, the shared record is extended through the signed expiry plus the
+verifier leeway; Redis expires the record automatically, keeping the store
+bounded.
 
-This revocation set is **process-local**. The current deployment topology is a
-single gateway replica, so the guarantee holds there. Before running multiple
-gateway replicas, move the revocation set to shared state such as Redis or the
-platform database; otherwise a token revoked by one replica can still be
-accepted by another.
+Redis errors fail authentication closed. The process-local claim map is only a
+fallback for unit tests and single-process tooling; production wiring always
+uses the shared Redis store. Do not run multiple gateway replicas without a
+reachable shared claim store.

@@ -154,6 +154,12 @@ components:
             - picture_book_recognition
             - photo_qa
             - capture
+        policy_version:
+          type: string
+          maxLength: 64
+          pattern: "^[A-Za-z0-9_.-]+$"
+          description: Effective child-safety policy revision supplied by the
+            trusted gateway caller and forwarded to the platform proxy.
         prompt:
           type: string
           maxLength: 500

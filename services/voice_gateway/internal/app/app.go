@@ -32,6 +32,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/usage"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/vision"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 // Run starts the voice gateway and waits for a shutdown signal.
@@ -80,6 +81,7 @@ func Run() error {
 		policyResolver,
 		deviceAuthorizer,
 		safetyReader,
+		redisCache.Client(),
 	)
 	if err != nil {
 		return err
@@ -96,9 +98,9 @@ func Run() error {
 	if cfg.Vision.Enabled {
 		visionService, err := vision.New(vision.Options{
 			Client: visionsub2api.New(visionsub2api.Config{
-				BaseURL: cfg.Sub2API.BaseURL,
-				APIKey:  cfg.Sub2API.APIKey,
-				Model:   cfg.Vision.Model,
+				BaseURL:      cfg.AI.DevicePlatformBaseURL,
+				ServiceToken: cfg.AI.DevicePlatformServiceToken,
+				Model:        cfg.Vision.Model,
 			}),
 			// Vision reuses the device authorizer so a caller-supplied device
 			// identifier is checked against the guardian's live consent.
@@ -157,6 +159,7 @@ func buildRealtimeTransport(
 	policyResolver content_policy.Resolver,
 	deviceAuthorizer websocket.DeviceAuthorizer,
 	safetyReader securitysettings.Reader,
+	redisClient *redis.Client,
 ) (http.Handler, *session.Manager, func(), error) {
 	if !cfg.WebSocket.Enabled {
 		logger.Info("device realtime endpoint is disabled")
@@ -171,12 +174,19 @@ func buildRealtimeTransport(
 		return nil, nil, nil, errors.New("realtime endpoint requires a device authorizer")
 	}
 
-	verifier, err := websocket.NewHMACDeviceTokenVerifier(cfg.WebSocket.AuthTokenSecret, nil)
+	verifier, err := websocket.NewHMACDeviceTokenVerifierWithStore(
+		cfg.WebSocket.AuthTokenSecret,
+		nil,
+		websocket.NewRedisTokenClaimStore(redisClient, "sprout:voice:device-token"),
+	)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("create device token verifier: %w", err)
 	}
 
-	adapters, err := pipeline.Build(cfg.Audio)
+	audioConfig := cfg.Audio
+	audioConfig.DevicePlatformBaseURL = cfg.AI.DevicePlatformBaseURL
+	audioConfig.DevicePlatformServiceToken = cfg.AI.DevicePlatformServiceToken
+	adapters, err := pipeline.Build(audioConfig)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build audio adapters: %w", err)
 	}

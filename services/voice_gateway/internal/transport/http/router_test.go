@@ -256,16 +256,6 @@ func TestInternalVisionAnalyzeReturnsBoundedResult(t *testing.T) {
 		Enabled:   true,
 		AuthToken: strings.Repeat("t", 32),
 	}
-	options.VisionService = &staticVisionService{
-		result: vision.Result{
-			TaskID:   "task-123456",
-			DeviceID: "device-1234567",
-			TaskType: vision.TaskTypeObjectRecognition,
-			Labels:   []vision.Label{{Label: "apple", Confidence: 9000}},
-			Summary:  "这是一颗苹果",
-		},
-	}
-
 	request := httptest.NewRequest(
 		stdhttp.MethodPost,
 		"/internal/v1/vision/tasks",
@@ -273,6 +263,7 @@ func TestInternalVisionAnalyzeReturnsBoundedResult(t *testing.T) {
 			"task_id": "task-123456",
 			"device_id": "device-1234567",
 			"task_type": "object_recognition",
+			"policy_version": "age_5_6",
 			"prompt": "这是什么",
 			"frame_width": 640,
 			"frame_height": 480,
@@ -281,13 +272,25 @@ func TestInternalVisionAnalyzeReturnsBoundedResult(t *testing.T) {
 	)
 	request.Header.Set("Authorization", "Bearer "+strings.Repeat("t", 32))
 	recorder := httptest.NewRecorder()
+	service := &recordingAnalyzeVisionService{result: vision.Result{
+		TaskID:   "task-123456",
+		DeviceID: "device-1234567",
+		TaskType: vision.TaskTypeObjectRecognition,
+		Labels:   []vision.Label{{Label: "apple", Confidence: 9000}},
+		Summary:  "这是一颗苹果",
+	}}
+	options.VisionService = service
 	NewRouter(options).ServeHTTP(recorder, request)
 
 	if recorder.Code != stdhttp.StatusOK {
 		t.Fatalf("expected status %d, got %d: %s", stdhttp.StatusOK, recorder.Code, recorder.Body.String())
 	}
+	if service.request.PolicyVersion != "age_5_6" {
+		t.Fatalf("policy version = %q, want age_5_6", service.request.PolicyVersion)
+	}
 	body := recorder.Body.String()
-	if !strings.Contains(body, `"label":"apple"`) || !strings.Contains(body, `"confidence":9000`) {
+	if !strings.Contains(body, `"label":"apple"`) ||
+		!strings.Contains(body, `"confidence":9000`) {
 		t.Fatalf("unexpected vision response: %s", body)
 	}
 }
@@ -380,6 +383,28 @@ func TestInternalVisionAnalyzeRejectsUnauthorizedDevice(t *testing.T) {
 type recordingVisionService struct {
 	taskID   string
 	deviceID string
+}
+
+type recordingAnalyzeVisionService struct {
+	request vision.Request
+	result  vision.Result
+	err     error
+}
+
+func (s *recordingAnalyzeVisionService) Analyze(
+	_ context.Context,
+	request vision.Request,
+) (vision.Result, error) {
+	s.request = request
+	return s.result, s.err
+}
+
+func (s *recordingAnalyzeVisionService) GetResult(
+	_ context.Context,
+	taskID string,
+	deviceID string,
+) (vision.Result, error) {
+	return vision.Result{TaskID: taskID, DeviceID: deviceID}, nil
 }
 
 func (s *recordingVisionService) Analyze(

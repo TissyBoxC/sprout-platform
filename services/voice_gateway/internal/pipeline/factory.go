@@ -70,7 +70,12 @@ func Build(cfg config.AudioConfig) (Adapters, error) {
 		adapters.TTS = synthesizer
 	}
 	if provider := strings.TrimSpace(cfg.LLMProvider); provider != "" {
-		client, err := buildLLM(provider, cfg.LLMConfig)
+		client, err := buildLLM(
+			provider,
+			cfg.LLMConfig,
+			cfg.DevicePlatformBaseURL,
+			cfg.DevicePlatformServiceToken,
+		)
 		if err != nil {
 			return Adapters{}, err
 		}
@@ -156,10 +161,18 @@ func buildTTS(provider string, providerConfig config.TTSProviderConfig) (tts.Syn
 	}
 }
 
-func buildLLM(provider string, providerConfig config.LLMProviderConfig) (llm.Client, error) {
+func buildLLM(
+	provider string,
+	providerConfig config.LLMProviderConfig,
+	devicePlatformBaseURL string,
+	devicePlatformServiceToken string,
+) (llm.Client, error) {
 	switch provider {
 	case ProviderSub2API:
-		client := sub2api_client.New(providerConfig.BaseURL, providerConfig.APIKey)
+		client := sub2api_client.New(
+			devicePlatformBaseURL,
+			devicePlatformServiceToken,
+		)
 		if providerConfig.MaxAttempts > 0 {
 			client.MaxAttempts = providerConfig.MaxAttempts
 		}

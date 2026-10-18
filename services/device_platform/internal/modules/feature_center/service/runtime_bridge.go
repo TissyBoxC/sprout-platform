@@ -77,14 +77,24 @@ func (s *Service) enrichMetrics(
 	ctx context.Context,
 	feature *domain.Feature,
 ) {
-	if s == nil || s.metrics == nil || feature == nil ||
-		len(feature.ReadOnlyMetrics) == 0 {
+	if feature == nil {
+		return
+	}
+	feature.MetricsState = domain.MetricsStateNotConfigured
+	if len(feature.ReadOnlyMetrics) == 0 {
+		return
+	}
+	if s == nil || s.metrics == nil {
+		applyHealthDerivedMetrics(feature)
 		return
 	}
 	values, err := s.metrics.FeatureMetrics(ctx, feature.ID)
 	if err != nil {
+		feature.MetricsState = domain.MetricsStateUnavailable
+		applyHealthDerivedMetrics(feature)
 		return
 	}
+	reported := 0
 	for index := range feature.ReadOnlyMetrics {
 		key := feature.ReadOnlyMetrics[index].Key
 		value, ok := values[key]
@@ -92,7 +102,44 @@ func (s *Service) enrichMetrics(
 			continue
 		}
 		feature.ReadOnlyMetrics[index].Value = value
+		reported++
 	}
+	if applyHealthDerivedMetrics(feature) {
+		reported++
+	}
+	if reported == 0 {
+		feature.MetricsState = domain.MetricsStateNotReported
+		return
+	}
+	feature.MetricsState = domain.MetricsStateAvailable
+}
+
+// applyHealthDerivedMetrics exposes only values the service can calculate from
+// an already-persisted health observation. It never turns unknown into a
+// successful state; unknown remains an empty metric value.
+func applyHealthDerivedMetrics(feature *domain.Feature) bool {
+	if feature == nil || feature.ID != "voice_gateway" {
+		return false
+	}
+	var value any
+	switch feature.Health {
+	case domain.HealthHealthy:
+		value = "ready"
+	case domain.HealthDegraded:
+		value = "degraded"
+	case domain.HealthUnavailable:
+		value = "unavailable"
+	default:
+		return false
+	}
+	for index := range feature.ReadOnlyMetrics {
+		if feature.ReadOnlyMetrics[index].Key != "gateway_ready_state" {
+			continue
+		}
+		feature.ReadOnlyMetrics[index].Value = value
+		return true
+	}
+	return false
 }
 
 // runtimeValues projects existing operations settings into feature-center

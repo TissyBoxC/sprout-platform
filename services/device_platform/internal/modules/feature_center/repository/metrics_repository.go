@@ -24,6 +24,22 @@ const offlinePolicyDeviceMetricQuery = `SELECT COUNT(*)
 	 AND policy.offline_enabled = TRUE
 	 AND acks.applied_revision = policy.revision`
 
+const otaPublishedMetricQuery = `SELECT COUNT(*)
+	FROM ota_releases
+	WHERE status = 'published'`
+
+const telemetryMetricQuery = `SELECT
+	(SELECT COUNT(*) FROM device_runtime_status),
+	(SELECT COUNT(*) FROM device_runtime_status
+	 WHERE connection_state = 'online'
+	   AND received_at >= NOW() - $1::interval),
+	(SELECT COALESCE(SUM(pending_telemetry), 0)
+	 FROM device_runtime_status)`
+
+const voiceConversationMetricQuery = `SELECT COALESCE(SUM(conversation_count), 0)
+	FROM platform_usage_daily
+	WHERE usage_day >= CURRENT_DATE - INTERVAL '6 days'`
+
 // MetricsRepository answers the read-only metric keys declared by the feature
 // registry. Every query is a plain count against a table owned by another
 // module, so the feature center never invents an operational value it cannot
@@ -53,6 +69,14 @@ func (r *MetricsRepository) FeatureMetrics(
 	featureID string,
 ) (map[string]any, error) {
 	switch featureID {
+	case "auth":
+		return r.scalar(ctx,
+			`SELECT COUNT(*)
+			FROM auth_sessions
+			WHERE revoked_at IS NULL
+			  AND expires_at > NOW()`,
+			"active_auth_session_count",
+		)
 	case "parent_account":
 		return r.scalar(ctx,
 			"SELECT COUNT(*) FROM parent_accounts WHERE role = 'parent' AND status = 'active'",
@@ -102,7 +126,7 @@ func (r *MetricsRepository) FeatureMetrics(
 		)
 	case "ota_release":
 		return r.scalar(ctx,
-			"SELECT COUNT(*) FROM platform_releases WHERE kind = 'firmware' AND status = 'published'",
+			otaPublishedMetricQuery,
 			"published_firmware_count",
 		)
 	case "app_update":
@@ -121,17 +145,36 @@ func (r *MetricsRepository) FeatureMetrics(
 			"reported_usage_days",
 		)
 	case "telemetry":
-		return r.triad(ctx,
-			`SELECT
-				(SELECT COUNT(*) FROM device_runtime_status),
-				(SELECT COUNT(*) FROM device_runtime_status
-				 WHERE connection_state = 'online'
-				   AND received_at >= NOW() - INTERVAL '90 seconds'),
-				(SELECT COALESCE(SUM(pending_telemetry), 0)
-				 FROM device_runtime_status)`,
+		return r.triadWithArgs(ctx,
+			telemetryMetricQuery,
+			[]any{fmt.Sprintf("%d milliseconds", r.onlineThreshold.Milliseconds())},
 			"telemetry_device_count",
 			"telemetry_online_count",
 			"telemetry_pending_total",
+		)
+	case "voice_conversation":
+		return r.scalar(ctx,
+			voiceConversationMetricQuery,
+			"conversation_count_7d",
+		)
+	case "ai_model_gateway":
+		return r.scalar(ctx,
+			`SELECT COUNT(DISTINCT model)
+			FROM ai_accounts
+			CROSS JOIN LATERAL unnest(available_models) AS model
+			WHERE status = 'active'`,
+			"available_model_count",
+		)
+	case "platform_security":
+		return r.scalar(ctx,
+			`SELECT COUNT(*)
+			FROM admin_totp_credentials AS credentials
+			JOIN parent_accounts AS accounts
+			  ON accounts.id = credentials.parent_account_id
+			WHERE accounts.role = 'admin'
+			  AND accounts.status = 'active'
+			  AND credentials.enabled_at IS NOT NULL`,
+			"mfa_enabled_admin_count",
 		)
 	case "notification":
 		return r.triad(ctx,
@@ -356,11 +399,33 @@ func (r *MetricsRepository) triad(
 	secondKey string,
 	thirdKey string,
 ) (map[string]any, error) {
+	return r.triadWithArgs(
+		ctx,
+		query,
+		nil,
+		firstKey,
+		secondKey,
+		thirdKey,
+	)
+}
+
+func (r *MetricsRepository) triadWithArgs(
+	ctx context.Context,
+	query string,
+	args []any,
+	firstKey string,
+	secondKey string,
+	thirdKey string,
+) (map[string]any, error) {
 	if r == nil || r.pool == nil {
 		return nil, fmt.Errorf("feature metrics database is unavailable")
 	}
 	var first, second, third int64
-	if err := r.pool.QueryRow(ctx, query).Scan(&first, &second, &third); err != nil {
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(
+		&first,
+		&second,
+		&third,
+	); err != nil {
 		return nil, fmt.Errorf("load feature metrics %s: %w", firstKey, err)
 	}
 	return map[string]any{

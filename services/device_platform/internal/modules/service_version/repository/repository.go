@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -26,6 +27,7 @@ type Repository interface {
 	ReleaseCatalog(ctx context.Context) (*domain.ReleaseCatalog, error)
 	RequestCheck(ctx context.Context) error
 	Enqueue(ctx context.Context, request *domain.UpgradeRequest) error
+	EnqueueBatch(ctx context.Context, requests []*domain.UpgradeRequest) error
 	ListOperations(ctx context.Context) ([]domain.Operation, error)
 	FindOperation(ctx context.Context, operationID string) (*domain.Operation, error)
 }
@@ -58,6 +60,10 @@ func (r *FileRepository) queueDir() string {
 
 func (r *FileRepository) resultsDir() string {
 	return filepath.Join(r.stateDir, "results")
+}
+
+func (r *FileRepository) processingDir() string {
+	return filepath.Join(r.stateDir, "processing")
 }
 
 // Status returns the worker's latest snapshot. A missing file is reported as
@@ -116,8 +122,34 @@ func (r *FileRepository) Enqueue(
 	ctx context.Context,
 	request *domain.UpgradeRequest,
 ) error {
-	if request == nil {
+	return r.EnqueueBatch(ctx, []*domain.UpgradeRequest{request})
+}
+
+// EnqueueBatch writes one or more upgrade commands while holding a single
+// cross-process lock. The queue is intentionally serial: the worker processes
+// one operation at a time, so a batch is a set of future steps, not parallel
+// work. Idle checks and all writes happen under the same lock to prevent a
+// second request from slipping in between individual files.
+func (r *FileRepository) EnqueueBatch(
+	ctx context.Context,
+	requests []*domain.UpgradeRequest,
+) error {
+	if len(requests) == 0 {
 		return errors.New("upgrade request is required")
+	}
+	seenIDs := make(map[string]struct{}, len(requests))
+	for _, request := range requests {
+		if request == nil {
+			return errors.New("upgrade request is required")
+		}
+		id := strings.TrimSpace(request.ID)
+		if id == "" || strings.ContainsAny(id, `/\`) {
+			return errors.New("upgrade request id is invalid")
+		}
+		if _, exists := seenIDs[id]; exists {
+			return errors.New("upgrade request id is duplicated")
+		}
+		seenIDs[id] = struct{}{}
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -125,10 +157,134 @@ func (r *FileRepository) Enqueue(
 	if err := os.MkdirAll(r.queueDir(), 0o750); err != nil {
 		return fmt.Errorf("create upgrade queue: %w", err)
 	}
-	return writeJSONAtomic(
-		filepath.Join(r.queueDir(), request.ID+".json"),
-		request,
-	)
+	if err := r.ensureQueueIdle(); err != nil {
+		return err
+	}
+	lock, err := r.acquireEnqueueLock()
+	if err != nil {
+		return err
+	}
+	defer lock.release()
+	// Re-check under the repository lock. ensureIdle in the service layer is
+	// advisory and can race with another administrator request; this check is
+	// the authoritative gate that prevents two active queue entries.
+	if err := r.ensureQueueIdle(); err != nil {
+		return err
+	}
+	written := make([]string, 0, len(requests))
+	for _, request := range requests {
+		path := filepath.Join(r.queueDir(), request.ID+".json")
+		if err := writeJSONAtomic(path, request); err != nil {
+			for _, writtenPath := range written {
+				_ = os.Remove(writtenPath)
+			}
+			return err
+		}
+		written = append(written, path)
+	}
+	return nil
+}
+
+type enqueueLock struct {
+	file *os.File
+	path string
+}
+
+func (lock *enqueueLock) release() {
+	if lock == nil {
+		return
+	}
+	if lock.file != nil {
+		_ = lock.file.Close()
+	}
+	if lock.path != "" {
+		_ = os.Remove(lock.path)
+	}
+}
+
+const enqueueLockStaleAfter = 15 * time.Minute
+
+// acquireEnqueueLock creates the queue lock with O_EXCL. This is atomic across
+// processes sharing the upgrade volume, unlike a process-local mutex. A lock
+// left behind by a crashed process is only removed after a conservative
+// expiry; the lock file contains both PID and creation time so operators can
+// distinguish a live request from a stale artifact.
+func (r *FileRepository) acquireEnqueueLock() (*enqueueLock, error) {
+	path := filepath.Join(r.queueDir(), ".enqueue.lock")
+	now := time.Now().UTC()
+	if err := r.removeStaleEnqueueLock(path, now); err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return nil, domain.ErrUpgradeInProgress
+	}
+	if err != nil {
+		return nil, fmt.Errorf("create upgrade queue lock: %w", err)
+	}
+	payload := fmt.Sprintf("%d %s\n", os.Getpid(), now.Format(time.RFC3339Nano))
+	if _, err := io.WriteString(file, payload); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("write upgrade queue lock: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("sync upgrade queue lock: %w", err)
+	}
+	return &enqueueLock{file: file, path: path}, nil
+}
+
+func (r *FileRepository) removeStaleEnqueueLock(
+	path string,
+	now time.Time,
+) error {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect upgrade queue lock: %w", err)
+	}
+	if now.Sub(info.ModTime()) <= enqueueLockStaleAfter {
+		return domain.ErrUpgradeInProgress
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove stale upgrade queue lock: %w", err)
+	}
+	return nil
+}
+
+// ensureQueueIdle checks queue files, worker-owned processing files, and
+// active results. The worker moves a queue file into processing/ before it
+// writes the first result. Checking only queue/ and results/ would therefore
+// allow a second request in that claim window.
+func (r *FileRepository) ensureQueueIdle() error {
+	for _, directory := range []string{r.queueDir(), r.processingDir()} {
+		entries, err := os.ReadDir(directory)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("list upgrade state: %w", err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() ||
+				!strings.HasSuffix(entry.Name(), ".json") ||
+				strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			return domain.ErrUpgradeInProgress
+		}
+	}
+	operations, err := r.ListOperations(context.Background())
+	if err != nil {
+		return err
+	}
+	for _, operation := range operations {
+		if domain.IsActiveOperation(operation.Status) {
+			return domain.ErrUpgradeInProgress
+		}
+	}
+	return nil
 }
 
 // ListOperations returns every known operation, newest first.

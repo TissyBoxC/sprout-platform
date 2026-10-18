@@ -62,6 +62,32 @@ func (status HealthStatus) Valid() bool {
 	}
 }
 
+// MetricsState is an internal projection of whether the live metrics source
+// could be queried. It deliberately has no JSON tag on Feature so the existing
+// HTTP contract remains unchanged while service code can distinguish an empty
+// value from an unavailable reader.
+type MetricsState string
+
+const (
+	MetricsStateNotConfigured MetricsState = "not_configured"
+	MetricsStateAvailable     MetricsState = "available"
+	MetricsStateUnavailable   MetricsState = "unavailable"
+	MetricsStateNotReported   MetricsState = "not_reported"
+)
+
+// Valid reports whether the internal metrics state is supported.
+func (state MetricsState) Valid() bool {
+	switch state {
+	case MetricsStateNotConfigured,
+		MetricsStateAvailable,
+		MetricsStateUnavailable,
+		MetricsStateNotReported:
+		return true
+	default:
+		return false
+	}
+}
+
 // FeatureStatus is the operational lifecycle shown in the feature center.
 type FeatureStatus string
 
@@ -167,7 +193,11 @@ type Feature struct {
 	Values          map[string]any `json:"values"`
 	ReadOnlyMetrics []Metric       `json:"read_only_metrics"`
 	ReadOnlyReason  string         `json:"read_only_reason,omitempty"`
-	UpdatedAt       *time.Time     `json:"updated_at,omitempty"`
+	// MetricsState is intentionally internal. The management handler projects
+	// metrics through an explicit allowlist, so this state never reaches the
+	// public response until a future contract version defines it.
+	MetricsState MetricsState `json:"-"`
+	UpdatedAt    *time.Time   `json:"updated_at,omitempty"`
 }
 
 // HealthDetail is the management UI projection for a health probe.

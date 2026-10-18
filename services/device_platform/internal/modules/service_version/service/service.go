@@ -453,6 +453,7 @@ func (s *Service) EnqueueAll(
 	}
 	actorAccountID = strings.TrimSpace(actorAccountID)
 	operations := make([]domain.Operation, 0, len(plans))
+	requests := make([]*domain.UpgradeRequest, 0, len(plans))
 	for _, plan := range plans {
 		operationID := uuid.NewString()
 		now := s.clock().UTC()
@@ -463,9 +464,7 @@ func (s *Service) EnqueueAll(
 			RequestedAt:   now,
 			RequestedBy:   actorAccountID,
 		}
-		if err := s.repository.Enqueue(ctx, request); err != nil {
-			return operations, err
-		}
+		requests = append(requests, request)
 		operations = append(operations, domain.Operation{
 			ID:            operationID,
 			TargetService: plan.TargetService,
@@ -474,6 +473,12 @@ func (s *Service) EnqueueAll(
 			Message:       "升级任务已排队，正在准备更新",
 			RequestedAt:   &now,
 		})
+	}
+	// A batch is a single queue ownership transfer. Writing each request via
+	// Enqueue would make the second item observe the first item as active and
+	// reject the operator's legitimate multi-service upgrade.
+	if err := s.repository.EnqueueBatch(ctx, requests); err != nil {
+		return nil, err
 	}
 	return operations, nil
 }
@@ -599,6 +604,12 @@ func defaultCatalog() []domain.CatalogEntry {
 			DisplayName: "发布文件下载",
 			Role:        "发布服务",
 			Image:       "nginx",
+		},
+		{
+			ID:          "upgrade_worker",
+			DisplayName: "升级执行器",
+			Role:        "服务运维",
+			Image:       "ghcr.io/tissyboxc/sprout-upgrade-worker",
 		},
 	}
 }

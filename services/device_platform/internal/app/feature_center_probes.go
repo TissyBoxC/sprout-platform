@@ -34,9 +34,10 @@ func (placeholderHealthProbe) HealthProbeReady() bool {
 }
 
 // schemaReadinessProbe verifies that a feature's authoritative storage is
-// deployed and queryable. It intentionally does not claim that the feature is
-// healthy just because one row exists: an empty table is the normal first-run
-// state, while a missing table or failed query is unavailable.
+// deployed and queryable. Storage availability alone is not functional
+// evidence: an empty or populated table returns unknown, while a missing table
+// or failed query is unavailable. Only a capability-specific probe may report
+// healthy or degraded.
 func schemaReadinessProbe(
 	pool *pgxpool.Pool,
 	query string,
@@ -47,20 +48,21 @@ func schemaReadinessProbe(
 				return featureCenterDomain.HealthUnavailable, nil
 			}
 			var marker int
-			err := pool.QueryRow(ctx, query).Scan(&marker)
-			if errors.Is(err, pgx.ErrNoRows) {
-				// The schema and query are valid, but there is no runtime
-				// evidence yet that the capability works.
-				return featureCenterDomain.HealthDegraded, nil
-			}
-			if err != nil {
-				return featureCenterDomain.HealthUnavailable, nil
-			}
-			// A successful read proves deployment, not functional health.
-			// Only a capability-specific probe may report healthy.
-			return featureCenterDomain.HealthDegraded, nil
+			return schemaReadinessStatus(
+				pool.QueryRow(ctx, query).Scan(&marker),
+			), nil
 		},
 	)
+}
+
+// schemaReadinessStatus maps a schema probe result without conflating storage
+// availability with capability health. A successful query or an empty result
+// proves only that storage is readable, so both remain unknown.
+func schemaReadinessStatus(err error) featureCenterDomain.HealthStatus {
+	if err == nil || errors.Is(err, pgx.ErrNoRows) {
+		return featureCenterDomain.HealthUnknown
+	}
+	return featureCenterDomain.HealthUnavailable
 }
 
 // voiceGatewayReadinessProbe checks the remote voice gateway's readiness

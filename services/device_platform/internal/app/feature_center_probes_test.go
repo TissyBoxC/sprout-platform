@@ -18,6 +18,7 @@ import (
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestPlaceholderHealthProbeFailsCoverageValidation(t *testing.T) {
@@ -37,6 +38,77 @@ func TestPlaceholderHealthProbeFailsCoverageValidation(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatal("placeholder probe passed coverage validation")
+	}
+}
+
+func TestSchemaReadinessProbeReturnsUnavailableWithoutDatabase(t *testing.T) {
+	probe := schemaReadinessProbe(nil, "SELECT 1")
+	status, err := probe.Check(context.Background(), "auth")
+	if err != nil {
+		t.Fatalf("check probe: %v", err)
+	}
+	if status != featureCenterDomain.HealthUnavailable {
+		t.Fatalf("status = %q, want unavailable", status)
+	}
+}
+
+func TestSchemaReadinessStatusReturnsUnknownForReadableStorage(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want featureCenterDomain.HealthStatus
+	}{
+		{name: "row returned", err: nil, want: featureCenterDomain.HealthUnknown},
+		{name: "empty result", err: pgx.ErrNoRows, want: featureCenterDomain.HealthUnknown},
+		{
+			name: "query failed",
+			err:  errors.New("relation does not exist"),
+			want: featureCenterDomain.HealthUnavailable,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := schemaReadinessStatus(test.err); got != test.want {
+				t.Fatalf("status = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestHealthStatusRetainsAllFourStates(t *testing.T) {
+	for _, status := range []featureCenterDomain.HealthStatus{
+		featureCenterDomain.HealthHealthy,
+		featureCenterDomain.HealthDegraded,
+		featureCenterDomain.HealthUnavailable,
+		featureCenterDomain.HealthUnknown,
+	} {
+		if !status.Valid() {
+			t.Fatalf("health status %q is not valid", status)
+		}
+	}
+}
+
+func TestSchemaReadinessProbeSourceNeverFabricatesCapabilityHealth(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join(".", "feature_center_probes.go"))
+	if err != nil {
+		t.Fatalf("read probe source: %v", err)
+	}
+	text := string(source)
+	start := strings.Index(text, "func schemaReadinessProbe(")
+	if start < 0 {
+		t.Fatal("schemaReadinessProbe definition not found")
+	}
+	end := strings.Index(text[start:], "\n}\n")
+	if end < 0 {
+		t.Fatal("schemaReadinessProbe body not found")
+	}
+	body := text[start : start+end+3]
+	if strings.Contains(body, "HealthHealthy") ||
+		strings.Contains(body, "HealthDegraded") {
+		t.Fatalf("schema readiness must not fabricate capability health:\n%s", body)
+	}
+	if !strings.Contains(body, "schemaReadinessStatus") {
+		t.Fatalf("schema readiness must use the explicit status mapping:\n%s", body)
 	}
 }
 

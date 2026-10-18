@@ -743,6 +743,7 @@ func TestDefaultRegistryActiveFeaturesHaveHealthAndReadOnlyReason(t *testing.T) 
 // featureCenterMetricsReader, or a runtime settings projection.
 func TestDefaultRegistryMetricsHaveVerifiableSource(t *testing.T) {
 	repositoryMetrics := map[string]struct{}{
+		"active_auth_session_count":             {},
 		"active_parent_count":                   {},
 		"active_ai_account_count":               {},
 		"child_profile_count":                   {},
@@ -812,6 +813,10 @@ func TestDefaultRegistryMetricsHaveVerifiableSource(t *testing.T) {
 		"running_service_count":                 {},
 		"download_file_count":                   {},
 		"notification_configured_channel_count": {},
+		"conversation_count_7d":                 {},
+		"available_model_count":                 {},
+		"mfa_enabled_admin_count":               {},
+		"gateway_ready_state":                   {},
 	}
 	for _, definition := range DefaultRegistry() {
 		for _, metric := range definition.Feature.ReadOnlyMetrics {
@@ -1984,13 +1989,14 @@ func (catalog staticModelCatalog) ModelOptions(
 
 type staticMetricsReader struct {
 	values map[string]map[string]any
+	err    error
 }
 
 func (reader staticMetricsReader) FeatureMetrics(
 	_ context.Context,
 	featureID string,
 ) (map[string]any, error) {
-	return reader.values[featureID], nil
+	return reader.values[featureID], reader.err
 }
 
 func TestProjectMergesLiveMetrics(t *testing.T) {
@@ -2019,6 +2025,9 @@ func TestProjectMergesLiveMetrics(t *testing.T) {
 	}
 	if value := parentAccount.ReadOnlyMetrics[0].Value; value != int64(7) {
 		t.Fatalf("active_parent_count value = %#v, want 7", value)
+	}
+	if parentAccount.MetricsState != domain.MetricsStateAvailable {
+		t.Fatalf("metrics state = %q, want available", parentAccount.MetricsState)
 	}
 
 	usageReport, err := service.Get(context.Background(), "usage_report")
@@ -2073,6 +2082,12 @@ func TestProjectLeavesUnknownMetricsEmpty(t *testing.T) {
 	if len(byID["parent_account"].ReadOnlyMetrics) != 1 {
 		t.Fatalf("parent_account metric count changed")
 	}
+	if aiAccount.MetricsState != domain.MetricsStateNotReported {
+		t.Fatalf(
+			"unreported metrics state = %q, want not_reported",
+			aiAccount.MetricsState,
+		)
+	}
 }
 
 func TestLiveMetricsDoNotMutateSharedRegistry(t *testing.T) {
@@ -2101,6 +2116,108 @@ func TestLiveMetricsDoNotMutateSharedRegistry(t *testing.T) {
 			"registry metric leaked across calls: %#v",
 			feature.ReadOnlyMetrics[0].Value,
 		)
+	}
+	if feature.MetricsState != domain.MetricsStateNotConfigured {
+		t.Fatalf(
+			"metrics state = %q, want not_configured",
+			feature.MetricsState,
+		)
+	}
+}
+
+func TestProjectMarksMetricsReaderFailureUnavailable(t *testing.T) {
+	service, err := New(Options{
+		Repository:  newMemoryRepository(),
+		Definitions: DefaultRegistry(),
+		Clock:       fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	service.SetMetricsReader(staticMetricsReader{
+		err: errors.New("metrics database unavailable"),
+	})
+
+	feature, err := service.Get(context.Background(), "parent_account")
+	if err != nil {
+		t.Fatalf("get parent_account: %v", err)
+	}
+	if feature.MetricsState != domain.MetricsStateUnavailable {
+		t.Fatalf("metrics state = %q, want unavailable", feature.MetricsState)
+	}
+	if feature.ReadOnlyMetrics[0].Value != nil {
+		t.Fatalf(
+			"failed metrics read produced a value: %#v",
+			feature.ReadOnlyMetrics[0].Value,
+		)
+	}
+}
+
+func TestProjectMarksMetricsNotReportedWhenReaderReturnsNoRegisteredValues(t *testing.T) {
+	service, err := New(Options{
+		Repository:  newMemoryRepository(),
+		Definitions: DefaultRegistry(),
+		Clock:       fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	service.SetMetricsReader(staticMetricsReader{
+		values: map[string]map[string]any{
+			"parent_account": {"unregistered_metric": int64(9)},
+		},
+	})
+
+	feature, err := service.Get(context.Background(), "parent_account")
+	if err != nil {
+		t.Fatalf("get parent_account: %v", err)
+	}
+	if feature.MetricsState != domain.MetricsStateNotReported {
+		t.Fatalf("metrics state = %q, want not_reported", feature.MetricsState)
+	}
+	if feature.ReadOnlyMetrics[0].Value != nil {
+		t.Fatalf("unregistered metric value leaked into projection: %#v", feature.ReadOnlyMetrics[0].Value)
+	}
+}
+
+func TestVoiceGatewayHealthDerivedMetricUsesRetainedState(t *testing.T) {
+	service, err := New(Options{
+		Repository:  newMemoryRepository(),
+		Definitions: DefaultRegistry(),
+		Clock:       fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	for _, test := range []struct {
+		health domain.HealthStatus
+		want   any
+	}{
+		{health: domain.HealthHealthy, want: "ready"},
+		{health: domain.HealthDegraded, want: "degraded"},
+		{health: domain.HealthUnavailable, want: "unavailable"},
+		{health: domain.HealthUnknown, want: nil},
+	} {
+		t.Run(string(test.health), func(t *testing.T) {
+			service.probes = map[string]HealthProbe{
+				"voice_gateway": HealthProbeFunc(func(
+					_ context.Context,
+					_ string,
+				) (domain.HealthStatus, error) {
+					return test.health, nil
+				}),
+			}
+			feature, err := service.CheckHealth(context.Background(), "voice_gateway")
+			if err != nil {
+				t.Fatalf("check health: %v", err)
+			}
+			if len(feature.ReadOnlyMetrics) != 1 {
+				t.Fatalf("voice gateway metric count = %d, want 1", len(feature.ReadOnlyMetrics))
+			}
+			if got := feature.ReadOnlyMetrics[0].Value; got != test.want {
+				t.Fatalf("gateway metric = %#v, want %#v", got, test.want)
+			}
+		})
 	}
 }
 

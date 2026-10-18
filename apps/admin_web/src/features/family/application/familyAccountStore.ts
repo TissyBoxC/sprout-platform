@@ -174,13 +174,11 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   async function load(page = pagination.value.page): Promise<void> {
     const familiesLoadSequence = beginFamiliesLoading()
     error.value = null
-    const modelsLoadSequence = beginModelsLoading()
     modelError.value = null
     try {
       await Promise.all([loadFamilies(page, true), loadModels()])
     } finally {
       finishFamiliesLoading(familiesLoadSequence)
-      finishModelsLoading(modelsLoadSequence)
     }
   }
 
@@ -511,8 +509,11 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   }
 
   async function loadModels(): Promise<void> {
+    if (isLoadingModels.value) {
+      return
+    }
     const loadSequence = beginModelsLoading()
-    const sequence = ++modelsRequestSequence
+    const sequence = modelsRequestSequence
     try {
       const models = await operationsClient.loadAIModels()
       if (sequence === modelsRequestSequence) {

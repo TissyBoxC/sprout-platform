@@ -53,10 +53,7 @@ interface MockFeature {
   updated_at: string
 }
 
-async function useAdminSession(
-  page: Page,
-  permissions: string[] = ['*'],
-): Promise<void> {
+async function useAdminSession(page: Page, permissions: string[] = ['*']): Promise<void> {
   await page.addInitScript(() => {
     globalThis.sessionStorage.setItem('sprout.admin.accessToken', 'test-access-token')
     globalThis.sessionStorage.setItem('sprout.admin.refreshToken', 'test-refresh-token')
@@ -79,7 +76,10 @@ async function useAdminSession(
   })
 }
 
-function jsonResponse(data: unknown, status = 200): {
+function jsonResponse(
+  data: unknown,
+  status = 200,
+): {
   status: number
   contentType: string
   body: string
@@ -201,9 +201,14 @@ async function setupFeatureCenterRoutes(
   updatePayloads: Array<Record<string, unknown>>
   healthChecks: number[]
 }> {
-  const feature: MockFeature = {
+  const feature = {
     ...mockFeature(),
     ...options.feature,
+  } as MockFeature
+  if (options.feature !== undefined && 'read_only_metrics' in options.feature) {
+    if (options.feature.read_only_metrics === undefined) {
+      delete (feature as Partial<MockFeature>).read_only_metrics
+    }
   }
   const updatePayloads: Array<Record<string, unknown>> = []
   const healthChecks: number[] = []
@@ -216,16 +221,13 @@ async function setupFeatureCenterRoutes(
     await route.fulfill(jsonResponse({ features: [feature] }))
   })
 
-  await page.route(
-    /\/api\/v1\/admin\/feature-center\/voice_conversation$/,
-    async (route) => {
-      if (route.request().method() === 'GET') {
-        await route.fulfill(jsonResponse({ feature }))
-        return
-      }
-      await route.continue()
-    },
-  )
+  await page.route(/\/api\/v1\/admin\/feature-center\/voice_conversation$/, async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill(jsonResponse({ feature }))
+      return
+    }
+    await route.continue()
+  })
 
   await page.route(
     /\/api\/v1\/admin\/feature-center\/voice_conversation\/config$/,
@@ -318,9 +320,7 @@ test('shows a merge-and-reload message when the feature configuration version co
   await page.getByLabel('启用语音对话').uncheck()
   await page.getByRole('button', { name: '保存配置' }).click()
 
-  await expect(
-    page.getByText(/这项功能已被其他人更新/),
-  ).toBeVisible()
+  await expect(page.getByText(/这项功能已被其他人更新/)).toBeVisible()
   await expect(page.getByRole('button', { name: '重新加载' })).toBeVisible()
   await expect(page.getByText('语音对话 的配置已保存。')).toHaveCount(0)
 
@@ -331,25 +331,19 @@ test('shows a merge-and-reload message when the feature configuration version co
   await expect(page.getByLabel('最长回复时长')).toHaveValue('36')
 })
 
-test('keeps feature configuration read-only without manage permission', async ({
-  page,
-}) => {
+test('keeps feature configuration read-only without manage permission', async ({ page }) => {
   await useAdminSession(page, ['feature_center.read'])
   await setupFeatureCenterRoutes(page)
 
   await page.goto('/feature-center')
 
-  await expect(
-    page.getByText('你有查看权限，但没有修改这项功能的权限。'),
-  ).toBeVisible()
+  await expect(page.getByText('你有查看权限，但没有修改这项功能的权限。')).toBeVisible()
   await expect(page.getByLabel('启用语音对话')).toBeDisabled()
   await expect(page.getByRole('button', { name: '保存配置' })).toBeDisabled()
   await expect(page.getByRole('button', { name: '检查健康' })).toBeDisabled()
 })
 
-test('runs a feature health check and updates the visible health result', async ({
-  page,
-}) => {
+test('runs a feature health check and updates the visible health result', async ({ page }) => {
   await useAdminSession(page)
   const { healthChecks } = await setupFeatureCenterRoutes(page)
 
@@ -366,24 +360,21 @@ test('runs a feature health check and updates the visible health result', async 
   expect(healthChecks).toHaveLength(1)
 })
 
-test('keeps a planned feature read-only and explains why configuration is unavailable', async ({
-  page,
-}) => {
+test('keeps a readonly feature independent from stale planning status', async ({ page }) => {
   await useAdminSession(page)
   await setupFeatureCenterRoutes(page, {
     feature: {
       status: 'planned',
       enabled: false,
-      read_only_reason: '该功能尚未实现，当前仅展示规划信息。',
+      read_only_reason: '这项功能由部署配置管理。',
     },
   })
 
   await page.goto('/feature-center')
 
-  await expect(page.getByText('规划中', { exact: true }).first()).toBeVisible()
-  await expect(
-    page.getByText('该功能尚未实现，当前仅展示规划信息。'),
-  ).toBeVisible()
+  await expect(page.getByText('规划中', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('这项功能由部署配置管理。')).toBeVisible()
+  await expect(page.getByText('只读', { exact: true })).toBeVisible()
   await expect(page.getByLabel('启用语音对话')).toBeDisabled()
   await expect(page.getByRole('button', { name: '保存配置' })).toBeDisabled()
   await expect(page.getByRole('button', { name: '放弃修改' })).toBeDisabled()
@@ -413,14 +404,41 @@ test('shows an explicit unavailable-health state when no health probe is connect
 
   await page.goto('/feature-center')
 
-  await expect(
-    page.getByText('健康状态：暂未接入健康检查'),
-  ).toBeVisible()
-  await expect(
-    page.getByText('这项功能还没有接入可用的健康检查。'),
-  ).toBeVisible()
+  await expect(page.getByText('健康状态：暂未接入健康检查')).toBeVisible()
+  await expect(page.getByText('这项功能还没有接入可用的健康检查。')).toBeVisible()
   await expect(page.getByText('最后检查：暂未接入')).toBeVisible()
-  await expect(page.getByText('暂未接入', { exact: true })).toBeVisible()
+  await expect(page.getByText('指标暂不可用', { exact: true }).first()).toBeVisible()
+})
+
+test('keeps the metrics section hidden when a feature explicitly reports none', async ({
+  page,
+}) => {
+  await useAdminSession(page)
+  await setupFeatureCenterRoutes(page, {
+    feature: {
+      read_only_metrics: [],
+    },
+  })
+
+  await page.goto('/feature-center')
+
+  await expect(page.getByRole('heading', { name: '运行指标' })).toHaveCount(0)
+  await expect(page.getByText('指标暂不可用')).toHaveCount(0)
+})
+
+test('shows an unavailable metrics state when the service omits the metrics field', async ({
+  page,
+}) => {
+  await useAdminSession(page)
+  await setupFeatureCenterRoutes(page, {
+    feature: {
+      read_only_metrics: undefined,
+    } as Partial<MockFeature>,
+  })
+
+  await page.goto('/feature-center')
+
+  await expect(page.getByText('指标暂不可用', { exact: true }).first()).toBeVisible()
 })
 
 test('adds, preserves, removes, and saves a custom multiselect value when allowed', async ({

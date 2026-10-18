@@ -37,7 +37,6 @@ export interface FeatureCenterSummary {
   healthy: number
   attention: number
   readonly: number
-  planned: number
 }
 
 export const ALL_FEATURE_CATEGORIES = 'all'
@@ -48,9 +47,7 @@ export const ALL_FEATURE_CATEGORIES = 'all'
 /// missing features or merges a partial update response into the list without
 /// normalizing it through the API client first.
 export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
-  const client: AdminFeatureCenterClient = createAdminFeatureCenterClient(
-    createHttpClient(),
-  )
+  const client: AdminFeatureCenterClient = createAdminFeatureCenterClient(createHttpClient())
   const authStore = useAuthStore()
 
   const features = ref<FeatureCenterFeature[]>([])
@@ -95,19 +92,11 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
       healthy: 0,
       attention: 0,
       readonly: 0,
-      planned: 0,
     }
     for (const feature of features.value) {
-      if (feature.status === 'planned') {
-        result.planned += 1
-        continue
-      }
       if (feature.health.status === 'healthy') {
         result.healthy += 1
-      } else if (
-        feature.health.status === 'degraded' ||
-        feature.health.status === 'unhealthy'
-      ) {
+      } else if (feature.health.status === 'degraded' || feature.health.status === 'unhealthy') {
         result.attention += 1
       }
       if (feature.readOnlyReason !== '' || feature.configSchema.length === 0) {
@@ -158,17 +147,12 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
       authStore.canManageFeatureCenter &&
       isDetailReady.value &&
       selectedFeature.value !== null &&
-      selectedFeature.value.status !== 'planned' &&
       selectedFeature.value.readOnlyReason === '' &&
       selectedFeature.value.configSchema.some((field) => field.editable),
   )
 
   const canCheckHealth = computed(
-    () =>
-      authStore.canManageFeatureCenter &&
-      isDetailReady.value &&
-      selectedFeature.value !== null &&
-      selectedFeature.value.status !== 'planned',
+    () => authStore.canManageFeatureCenter && isDetailReady.value && selectedFeature.value !== null,
   )
 
   const isDirty = computed(() => {
@@ -183,16 +167,9 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
     )
   })
 
-  const canSave = computed(
-    () =>
-      canEdit.value &&
-      isDirty.value &&
-      !isSaving.value,
-  )
+  const canSave = computed(() => canEdit.value && isDirty.value && !isSaving.value)
 
-  async function load(
-    options: { preserveSelectedDraft?: boolean } = {},
-  ): Promise<boolean> {
+  async function load(options: { preserveSelectedDraft?: boolean } = {}): Promise<boolean> {
     isLoading.value = true
     error.value = null
     try {
@@ -200,9 +177,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
       features.value = nextFeatures
 
       if (selectedFeatureId.value) {
-        const selected = nextFeatures.find(
-          (feature) => feature.id === selectedFeatureId.value,
-        )
+        const selected = nextFeatures.find((feature) => feature.id === selectedFeatureId.value)
         if (selected !== undefined) {
           if (options.preserveSelectedDraft && selectedFeature.value !== null) {
             const preservedConfig = cloneConfig(draftConfig.value)
@@ -262,8 +237,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
 
     const requestGeneration = ++detailRequestGeneration
     selectedFeatureId.value = normalizedId
-    const listFeature =
-      features.value.find((feature) => feature.id === normalizedId) ?? null
+    const listFeature = features.value.find((feature) => feature.id === normalizedId) ?? null
     if (listFeature !== null) {
       applyFeatureToEditor(listFeature)
     } else {
@@ -353,11 +327,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
       }
     }
 
-    const config = payloadConfig(
-      feature,
-      draftConfig.value,
-      secretDrafts.value,
-    )
+    const config = payloadConfig(feature, draftConfig.value, secretDrafts.value)
     const input: UpdateFeatureConfigInput = {
       values: config,
       expectedVersion: draftVersion.value,
@@ -376,8 +346,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
         lastMessage.value = `${result.feature.name || feature.name} 的配置已保存。`
       } else {
         partialSuccessMessage.value =
-          result.notice.message ||
-          '配置已经保存，但安全记录没有完成。请联系管理员核对。'
+          result.notice.message || '配置已经保存，但安全记录没有完成。请联系管理员核对。'
       }
       return { succeeded: true, conflicted: false, error: null }
     } catch (caught: unknown) {
@@ -411,6 +380,8 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
       if (selectedFeature.value?.id === normalizedId) {
         selectedFeature.value = {
           ...selectedFeature.value,
+          metrics: result.feature.metrics,
+          metricsReported: result.feature.metricsReported,
           health: result.feature.health,
           updatedAt: result.feature.updatedAt,
         }
@@ -420,8 +391,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
         lastMessage.value = `${feature?.name ?? '功能'} 的健康状态已更新。`
       } else {
         partialSuccessMessage.value =
-          result.notice.message ||
-          '健康状态已经更新，但安全记录没有完成。请联系管理员核对。'
+          result.notice.message || '健康状态已经更新，但安全记录没有完成。请联系管理员核对。'
       }
       return true
     } catch (caught: unknown) {
@@ -535,10 +505,7 @@ function cloneConfig(
   config: Record<string, FeatureConfigValue>,
 ): Record<string, FeatureConfigValue> {
   return Object.fromEntries(
-    Object.entries(config).map(([key, value]) => [
-      key,
-      Array.isArray(value) ? [...value] : value,
-    ]),
+    Object.entries(config).map(([key, value]) => [key, Array.isArray(value) ? [...value] : value]),
   )
 }
 
@@ -560,9 +527,7 @@ function sameConfig(
     if (Array.isArray(leftValue) && Array.isArray(rightValue)) {
       return (
         leftValue.length === rightValue.length &&
-        leftValue.every(
-          (value, valueIndex) => value === rightValue.at(valueIndex),
-        )
+        leftValue.every((value, valueIndex) => value === rightValue.at(valueIndex))
       )
     }
     return leftValue === rightValue
@@ -602,14 +567,9 @@ function payloadConfig(
   return config
 }
 
-function looksLikeSecretField(
-  key: string,
-  fields: FeatureConfigField[],
-): boolean {
+function looksLikeSecretField(key: string, fields: FeatureConfigField[]): boolean {
   return (
     fields.some((field) => field.key === key && field.type === 'secret') ||
-    /(?:^|_)(?:secret|token|password|credential|api_key|private_key)(?:$|_)/i.test(
-      key,
-    )
+    /(?:^|_)(?:secret|token|password|credential|api_key|private_key)(?:$|_)/i.test(key)
   )
 }

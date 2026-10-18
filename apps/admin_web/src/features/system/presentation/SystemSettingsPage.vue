@@ -2,20 +2,34 @@
 import { computed, onMounted } from 'vue'
 
 import type { AIGatewayChildPolicy } from '@/api/adminOperations'
+import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
+import { useAuthStore } from '@/features/auth/application/authStore'
 import { useSystemSettingsStore } from '@/features/system/application/systemSettingsStore'
 
 const store = useSystemSettingsStore()
-const selectedDefaultModel = computed({
-  get: () => store.settings.defaultModels[0] ?? '',
-  set: (value: string) => {
-    store.settings.defaultModels = value ? [value] : []
-  },
+const authStore = useAuthStore()
+const canManageSettings = computed(() => authStore.can(ADMIN_PERMISSIONS.settingsManage))
+const defaultModelOptions = computed(() => {
+  const options = [...store.modelOptions]
+  const knownIds = new Set(options.map((model) => model.id))
+  for (const modelId of store.settings.defaultModels) {
+    if (!knownIds.has(modelId)) {
+      options.push({ id: modelId, latencyMs: null })
+    }
+  }
+  return options
 })
 
-const childPolicy = computed<AIGatewayChildPolicy | null>(
-  () => store.childPolicy,
-)
+const childPolicy = computed<AIGatewayChildPolicy | null>(() => store.childPolicy)
 const childPolicyTiers = computed(() => childPolicy.value?.tiers ?? [])
+
+function toggleDefaultModel(modelId: string): void {
+  if (store.settings.defaultModels.includes(modelId)) {
+    store.settings.defaultModels = store.settings.defaultModels.filter((value) => value !== modelId)
+    return
+  }
+  store.settings.defaultModels = [...store.settings.defaultModels, modelId]
+}
 
 onMounted(() => {
   void store.load()
@@ -71,6 +85,7 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
         </p>
       </div>
       <button
+        v-if="canManageSettings"
         type="button"
         class="primary"
         :disabled="!store.isLoaded || store.isSaving"
@@ -104,382 +119,379 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
       <button type="button" class="primary" @click="store.load">重新加载</button>
     </div>
 
-    <form v-else-if="store.isLoaded" class="settings-layout" @submit.prevent="store.save">
-      <section class="settings-section">
-        <div class="section-heading">
-          <div>
-            <p class="section-index">01</p>
-            <h2>AI 服务</h2>
-          </div>
-          <p>决定家长首次开通 AI 服务时的默认额度与可用范围。</p>
-        </div>
-        <div class="field-grid">
-          <label>
-            <span>初始额度</span>
-            <input
-              v-model.number="store.settings.defaultBalanceUsd"
-              type="number"
-              min="0"
-              step="0.01"
-              readonly
-            />
-            <small class="field-hint">
-              与{{ store.defaultBalanceSource || ' AI 服务统一设置' }}保持一致，保存时会同步写入。
-            </small>
-          </label>
-          <label>
-            <span>默认同时对话数量</span>
-            <input
-              v-model.number="store.settings.defaultConcurrencyLimit"
-              type="number"
-              min="1"
-              step="1"
-            />
-          </label>
-          <label class="span-two">
-            <span>默认模型</span>
-            <select v-model="selectedDefaultModel">
-              <option value="">暂时使用 AI 服务推荐模型</option>
-              <option
-                v-for="model in store.modelOptions"
-                :key="model.id"
-                :value="model.id"
-              >
-                {{ model.id }}
-                {{ model.latencyMs === null ? '' : `· ${model.latencyMs} ms` }}
-              </option>
-            </select>
-            <small class="field-hint">
-              读取可用模型后自动选择延迟最低的一项，也可以在列表中调整。
-            </small>
-          </label>
-        </div>
-      </section>
-
-      <section class="settings-section">
-        <div class="section-heading">
-          <div>
-            <p class="section-index">02</p>
-            <h2>账号与注册</h2>
-          </div>
-          <p>控制家长如何注册和登录；关闭注册不会影响已有账号。</p>
-        </div>
-        <div class="toggle-list">
-          <label class="toggle-row">
-            <span>
-              <strong>允许新家长注册</strong>
-              <small>关闭后，家长仍可使用已有账号登录。</small>
-            </span>
-            <input v-model="store.settings.registrationEnabled" type="checkbox" />
-          </label>
-          <label class="toggle-row">
-            <span>
-              <strong>注册时验证手机号</strong>
-              <small>开启后，注册需要完成一次手机号确认。</small>
-            </span>
-            <input v-model="store.settings.smsVerificationEnabled" type="checkbox" />
-          </label>
-          <label class="toggle-row">
-            <span>
-              <strong>允许使用邮箱登录</strong>
-              <small>家长仍可先用手机号登录，再在应用内绑定邮箱。</small>
-            </span>
-            <input v-model="store.settings.emailLoginEnabled" type="checkbox" />
-          </label>
-        </div>
-      </section>
-
-      <section class="settings-section">
-        <div class="section-heading">
-          <div>
-            <p class="section-index">03</p>
-            <h2>内容安全</h2>
-          </div>
-          <p>所有选项默认采用保护儿童安全的严格策略。</p>
-        </div>
-        <div class="toggle-list">
-          <div class="toggle-row readonly-row">
-            <span>
-              <strong>新账号默认开启未成年人模式</strong>
-              <small>平台安全基线固定启用；家长仍可在自己的账号中调整可用范围。</small>
-            </span>
-            <span class="readonly-value">固定开启</span>
-          </div>
-          <label class="toggle-row">
-            <span>
-              <strong>回复发送前进行内容审核</strong>
-              <small>发现不适合儿童的内容时，不会发送到设备。</small>
-            </span>
-            <input
-              v-model="store.settings.outputModerationEnabled"
-              type="checkbox"
-            />
-          </label>
-          <label class="toggle-row">
-            <span>
-              <strong>危机内容提示监护人</strong>
-              <small>涉及自伤或受伤害风险时，提供求助提示并通知监护人。</small>
-            </span>
-            <input
-              v-model="store.settings.crisisInterventionEnabled"
-              type="checkbox"
-            />
-          </label>
-        </div>
-
-        <div class="gateway-policy">
-          <div class="gateway-policy-heading">
+    <form v-else-if="store.isLoaded" @submit.prevent="store.save">
+      <p v-if="!canManageSettings" class="readonly-notice">
+        你当前只有查看权限。可以查看系统设置，但保存和修改控件已锁定。
+      </p>
+      <fieldset class="settings-layout" :disabled="!canManageSettings">
+        <section class="settings-section">
+          <div class="section-heading">
             <div>
-              <h3>儿童安全策略（网关生效）</h3>
-              <p>读取 AI 网关当前实际执行的年龄分级策略，确认每个年龄段都被覆盖。</p>
+              <p class="section-index">01</p>
+              <h2>AI 服务</h2>
             </div>
-            <button
-              type="button"
-              class="text-button"
-              :disabled="store.isChildPolicyLoading"
-              @click="store.reloadChildPolicy"
-            >
-              {{ store.isChildPolicyLoading ? '正在读取…' : '重新读取' }}
-            </button>
+            <p>决定家长首次开通 AI 服务时的默认额度与可用范围。</p>
           </div>
-
-          <div v-if="store.isChildPolicyLoading" class="inline-state">
-            正在读取网关策略…
-          </div>
-          <div v-else-if="store.childPolicyError" class="inline-state error">
-            {{ store.childPolicyError.message }}
-            <button
-              type="button"
-              class="text-button"
-              @click="store.reloadChildPolicy"
-            >
-              重新读取
-            </button>
-          </div>
-          <div v-else-if="!childPolicy || !childPolicy.enabled" class="empty-section">
-            <p>网关尚未启用儿童安全策略，目前不按年龄层限制可用模型与回复长度。</p>
-          </div>
-          <template v-else>
-            <ul class="policy-summary">
-              <li>
-                <span>整体对齐</span>
-                <strong :class="childPolicy.aligned ? 'ok' : 'warn'">
-                  {{ childPolicy.aligned ? '全部年龄段已对齐' : '存在未覆盖的年龄段' }}
-                </strong>
-              </li>
-              <li>
-                <span>缺少策略标识时</span>
-                <strong>
-                  {{
-                    childPolicy.requirePolicyVersion
-                      ? '拒绝请求'
-                      : `回退到 ${ageBandLabel(childPolicy.defaultAgeBand)}`
-                  }}
-                </strong>
-              </li>
-              <li>
-                <span>安全边界注入</span>
-                <strong>{{ childPolicy.injectSafetyBoundary ? '已开启' : '未开启' }}</strong>
-              </li>
-            </ul>
-
-            <ul v-if="childPolicyTiers.length" class="policy-tier-list">
-              <li v-for="tier in childPolicyTiers" :key="tier.ageTier">
-                <div class="policy-tier-header">
-                  <strong>{{ ageTierLabel(tier.ageTier) }}</strong>
-                  <span
-                    class="policy-badge"
-                    :class="tier.bound ? 'ok' : 'warn'"
-                  >
-                    {{ tierBindingLabel(tier.bound, tier.ageBandMissing) }}
+          <div class="field-grid">
+            <label>
+              <span>初始额度</span>
+              <input
+                v-model.number="store.settings.defaultBalanceUsd"
+                type="number"
+                min="0"
+                step="0.01"
+                readonly
+              />
+              <small class="field-hint">
+                与{{ store.defaultBalanceSource || ' AI 服务统一设置' }}保持一致，保存时会同步写入。
+              </small>
+            </label>
+            <label>
+              <span>默认同时对话数量</span>
+              <input
+                v-model.number="store.settings.defaultConcurrencyLimit"
+                type="number"
+                min="1"
+                step="1"
+              />
+            </label>
+            <div class="span-two model-default-field">
+              <span class="field-title">默认模型</span>
+              <div class="model-default-list" role="group" aria-label="默认模型">
+                <label
+                  v-for="model in defaultModelOptions"
+                  :key="model.id"
+                  class="model-default-option"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="store.settings.defaultModels.includes(model.id)"
+                    @change="toggleDefaultModel(model.id)"
+                  />
+                  <span>
+                    <strong>{{ model.id }}</strong>
+                    <small>
+                      {{ model.latencyMs === null ? '延迟待测' : `${model.latencyMs} ms` }}
+                    </small>
                   </span>
-                </div>
-                <p v-if="tier.bound" class="policy-tier-meta">
-                  对应 {{ ageBandLabel(tier.ageBand) }} ·
-                  {{ contentRatingLabel(tier.contentRating) }} ·
-                  单次回复长度上限 {{ tier.maxOutputTokens }} ·
-                  可用模型 {{ tier.allowedModels.length }} 个
+                </label>
+                <p v-if="defaultModelOptions.length === 0" class="field-hint">
+                  暂时没有读取到可用模型，保存时会保留已有选择。
                 </p>
-                <p v-else class="policy-tier-meta">
-                  网关无法为这个年龄段套用安全策略，需要先在网关配置绑定。
-                </p>
-              </li>
-            </ul>
-            <p v-else class="field-hint">网关还没有返回任何年龄段配置。</p>
-          </template>
-        </div>
-      </section>
+              </div>
+              <small class="field-hint">
+                可选择一个或多个默认模型。已有选择会原样保留；只有未设置时才会回退到延迟最低的可用模型。
+              </small>
+            </div>
+          </div>
+        </section>
 
-      <section class="settings-section">
-        <div class="section-heading">
-          <div>
-            <p class="section-index">04</p>
-            <h2>语音对话</h2>
+        <section class="settings-section">
+          <div class="section-heading">
+            <div>
+              <p class="section-index">02</p>
+              <h2>账号与注册</h2>
+            </div>
+            <p>控制家长如何注册和登录；关闭注册不会影响已有账号。</p>
           </div>
-          <p>作为新儿童策略的默认值，家长仍可为每个孩子单独收紧。</p>
-        </div>
-        <div class="field-grid">
-          <label>
-            <span>空闲保持时长</span>
-            <input
-              v-model.number="store.settings.voiceIdleWindowSeconds"
-              type="number"
-              min="2"
-              max="60"
-              step="1"
-            />
-            <small class="field-hint">允许范围 2–60 秒。</small>
-          </label>
-        </div>
-        <div class="toggle-list">
-          <label class="toggle-row">
-            <span>
-              <strong>默认启用连续会话</strong>
-              <small>孩子在空闲窗口内无需再次唤醒即可继续对话。</small>
-            </span>
-            <input
-              v-model="store.settings.continuousConversationEnabled"
-              type="checkbox"
-            />
-          </label>
-          <label class="toggle-row">
-            <span>
-              <strong>允许说话打断播放</strong>
-              <small>孩子开口时可以中断当前回复。</small>
-            </span>
-            <input
-              v-model="store.settings.bargeInEnabled"
-              type="checkbox"
-            />
-          </label>
-          <label class="toggle-row">
-            <span>
-              <strong>启用远场拾音</strong>
-              <small>开启远场降噪与回声处理，提升距离较远时的识别效果。</small>
-            </span>
-            <input
-              v-model="store.settings.farFieldEnabled"
-              type="checkbox"
-            />
-          </label>
-        </div>
-      </section>
+          <div class="toggle-list">
+            <label class="toggle-row">
+              <span>
+                <strong>允许新家长注册</strong>
+                <small>关闭后，家长仍可使用已有账号登录。</small>
+              </span>
+              <input v-model="store.settings.registrationEnabled" type="checkbox" />
+            </label>
+            <label class="toggle-row">
+              <span>
+                <strong>注册时验证手机号</strong>
+                <small>开启后，注册需要完成一次手机号确认。</small>
+              </span>
+              <input v-model="store.settings.smsVerificationEnabled" type="checkbox" />
+            </label>
+            <label class="toggle-row">
+              <span>
+                <strong>允许使用邮箱登录</strong>
+                <small>家长仍可先用手机号登录，再在应用内绑定邮箱。</small>
+              </span>
+              <input v-model="store.settings.emailLoginEnabled" type="checkbox" />
+            </label>
+          </div>
+        </section>
 
-      <section class="settings-section">
-        <div class="section-heading">
-          <div>
-            <p class="section-index">05</p>
-            <h2>更新与发布</h2>
+        <section class="settings-section">
+          <div class="section-heading">
+            <div>
+              <p class="section-index">03</p>
+              <h2>内容安全</h2>
+            </div>
+            <p>所有选项默认采用保护儿童安全的严格策略。</p>
           </div>
-          <p>统一控制应用和设备的更新渠道，减少不同版本之间的兼容问题。</p>
-        </div>
-        <div class="field-grid">
-          <label>
-            <span>默认更新渠道</span>
-            <select v-model="store.settings.releaseChannel">
-              <option value="stable">稳定渠道</option>
-              <option value="beta">测试渠道</option>
-              <option value="canary">内测渠道</option>
-            </select>
-          </label>
-          <label>
-            <span>最低可登录版本</span>
-            <input
-              v-model.trim="store.settings.minimumClientVersion"
-              type="text"
-              placeholder="例如 0.8.0"
-            />
-          </label>
-          <label>
-            <span>必须升级的版本线</span>
-            <input
-              v-model.trim="store.settings.mandatoryUpdateThreshold"
-              type="text"
-              placeholder="低于该版本时必须升级"
-            />
-          </label>
-          <div class="span-two policy-note">
-            <strong>更新包由服务器下发</strong>
-            <p>
-              资源更新和完整安装包都使用登记版本中的安全下载地址与校验值。
-              客户端会先校验文件，再执行资源替换或应用安装。
-            </p>
+          <div class="toggle-list">
+            <div class="toggle-row readonly-row">
+              <span>
+                <strong>新账号默认开启未成年人模式</strong>
+                <small>平台安全基线固定启用；家长仍可在自己的账号中调整可用范围。</small>
+              </span>
+              <span class="readonly-value">固定开启</span>
+            </div>
+            <label class="toggle-row">
+              <span>
+                <strong>回复发送前进行内容审核</strong>
+                <small>发现不适合儿童的内容时，不会发送到设备。</small>
+              </span>
+              <input v-model="store.settings.outputModerationEnabled" type="checkbox" />
+            </label>
+            <label class="toggle-row">
+              <span>
+                <strong>危机内容提示监护人</strong>
+                <small>涉及自伤或受伤害风险时，提供求助提示并通知监护人。</small>
+              </span>
+              <input v-model="store.settings.crisisInterventionEnabled" type="checkbox" />
+            </label>
           </div>
-        </div>
-      </section>
 
-      <section class="settings-section">
-        <div class="section-heading">
-          <div>
-            <p class="section-index">06</p>
-            <h2>隐私与数据</h2>
-          </div>
-          <p>音视频上传默认关闭。需要上传时，应先获得监护人明确同意。</p>
-        </div>
-        <div class="field-grid">
-          <label>
-            <span>语音保留天数</span>
-            <input
-              v-model.number="store.settings.audioRetentionDays"
-              type="number"
-              min="0"
-              step="1"
-            />
-          </label>
-          <label>
-            <span>图像保留天数</span>
-            <input
-              v-model.number="store.settings.imageRetentionDays"
-              type="number"
-              min="0"
-              step="1"
-            />
-          </label>
-          <label>
-            <span>对话记录保留天数</span>
-            <input
-              v-model.number="store.settings.conversationRetentionDays"
-              type="number"
-              min="0"
-              step="1"
-            />
-          </label>
-          <label>
-            <span>使用报告保留天数</span>
-            <input
-              v-model.number="store.settings.usageReportRetentionDays"
-              type="number"
-              min="1"
-              max="3650"
-              step="1"
-            />
-            <small class="field-hint">超出天数的设备与平台使用统计会被自动清理。</small>
-          </label>
-        </div>
-        <div class="toggle-list privacy-toggles">
-          <div class="toggle-row readonly-row">
-            <span>
-              <strong>语音原文件上传</strong>
-              <small>安全策略固定关闭。需要上传时必须先完成监护人逐项授权。</small>
-            </span>
-            <span class="readonly-value">固定关闭</span>
-          </div>
-          <div class="toggle-row readonly-row">
-            <span>
-              <strong>图像原文件上传</strong>
-              <small>安全策略固定关闭。需要上传时必须先完成监护人逐项授权。</small>
-            </span>
-            <span class="readonly-value">固定关闭</span>
-          </div>
-        </div>
-      </section>
+          <div class="gateway-policy">
+            <div class="gateway-policy-heading">
+              <div>
+                <h3>儿童安全策略（网关生效）</h3>
+                <p>读取 AI 网关当前实际执行的年龄分级策略，确认每个年龄段都被覆盖。</p>
+              </div>
+              <button
+                type="button"
+                class="text-button"
+                :disabled="store.isChildPolicyLoading"
+                @click="store.reloadChildPolicy"
+              >
+                {{ store.isChildPolicyLoading ? '正在读取…' : '重新读取' }}
+              </button>
+            </div>
 
-      <div class="form-footer">
-        <p>保存后，新设置会立即用于新的账号、设备和更新任务。</p>
-        <button type="submit" class="primary" :disabled="store.isSaving">
-          {{ store.isSaving ? '正在保存…' : '保存系统设置' }}
-        </button>
-      </div>
+            <div v-if="store.isChildPolicyLoading" class="inline-state">正在读取网关策略…</div>
+            <div v-else-if="store.childPolicyError" class="inline-state error">
+              {{ store.childPolicyError.message }}
+              <button type="button" class="text-button" @click="store.reloadChildPolicy">
+                重新读取
+              </button>
+            </div>
+            <div v-else-if="!childPolicy || !childPolicy.enabled" class="empty-section">
+              <p>网关尚未启用儿童安全策略，目前不按年龄层限制可用模型与回复长度。</p>
+            </div>
+            <template v-else>
+              <ul class="policy-summary">
+                <li>
+                  <span>整体对齐</span>
+                  <strong :class="childPolicy.aligned ? 'ok' : 'warn'">
+                    {{ childPolicy.aligned ? '全部年龄段已对齐' : '存在未覆盖的年龄段' }}
+                  </strong>
+                </li>
+                <li>
+                  <span>缺少策略标识时</span>
+                  <strong>
+                    {{
+                      childPolicy.requirePolicyVersion
+                        ? '拒绝请求'
+                        : `回退到 ${ageBandLabel(childPolicy.defaultAgeBand)}`
+                    }}
+                  </strong>
+                </li>
+                <li>
+                  <span>安全边界注入</span>
+                  <strong>{{ childPolicy.injectSafetyBoundary ? '已开启' : '未开启' }}</strong>
+                </li>
+              </ul>
+
+              <ul v-if="childPolicyTiers.length" class="policy-tier-list">
+                <li v-for="tier in childPolicyTiers" :key="tier.ageTier">
+                  <div class="policy-tier-header">
+                    <strong>{{ ageTierLabel(tier.ageTier) }}</strong>
+                    <span class="policy-badge" :class="tier.bound ? 'ok' : 'warn'">
+                      {{ tierBindingLabel(tier.bound, tier.ageBandMissing) }}
+                    </span>
+                  </div>
+                  <p v-if="tier.bound" class="policy-tier-meta">
+                    对应 {{ ageBandLabel(tier.ageBand) }} ·
+                    {{ contentRatingLabel(tier.contentRating) }} · 单次回复长度上限
+                    {{ tier.maxOutputTokens }} · 可用模型 {{ tier.allowedModels.length }} 个
+                  </p>
+                  <p v-else class="policy-tier-meta">
+                    网关无法为这个年龄段套用安全策略，需要先在网关配置绑定。
+                  </p>
+                </li>
+              </ul>
+              <p v-else class="field-hint">网关还没有返回任何年龄段配置。</p>
+            </template>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="section-heading">
+            <div>
+              <p class="section-index">04</p>
+              <h2>语音对话</h2>
+            </div>
+            <p>作为新儿童策略的默认值，家长仍可为每个孩子单独收紧。</p>
+          </div>
+          <div class="field-grid">
+            <label>
+              <span>空闲保持时长</span>
+              <input
+                v-model.number="store.settings.voiceIdleWindowSeconds"
+                type="number"
+                min="2"
+                max="60"
+                step="1"
+              />
+              <small class="field-hint">允许范围 2–60 秒。</small>
+            </label>
+          </div>
+          <div class="toggle-list">
+            <label class="toggle-row">
+              <span>
+                <strong>默认启用连续会话</strong>
+                <small>孩子在空闲窗口内无需再次唤醒即可继续对话。</small>
+              </span>
+              <input v-model="store.settings.continuousConversationEnabled" type="checkbox" />
+            </label>
+            <label class="toggle-row">
+              <span>
+                <strong>允许说话打断播放</strong>
+                <small>孩子开口时可以中断当前回复。</small>
+              </span>
+              <input v-model="store.settings.bargeInEnabled" type="checkbox" />
+            </label>
+            <label class="toggle-row">
+              <span>
+                <strong>启用远场拾音</strong>
+                <small>开启远场降噪与回声处理，提升距离较远时的识别效果。</small>
+              </span>
+              <input v-model="store.settings.farFieldEnabled" type="checkbox" />
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="section-heading">
+            <div>
+              <p class="section-index">05</p>
+              <h2>更新与发布</h2>
+            </div>
+            <p>统一控制应用和设备的更新渠道，减少不同版本之间的兼容问题。</p>
+          </div>
+          <div class="field-grid">
+            <label>
+              <span>默认更新渠道</span>
+              <select v-model="store.settings.releaseChannel">
+                <option value="stable">稳定渠道</option>
+                <option value="beta">测试渠道</option>
+                <option value="canary">内测渠道</option>
+              </select>
+            </label>
+            <label>
+              <span>最低可登录版本</span>
+              <input
+                v-model.trim="store.settings.minimumClientVersion"
+                type="text"
+                placeholder="例如 0.8.0"
+              />
+            </label>
+            <label>
+              <span>必须升级的版本线</span>
+              <input
+                v-model.trim="store.settings.mandatoryUpdateThreshold"
+                type="text"
+                placeholder="低于该版本时必须升级"
+              />
+            </label>
+            <div class="span-two policy-note">
+              <strong>更新包由服务器下发</strong>
+              <p>
+                资源更新和完整安装包都使用登记版本中的安全下载地址与校验值。
+                客户端会先校验文件，再执行资源替换或应用安装。
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="section-heading">
+            <div>
+              <p class="section-index">06</p>
+              <h2>隐私与数据</h2>
+            </div>
+            <p>音视频上传默认关闭。需要上传时，应先获得监护人明确同意。</p>
+          </div>
+          <div class="field-grid">
+            <label>
+              <span>语音保留天数</span>
+              <input
+                v-model.number="store.settings.audioRetentionDays"
+                type="number"
+                min="0"
+                step="1"
+              />
+            </label>
+            <label>
+              <span>图像保留天数</span>
+              <input
+                v-model.number="store.settings.imageRetentionDays"
+                type="number"
+                min="0"
+                step="1"
+              />
+            </label>
+            <label>
+              <span>对话记录保留天数</span>
+              <input
+                v-model.number="store.settings.conversationRetentionDays"
+                type="number"
+                min="0"
+                step="1"
+              />
+            </label>
+            <label>
+              <span>使用报告保留天数</span>
+              <input
+                v-model.number="store.settings.usageReportRetentionDays"
+                type="number"
+                min="1"
+                max="3650"
+                step="1"
+              />
+              <small class="field-hint">超出天数的设备与平台使用统计会被自动清理。</small>
+            </label>
+          </div>
+          <div class="toggle-list privacy-toggles">
+            <div class="toggle-row readonly-row">
+              <span>
+                <strong>语音原文件上传</strong>
+                <small>安全策略固定关闭。需要上传时必须先完成监护人逐项授权。</small>
+              </span>
+              <span class="readonly-value">固定关闭</span>
+            </div>
+            <div class="toggle-row readonly-row">
+              <span>
+                <strong>图像原文件上传</strong>
+                <small>安全策略固定关闭。需要上传时必须先完成监护人逐项授权。</small>
+              </span>
+              <span class="readonly-value">固定关闭</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="form-footer">
+          <p>
+            {{
+              canManageSettings
+                ? '保存后，新设置会立即用于新的账号、设备和更新任务。'
+                : '当前账号只能查看系统设置。'
+            }}
+          </p>
+          <button v-if="canManageSettings" type="submit" class="primary" :disabled="store.isSaving">
+            {{ store.isSaving ? '正在保存…' : '保存系统设置' }}
+          </button>
+        </div>
+      </fieldset>
     </form>
   </section>
 </template>
@@ -570,6 +582,20 @@ button:disabled {
 .settings-layout {
   display: grid;
   gap: 18px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.readonly-notice {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid #b7def2;
+  border-radius: 14px;
+  background: #f3faff;
+  color: #27627f;
+  line-height: 1.55;
 }
 
 .settings-section {
@@ -655,6 +681,59 @@ button:disabled {
   font-size: 13px;
   font-weight: 400;
   line-height: 1.55;
+}
+
+.model-default-field {
+  display: grid;
+  gap: 8px;
+  color: var(--sprout-text);
+  font-weight: 600;
+}
+
+.field-title {
+  color: var(--sprout-text);
+}
+
+.model-default-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 9px;
+}
+
+.model-default-option {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+  border: 1px solid #f7d9e2;
+  border-radius: 14px;
+  background: #fffbfc;
+  cursor: pointer;
+}
+
+.model-default-option input {
+  width: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  height: 18px;
+  padding: 0;
+  accent-color: #d94f83;
+}
+
+.model-default-option span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.model-default-option strong {
+  overflow-wrap: anywhere;
+}
+
+.model-default-option small {
+  color: var(--sprout-text-muted);
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .notice-message {

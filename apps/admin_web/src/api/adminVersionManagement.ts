@@ -22,6 +22,7 @@ export interface AdminServiceVersion {
   canUpgrade: boolean
   lastCheckedAt: string
   updatedAt: string
+  catalogDependencyMissing?: boolean
 }
 
 export interface ServiceVersionSnapshot {
@@ -147,9 +148,7 @@ function releaseCatalogNotReady(error: unknown): boolean {
   if (!axios.isAxiosError(error)) {
     return false
   }
-  const data = error.response?.data as
-    | { error?: { code?: unknown } }
-    | undefined
+  const data = error.response?.data as { error?: { code?: unknown } } | undefined
   return data?.error?.code === 'release_catalog_not_ready'
 }
 

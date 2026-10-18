@@ -16,12 +16,8 @@ import {
 const store = useFamilyAccountStore()
 const isCreateOpen = ref(false)
 const selectedFamilyId = ref('')
-const profileForm = reactive<UpdateAdminFamilyProfileInput>(
-  emptyProfileForm(),
-)
-const aiForm = reactive<UpdateAdminFamilyAiAccountInput>(
-  emptyAiAccountForm(),
-)
+const profileForm = reactive<UpdateAdminFamilyProfileInput>(emptyProfileForm())
+const aiForm = reactive<UpdateAdminFamilyAiAccountInput>(emptyAiAccountForm())
 const passwordForm = reactive({
   password: '',
   confirmation: '',
@@ -41,34 +37,24 @@ const createForm = reactive<CreateAdminFamilyInput>({
 })
 
 const selectedFamily = computed(
-  () =>
-    store.families.find(
-      (family) => family.parentAccountId === selectedFamilyId.value,
-    ) ?? null,
+  () => store.families.find((family) => family.parentAccountId === selectedFamilyId.value) ?? null,
 )
 const selectedDevices = computed(() =>
-  selectedFamily.value === null
-    ? []
-    : store.devicesFor(selectedFamily.value.parentAccountId),
+  selectedFamily.value === null ? [] : store.devicesFor(selectedFamily.value.parentAccountId),
 )
 const isDevicesLoading = computed(
   () =>
     selectedFamily.value !== null &&
     store.isFamilyDevicesLoading(selectedFamily.value.parentAccountId),
 )
-const deviceError = computed(
-  () =>
-    selectedFamily.value === null
-      ? null
-      : store.deviceErrorFor(selectedFamily.value.parentAccountId),
+const deviceError = computed(() =>
+  selectedFamily.value === null ? null : store.deviceErrorFor(selectedFamily.value.parentAccountId),
 )
 const availableModels = computed(() =>
   modelOptionsForAccount(store.modelOptions, aiForm.availableModels),
 )
 const aiUsage = computed(() =>
-  selectedFamily.value === null
-    ? null
-    : store.aiUsageFor(selectedFamily.value.parentAccountId),
+  selectedFamily.value === null ? null : store.aiUsageFor(selectedFamily.value.parentAccountId),
 )
 const isAIUsageLoading = computed(
   () =>
@@ -161,10 +147,7 @@ async function saveProfile(): Promise<void> {
   if (selectedFamily.value === null) {
     return
   }
-  const result = await store.updateParentProfile(
-    selectedFamily.value.parentAccountId,
-    profileForm,
-  )
+  const result = await store.updateParentProfile(selectedFamily.value.parentAccountId, profileForm)
   handleMutationResult('profile', result, '家长资料已保存。')
 }
 
@@ -295,9 +278,7 @@ async function changePageSize(event: Event): Promise<void> {
 
 function toggleModel(model: AIModelOption): void {
   if (aiForm.availableModels.includes(model.id)) {
-    aiForm.availableModels = aiForm.availableModels.filter(
-      (modelId) => modelId !== model.id,
-    )
+    aiForm.availableModels = aiForm.availableModels.filter((modelId) => modelId !== model.id)
     return
   }
   aiForm.availableModels = [...aiForm.availableModels, model.id]
@@ -381,10 +362,7 @@ function modelOptionsForAccount(
   })
 }
 
-function assignableModels(
-  account: AdminFamilyAiAccount,
-  models: AIModelOption[],
-): string[] {
+function assignableModels(account: AdminFamilyAiAccount, models: AIModelOption[]): string[] {
   const accessible = account.availableModels.length
     ? account.availableModels
     : account.allowedModels
@@ -402,8 +380,7 @@ function fastestModel(models: AIModelOption[]): AIModelOption | null {
     return models.find((model) => model.id) ?? null
   }
   return measuredModels.reduce((fastest, model) =>
-    (model.latencyMs ?? Number.POSITIVE_INFINITY) <
-    (fastest.latencyMs ?? Number.POSITIVE_INFINITY)
+    (model.latencyMs ?? Number.POSITIVE_INFINITY) < (fastest.latencyMs ?? Number.POSITIVE_INFINITY)
       ? model
       : fastest,
   )
@@ -455,11 +432,11 @@ function formatCount(value: number): string {
   return value.toLocaleString('zh-CN')
 }
 
-function formatUsd(value: number): string {
+function formatQuota(value: number): string {
   if (!Number.isFinite(value)) {
-    return '$0.0000'
+    return '0.0000'
   }
-  return `$${value.toFixed(4)}`
+  return value.toFixed(4)
 }
 
 function formatDurationMs(value: number): string {
@@ -533,17 +510,10 @@ function emptySectionFeedback(): {
       <div>
         <p class="eyebrow">家庭与 AI 服务</p>
         <h1>家长账号</h1>
-        <p class="page-description">
-          查看家庭和绑定设备，统一维护家长资料、AI 服务与登录安全。
-        </p>
+        <p class="page-description">查看家庭和绑定设备，统一维护家长资料、AI 服务与登录安全。</p>
       </div>
       <div class="header-actions">
-        <button
-          type="button"
-          class="secondary"
-          :disabled="store.isLoading"
-          @click="store.load()"
-        >
+        <button type="button" class="secondary" :disabled="store.isLoading" @click="store.load()">
           重新加载
         </button>
         <button
@@ -569,11 +539,7 @@ function emptySectionFeedback(): {
     </Transition>
 
     <Transition name="page" mode="out-in">
-      <div
-        v-if="store.isLoading && store.families.length === 0"
-        key="loading"
-        class="state-panel"
-      >
+      <div v-if="store.isLoading && store.families.length === 0" key="loading" class="state-panel">
         <span class="state-spinner" aria-hidden="true"></span>
         正在读取家长账号…
       </div>
@@ -591,18 +557,14 @@ function emptySectionFeedback(): {
         <span class="state-icon" aria-hidden="true">☆</span>
         <div>
           <strong>
-            {{
-              store.pagination.page > 1
-                ? '这一页没有家长账号'
-                : '还没有家长账号'
-            }}
+            {{ store.pagination.page > 1 ? '这一页没有家长账号' : '还没有家长账号' }}
           </strong>
           <p>
-          {{
-            store.pagination.page > 1
-              ? '列表可能刚刚发生变化，请返回上一页或重新加载。'
-              : '新建后，家长可以直接登录应用使用。'
-          }}
+            {{
+              store.pagination.page > 1
+                ? '列表可能刚刚发生变化，请返回上一页或重新加载。'
+                : '新建后，家长可以直接登录应用使用。'
+            }}
           </p>
         </div>
         <div class="empty-actions">
@@ -626,17 +588,13 @@ function emptySectionFeedback(): {
         </div>
         <footer class="pagination pagination-empty">
           <p>
-            第 {{ store.pageStart }}–{{ store.pageEnd }} 个账号，共
-            {{ store.pagination.total }} 个
+            第 {{ store.pageStart }}–{{ store.pageEnd }} 个账号，共 {{ store.pagination.total }} 个
           </p>
           <div class="pagination-controls">
             <label>
               <span>每页</span>
               <select
-                :value="
-                  store.pagination.pendingPageSize ??
-                  store.pagination.pageSize
-                "
+                :value="store.pagination.pendingPageSize ?? store.pagination.pageSize"
                 :disabled="store.isLoading || store.isSubmitting"
                 @change="changePageSize"
               >
@@ -648,27 +606,18 @@ function emptySectionFeedback(): {
             <button
               type="button"
               class="secondary"
-              :disabled="
-                store.isLoading ||
-                store.isSubmitting ||
-                !store.pagination.hasPrevious
-              "
+              :disabled="store.isLoading || store.isSubmitting || !store.pagination.hasPrevious"
               @click="store.goToPage(store.pagination.page - 1)"
             >
               上一页
             </button>
             <span>
-              第 {{ store.pagination.page }} /
-              {{ Math.max(store.pagination.totalPages, 1) }} 页
+              第 {{ store.pagination.page }} / {{ Math.max(store.pagination.totalPages, 1) }} 页
             </span>
             <button
               type="button"
               class="secondary"
-              :disabled="
-                store.isLoading ||
-                store.isSubmitting ||
-                !store.pagination.hasMore
-              "
+              :disabled="store.isLoading || store.isSubmitting || !store.pagination.hasMore"
               @click="store.goToPage(store.pagination.page + 1)"
             >
               下一页
@@ -693,11 +642,7 @@ function emptySectionFeedback(): {
             <tr v-for="family in store.families" :key="family.parentAccountId">
               <td>
                 <span class="parent-name">
-                  {{
-                    family.guardianFamilyName ||
-                    family.parentDisplayName ||
-                    '未填写称呼'
-                  }}
+                  {{ family.guardianFamilyName || family.parentDisplayName || '未填写称呼' }}
                 </span>
                 <span class="parent-meta">{{ family.phone || '未绑定手机号' }}</span>
               </td>
@@ -708,10 +653,7 @@ function emptySectionFeedback(): {
                 </span>
               </td>
               <td>
-                <span
-                  v-if="family.aiAccount"
-                  :class="['status', family.aiAccount.status]"
-                >
+                <span v-if="family.aiAccount" :class="['status', family.aiAccount.status]">
                   {{ statusLabel(family.aiAccount.status) }}
                 </span>
                 <span v-else class="status missing">待开通</span>
@@ -721,15 +663,14 @@ function emptySectionFeedback(): {
               </td>
               <td>
                 <span v-if="family.aiAccount">
-                  {{ family.aiAccount.balanceUsd.toFixed(2) }}
+                  额度 {{ family.aiAccount.balanceUsd.toFixed(2) }}
                 </span>
                 <span v-else>未开通</span>
               </td>
               <td>
                 <span v-if="family.aiAccount">
                   {{
-                    assignableModels(family.aiAccount, store.modelOptions).join('、') ||
-                    '等待模型'
+                    assignableModels(family.aiAccount, store.modelOptions).join('、') || '等待模型'
                   }}
                 </span>
                 <span v-else>未开通</span>
@@ -758,17 +699,13 @@ function emptySectionFeedback(): {
         </table>
         <footer class="pagination">
           <p>
-            第 {{ store.pageStart }}–{{ store.pageEnd }} 个账号，共
-            {{ store.pagination.total }} 个
+            第 {{ store.pageStart }}–{{ store.pageEnd }} 个账号，共 {{ store.pagination.total }} 个
           </p>
           <div class="pagination-controls">
             <label>
               <span>每页</span>
               <select
-                :value="
-                  store.pagination.pendingPageSize ??
-                  store.pagination.pageSize
-                "
+                :value="store.pagination.pendingPageSize ?? store.pagination.pageSize"
                 :disabled="store.isLoading || store.isSubmitting"
                 @change="changePageSize"
               >
@@ -780,27 +717,18 @@ function emptySectionFeedback(): {
             <button
               type="button"
               class="secondary"
-              :disabled="
-                store.isLoading ||
-                store.isSubmitting ||
-                !store.pagination.hasPrevious
-              "
+              :disabled="store.isLoading || store.isSubmitting || !store.pagination.hasPrevious"
               @click="store.goToPage(store.pagination.page - 1)"
             >
               上一页
             </button>
             <span>
-              第 {{ store.pagination.page }} /
-              {{ Math.max(store.pagination.totalPages, 1) }} 页
+              第 {{ store.pagination.page }} / {{ Math.max(store.pagination.totalPages, 1) }} 页
             </span>
             <button
               type="button"
               class="secondary"
-              :disabled="
-                store.isLoading ||
-                store.isSubmitting ||
-                !store.pagination.hasMore
-              "
+              :disabled="store.isLoading || store.isSubmitting || !store.pagination.hasMore"
               @click="store.goToPage(store.pagination.page + 1)"
             >
               下一页
@@ -811,11 +739,7 @@ function emptySectionFeedback(): {
     </Transition>
 
     <Transition name="modal">
-      <div
-        v-if="isCreateOpen"
-        class="dialog-backdrop"
-        @click.self="closeCreate"
-      >
+      <div v-if="isCreateOpen" class="dialog-backdrop" @click.self="closeCreate">
         <form
           class="dialog"
           role="dialog"
@@ -824,9 +748,7 @@ function emptySectionFeedback(): {
           @submit.prevent="createFamily"
         >
           <h2 id="create-family-title">新建家长账号</h2>
-          <p class="dialog-hint">
-            创建后会自动开通家长 AI 服务，家长可直接登录应用。
-          </p>
+          <p class="dialog-hint">创建后会自动开通家长 AI 服务，家长可直接登录应用。</p>
           <label>
             <span>手机号</span>
             <input
@@ -868,11 +790,7 @@ function emptySectionFeedback(): {
             >
               取消
             </button>
-            <button
-              type="submit"
-              class="primary"
-              :disabled="store.isSubmitting || store.isLoading"
-            >
+            <button type="submit" class="primary" :disabled="store.isSubmitting || store.isLoading">
               {{ store.isSubmitting ? '正在创建…' : '创建账号' }}
             </button>
           </div>
@@ -881,11 +799,7 @@ function emptySectionFeedback(): {
     </Transition>
 
     <Transition name="drawer">
-      <div
-        v-if="selectedFamily"
-        class="drawer-backdrop"
-        @click.self="closeFamily"
-      >
+      <div v-if="selectedFamily" class="drawer-backdrop" @click.self="closeFamily">
         <aside
           class="family-drawer"
           role="dialog"
@@ -920,20 +834,12 @@ function emptySectionFeedback(): {
 
           <div class="drawer-body">
             <Transition name="toast">
-              <p
-                v-if="feedbackBySection.profile.message"
-                class="success-message"
-                role="status"
-              >
+              <p v-if="feedbackBySection.profile.message" class="success-message" role="status">
                 {{ feedbackBySection.profile.message }}
               </p>
             </Transition>
             <Transition name="toast">
-              <p
-                v-if="feedbackBySection.profile.error"
-                class="error-message"
-                role="alert"
-              >
+              <p v-if="feedbackBySection.profile.error" class="error-message" role="alert">
                 {{ feedbackBySection.profile.error.message }}
               </p>
             </Transition>
@@ -965,11 +871,7 @@ function emptySectionFeedback(): {
                 </label>
                 <label>
                   <span>宝贝姓名</span>
-                  <input
-                    v-model.trim="profileForm.childNickname"
-                    type="text"
-                    placeholder="可选"
-                  />
+                  <input v-model.trim="profileForm.childNickname" type="text" placeholder="可选" />
                 </label>
                 <label>
                   <span>宝贝生日</span>
@@ -981,9 +883,7 @@ function emptySectionFeedback(): {
                   type="button"
                   class="primary"
                   :disabled="
-                    store.isUpdatingProfile ||
-                    store.isUpdatingAiAccount ||
-                    store.isSubmitting
+                    store.isUpdatingProfile || store.isUpdatingAiAccount || store.isSubmitting
                   "
                   @click="saveProfile"
                 >
@@ -1008,20 +908,12 @@ function emptySectionFeedback(): {
 
               <div v-if="selectedFamily.aiAccount" class="ai-editor">
                 <Transition name="toast">
-                  <p
-                    v-if="feedbackBySection.ai.message"
-                    class="success-message"
-                    role="status"
-                  >
+                  <p v-if="feedbackBySection.ai.message" class="success-message" role="status">
                     {{ feedbackBySection.ai.message }}
                   </p>
                 </Transition>
                 <Transition name="toast">
-                  <p
-                    v-if="feedbackBySection.ai.error"
-                    class="error-message"
-                    role="alert"
-                  >
+                  <p v-if="feedbackBySection.ai.error" class="error-message" role="alert">
                     {{ feedbackBySection.ai.error.message }}
                   </p>
                 </Transition>
@@ -1035,20 +927,11 @@ function emptySectionFeedback(): {
                   </label>
                   <label>
                     <span>剩余额度</span>
-                    <input
-                      v-model.number="aiForm.balanceUsd"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                    />
+                    <input v-model.number="aiForm.balanceUsd" type="number" min="0" step="0.01" />
                   </label>
                   <label>
                     <span>同时对话数量</span>
-                    <input
-                      v-model.number="aiForm.concurrencyLimit"
-                      type="number"
-                      min="1"
-                    />
+                    <input v-model.number="aiForm.concurrencyLimit" type="number" min="1" />
                   </label>
                 </div>
 
@@ -1056,9 +939,7 @@ function emptySectionFeedback(): {
                   <div class="model-picker-heading">
                     <div>
                       <span class="field-label">可分配模型</span>
-                      <p class="field-hint">
-                        家长只能使用勾选的模型，列表按当前延迟从低到高排列。
-                      </p>
+                      <p class="field-hint">家长只能使用勾选的模型，列表按当前延迟从低到高排列。</p>
                     </div>
                     <div class="model-picker-actions">
                       <button type="button" class="text-button" @click="selectAllModels">
@@ -1104,15 +985,11 @@ function emptySectionFeedback(): {
                     type="button"
                     class="primary"
                     :disabled="
-                      store.isUpdatingAiAccount ||
-                      store.isUpdatingProfile ||
-                      store.isSubmitting
+                      store.isUpdatingAiAccount || store.isUpdatingProfile || store.isSubmitting
                     "
                     @click="saveAiAccount"
                   >
-                    {{
-                      store.isUpdatingAiAccount ? '正在保存…' : '保存 AI 设置'
-                    }}
+                    {{ store.isUpdatingAiAccount ? '正在保存…' : '保存 AI 设置' }}
                   </button>
                 </div>
               </div>
@@ -1123,9 +1000,7 @@ function emptySectionFeedback(): {
                   type="button"
                   class="primary"
                   :disabled="
-                    store.isSubmitting ||
-                    store.isUpdatingAiAccount ||
-                    store.isUpdatingProfile
+                    store.isSubmitting || store.isUpdatingAiAccount || store.isUpdatingProfile
                   "
                   @click="retryAiAccount"
                 >
@@ -1144,7 +1019,7 @@ function emptySectionFeedback(): {
               <div class="section-heading">
                 <div>
                   <h3>AI 用量核对</h3>
-                  <p>与网关用量对账，默认显示最近 24 小时的请求与费用。</p>
+                  <p>与网关用量对账，默认显示最近 24 小时的请求与额度消耗。</p>
                 </div>
                 <button
                   type="button"
@@ -1156,16 +1031,10 @@ function emptySectionFeedback(): {
                 </button>
               </div>
 
-              <div v-if="isAIUsageLoading" class="inline-state">
-                正在读取 AI 用量…
-              </div>
+              <div v-if="isAIUsageLoading" class="inline-state">正在读取 AI 用量…</div>
               <div v-else-if="aiUsageError" class="inline-state error">
                 {{ aiUsageError.message }}
-                <button
-                  type="button"
-                  class="text-button"
-                  @click="reloadAIUsage"
-                >
+                <button type="button" class="text-button" @click="reloadAIUsage">
                   重新加载用量
                 </button>
               </div>
@@ -1196,12 +1065,12 @@ function emptySectionFeedback(): {
                     <dd>{{ formatCount(aiUsage.totalTokens) }}</dd>
                   </div>
                   <div>
-                    <dt>预估费用</dt>
-                    <dd>{{ formatUsd(aiUsage.costUsd) }}</dd>
+                    <dt>预估额度消耗</dt>
+                    <dd>{{ formatQuota(aiUsage.costUsd) }}</dd>
                   </div>
                   <div>
-                    <dt>实际费用</dt>
-                    <dd>{{ formatUsd(aiUsage.actualCostUsd) }}</dd>
+                    <dt>实际额度消耗</dt>
+                    <dd>{{ formatQuota(aiUsage.actualCostUsd) }}</dd>
                   </div>
                   <div>
                     <dt>平均耗时</dt>
@@ -1210,18 +1079,15 @@ function emptySectionFeedback(): {
                 </dl>
 
                 <ul v-if="aiUsage.models.length" class="usage-model-list">
-                  <li
-                    v-for="model in aiUsage.models"
-                    :key="model.model"
-                  >
+                  <li v-for="model in aiUsage.models" :key="model.model">
                     <div class="usage-model-header">
                       <strong>{{ model.model }}</strong>
                       <span>{{ formatCount(model.requests) }} 次</span>
                     </div>
                     <p class="usage-model-meta">
-                      Token {{ formatCount(model.totalTokens) }} ·
-                      预估 {{ formatUsd(model.costUsd) }} ·
-                      实际 {{ formatUsd(model.actualCostUsd) }}
+                      Token {{ formatCount(model.totalTokens) }} · 预估额度消耗
+                      {{ formatQuota(model.costUsd) }} · 实际额度消耗
+                      {{ formatQuota(model.actualCostUsd) }}
                     </p>
                   </li>
                 </ul>
@@ -1245,9 +1111,7 @@ function emptySectionFeedback(): {
                 </button>
               </div>
 
-              <div v-if="isDevicesLoading" class="inline-state">
-                正在读取绑定设备…
-              </div>
+              <div v-if="isDevicesLoading" class="inline-state">正在读取绑定设备…</div>
               <div v-else-if="deviceError" class="inline-state error">
                 {{ deviceError.message }}
                 <button type="button" class="text-button" @click="reloadDevices">
@@ -1261,12 +1125,7 @@ function emptySectionFeedback(): {
                 <li v-for="device in selectedDevices" :key="device.deviceId">
                   <div class="device-list-header">
                     <strong>{{ device.deviceName || '未命名设备' }}</strong>
-                    <span
-                      :class="[
-                        'status',
-                        deviceStatusClass(device.runtime?.isOnline ?? null),
-                      ]"
-                    >
+                    <span :class="['status', deviceStatusClass(device.runtime?.isOnline ?? null)]">
                       {{ deviceStatusLabel(device.runtime?.isOnline ?? null) }}
                     </span>
                   </div>
@@ -1278,8 +1137,8 @@ function emptySectionFeedback(): {
                     {{ device.capabilities.map(capabilityLabel).join('、') }}
                   </p>
                   <p class="device-meta">
-                    绑定于 {{ formatDate(device.boundAt) }} ·
-                    最近上报 {{ formatTime(device.runtime?.receivedAt ?? '') }}
+                    绑定于 {{ formatDate(device.boundAt) }} · 最近上报
+                    {{ formatTime(device.runtime?.receivedAt ?? '') }}
                   </p>
                 </li>
               </ul>
@@ -1314,19 +1173,14 @@ function emptySectionFeedback(): {
               <p v-if="feedbackBySection.password.message" class="success-message">
                 {{ feedbackBySection.password.message }}
               </p>
-              <p
-                v-if="feedbackBySection.password.error"
-                class="error-message"
-              >
+              <p v-if="feedbackBySection.password.error" class="error-message">
                 {{ feedbackBySection.password.error.message }}
               </p>
             </section>
           </div>
 
           <footer class="drawer-footer">
-            <button type="button" class="secondary" @click="closeFamily">
-              关闭
-            </button>
+            <button type="button" class="secondary" @click="closeFamily">关闭</button>
           </footer>
         </aside>
       </div>
@@ -1346,9 +1200,7 @@ function emptySectionFeedback(): {
           @submit.prevent="resetPassword"
         >
           <h2 id="reset-password-title">重置家长密码</h2>
-          <p class="dialog-hint">
-            重置后该家长需要重新登录。请通过可靠方式把新密码交给家长。
-          </p>
+          <p class="dialog-hint">重置后该家长需要重新登录。请通过可靠方式把新密码交给家长。</p>
           <label>
             <span>新密码</span>
             <input
@@ -1775,9 +1627,7 @@ tbody tr:hover {
   height: 100%;
   grid-template-rows: auto minmax(0, 1fr) auto;
   border-left: 1px solid #f0bdcb;
-  background:
-    radial-gradient(circle at 96% 2%, rgb(255 224 102 / 14%), transparent 16rem),
-    #fffbfc;
+  background: radial-gradient(circle at 96% 2%, rgb(255 224 102 / 14%), transparent 16rem), #fffbfc;
   box-shadow: -24px 0 64px rgb(74 46 59 / 18%);
 }
 

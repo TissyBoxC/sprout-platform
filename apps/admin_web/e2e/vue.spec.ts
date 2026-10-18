@@ -1,6 +1,35 @@
 import { test, expect, type Page } from '@playwright/test'
 
 async function useAdminSession(page: Page): Promise<void> {
+  await useAdminSessionWithPermissions(page, [
+    'admins.read',
+    'admins.manage',
+    'devices.read',
+    'devices.manage',
+    'family.read',
+    'family.manage',
+    'ai_accounts.read',
+    'ai_accounts.manage',
+    'ota.read',
+    'ota.manage',
+    'storage.read',
+    'storage.manage',
+    'content.read',
+    'content.review',
+    'service.read',
+    'service.upgrade',
+    'feature_center.read',
+    'feature_center.manage',
+    'settings.read',
+    'settings.manage',
+    'notifications.read',
+    'notifications.manage',
+    'stats.read',
+    'audit.read',
+  ])
+}
+
+async function useAdminSessionWithPermissions(page: Page, permissions: string[]): Promise<void> {
   await page.addInitScript(() => {
     globalThis.sessionStorage.setItem('sprout.admin.accessToken', 'test-access-token')
     globalThis.sessionStorage.setItem('sprout.admin.refreshToken', 'test-refresh-token')
@@ -15,32 +44,7 @@ async function useAdminSession(page: Page): Promise<void> {
             email: 'admin@sprout.local',
             display_name: '管理员',
             role: 'admin',
-            admin_permissions: [
-              'admins.read',
-              'admins.manage',
-              'devices.read',
-              'devices.manage',
-              'family.read',
-              'family.manage',
-              'ai_accounts.read',
-              'ai_accounts.manage',
-              'ota.read',
-              'ota.manage',
-              'storage.read',
-              'storage.manage',
-              'content.read',
-              'content.review',
-              'service.read',
-              'service.upgrade',
-              'feature_center.read',
-              'feature_center.manage',
-              'settings.read',
-              'settings.manage',
-              'notifications.read',
-              'notifications.manage',
-              'stats.read',
-              'audit.read',
-            ],
+            admin_permissions: permissions,
           },
         },
       }),
@@ -92,7 +96,7 @@ test('visits the app root url', async ({ page }) => {
 
 test('logout clears cached user-domain stores before the next session', async ({ page }) => {
   await useAdminSession(page)
-  await page.route('**/api/v1/admin/families', async (route) => {
+  await page.route('**/api/v1/admin/families**', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -104,6 +108,10 @@ test('logout clears cached user-domain stores before the next session', async ({
               phone: '13800000000',
             },
           ],
+          total: 1,
+          page: 1,
+          page_size: 20,
+          total_pages: 1,
         },
       }),
     })
@@ -128,7 +136,7 @@ test('logout clears cached user-domain stores before the next session', async ({
     globalThis.sessionStorage.setItem('sprout.admin.refreshToken', 'next-refresh-token')
   })
   let familyRequests = 0
-  await page.route('**/api/v1/admin/families', async (route) => {
+  await page.route('**/api/v1/admin/families**', async (route) => {
     familyRequests += 1
     await route.fulfill({
       contentType: 'application/json',
@@ -167,12 +175,7 @@ test('ignores a late feature response after another feature is selected', async 
     'conversation',
     '2026-10-18T09:00:00Z',
   )
-  const beta = featurePayload(
-    'feature_beta',
-    '当前内容功能',
-    'content',
-    '2026-10-18T10:00:00Z',
-  )
+  const beta = featurePayload('feature_beta', '当前内容功能', 'content', '2026-10-18T10:00:00Z')
   await page.route(/\/api\/v1\/admin\/feature-center$/, async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -260,7 +263,7 @@ test('debounces notification search and preserves visible support errors', async
       }),
     })
   })
-  await page.route('**/api/v1/admin/families', async (route) => {
+  await page.route('**/api/v1/admin/families**', async (route) => {
     await route.fulfill({
       status: 503,
       contentType: 'application/json',
@@ -284,11 +287,12 @@ test('debounces notification search and preserves visible support errors', async
   expect(queries).toEqual(['语音'])
 
   await page.getByRole('button', { name: '发布通知' }).click()
-  await page.getByRole('button', { name: '指定家长' }).click()
+  await page
+    .getByRole('group', { name: '接收对象' })
+    .getByRole('button', { name: '指定家长' })
+    .click()
   const composer = page.getByRole('dialog', { name: '发布通知' })
-  await expect(
-    composer.getByText(/服务暂时不可用，请稍后重试/),
-  ).toBeVisible()
+  await expect(composer.getByText(/服务暂时不可用，请稍后重试/)).toBeVisible()
   await expect(page.getByRole('button', { name: '重新读取家长' })).toBeVisible()
 })
 
@@ -296,11 +300,7 @@ test('keeps the newest device OTA release selected after an older detail arrives
   page,
 }) => {
   await useAdminSession(page)
-  const release = (
-    releaseId: string,
-    firmwareVersion: string,
-    signatureKeyId: string,
-  ) => ({
+  const release = (releaseId: string, firmwareVersion: string, signatureKeyId: string) => ({
     release_id: releaseId,
     firmware_version: firmwareVersion,
     hardware_revision: 'rev-a',
@@ -475,9 +475,7 @@ test('keeps the newest content package open after an older detail arrives late',
 
   await page.goto('/content')
   await page.waitForFunction(() => {
-    return (
-      document.querySelectorAll('table tbody tr button').length >= 2
-    )
+    return document.querySelectorAll('table tbody tr button').length >= 2
   })
   await page.evaluate(() => {
     const rows = document.querySelectorAll<HTMLTableRowElement>('table tbody tr')
@@ -582,9 +580,11 @@ test('keeps the newest service operation selected after an older detail arrives 
 
   await page.goto('/services')
   await page.waitForFunction(() => {
-    return Array.from(document.querySelectorAll('button')).filter(
-      (button) => button.textContent?.trim() === '查看进度',
-    ).length >= 2
+    return (
+      Array.from(document.querySelectorAll('button')).filter(
+        (button) => button.textContent?.trim() === '查看进度',
+      ).length >= 2
+    )
   })
   await page.evaluate(() => {
     const progressButtons = Array.from(document.querySelectorAll('button')).filter(
@@ -709,11 +709,158 @@ test('uses the fastest available model and the provider default balance', async 
   await page.goto('/settings')
 
   await expect(page.getByLabel('初始额度')).toHaveValue('6.5')
-  await expect(page.getByLabel('默认模型')).toHaveValue('fast-model')
+  await expect(page.getByRole('checkbox', { name: /fast-model/ })).toBeChecked()
+  await expect(page.getByRole('checkbox', { name: /slow-model/ })).not.toBeChecked()
+})
+
+test('keeps the saved default models when another setting is saved', async ({ page }) => {
+  await useAdminSession(page)
+
+  let savedDefaultModels: string[] = []
+  await page.route('**/api/v1/admin/settings', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            version: 4,
+            settings: {
+              ai: {
+                default_balance_usd: 10,
+                default_concurrency: 3,
+                default_models: ['slow-model', 'legacy-model'],
+              },
+              account: {},
+              safety: {},
+              voice: {},
+              update: {},
+              retention: {},
+            },
+          },
+        }),
+      })
+      return
+    }
+    const payload = route.request().postDataJSON() as {
+      settings: { ai: { default_models: string[] } }
+      expected_version: number
+    }
+    savedDefaultModels = payload.settings.ai.default_models
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          version: 5,
+          settings: {
+            ...payload.settings,
+          },
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/ai-account-defaults', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          default_balance_usd: 10,
+          default_concurrency: 3,
+          source: 'sub2api',
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/ai-models', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          models: [
+            { id: 'slow-model', latency_ms: 500 },
+            { id: 'fast-model', latency_ms: 80 },
+          ],
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/ai-gateway/child-policy', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: {} }),
+    })
+  })
+
+  await page.goto('/settings')
+
+  await expect(page.getByRole('checkbox', { name: /slow-model/ })).toBeChecked()
+  await expect(page.getByRole('checkbox', { name: /legacy-model/ })).toBeChecked()
+  await expect(page.getByRole('checkbox', { name: /fast-model/ })).not.toBeChecked()
+
+  await page.getByLabel('默认同时对话数量').fill('7')
+  await page.locator('header').getByRole('button', { name: '保存系统设置' }).click()
+
+  await expect(page.getByText('系统设置已保存。')).toBeVisible()
+  expect(savedDefaultModels).toEqual(['slow-model', 'legacy-model'])
+  await expect(page.getByRole('checkbox', { name: /slow-model/ })).toBeChecked()
+  await expect(page.getByRole('checkbox', { name: /legacy-model/ })).toBeChecked()
+  await expect(page.getByRole('checkbox', { name: /fast-model/ })).not.toBeChecked()
+})
+
+test('keeps system settings writable only for settings.manage', async ({ page }) => {
+  await useAdminSessionWithPermissions(page, ['settings.read'])
+
+  let writeRequests = 0
+  await page.route('**/api/v1/admin/settings', async (route) => {
+    if (route.request().method() !== 'GET') {
+      writeRequests += 1
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          version: 3,
+          settings: {
+            ai: {
+              default_balance_usd: 10,
+              default_concurrency: 4,
+              default_models: ['gpt-safe'],
+            },
+            account: {},
+            safety: {},
+            voice: {},
+            update: {},
+            retention: {},
+          },
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/ai/**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: {} }),
+    })
+  })
+
+  await page.goto('/settings')
+
+  await expect(
+    page.getByText('你当前只有查看权限。可以查看系统设置，但保存和修改控件已锁定。'),
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: '保存系统设置' })).toHaveCount(0)
+  await expect(page.getByLabel('默认同时对话数量')).toBeDisabled()
+  await expect(page.getByRole('checkbox', { name: /gpt-safe/ })).toBeDisabled()
+  expect(writeRequests).toBe(0)
 })
 
 test('manages a family AI account, profile, password, and bound devices', async ({ page }) => {
   await useAdminSession(page)
+  const modelRequests: string[] = []
+  page.on('request', (request) => {
+    if (request.url().includes('/api/v1/admin/ai-models')) {
+      modelRequests.push(request.url())
+    }
+  })
 
   const family = {
     parent_account_id: 'parent-1',
@@ -737,10 +884,18 @@ test('manages a family AI account, profile, password, and bound devices', async 
     },
   }
 
-  await page.route('**/api/v1/admin/families', async (route) => {
+  await page.route('**/api/v1/admin/families**', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ data: { accounts: [family] } }),
+      body: JSON.stringify({
+        data: {
+          accounts: [family],
+          total: 1,
+          page: 1,
+          page_size: 20,
+          total_pages: 1,
+        },
+      }),
     })
   })
   await page.route('**/api/v1/admin/ai-models', async (route) => {
@@ -866,7 +1021,8 @@ test('manages a family AI account, profile, password, and bound devices', async 
   await page.goto('/families')
 
   await expect(page.getByRole('heading', { name: '家长账号' })).toBeVisible()
-  await expect(page.getByText('0.00', { exact: true }).first()).toBeVisible()
+  const familyRow = page.getByRole('row', { name: /王.*13273330085/ })
+  await expect(familyRow.getByText(/额度\s+0\.00/)).toBeVisible()
 
   await page.getByRole('button', { name: '管理' }).click()
 
@@ -876,9 +1032,12 @@ test('manages a family AI account, profile, password, and bound devices', async 
   await expect(page.getByRole('heading', { name: 'AI 用量核对' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '绑定设备' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '账号安全' })).toBeVisible()
+  await expect(page.getByText('正在读取可用模型…')).toHaveCount(0)
+  expect(modelRequests).not.toHaveLength(0)
   await expect(page.getByText('默认最快')).toBeVisible()
   await expect(page.getByText('12 次')).toBeVisible()
-  await expect(page.getByText('$0.4500').first()).toBeVisible()
+  await expect(page.getByText('0.4500', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText(/\$|美元/)).toHaveCount(0)
   await expect(page.getByText('初芽一号')).toBeVisible()
   await expect(page.getByText('在线', { exact: true })).toBeVisible()
 
@@ -913,11 +1072,81 @@ test('manages a family AI account, profile, password, and bound devices', async 
   expect(drawerBox?.width).toBeLessThanOrEqual(390)
 
   await page.getByRole('button', { name: '关闭', exact: true }).click()
-  await expect(page.getByText('12.50', { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('row', { name: /李.*13273330085/ })).toContainText(
+    '额度 12.50',
+  )
 
   await page.getByRole('button', { name: '管理' }).click()
   await expect(page.getByLabel('剩余额度')).toHaveValue('12.5')
   await expect(page.getByLabel('家长称呼')).toHaveValue('更新后的家长')
+})
+
+test('keeps download controls hidden and readonly without storage.manage', async ({ page }) => {
+  await useAdminSessionWithPermissions(page, ['storage.read'])
+
+  let writeRequests = 0
+  await page.route('**/api/v1/admin/storage/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (request.method() !== 'GET') {
+      writeRequests += 1
+    }
+    if (path.endsWith('/storage/files')) {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            files: [
+              {
+                id: 'file-1',
+                name: '初芽-0.23.0.apk',
+                relative_path: '0.23.0/stable/android/apk/初芽-0.23.0.apk',
+                directory: '0.23.0/stable/android/apk',
+                size_bytes: 1024,
+                modified_at: '2026-10-18T09:00:00Z',
+                sha256: 'a'.repeat(64),
+                version: '0.23.0',
+                kind: 'client',
+                platform: 'android',
+                download_url: 'https://download.example.test/0.23.0/app.apk',
+                is_indexed: true,
+              },
+            ],
+          },
+        }),
+      })
+      return
+    }
+    if (path.endsWith('/storage/index/status')) {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            is_available: true,
+            refreshed_at: '2026-10-18T09:05:00Z',
+            indexed_file_count: 1,
+            pending_file_count: 0,
+          },
+        }),
+      })
+      return
+    }
+    await route.fulfill({ status: 404 })
+  })
+
+  await page.goto('/downloads')
+
+  await expect(
+    page.getByText(
+      '你当前只有查看权限。可以查看下载服务器上的文件，但不能上传、删除或刷新发布索引。',
+    ),
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: '上传文件' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '刷新发布索引' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '删除' })).toHaveCount(0)
+  await expect(page.getByText('只读', { exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: '前往内容发布' })).toHaveCount(0)
+  expect(writeRequests).toBe(0)
 })
 
 test('fills the current version and the release artifact automatically', async ({ page }) => {
@@ -946,7 +1175,7 @@ test('fills the current version and the release artifact automatically', async (
   })
 
   await page.goto('/releases')
-  await page.getByRole('button', { name: '登记新版本' }).click()
+  await page.locator('header').getByRole('button', { name: '登记新版本' }).click()
   await expect(page.getByLabel('版本号')).toHaveValue(/\d+\.\d+\.\d+/)
   await page.getByRole('button', { name: '自动查找更新文件' }).click()
 
@@ -1134,12 +1363,18 @@ test('checks and upgrades brand services from the service version page', async (
 
   await page.route('**/api/v1/admin/service-versions', async (route) => {
     serviceSnapshotRequests += 1
+    const checkedAt =
+      serviceSnapshotRequests === 1 ? '2026-10-03T10:00:00Z' : '2026-10-03T10:01:00Z'
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
         data: {
-          services: serviceVersions,
-          checked_at: '2026-10-03T10:00:00Z',
+          services: serviceVersions.map((service) => ({
+            ...service,
+            last_checked_at: checkedAt,
+            updated_at: checkedAt,
+          })),
+          checked_at: checkedAt,
           all_up_to_date: false,
           execution_enabled: true,
         },
@@ -1225,7 +1460,7 @@ test('checks and upgrades brand services from the service version page', async (
   await expect(page.getByRole('heading', { name: '服务版本' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '全部服务' })).toBeVisible()
   await expect(page.locator('table')).toHaveCount(1)
-  await expect(page.locator('table tbody tr')).toHaveCount(9)
+  await expect(page.locator('table tbody tr')).toHaveCount(10)
   await expect(page.locator('.time-value')).toHaveText(/2026/)
   await expect(page.getByText('只读服务')).toHaveCount(0)
   await expect(page.getByText('管理端自身', { exact: true })).toBeVisible()
@@ -1257,12 +1492,13 @@ test('checks and upgrades brand services from the service version page', async (
   await expect(page.getByRole('button', { name: '查看进度' })).toBeVisible()
 })
 
-test('marks the previous service snapshot when a version check does not complete', async ({
+test('keeps the previous service snapshot when polling times out and retries successfully', async ({
   page,
 }) => {
   await useAdminSession(page)
 
   let checkAttempts = 0
+  let staleLoadsRemaining = 0
   let checkedSnapshot = {
     checked_at: '2026-10-16T10:00:00Z',
     services: [
@@ -1286,12 +1522,32 @@ test('marks the previous service snapshot when a version check does not complete
   }
 
   await page.route('**/api/v1/admin/service-versions', async (route) => {
+    const responseSnapshot =
+      staleLoadsRemaining > 0
+        ? {
+            checked_at: '2026-10-16T10:00:00Z',
+            services: checkedSnapshot.services.map((service) => ({
+              ...service,
+              current_version: '0.22.0',
+              latest_version: '0.22.1',
+              status: 'outdated',
+              can_upgrade: true,
+              last_checked_at: '2026-10-16T10:00:00Z',
+              updated_at: '2026-10-16T10:00:00Z',
+            })),
+          }
+        : checkedSnapshot
+    if (staleLoadsRemaining > 0) {
+      staleLoadsRemaining -= 1
+    }
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
         data: {
-          ...checkedSnapshot,
-          all_up_to_date: checkedSnapshot.services.every((service) => service.status === 'current'),
+          ...responseSnapshot,
+          all_up_to_date: responseSnapshot.services.every(
+            (service) => service.status === 'current',
+          ),
         },
       }),
     })
@@ -1299,15 +1555,23 @@ test('marks the previous service snapshot when a version check does not complete
   await page.route('**/api/v1/admin/service-versions/check', async (route) => {
     checkAttempts += 1
     if (checkAttempts === 1) {
+      staleLoadsRemaining = 10
       await route.fulfill({
-        status: 503,
         contentType: 'application/json',
         body: JSON.stringify({
-          data: null,
-          error: {
-            code: 'service_unavailable',
-            message: '版本检查暂时不可用',
-            retryable: true,
+          data: {
+            checked_at: '2026-10-16T10:00:00Z',
+            services: checkedSnapshot.services.map((service) => ({
+              ...service,
+              current_version: '0.22.0',
+              latest_version: '0.22.1',
+              status: 'outdated',
+              can_upgrade: true,
+              last_checked_at: '2026-10-16T10:00:00Z',
+              updated_at: '2026-10-16T10:00:00Z',
+            })),
+            all_up_to_date: false,
+            execution_enabled: true,
           },
         }),
       })
@@ -1341,17 +1605,18 @@ test('marks the previous service snapshot when a version check does not complete
       body: JSON.stringify({
         data: {
           service: 'admin_web',
-          releases: checkedSnapshot.services[0].status === 'current'
-            ? []
-            : [
-                {
-                  version: '0.22.1',
-                  release_url: '',
-                  published_at: '2026-10-16T10:00:00Z',
-                  is_current: false,
-                  is_latest: true,
-                },
-              ],
+          releases:
+            checkedSnapshot.services[0].status === 'current'
+              ? []
+              : [
+                  {
+                    version: '0.22.1',
+                    release_url: '',
+                    published_at: '2026-10-16T10:00:00Z',
+                    is_current: false,
+                    is_latest: true,
+                  },
+                ],
         },
       }),
     })
@@ -1368,23 +1633,18 @@ test('marks the previous service snapshot when a version check does not complete
 
   await page.getByRole('button', { name: '检查更新' }).click()
 
-  await expect(page.getByRole('alert')).toContainText('检查结果未刷新')
-  await expect(
-    page.getByText('本次检查未完成，当前显示的是上次检查结果，请稍后重试。'),
-  ).toBeVisible()
+  await expect(page.getByRole('alert')).toContainText('检查尚未返回')
+  await expect(page.getByText('检查尚未返回，正在显示上次检查结果。请稍后重新检查。')).toBeVisible()
   await expect(page.getByText('0.22.1', { exact: true }).first()).toBeVisible()
   await expect(page.getByRole('button', { name: '升级到 0.22.1' })).toBeDisabled()
-  await expect(
-    page.getByText('所有受管服务均已是最新版本，目前没有可执行的升级。'),
-  ).toHaveCount(0)
+  await expect(page.getByText('所有受管服务均已是最新版本，目前没有可执行的升级。')).toHaveCount(0)
+  await expect(page.getByText('所有服务都已是当前版本。')).toHaveCount(0)
 
-  await page.getByRole('button', { name: '检查更新' }).click()
+  await page.getByRole('button', { name: '重新检查' }).click()
 
   await expect(page.getByText('所有服务都已是当前版本。')).toBeVisible()
   await expect(page.getByRole('alert')).toHaveCount(0)
-  await expect(
-    page.getByText('所有受管服务均已是最新版本，目前没有可执行的升级。'),
-  ).toBeVisible()
+  await expect(page.getByText('所有受管服务均已是最新版本，目前没有可执行的升级。')).toBeVisible()
   expect(checkAttempts).toBe(2)
 })
 
@@ -1447,6 +1707,140 @@ test('keeps a read-only service snapshot visible without offering upgrades', asy
   await expect(page.getByRole('button', { name: '全部升级' })).toBeDisabled()
   await expect(page.getByRole('button', { name: /升级到/ })).toHaveCount(0)
   expect(upgradeRequests).toBe(0)
+})
+
+test('keeps service version controls readonly without service.upgrade', async ({ page }) => {
+  await useAdminSessionWithPermissions(page, ['service.read'])
+
+  let writeRequests = 0
+  await page.route('**/api/v1/admin/service-versions', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          services: [
+            {
+              id: 'admin_web',
+              display_name: '品牌管理端',
+              role: '平台服务',
+              image: 'ghcr.io/tissyboxc/sprout-admin-web:0.23.0',
+              current_version: '0.23.0',
+              latest_version: '0.23.1',
+              status: 'outdated',
+              release_url: '',
+              is_self: true,
+              upgrade_supported: true,
+              upgrade_executable: true,
+              can_upgrade: true,
+              last_checked_at: '2026-10-18T10:00:00Z',
+              updated_at: '2026-10-18T10:00:00Z',
+            },
+          ],
+          checked_at: '2026-10-18T10:00:00Z',
+          all_up_to_date: false,
+          execution_enabled: true,
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/service-versions/check', async (route) => {
+    writeRequests += 1
+    await route.fulfill({ status: 500 })
+  })
+  await page.route('**/api/v1/admin/service-versions/*/releases**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          service: 'admin_web',
+          releases: [
+            {
+              version: '0.23.1',
+              release_url: '',
+              published_at: '2026-10-18T09:00:00Z',
+              is_current: false,
+              is_latest: true,
+            },
+          ],
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/service-versions/*/upgrade', async (route) => {
+    writeRequests += 1
+    await route.fulfill({ status: 500 })
+  })
+  await page.route('**/api/v1/admin/service-version-operations', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { operations: [] } }),
+    })
+  })
+
+  await page.goto('/services')
+
+  await expect(
+    page.getByText('你当前只有查看权限。可以查看版本状态，但不能选择版本或启动升级。'),
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: '检查更新' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '重新检查' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '全部升级' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: /升级到/ })).toHaveCount(0)
+  await expect(page.getByLabel('品牌管理端版本')).toHaveCount(0)
+  expect(writeRequests).toBe(0)
+})
+
+test('shows upgrade_worker as a backend catalog gap without fabricating versions', async ({
+  page,
+}) => {
+  await useAdminSession(page)
+  await page.route('**/api/v1/admin/service-versions', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          services: [
+            {
+              id: 'admin_web',
+              display_name: '品牌管理端',
+              role: '平台服务',
+              image: 'ghcr.io/tissyboxc/sprout-admin-web:0.23.0',
+              current_version: '0.23.0',
+              latest_version: '0.23.0',
+              status: 'current',
+              release_url: '',
+              is_self: true,
+              upgrade_supported: true,
+              upgrade_executable: true,
+              can_upgrade: false,
+              last_checked_at: '2026-10-18T10:00:00Z',
+              updated_at: '2026-10-18T10:00:00Z',
+            },
+          ],
+          checked_at: '2026-10-18T10:00:00Z',
+          all_up_to_date: true,
+          execution_enabled: true,
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/service-version-operations', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { operations: [] } }),
+    })
+  })
+
+  await page.goto('/services')
+
+  const upgradeWorkerRow = page.getByRole('row', { name: /服务升级执行器/ })
+  await expect(upgradeWorkerRow).toBeVisible()
+  await expect(upgradeWorkerRow).toContainText('待后端接入')
+  await expect(upgradeWorkerRow).toContainText('版本与健康状态需后端补齐后才能操作')
+  await expect(upgradeWorkerRow.getByText('未知', { exact: true })).toBeVisible()
+  await expect(upgradeWorkerRow.getByText('待检查', { exact: true })).toBeVisible()
+  await expect(page.getByRole('row', { name: /品牌管理端/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /升级到/ })).toHaveCount(0)
 })
 
 test('distinguishes a release catalog that is still preparing from a real failure', async ({
@@ -1600,9 +1994,7 @@ test('shows an explicit no-upgrade state when all managed services are current',
 
   await page.goto('/services')
 
-  await expect(
-    page.getByText('所有受管服务均已是最新版本，目前没有可执行的升级。'),
-  ).toBeVisible()
+  await expect(page.getByText('所有受管服务均已是最新版本，目前没有可执行的升级。')).toBeVisible()
   await expect(page.getByText('当前已是最新版本，无需升级').first()).toBeVisible()
   await expect(page.getByRole('button', { name: /^升级到/ })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '全部升级' })).toBeDisabled()
@@ -1691,7 +2083,9 @@ test('explains when the backend reports that an upgrade is not needed', async ({
   await expect(page.getByText('请检查填写的内容')).toHaveCount(0)
 })
 
-test('lists download files and manages uploads, deletion, and the release index', async ({ page }) => {
+test('lists download files and manages uploads, deletion, and the release index', async ({
+  page,
+}) => {
   await useAdminSession(page)
 
   const indexedFile = {
@@ -1882,17 +2276,13 @@ test('lists download files and manages uploads, deletion, and the release index'
   await uploadDialog.getByLabel('文件类型').selectOption('resource')
   await uploadDialog.getByLabel('适用平台').selectOption('all')
   await uploadDialog.getByLabel('更新说明').fill('新增离线故事与发音练习。')
-  await expect(uploadDialog.getByLabel('目标目录')).toHaveValue(
-    '0.12.3/stable/all/resource',
-  )
+  await expect(uploadDialog.getByLabel('目标目录')).toHaveValue('0.12.3/stable/all/resource')
   await uploadDialog.getByRole('button', { name: '上传并登记版本' }).click()
 
   await expect(
     page.getByText('learning-pack-0.12.3.zip 已上传，并登记为待发布版本。'),
   ).toBeVisible()
-  expect(uploadPayloads.body).toContain(
-    '0.12.3/stable/all/resource/learning-pack-0.12.3.zip',
-  )
+  expect(uploadPayloads.body).toContain('0.12.3/stable/all/resource/learning-pack-0.12.3.zip')
   expect(releasePayloads).toHaveLength(1)
   expect(releasePayloads[0]).toContain('"kind":"resource"')
   expect(releasePayloads[0]).toContain('"platform":"all"')
@@ -1905,9 +2295,7 @@ test('lists download files and manages uploads, deletion, and the release index'
   await expect(deleteDialog).toBeVisible()
   await deleteDialog.getByRole('button', { name: '确认删除' }).click()
   await expect(page.getByText('已从下载服务器删除。')).toBeVisible()
-  expect(deletedPaths[0]).toBe(
-    '0.12.3/stable/android/apk/sprout-parent-app-0.12.3.apk',
-  )
+  expect(deletedPaths[0]).toBe('0.12.3/stable/android/apk/sprout-parent-app-0.12.3.apk')
 })
 
 test('shows complete device diagnostics with bounded history and refresh', async ({ page }) => {
@@ -2238,8 +2626,7 @@ test('manages the content library lifecycle from draft to published', async ({ p
       directory: '1.0.0/stable/all/resource',
       size_bytes: 2048,
       sha256: 'a'.repeat(64),
-      download_url:
-        'https://download.example.test/1.0.0/stable/all/resource/story-001.zip',
+      download_url: 'https://download.example.test/1.0.0/stable/all/resource/story-001.zip',
       is_indexed: true,
     },
   ]
@@ -2348,9 +2735,7 @@ test('manages the content library lifecycle from draft to published', async ({ p
   await expect(page.getByRole('heading', { name: '内容库' })).toBeVisible()
   await expect(page.locator('table tbody tr')).toHaveCount(1)
   await expect(page.getByText('小兔子的一天', { exact: true })).toBeVisible()
-  await expect(
-    page.locator('table tbody tr').getByText('草稿', { exact: true }),
-  ).toBeVisible()
+  await expect(page.locator('table tbody tr').getByText('草稿', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: '新建内容' }).click()
   const createDialog = page.getByRole('dialog', { name: '新建内容草稿' })
@@ -2359,16 +2744,14 @@ test('manages the content library lifecycle from draft to published', async ({ p
   await createDialog.getByLabel('标题').fill('小熊的清晨')
   await createDialog.getByText('5-6 岁').click()
   await createDialog.getByRole('button', { name: '选择下载文件' }).click()
-  await createDialog.getByLabel('选择已经上传的文件').selectOption(
-    '1.0.0/stable/all/resource/story-001.zip',
-  )
+  await createDialog
+    .getByLabel('选择已经上传的文件')
+    .selectOption('1.0.0/stable/all/resource/story-001.zip')
   await expect(createDialog.getByLabel('校验值')).toHaveValue('a'.repeat(64))
   await expect(createDialog.getByLabel('文件大小（字节）')).toHaveValue('2048')
   await createDialog.getByLabel('文件大小（字节）').fill('786433')
   await createDialog.getByRole('button', { name: '创建草稿' }).click()
-  await expect(
-    createDialog.getByText('文件大小需要在 1 字节到 768 KiB 之间。'),
-  ).toBeVisible()
+  await expect(createDialog.getByText('文件大小需要在 1 字节到 768 KiB 之间。')).toBeVisible()
   expect(createPayload).toBe('')
   await createDialog.getByLabel('文件大小（字节）').fill('2048')
   await createDialog.getByRole('button', { name: '创建草稿' }).click()
@@ -2393,9 +2776,7 @@ test('manages the content library lifecycle from draft to published', async ({ p
   const rejectDialog = page.getByRole('dialog', { name: '驳回第 1 版？' })
   await expect(rejectDialog).toBeVisible()
   await rejectDialog.getByRole('button', { name: '确认驳回' }).click()
-  await expect(
-    rejectDialog.getByText('请填写驳回理由，便于作者修改后再提交。'),
-  ).toBeVisible()
+  await expect(rejectDialog.getByText('请填写驳回理由，便于作者修改后再提交。')).toBeVisible()
   expect(rejectPayloads).toHaveLength(0)
   await rejectDialog.getByLabel('驳回理由').fill('音频有杂音，请重新录制。')
   await rejectDialog.getByRole('button', { name: '确认驳回' }).click()
@@ -2420,7 +2801,13 @@ test('shows family usage reports and recovers from a report read failure', async
 
   let reportRequests = 0
   const requestedDays: string[] = []
-  await page.route('**/api/v1/admin/families', async (route) => {
+  await page.route('**/api/v1/admin/ai-models', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { models: [] } }),
+    })
+  })
+  await page.route('**/api/v1/admin/families**', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -2432,104 +2819,105 @@ test('shows family usage reports and recovers from a report read failure', async
               phone: '13800001111',
             },
           ],
+          total: 1,
+          page: 1,
+          page_size: 20,
+          total_pages: 1,
         },
       }),
     })
   })
-  await page.route(
-    '**/api/v1/admin/families/parent-usage-1/usage-reports**',
-    async (route) => {
-      reportRequests += 1
-      const requestUrl = new URL(route.request().url())
-      requestedDays.push(requestUrl.searchParams.get('days') ?? '')
-      if (reportRequests === 1) {
-        await route.fulfill({
-          status: 503,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            error: { code: 'temporarily_unavailable', message: '服务暂时不可用' },
-          }),
-        })
-        return
-      }
+  await page.route('**/api/v1/admin/families/parent-usage-1/usage-reports**', async (route) => {
+    reportRequests += 1
+    const requestUrl = new URL(route.request().url())
+    requestedDays.push(requestUrl.searchParams.get('days') ?? '')
+    if (reportRequests === 1) {
       await route.fulfill({
+        status: 503,
         contentType: 'application/json',
         body: JSON.stringify({
-          data: {
-            reports: [
-              {
-                schema_version: '1.0.0',
-                report_date: '2026-10-07',
-                timezone_offset_minutes: 480,
-                has_policy: true,
-                has_daily_limit: true,
-                active_minutes: 42,
-                conversation_count: 18,
-                conversation_minutes: 24,
-                content_play_count: 6,
-                content_minutes: 18,
-                daily_limit_minutes: 60,
-                remaining_minutes: 18,
-                limit_reached: false,
-                categories: [
-                  { category: 'story', play_count: 3, minutes: 9 },
-                  { category: 'nursery_rhyme', play_count: 2, minutes: 6 },
-                ],
-                blocked: {
-                  disabled_period: 1,
-                  daily_limit: 0,
-                  category_denied: 2,
-                  time_untrusted: 0,
-                },
-                devices: [
-                  {
-                    device_id: 'device-usage-1',
-                    device_name: '初芽一号',
-                    active_minutes: 42,
-                    conversation_count: 18,
-                    content_play_count: 6,
-                  },
-                ],
-                updated_at: '2026-10-07T12:00:00Z',
-              },
-              {
-                schema_version: '1.0.0',
-                report_date: '2026-10-06',
-                timezone_offset_minutes: 480,
-                has_policy: true,
-                has_daily_limit: true,
-                active_minutes: 12,
-                conversation_count: 4,
-                conversation_minutes: 5,
-                content_play_count: 2,
-                content_minutes: 7,
-                daily_limit_minutes: 60,
-                remaining_minutes: 48,
-                limit_reached: false,
-                categories: [{ category: 'bedtime', play_count: 1, minutes: 3 }],
-                blocked: {
-                  disabled_period: 0,
-                  daily_limit: 1,
-                  category_denied: 0,
-                  time_untrusted: 0,
-                },
-                devices: [
-                  {
-                    device_id: 'device-usage-1',
-                    device_name: '初芽一号',
-                    active_minutes: 12,
-                    conversation_count: 4,
-                    content_play_count: 2,
-                  },
-                ],
-                updated_at: '2026-10-06T12:00:00Z',
-              },
-            ],
-          },
+          error: { code: 'temporarily_unavailable', message: '服务暂时不可用' },
         }),
       })
-    },
-  )
+      return
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          reports: [
+            {
+              schema_version: '1.0.0',
+              report_date: '2026-10-07',
+              timezone_offset_minutes: 480,
+              has_policy: true,
+              has_daily_limit: true,
+              active_minutes: 42,
+              conversation_count: 18,
+              conversation_minutes: 24,
+              content_play_count: 6,
+              content_minutes: 18,
+              daily_limit_minutes: 60,
+              remaining_minutes: 18,
+              limit_reached: false,
+              categories: [
+                { category: 'story', play_count: 3, minutes: 9 },
+                { category: 'nursery_rhyme', play_count: 2, minutes: 6 },
+              ],
+              blocked: {
+                disabled_period: 1,
+                daily_limit: 0,
+                category_denied: 2,
+                time_untrusted: 0,
+              },
+              devices: [
+                {
+                  device_id: 'device-usage-1',
+                  device_name: '初芽一号',
+                  active_minutes: 42,
+                  conversation_count: 18,
+                  content_play_count: 6,
+                },
+              ],
+              updated_at: '2026-10-07T12:00:00Z',
+            },
+            {
+              schema_version: '1.0.0',
+              report_date: '2026-10-06',
+              timezone_offset_minutes: 480,
+              has_policy: true,
+              has_daily_limit: true,
+              active_minutes: 12,
+              conversation_count: 4,
+              conversation_minutes: 5,
+              content_play_count: 2,
+              content_minutes: 7,
+              daily_limit_minutes: 60,
+              remaining_minutes: 48,
+              limit_reached: false,
+              categories: [{ category: 'bedtime', play_count: 1, minutes: 3 }],
+              blocked: {
+                disabled_period: 0,
+                daily_limit: 1,
+                category_denied: 0,
+                time_untrusted: 0,
+              },
+              devices: [
+                {
+                  device_id: 'device-usage-1',
+                  device_name: '初芽一号',
+                  active_minutes: 12,
+                  conversation_count: 4,
+                  content_play_count: 2,
+                },
+              ],
+              updated_at: '2026-10-06T12:00:00Z',
+            },
+          ],
+        },
+      }),
+    })
+  })
 
   await page.goto('/usage-reports')
 
@@ -2558,7 +2946,7 @@ test('shows family usage reports and recovers from a report read failure', async
 test('distinguishes a missing guardian policy from a policy read failure', async ({ page }) => {
   await useAdminSession(page)
 
-  await page.route('**/api/v1/admin/families', async (route) => {
+  await page.route('**/api/v1/admin/families**', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -2570,55 +2958,58 @@ test('distinguishes a missing guardian policy from a policy read failure', async
               phone: '13900002222',
             },
           ],
+          total: 1,
+          page: 1,
+          page_size: 20,
+          total_pages: 1,
         },
       }),
     })
   })
-  await page.route(
-    '**/api/v1/admin/families/parent-policy-1/children',
-    async (route) => {
-      await route.fulfill({
-        contentType: 'application/json',
-        body: JSON.stringify({
-          data: {
-            children: [
-              {
-                child_id: 'child-policy-1',
-                family_id: 'parent-policy-1',
-                nickname: '小满',
-                age_tier: 'age_5_6',
-                interests: [],
-                content_categories: ['story'],
-                guardian_consent: true,
-                created_at: '2026-10-01T00:00:00Z',
-                updated_at: '2026-10-07T00:00:00Z',
-                policy: null,
-              },
-              {
-                child_id: 'child-policy-2',
-                family_id: 'parent-policy-1',
-                nickname: '小禾',
-                age_tier: 'age_3_4',
-                interests: [],
-                content_categories: ['story'],
-                guardian_consent: true,
-                created_at: '2026-10-01T00:00:00Z',
-                updated_at: '2026-10-07T00:00:00Z',
-                policy_state: 'read_failed',
-                policy_error: '策略暂时无法读取，请稍后重试',
-              },
-            ],
-          },
-        }),
-      })
-    },
-  )
+  await page.route('**/api/v1/admin/families/parent-policy-1/children', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          children: [
+            {
+              child_id: 'child-policy-1',
+              family_id: 'parent-policy-1',
+              nickname: '小满',
+              age_tier: 'age_5_6',
+              interests: [],
+              content_categories: ['story'],
+              guardian_consent: true,
+              created_at: '2026-10-01T00:00:00Z',
+              updated_at: '2026-10-07T00:00:00Z',
+              policy: null,
+            },
+            {
+              child_id: 'child-policy-2',
+              family_id: 'parent-policy-1',
+              nickname: '小禾',
+              age_tier: 'age_3_4',
+              interests: [],
+              content_categories: ['story'],
+              guardian_consent: true,
+              created_at: '2026-10-01T00:00:00Z',
+              updated_at: '2026-10-07T00:00:00Z',
+              policy_state: 'read_failed',
+              policy_error: '策略暂时无法读取，请稍后重试',
+            },
+          ],
+        },
+      }),
+    })
+  })
 
   await page.goto('/children')
 
   await expect(page.getByRole('heading', { name: '儿童档案' })).toBeVisible()
   await page.getByRole('button', { name: /小满/ }).click()
-  await expect(page.getByText('监护人尚未设置时间与内容策略。监护人保存后，这里会显示最新规则。')).toBeVisible()
+  await expect(
+    page.getByText('监护人尚未设置时间与内容策略。监护人保存后，这里会显示最新规则。'),
+  ).toBeVisible()
 
   await page.getByRole('button', { name: /小禾/ }).click()
   await expect(page.getByText('策略读取失败')).toBeVisible()

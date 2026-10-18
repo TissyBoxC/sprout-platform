@@ -2,12 +2,7 @@ import axios, { type AxiosInstance } from 'axios'
 
 import { createHttpClient } from '@/api/httpClient'
 
-export type FeatureCenterStatus =
-  | 'enabled'
-  | 'planned'
-  | 'disabled'
-  | 'maintenance'
-  | 'unknown'
+export type FeatureCenterStatus = 'enabled' | 'disabled' | 'maintenance' | 'unknown'
 
 export type FeatureConfigFieldType =
   | 'boolean'
@@ -45,12 +40,7 @@ export interface FeatureConfigField {
   unit: string
 }
 
-export type FeatureHealthStatus =
-  | 'healthy'
-  | 'degraded'
-  | 'unhealthy'
-  | 'checking'
-  | 'unknown'
+export type FeatureHealthStatus = 'healthy' | 'degraded' | 'unhealthy' | 'checking' | 'unknown'
 
 export interface FeatureHealth {
   status: FeatureHealthStatus
@@ -80,6 +70,12 @@ export interface FeatureCenterFeature {
   configSchema: FeatureConfigField[]
   secretConfigured: Record<string, boolean>
   metrics: FeatureMetric[]
+  /**
+   * True when the service explicitly reported metrics, including an empty
+   * collection. False means the service omitted metrics and the UI must show
+   * an unavailable state rather than pretending no metrics were reported.
+   */
+  metricsReported: boolean
   health: FeatureHealth
   healthSource: string
   readOnlyReason: string
@@ -126,9 +122,7 @@ export const FEATURE_CENTER_VERSION_CONFLICT_CODES = [
   'stale_feature_config',
 ] as const
 
-const versionConflictCodes = new Set<string>(
-  FEATURE_CENTER_VERSION_CONFLICT_CODES,
-)
+const versionConflictCodes = new Set<string>(FEATURE_CENTER_VERSION_CONFLICT_CODES)
 
 /// Creates the client for the administrator feature catalog.
 ///
@@ -147,9 +141,7 @@ export function createAdminFeatureCenterClient(
     },
 
     async getFeature(featureId: string): Promise<FeatureCenterFeature> {
-      const response = await httpClient.get(
-        `${basePath}/${encodeURIComponent(featureId.trim())}`,
-      )
+      const response = await httpClient.get(`${basePath}/${encodeURIComponent(featureId.trim())}`)
       const feature = toNullableFeature(
         recordValue(response.data?.data).feature ?? response.data?.data,
       )
@@ -173,9 +165,7 @@ export function createAdminFeatureCenterClient(
       return parseMutationResult(response.data?.data)
     },
 
-    async checkFeatureHealth(
-      featureId: string,
-    ): Promise<FeatureCenterMutationResult> {
+    async checkFeatureHealth(featureId: string): Promise<FeatureCenterMutationResult> {
       const response = await httpClient.post(
         `${basePath}/${encodeURIComponent(featureId.trim())}/health-check`,
       )
@@ -206,9 +196,7 @@ export function isFeatureCenterVersionConflict(error: unknown): boolean {
   }
   const payload = recordValue(error.response.data)
   const backendError = recordValue(payload.error)
-  const message = stringValue(
-    backendError.message || payload.message,
-  ).toLowerCase()
+  const message = stringValue(backendError.message || payload.message).toLowerCase()
   return message.includes('version') || message.includes('版本')
 }
 
@@ -250,31 +238,21 @@ function parseMutationResult(value: unknown): FeatureCenterMutationResult {
 
 function toNullableFeature(value: unknown): FeatureCenterFeature | null {
   const record = recordValue(value)
-  const id = stringValue(
-    record.id ?? record.key ?? record.feature_id ?? record.featureId,
-  ).trim()
+  const id = stringValue(record.id ?? record.key ?? record.feature_id ?? record.featureId).trim()
   if (!id) {
     return null
   }
 
   const configSource = recordValue(
-    record.values ??
-      record.config ??
-      record.config_values ??
-      record.configValues,
+    record.values ?? record.config ?? record.config_values ?? record.configValues,
   )
   const parsedSchema = parseConfigSchema(
-    record.config_schema ??
-      record.configSchema ??
-      record.schema ??
-      record.fields,
+    record.config_schema ?? record.configSchema ?? record.schema ?? record.fields,
     configSource,
   )
   const configSchema = parsedSchema.map((item) => item.field)
   const secretKeys = new Set(
-    configSchema
-      .filter((field) => field.type === 'secret')
-      .map((field) => field.key),
+    configSchema.filter((field) => field.type === 'secret').map((field) => field.key),
   )
 
   for (const key of Object.keys(configSource)) {
@@ -289,14 +267,11 @@ function toNullableFeature(value: unknown): FeatureCenterFeature | null {
     const field = parsedField.field
     if (field.type === 'secret') {
       secretConfigured[field.key] =
-        parsedField.secretConfigured ??
-        secretIsConfigured(field.key, configSource, record)
+        parsedField.secretConfigured ?? secretIsConfigured(field.key, configSource, record)
       continue
     }
     const sourceValue =
-      configSource[field.key] !== undefined
-        ? configSource[field.key]
-        : parsedField.effectiveValue
+      configSource[field.key] !== undefined ? configSource[field.key] : parsedField.effectiveValue
     config[field.key] = normalizeConfigValue(sourceValue, field)
   }
 
@@ -337,60 +312,37 @@ function toNullableFeature(value: unknown): FeatureCenterFeature | null {
   const categoryId = stringValue(
     typeof record.category === 'string'
       ? record.category
-      : category.id ?? category.key ?? category.value,
+      : (category.id ?? category.key ?? category.value),
   ).trim()
   const status = featureStatus(record.status, record.enabled)
   const rawHealth = recordValue(record.health)
-  const healthDetail = recordValue(
-    record.health_detail ?? record.healthDetail,
-  )
+  const healthDetail = recordValue(record.health_detail ?? record.healthDetail)
   const rawHealthStatus =
     typeof record.health === 'string' || typeof record.health === 'number'
       ? record.health
-      : rawHealth.status ??
-        record.health_status ??
-        record.healthStatus ??
-        healthDetail.status
+      : (rawHealth.status ?? record.health_status ?? record.healthStatus ?? healthDetail.status)
 
   return {
     id,
-    name: stringValue(
-      record.name ?? record.display_name ?? record.displayName ?? record.title,
-      id,
-    ),
-    description: stringValue(
-      record.description ?? record.summary ?? record.detail,
-    ),
-    owner: stringValue(
-      record.owner ?? record.owner_name ?? record.ownerName ?? record.team,
-    ),
+    name: stringValue(record.name ?? record.display_name ?? record.displayName ?? record.title, id),
+    description: stringValue(record.description ?? record.summary ?? record.detail),
+    owner: stringValue(record.owner ?? record.owner_name ?? record.ownerName ?? record.team),
     category: categoryId || 'other',
     categoryLabel: stringValue(
       typeof record.category === 'string'
-        ? category.label ?? category.name
-        : category.label ?? category.name,
+        ? (category.label ?? category.name)
+        : (category.label ?? category.name),
       categoryId || '其他',
     ),
     status,
-    enabled:
-      typeof record.enabled === 'boolean'
-        ? record.enabled
-        : status === 'enabled',
+    enabled: typeof record.enabled === 'boolean' ? record.enabled : status === 'enabled',
     version: nonNegativeInteger(
-      record.config_version ??
-        record.configVersion ??
-        record.version ??
-        record.revision,
+      record.config_version ?? record.configVersion ?? record.version ?? record.revision,
     ),
     config,
     configSchema,
     secretConfigured,
-    metrics: parseMetrics(
-      record.read_only_metrics ??
-        record.readOnlyMetrics ??
-        record.metrics ??
-        record.statistics,
-    ),
+    ...parseMetricsAvailability(metricsSource(record)),
     health: healthValue({
       status: rawHealthStatus,
       checked_at:
@@ -425,17 +377,12 @@ function toNullableFeature(value: unknown): FeatureCenterFeature | null {
         rawHealth.health_source ??
         rawHealth.healthSource,
     ),
-    readOnlyReason: stringValue(
-      record.read_only_reason ?? record.readOnlyReason,
-    ),
+    readOnlyReason: stringValue(record.read_only_reason ?? record.readOnlyReason),
     updatedAt: stringValue(record.updated_at ?? record.updatedAt),
   }
 }
 
-function parseConfigSchema(
-  value: unknown,
-  config: Record<string, unknown>,
-): ParsedConfigField[] {
+function parseConfigSchema(value: unknown, config: Record<string, unknown>): ParsedConfigField[] {
   const schema = recordValue(value)
   const rawFields = Array.isArray(value)
     ? value
@@ -443,9 +390,7 @@ function parseConfigSchema(
       ? schema.fields
       : recordValue(schema.properties)
   const required = new Set(
-    Array.isArray(schema.required)
-      ? schema.required.map((item) => String(item))
-      : [],
+    Array.isArray(schema.required) ? schema.required.map((item) => String(item)) : [],
   )
 
   if (Array.isArray(rawFields)) {
@@ -456,11 +401,7 @@ function parseConfigSchema(
   }
 
   return Object.entries(rawFields).flatMap(([key, field]) => {
-    const parsed = toNullableConfigField(
-      { key, ...recordValue(field) },
-      config,
-      required,
-    )
+    const parsed = toNullableConfigField({ key, ...recordValue(field) }, config, required)
     return parsed === null ? [] : [parsed]
   })
 }
@@ -471,20 +412,14 @@ function toNullableConfigField(
   required: Set<string>,
 ): ParsedConfigField | null {
   const record = recordValue(value)
-  const key = stringValue(
-    record.key ?? record.name ?? record.id ?? record.property,
-  ).trim()
+  const key = stringValue(record.key ?? record.name ?? record.id ?? record.property).trim()
   if (!key) {
     return null
   }
 
   const type = configFieldType(record, config[key])
   const options = configOptions(record)
-  const rawDefault =
-    record.default_value ??
-    record.defaultValue ??
-    record.default ??
-    config[key]
+  const rawDefault = record.default_value ?? record.defaultValue ?? record.default ?? config[key]
   const rawValue = record.value ?? config[key] ?? rawDefault
   const placeholderField: FeatureConfigField = {
     key,
@@ -509,28 +444,15 @@ function toNullableConfigField(
       record.title ?? record.label ?? record.display_name ?? record.name,
       humanizeKey(key),
     ),
-    description: stringValue(
-      record.description ?? record.help ?? record.hint,
-    ),
+    description: stringValue(record.description ?? record.help ?? record.hint),
     type,
-    required:
-      required.has(key) ||
-      record.required === true ||
-      record.optional === false,
-    editable:
-      record.editable !== false &&
-      record.read_only !== true &&
-      record.readOnly !== true,
-    allowCustom:
-      record.allow_custom === true || record.allowCustom === true,
+    required: required.has(key) || record.required === true || record.optional === false,
+    editable: record.editable !== false && record.read_only !== true && record.readOnly !== true,
+    allowCustom: record.allow_custom === true || record.allowCustom === true,
     defaultValue,
     options,
-    minimum: nullableNumber(
-      record.minimum ?? record.min ?? record.min_value ?? record.minValue,
-    ),
-    maximum: nullableNumber(
-      record.maximum ?? record.max ?? record.max_value ?? record.maxValue,
-    ),
+    minimum: nullableNumber(record.minimum ?? record.min ?? record.min_value ?? record.minValue),
+    maximum: nullableNumber(record.maximum ?? record.max ?? record.max_value ?? record.maxValue),
     step: nullableNumber(record.step ?? record.multiple_of ?? record.multipleOf),
     placeholder: stringValue(record.placeholder ?? record.example),
     unit: stringValue(record.unit),
@@ -545,8 +467,7 @@ function toNullableConfigField(
             ...field,
             defaultValue,
           }),
-    secretConfigured:
-      type === 'secret' ? secretMetadataConfigured(rawValue) : null,
+    secretConfigured: type === 'secret' ? secretMetadataConfigured(rawValue) : null,
   }
 }
 
@@ -568,11 +489,7 @@ function configFieldType(
   ) {
     return 'secret'
   }
-  if (
-    explicit === 'boolean' ||
-    explicit === 'bool' ||
-    typeof currentValue === 'boolean'
-  ) {
+  if (explicit === 'boolean' || explicit === 'bool' || typeof currentValue === 'boolean') {
     return 'boolean'
   }
   if (explicit === 'integer' || explicit === 'int' || explicit === 'int64') {
@@ -616,14 +533,8 @@ function configFieldType(
 
 function configOptions(field: Record<string, unknown>): FeatureConfigOption[] {
   const items = recordValue(field.items)
-  const rawOptions =
-    field.options ??
-    field.enum ??
-    items.options ??
-    items.enum
-  const source = Array.isArray(rawOptions)
-    ? rawOptions
-    : recordValue(rawOptions)
+  const rawOptions = field.options ?? field.enum ?? items.options ?? items.enum
+  const source = Array.isArray(rawOptions) ? rawOptions : recordValue(rawOptions)
 
   if (Array.isArray(source)) {
     return source.flatMap((option: unknown) => {
@@ -639,10 +550,7 @@ function configOptions(field: Record<string, unknown>): FeatureConfigOption[] {
       return [
         {
           value,
-          label: stringValue(
-            record.label ?? record.name ?? record.title,
-            value,
-          ),
+          label: stringValue(record.label ?? record.name ?? record.title, value),
         },
       ]
     })
@@ -654,10 +562,7 @@ function configOptions(field: Record<string, unknown>): FeatureConfigOption[] {
   }))
 }
 
-function normalizeConfigValue(
-  value: unknown,
-  field: FeatureConfigField,
-): FeatureConfigValue {
+function normalizeConfigValue(value: unknown, field: FeatureConfigField): FeatureConfigValue {
   switch (field.type) {
     case 'boolean':
       return typeof value === 'boolean' ? value : booleanValue(value)
@@ -670,9 +575,7 @@ function normalizeConfigValue(
       return clampNumber(number, field)
     }
     case 'multiselect':
-      return Array.isArray(value)
-        ? value.map((item) => String(item)).filter(Boolean)
-        : []
+      return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : []
     case 'secret':
       return ''
     case 'select':
@@ -689,11 +592,7 @@ function normalizeConfigValue(
 }
 
 function normalizeUnknownConfigValue(value: unknown): FeatureConfigValue {
-  if (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return value
   }
   if (Array.isArray(value)) {
@@ -724,18 +623,13 @@ function secretIsConfigured(
   }
   if (
     booleanValue(
-      config[`${key}_configured`] ??
-        config[`${key}_is_configured`] ??
-        config[`has_${key}`],
+      config[`${key}_configured`] ?? config[`${key}_is_configured`] ?? config[`has_${key}`],
     )
   ) {
     return true
   }
   const configuredKeys = feature.configured_secrets ?? feature.configuredSecrets
-  if (
-    Array.isArray(configuredKeys) &&
-    configuredKeys.map((item) => String(item)).includes(key)
-  ) {
+  if (Array.isArray(configuredKeys) && configuredKeys.map((item) => String(item)).includes(key)) {
     return true
   }
 
@@ -768,9 +662,7 @@ function isSecretMetadataKey(key: string): boolean {
 }
 
 function looksLikeSecretKey(key: string): boolean {
-  return /(?:^|_)(?:secret|token|password|credential|api_key|private_key)(?:$|_)/i.test(
-    key,
-  )
+  return /(?:^|_)(?:secret|token|password|credential|api_key|private_key)(?:$|_)/i.test(key)
 }
 
 function parseMetrics(value: unknown): FeatureMetric[] {
@@ -786,10 +678,7 @@ function parseMetrics(value: unknown): FeatureMetric[] {
           key,
           label: stringValue(record.label ?? record.title, humanizeKey(key)),
           value: metricDisplayValue(
-            record.value ??
-              record.display_value ??
-              record.displayValue ??
-              record.count,
+            record.value ?? record.display_value ?? record.displayValue ?? record.count,
           ),
           unit: stringValue(record.unit),
         },
@@ -800,10 +689,27 @@ function parseMetrics(value: unknown): FeatureMetric[] {
   return flattenMetrics(recordValue(value))
 }
 
-function flattenMetrics(
-  value: Record<string, unknown>,
-  prefix = '',
-): FeatureMetric[] {
+function parseMetricsAvailability(value: unknown): {
+  metrics: FeatureMetric[]
+  metricsReported: boolean
+} {
+  const hasMetricsField = value !== undefined && value !== null
+  return {
+    metrics: parseMetrics(value),
+    metricsReported: hasMetricsField,
+  }
+}
+
+function metricsSource(record: Record<string, unknown>): unknown {
+  for (const key of ['read_only_metrics', 'readOnlyMetrics', 'metrics', 'statistics']) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) {
+      return record[key]
+    }
+  }
+  return undefined
+}
+
+function flattenMetrics(value: Record<string, unknown>, prefix = ''): FeatureMetric[] {
   return Object.entries(value).flatMap(([key, item]) => {
     const metricKey = prefix ? `${prefix}.${key}` : key
     if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
@@ -831,9 +737,7 @@ function metricDisplayValue(value: unknown): string {
     return Number.isFinite(value) ? String(value) : '暂未接入'
   }
   if (typeof value === 'string') {
-    return value.trim() === '' || value.trim() === '暂无'
-      ? '暂未接入'
-      : value
+    return value.trim() === '' || value.trim() === '暂无' ? '暂未接入' : value
   }
   return '暂未接入'
 }
@@ -849,11 +753,7 @@ function healthValue(value: unknown): FeatureHealth {
     }
   }
   const status = healthStatus(
-    record.status ??
-      record.state ??
-      record.health ??
-      record.health_status ??
-      record.healthStatus,
+    record.status ?? record.state ?? record.health ?? record.health_status ?? record.healthStatus,
   )
 
   return {
@@ -887,10 +787,7 @@ function healthValue(value: unknown): FeatureHealth {
   }
 }
 
-function featureStatus(
-  value: unknown,
-  enabled: unknown,
-): FeatureCenterStatus {
+function featureStatus(value: unknown, enabled: unknown): FeatureCenterStatus {
   const normalized = stringValue(value).trim().toLowerCase()
   switch (normalized) {
     case 'enabled':
@@ -899,7 +796,7 @@ function featureStatus(
     case 'available':
       return 'enabled'
     case 'planned':
-      return 'planned'
+      return 'disabled'
     case 'disabled':
     case 'inactive':
     case 'off':
@@ -910,11 +807,7 @@ function featureStatus(
     case 'degraded':
       return 'maintenance'
     default:
-      return typeof enabled === 'boolean'
-        ? enabled
-          ? 'enabled'
-          : 'disabled'
-        : 'unknown'
+      return typeof enabled === 'boolean' ? (enabled ? 'enabled' : 'disabled') : 'unknown'
   }
 }
 
@@ -973,9 +866,7 @@ function booleanValue(value: unknown): boolean {
     return value
   }
   if (typeof value === 'string') {
-    return ['true', '1', 'yes', 'on', 'configured'].includes(
-      value.trim().toLowerCase(),
-    )
+    return ['true', '1', 'yes', 'on', 'configured'].includes(value.trim().toLowerCase())
   }
   return value === 1
 }

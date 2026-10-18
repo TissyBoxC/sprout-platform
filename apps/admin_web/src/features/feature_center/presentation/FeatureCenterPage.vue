@@ -15,8 +15,22 @@ const store = useFeatureCenterStore()
 const selectedFeature = computed(() => store.selectedFeature)
 const hasFeatures = computed(() => store.features.length > 0)
 const hasVisibleFeatures = computed(() => store.filteredFeatures.length > 0)
-const healthStatus = computed(
-  () => selectedFeature.value?.health.status ?? 'unknown',
+const healthStatus = computed(() => selectedFeature.value?.health.status ?? 'unknown')
+const metricsAllUnavailable = computed(
+  () =>
+    selectedFeature.value !== null &&
+    selectedFeature.value.metrics.length > 0 &&
+    selectedFeature.value.metrics.every((metric) => isMetricUnavailable(metric.value)),
+)
+const metricsUnavailable = computed(
+  () =>
+    selectedFeature.value !== null &&
+    (!selectedFeature.value.metricsReported || metricsAllUnavailable.value),
+)
+const hasMetricsField = computed(
+  () =>
+    selectedFeature.value !== null &&
+    (selectedFeature.value.metrics.length > 0 || !selectedFeature.value.metricsReported),
 )
 
 onMounted(() => {
@@ -52,7 +66,6 @@ function featureStatusLabel(feature: FeatureCenterFeature): string {
   return (
     {
       enabled: '已启用',
-      planned: '规划中',
       disabled: '已停用',
       maintenance: '维护中',
       unknown: '状态未明',
@@ -98,19 +111,21 @@ function metricGridClass(metrics: FeatureMetric[]): string {
 }
 
 function metricValue(value: string): string {
+  return isMetricUnavailable(value) ? '指标暂不可用' : value
+}
+
+function isMetricUnavailable(value: string): boolean {
   const normalized = value.trim()
-  return normalized === '' || normalized === '暂无' ? '暂未接入' : value
+  return (
+    normalized === '' ||
+    normalized === '暂无' ||
+    normalized === '暂未接入' ||
+    normalized === '指标暂不可用'
+  )
 }
 
 function reloadFeatureList(): void {
   void store.load()
-}
-
-function plannedReason(feature: FeatureCenterFeature): string {
-  return (
-    feature.readOnlyReason ||
-    '该功能尚未实现，当前仅展示规划信息，完成实现后开放配置。'
-  )
 }
 </script>
 
@@ -153,10 +168,6 @@ function plannedReason(feature: FeatureCenterFeature): string {
         <span>只读能力</span>
         <strong>{{ store.summary.readonly }}</strong>
       </article>
-      <article>
-        <span>规划中</span>
-        <strong>{{ store.summary.planned }}</strong>
-      </article>
     </section>
 
     <Transition name="toast">
@@ -171,11 +182,7 @@ function plannedReason(feature: FeatureCenterFeature): string {
       </p>
     </Transition>
     <Transition name="toast">
-      <p
-        v-if="store.partialSuccessMessage"
-        class="notice warning"
-        role="alert"
-      >
+      <p v-if="store.partialSuccessMessage" class="notice warning" role="alert">
         {{ store.partialSuccessMessage }}
       </p>
     </Transition>
@@ -255,11 +262,7 @@ function plannedReason(feature: FeatureCenterFeature): string {
             </div>
 
             <div v-else class="feature-groups">
-              <section
-                v-for="group in store.groupedFeatures"
-                :key="group.id"
-                class="feature-group"
-              >
+              <section v-for="group in store.groupedFeatures" :key="group.id" class="feature-group">
                 <p class="group-title">{{ group.label }}</p>
                 <ul>
                   <li v-for="feature in group.features" :key="feature.id">
@@ -272,10 +275,7 @@ function plannedReason(feature: FeatureCenterFeature): string {
                         <strong>{{ feature.name }}</strong>
                         <small>{{ feature.owner || '负责人待补充' }}</small>
                       </span>
-                      <span
-                        class="mini-status"
-                        :class="featureStatusClass(feature)"
-                      >
+                      <span class="mini-status" :class="featureStatusClass(feature)">
                         {{ featureStatusLabel(feature) }}
                       </span>
                     </button>
@@ -298,10 +298,7 @@ function plannedReason(feature: FeatureCenterFeature): string {
                   <h2>{{ selectedFeature.name }}</h2>
                   <p>{{ selectedFeature.description || '暂未填写功能说明。' }}</p>
                 </div>
-                <span
-                  class="feature-status"
-                  :class="featureStatusClass(selectedFeature)"
-                >
+                <span class="feature-status" :class="featureStatusClass(selectedFeature)">
                   {{ featureStatusLabel(selectedFeature) }}
                 </span>
               </header>
@@ -329,9 +326,7 @@ function plannedReason(feature: FeatureCenterFeature): string {
                     <p v-if="selectedFeature.health.message">
                       {{ selectedFeature.health.message }}
                     </p>
-                    <p v-else-if="healthStatus === 'unknown'">
-                      这项功能还没有接入可用的健康检查。
-                    </p>
+                    <p v-else-if="healthStatus === 'unknown'">这项功能还没有接入可用的健康检查。</p>
                     <p v-else>最近一次检查未附带说明。</p>
                   </div>
                 </div>
@@ -353,17 +348,27 @@ function plannedReason(feature: FeatureCenterFeature): string {
                 </div>
               </section>
 
-              <section
-                v-if="selectedFeature.metrics.length > 0"
-                class="metrics-section"
-              >
+              <section v-if="hasMetricsField" class="metrics-section">
                 <div class="section-heading">
                   <div>
                     <h3>运行指标</h3>
                     <p>只读数据，由功能服务上报。</p>
                   </div>
                 </div>
-                <div :class="metricGridClass(selectedFeature.metrics)">
+                <div
+                  v-if="metricsUnavailable"
+                  class="metrics-unavailable"
+                >
+                  <strong>指标暂不可用</strong>
+                  <p>
+                    {{
+                      !selectedFeature.metricsReported
+                        ? '功能服务没有返回运行指标，可以稍后刷新再试。'
+                        : '功能服务没有返回可用的运行指标，可以稍后刷新再试。'
+                    }}
+                  </p>
+                </div>
+                <div v-else :class="metricGridClass(selectedFeature.metrics)">
                   <article
                     v-for="metric in selectedFeature.metrics"
                     :key="metric.key"
@@ -380,32 +385,17 @@ function plannedReason(feature: FeatureCenterFeature): string {
                 <div class="section-heading">
                   <div>
                     <h3>功能配置</h3>
-                    <p v-if="selectedFeature.status === 'planned'">
-                      {{ plannedReason(selectedFeature) }}
-                    </p>
-                    <p v-else-if="selectedFeature.readOnlyReason">
+                    <p v-if="selectedFeature.readOnlyReason">
                       {{ selectedFeature.readOnlyReason }}
                     </p>
-                    <p v-else-if="!store.canEdit">
-                      你有查看权限，但没有修改这项功能的权限。
-                    </p>
+                    <p v-else-if="!store.canEdit">你有查看权限，但没有修改这项功能的权限。</p>
                     <p v-else>保存后会立即更新该功能的运行参数。</p>
                   </div>
-                  <span v-if="selectedFeature.status === 'planned'" class="planned-badge">
-                    规划中
-                  </span>
-                  <span v-else-if="selectedFeature.readOnlyReason" class="readonly-badge">
-                    只读
-                  </span>
-                  <span v-else-if="store.isDirty" class="dirty-badge">
-                    有未保存的修改
-                  </span>
+                  <span v-if="selectedFeature.readOnlyReason" class="readonly-badge"> 只读 </span>
+                  <span v-else-if="store.isDirty" class="dirty-badge"> 有未保存的修改 </span>
                 </div>
 
-                <div
-                  v-if="selectedFeature.configSchema.length === 0"
-                  class="config-empty"
-                >
+                <div v-if="selectedFeature.configSchema.length === 0" class="config-empty">
                   这项功能没有可调整的配置。
                 </div>
                 <div v-else class="config-grid">
@@ -415,12 +405,8 @@ function plannedReason(feature: FeatureCenterFeature): string {
                     :field="field"
                     :value="store.draftConfig[field.key] ?? null"
                     :secret-draft="store.secretDrafts[field.key] ?? ''"
-                    :secret-configured="
-                      store.selectedFeature?.secretConfigured[field.key] ?? false
-                    "
-                    :locked="
-                      selectedFeature.status === 'planned' || !store.canEdit
-                    "
+                    :secret-configured="store.selectedFeature?.secretConfigured[field.key] ?? false"
+                    :locked="!store.canEdit"
                     @update-value="updateConfigValue(field.key, $event)"
                     @update-secret="store.setSecretDraft(field.key, $event)"
                   />
@@ -430,12 +416,7 @@ function plannedReason(feature: FeatureCenterFeature): string {
                   <button
                     type="button"
                     class="secondary"
-                    :disabled="
-                      !store.isDirty ||
-                      store.isSaving ||
-                      !store.canEdit ||
-                      selectedFeature.status === 'planned'
-                    "
+                    :disabled="!store.isDirty || store.isSaving || !store.canEdit"
                     @click="store.discardDraft"
                   >
                     放弃修改
@@ -493,7 +474,7 @@ function plannedReason(feature: FeatureCenterFeature): string {
 
 .summary-strip {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -829,12 +810,6 @@ button.compact {
   color: #755600;
 }
 
-.mini-status.planned,
-.feature-status.planned {
-  background: #f3ecff;
-  color: #6542a3;
-}
-
 .mini-status.unknown,
 .feature-status.unknown {
   background: #eaf5ff;
@@ -1064,16 +1039,6 @@ button.compact {
   font-weight: 700;
 }
 
-.planned-badge {
-  flex: 0 0 auto;
-  padding: 4px 9px;
-  border-radius: 999px;
-  background: #f3ecff;
-  color: #6542a3;
-  font-size: 11px;
-  font-weight: 700;
-}
-
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1105,6 +1070,26 @@ button.compact {
 
 .metric-card small {
   color: var(--sprout-text-muted);
+}
+
+.metrics-unavailable {
+  display: grid;
+  gap: 5px;
+  padding: 16px;
+  border: 1px dashed var(--sprout-outline);
+  border-radius: 16px;
+  background: #fffbfc;
+  color: var(--sprout-text-muted);
+}
+
+.metrics-unavailable strong {
+  color: var(--sprout-text);
+}
+
+.metrics-unavailable p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .config-grid {

@@ -13,6 +13,9 @@ import {
 import { createHttpClient } from '@/api/httpClient'
 
 const activeOperationStatuses = new Set(['queued', 'running', 'recovering'])
+const VERSION_CHECK_POLL_ATTEMPTS = 10
+const VERSION_CHECK_POLL_INTERVAL_MS = 250
+const upgradeWorkerDependencyId = 'upgrade_worker'
 
 export function isUpgradeableService(service: AdminServiceVersion): boolean {
   return service.upgradeSupported && service.upgradeExecutable
@@ -45,7 +48,19 @@ export const useVersionManagementStore = defineStore('admin-version-management',
   const checkWarning = ref('')
   let operationRequestGeneration = 0
 
-  const services = computed(() => snapshot.value?.services ?? [])
+  const services = computed(() => {
+    const reportedServices = snapshot.value?.services ?? []
+    if (
+      snapshot.value === null ||
+      reportedServices.some((service) => service.id === upgradeWorkerDependencyId)
+    ) {
+      return reportedServices
+    }
+    return [
+      ...reportedServices,
+      upgradeWorkerDependencyRow(snapshot.value.checkedAt),
+    ]
+  })
   const outdatedServices = computed(() =>
     services.value.filter(
       (service) =>
@@ -63,10 +78,13 @@ export const useVersionManagementStore = defineStore('admin-version-management',
     isLoading.value = true
     error.value = null
     try {
-      snapshot.value = await client.loadServiceVersions()
+      const loadedSnapshot = await client.loadServiceVersions()
+      snapshot.value = loadedSnapshot
       operations.value = await client.loadServiceVersionOperations()
       await loadReleaseStates(services.value)
-      checkWarning.value = ''
+      checkWarning.value = hasUncheckedSnapshot(loadedSnapshot)
+        ? '检查尚未返回，正在显示上次检查结果。请稍后重新检查。'
+        : ''
     } catch (caught: unknown) {
       error.value = mapApiError(caught)
     } finally {
@@ -80,27 +98,47 @@ export const useVersionManagementStore = defineStore('admin-version-management',
     lastMessage.value = ''
     checkWarning.value = ''
     try {
+      const previousCheckedAt = snapshot.value?.checkedAt ?? ''
       const requestedSnapshot = await client.checkServiceVersions()
-      // The worker refreshes asynchronously. Poll briefly for a newer
-      // checked_at instead of presenting the old snapshot as the result.
-      snapshot.value = await waitForCheckedSnapshot(
+      // The worker refreshes asynchronously. A timeout is not a successful
+      // check: preserve the previous snapshot and expose a retryable state.
+      const checkResult = await waitForCheckedSnapshot(
         requestedSnapshot,
+        previousCheckedAt,
         () => client.loadServiceVersions(),
       )
-      operations.value = await client.loadServiceVersionOperations()
-      await loadReleaseStates(services.value)
+      if (!checkResult.confirmed) {
+        // Keep the last confirmed snapshot. Replacing it with an unchanged
+        // response would make the old timestamp look like a fresh check.
+        checkWarning.value = '检查尚未返回，正在显示上次检查结果。请稍后重新检查。'
+        return
+      }
+      snapshot.value = checkResult.snapshot
+      checkWarning.value = ''
       const count = outdatedServices.value.length
       lastMessage.value =
         count === 0 ? '所有服务都已是当前版本。' : `检查完成，有 ${count} 个服务可以升级。`
+      void refreshAfterVersionCheck()
     } catch (caught: unknown) {
       const mappedError = mapApiError(caught)
       if (mappedError.retryable && snapshot.value !== null) {
-        checkWarning.value = '本次检查未完成，当前显示的是上次检查结果，请稍后重试。'
+        checkWarning.value = '检查尚未返回，正在显示上次检查结果。请稍后重新检查。'
       } else {
         error.value = mappedError
       }
     } finally {
       isChecking.value = false
+    }
+  }
+
+  async function refreshAfterVersionCheck(): Promise<void> {
+    try {
+      operations.value = await client.loadServiceVersionOperations()
+      await loadReleaseStates(services.value)
+    } catch (caught: unknown) {
+      // A release catalog failure must not turn a completed version check
+      // into a misleading timeout. It is a secondary refresh failure only.
+      void caught
     }
   }
 
@@ -275,9 +313,7 @@ export const useVersionManagementStore = defineStore('admin-version-management',
       }
     } catch (caught: unknown) {
       const errorMessage =
-        caught instanceof ReleaseCatalogNotReadyError
-          ? caught.message
-          : mapApiError(caught).message
+        caught instanceof ReleaseCatalogNotReadyError ? caught.message : mapApiError(caught).message
       releaseStates.value = {
         ...releaseStates.value,
         [service.id]: {
@@ -290,9 +326,7 @@ export const useVersionManagementStore = defineStore('admin-version-management',
   }
 
   async function loadReleaseStates(targetServices: AdminServiceVersion[]): Promise<void> {
-    const upgradeableServices = targetServices.filter((service) =>
-      isUpgradeableService(service),
-    )
+    const upgradeableServices = targetServices.filter((service) => isUpgradeableService(service))
     await Promise.all(upgradeableServices.map((service) => loadServiceReleases(service)))
   }
 
@@ -379,29 +413,66 @@ function selectableVersion(
   return ''
 }
 
+interface CheckedSnapshotResult {
+  snapshot: ServiceVersionSnapshot
+  confirmed: boolean
+}
+
 async function waitForCheckedSnapshot(
   requestedSnapshot: ServiceVersionSnapshot,
+  previousCheckedAt: string,
   loadSnapshot: () => Promise<ServiceVersionSnapshot>,
-): Promise<ServiceVersionSnapshot> {
-  const requestedAt = Date.parse(requestedSnapshot.checkedAt)
-  let latestSnapshot = requestedSnapshot
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    const nextSnapshot = await loadSnapshot()
-    latestSnapshot = nextSnapshot
-    const nextCheckedAt = Date.parse(nextSnapshot.checkedAt)
-    if (
-      Number.isFinite(nextCheckedAt) &&
-      (!Number.isFinite(requestedAt) || nextCheckedAt > requestedAt)
-    ) {
-      return nextSnapshot
-    }
-    await delay(500)
+): Promise<CheckedSnapshotResult> {
+  if (snapshotAdvanced(requestedSnapshot, previousCheckedAt)) {
+    return { snapshot: requestedSnapshot, confirmed: true }
   }
-  return latestSnapshot
+  for (let attempt = 0; attempt < VERSION_CHECK_POLL_ATTEMPTS; attempt += 1) {
+    const nextSnapshot = await loadSnapshot()
+    if (snapshotAdvanced(nextSnapshot, previousCheckedAt)) {
+      return { snapshot: nextSnapshot, confirmed: true }
+    }
+    await delay(VERSION_CHECK_POLL_INTERVAL_MS)
+  }
+  return { snapshot: requestedSnapshot, confirmed: false }
+}
+
+function snapshotAdvanced(snapshot: ServiceVersionSnapshot, previousCheckedAt: string): boolean {
+  const previous = Date.parse(previousCheckedAt)
+  const current = Date.parse(snapshot.checkedAt)
+  return Number.isFinite(current) && (!Number.isFinite(previous) || current > previous)
+}
+
+function hasUncheckedSnapshot(snapshot: ServiceVersionSnapshot): boolean {
+  return snapshot.checkedAt.trim() === ''
 }
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, milliseconds)
   })
+}
+
+/**
+ * The upgrade executor is deployed by Compose but is not yet represented in
+ * the backend service catalog. Keep it visible as an explicit dependency gap
+ * without inventing an image tag, version, or upgrade action.
+ */
+function upgradeWorkerDependencyRow(checkedAt: string): AdminServiceVersion {
+  return {
+    id: upgradeWorkerDependencyId,
+    displayName: '服务升级执行器',
+    role: '执行后台升级任务',
+    image: 'ghcr.io/tissyboxc/sprout-upgrade-worker',
+    currentVersion: '',
+    latestVersion: '',
+    status: 'unknown',
+    releaseUrl: '',
+    isSelf: false,
+    upgradeSupported: false,
+    upgradeExecutable: false,
+    canUpgrade: false,
+    lastCheckedAt: checkedAt,
+    updatedAt: checkedAt,
+    catalogDependencyMissing: true,
+  }
 }

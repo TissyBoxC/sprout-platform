@@ -12,8 +12,12 @@ import {
   artifactPlatformLabel,
   useDownloadFilesStore,
 } from '@/features/downloads/application/downloadFilesStore'
+import { useAuthStore } from '@/features/auth/application/authStore'
+import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
 
 const store = useDownloadFilesStore()
+const authStore = useAuthStore()
+const canManageStorage = computed(() => authStore.can(ADMIN_PERMISSIONS.storageManage))
 const isUploadOpen = ref(false)
 const pendingDelete = ref<DownloadFile | null>(null)
 const uploadForm = reactive({
@@ -46,12 +50,7 @@ onMounted(async () => {
 })
 
 watch(
-  () => [
-    uploadForm.version,
-    uploadForm.kind,
-    uploadForm.platform,
-    uploadForm.filename,
-  ],
+  () => [uploadForm.version, uploadForm.kind, uploadForm.platform, uploadForm.filename],
   () => {
     void refreshUploadConflict()
   },
@@ -214,12 +213,7 @@ function uploadFlowCompleted(result: {
   indexRefreshed: boolean
   listRefreshed: boolean
 }): boolean {
-  return (
-    result.uploaded &&
-    result.registered &&
-    result.indexRefreshed &&
-    result.listRefreshed
-  )
+  return result.uploaded && result.registered && result.indexRefreshed && result.listRefreshed
 }
 
 function closeUploadAfterCompletion(): void {
@@ -362,7 +356,7 @@ function sha256Summary(value: string): string {
           查看下载服务器上的真实文件，手动上传新版本，并确认发布索引是否已经登记。
         </p>
       </div>
-      <div class="header-actions">
+      <div v-if="canManageStorage" class="header-actions">
         <button
           type="button"
           class="secondary"
@@ -392,26 +386,26 @@ function sha256Summary(value: string): string {
       </div>
     </header>
 
+    <p v-if="!canManageStorage" class="readonly-notice">
+      你当前只有查看权限。可以查看下载服务器上的文件，但不能上传、删除或刷新发布索引。
+    </p>
+
     <div class="index-banner" :class="{ warning: !store.indexStatus.isAvailable }">
       <span class="banner-mark" aria-hidden="true">☆</span>
       <div>
         <strong>
-          {{
-            store.indexStatus.isAvailable
-              ? '发布索引可用'
-              : '还没有读取到发布索引'
-          }}
+          {{ store.indexStatus.isAvailable ? '发布索引可用' : '还没有读取到发布索引' }}
         </strong>
         <p>
           已登记 {{ store.indexStatus.indexedFileCount }} 个文件，待登记
           {{ store.indexStatus.pendingFileCount }} 个。最近刷新：
           {{ formatTime(store.indexStatus.refreshedAt) }}
         </p>
-            <p v-if="store.indexStatus.errorCode" class="banner-error">
-              发布索引暂时无法读取。请刷新索引；如果仍然失败，请稍后再试。
+        <p v-if="store.indexStatus.errorCode" class="banner-error">
+          发布索引暂时无法读取。请刷新索引；如果仍然失败，请稍后再试。
         </p>
       </div>
-      <RouterLink to="/releases">前往内容发布</RouterLink>
+      <RouterLink v-if="canManageStorage" to="/releases"> 前往内容发布 </RouterLink>
     </div>
 
     <Transition name="toast">
@@ -548,6 +542,7 @@ function sha256Summary(value: string): string {
                 </td>
                 <td>
                   <button
+                    v-if="canManageStorage"
                     type="button"
                     class="danger"
                     :disabled="store.isDeleting(file.relativePath)"
@@ -555,6 +550,7 @@ function sha256Summary(value: string): string {
                   >
                     {{ store.isDeleting(file.relativePath) ? '正在删除…' : '删除' }}
                   </button>
+                  <span v-else class="read-only-copy">只读</span>
                 </td>
               </tr>
             </tbody>
@@ -681,11 +677,7 @@ function sha256Summary(value: string): string {
           <p v-if="uploadConflictMessage" class="inline-error" role="alert">
             {{ uploadConflictMessage }}
           </p>
-          <p
-            v-else-if="!uploadForm.releaseNotes"
-            id="release-notes-hint"
-            class="inline-hint"
-          >
+          <p v-else-if="!uploadForm.releaseNotes" id="release-notes-hint" class="inline-hint">
             更新说明填写后，文件会自动登记为待发布版本；缺失说明时不会生成无法补充的草稿。
           </p>
 
@@ -711,18 +703,10 @@ function sha256Summary(value: string): string {
             </div>
             <progress :value="store.uploadState.progress" max="100"></progress>
             <ol class="upload-stages" aria-label="上传处理进度">
-              <li :class="store.uploadStages.upload">
-                文件上传
-              </li>
-              <li :class="store.uploadStages.registration">
-                版本登记
-              </li>
-              <li :class="store.uploadStages.index">
-                发布索引
-              </li>
-              <li :class="store.uploadStages.list">
-                文件列表
-              </li>
+              <li :class="store.uploadStages.upload">文件上传</li>
+              <li :class="store.uploadStages.registration">版本登记</li>
+              <li :class="store.uploadStages.index">发布索引</li>
+              <li :class="store.uploadStages.list">文件列表</li>
             </ol>
             <small v-if="store.uploadState.uploadedFilePath" class="upload-path">
               {{ store.uploadState.uploadedFilePath }}
@@ -735,18 +719,15 @@ function sha256Summary(value: string): string {
             </small>
             <small
               v-if="
-                store.uploadStage === 'registration_required' &&
-                store.uploadState.uploadedFilePath
+                store.uploadStage === 'registration_required' && store.uploadState.uploadedFilePath
               "
               class="inline-hint"
             >
-              请在下方补填更新说明后再次提交登记；文件已经保存在下载服务器，
-              不需要重新上传。
+              请在下方补填更新说明后再次提交登记；文件已经保存在下载服务器， 不需要重新上传。
             </small>
             <div
               v-if="
-                store.uploadReview.actionLabel &&
-                store.uploadReview.action !== 'manage_release'
+                store.uploadReview.actionLabel && store.uploadReview.action !== 'manage_release'
               "
               class="upload-actions"
             >
@@ -767,23 +748,15 @@ function sha256Summary(value: string): string {
               </button>
             </div>
             <div
-              v-else-if="
-                store.uploadReview.canManageRelease ||
-                store.uploadStage === 'registered'
-              "
+              v-else-if="store.uploadReview.canManageRelease || store.uploadStage === 'registered'"
               class="upload-actions"
             >
-              <RouterLink class="review-link" to="/releases">
-                前往内容发布
-              </RouterLink>
+              <RouterLink class="review-link" to="/releases"> 前往内容发布 </RouterLink>
             </div>
           </div>
 
           <div class="dialog-actions">
-            <p
-              v-if="hasPendingUploadCompletion"
-              class="pending-completion-hint"
-            >
+            <p v-if="hasPendingUploadCompletion" class="pending-completion-hint">
               文件已经上传，请先完成登记、索引同步和列表刷新，再关闭窗口。
             </p>
             <button
@@ -819,9 +792,7 @@ function sha256Summary(value: string): string {
               }}
             </button>
           </div>
-          <p class="upload-target-hint">
-            将保存为：{{ uploadTargetPath }}
-          </p>
+          <p class="upload-target-hint">将保存为：{{ uploadTargetPath }}</p>
         </form>
       </div>
     </Transition>
@@ -851,7 +822,6 @@ function sha256Summary(value: string): string {
         </section>
       </div>
     </Transition>
-
   </section>
 </template>
 
@@ -900,6 +870,22 @@ h1 {
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.readonly-notice {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border: 1px solid #b7def2;
+  border-radius: 14px;
+  background: #f3faff;
+  color: #27627f;
+  line-height: 1.55;
+}
+
+.read-only-copy {
+  display: inline-block;
+  color: var(--sprout-text-muted);
+  font-size: 12px;
 }
 
 .pending-completion-hint {

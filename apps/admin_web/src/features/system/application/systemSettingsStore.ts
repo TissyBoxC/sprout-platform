@@ -80,15 +80,16 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
     try {
       const response = await httpClient.get('/api/v1/admin/settings')
       settings.value = toSettings(response.data.data?.settings ?? {})
+      const savedDefaultModels = [...settings.value.defaultModels]
       version.value = numberValue(response.data.data?.version, 0)
       isLoaded.value = true
+      await synchronizeAIProviderDefaults(savedDefaultModels)
     } catch (caught: unknown) {
       error.value = mapApiError(caught)
+      await synchronizeAIProviderDefaults()
     } finally {
       isLoading.value = false
     }
-
-    await synchronizeAIProviderDefaults()
   }
 
   async function save(): Promise<boolean> {
@@ -104,13 +105,10 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
     error.value = null
     lastMessage.value = ''
     try {
-      const response = await httpClient.put(
-        '/api/v1/admin/settings',
-        {
-          settings: toPayload(settings.value),
-          expected_version: version.value,
-        },
-      )
+      const response = await httpClient.put('/api/v1/admin/settings', {
+        settings: toPayload(settings.value),
+        expected_version: version.value,
+      })
       settings.value = toSettings(response.data.data?.settings ?? {})
       version.value = numberValue(response.data.data?.version, version.value)
       lastMessage.value = '系统设置已保存。'
@@ -151,13 +149,12 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
     settings,
   }
 
-  async function synchronizeAIProviderDefaults(): Promise<void> {
-    const [defaultsResult, modelsResult, childPolicyResult] =
-      await Promise.allSettled([
-        operationsClient.loadAIAccountDefaults(),
-        operationsClient.loadAIModels(),
-        operationsClient.loadAIGatewayChildPolicy(),
-      ])
+  async function synchronizeAIProviderDefaults(savedDefaultModels?: string[]): Promise<void> {
+    const [defaultsResult, modelsResult, childPolicyResult] = await Promise.allSettled([
+      operationsClient.loadAIAccountDefaults(),
+      operationsClient.loadAIModels(),
+      operationsClient.loadAIGatewayChildPolicy(),
+    ])
 
     if (defaultsResult.status === 'fulfilled' && defaultsResult.value !== null) {
       const defaults = defaultsResult.value
@@ -165,8 +162,7 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
         settings.value.defaultBalanceUsd = defaults.defaultBalanceUsd
       }
       if (defaults.defaultConcurrencyLimit !== null) {
-        settings.value.defaultConcurrencyLimit =
-          defaults.defaultConcurrencyLimit
+        settings.value.defaultConcurrencyLimit = defaults.defaultConcurrencyLimit
       }
       defaultBalanceSource.value =
         defaults.source === 'sub2api' ? 'AI 服务统一设置' : defaults.source
@@ -178,9 +174,16 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
 
     if (modelsResult.status === 'fulfilled') {
       modelOptions.value = modelsResult.value
-      const fastestModel = fastestAvailableModel(modelsResult.value)
-      if (fastestModel !== null) {
-        settings.value.defaultModels = [fastestModel.id]
+      // A saved default is an operator decision, not a cache of the fastest
+      // model at page-load time. Only an empty value receives the fallback.
+      const currentDefaultModels = savedDefaultModels ?? settings.value.defaultModels
+      if (currentDefaultModels.length > 0) {
+        settings.value.defaultModels = [...currentDefaultModels]
+      } else {
+        const fastestModel = fastestAvailableModel(modelsResult.value)
+        if (fastestModel !== null) {
+          settings.value.defaultModels = [fastestModel.id]
+        }
       }
     }
 
@@ -192,12 +195,8 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
       childPolicyError.value = mapApiError(childPolicyResult.reason)
     }
 
-    if (
-      defaultsResult.status === 'rejected' ||
-      modelsResult.status === 'rejected'
-    ) {
-      integrationNotice.value =
-        '暂时无法读取 AI 服务的最新配置，当前显示上次保存的内容。'
+    if (defaultsResult.status === 'rejected' || modelsResult.status === 'rejected') {
+      integrationNotice.value = '暂时无法读取 AI 服务的最新配置，当前显示上次保存的内容。'
     }
   }
 
@@ -216,9 +215,7 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
 })
 
 function isSettingsVersionConflict(error: unknown): boolean {
-  const response = (
-    error as { response?: { data?: { error?: { code?: unknown } } } }
-  )?.response
+  const response = (error as { response?: { data?: { error?: { code?: unknown } } } })?.response
   return response?.data?.error?.code === 'settings_version_conflict'
 }
 
@@ -230,8 +227,7 @@ function fastestAvailableModel(models: AIModelOption[]): AIModelOption | null {
     return null
   }
   return availableModels.reduce((fastest, model) =>
-    (model.latencyMs ?? Number.POSITIVE_INFINITY) <
-    (fastest.latencyMs ?? Number.POSITIVE_INFINITY)
+    (model.latencyMs ?? Number.POSITIVE_INFINITY) < (fastest.latencyMs ?? Number.POSITIVE_INFINITY)
       ? model
       : fastest,
   )
@@ -248,23 +244,14 @@ function toSettings(value: Record<string, unknown>): SystemSettings {
 
   return {
     defaultBalanceUsd: numberValue(ai.default_balance_usd, defaults.defaultBalanceUsd),
-    defaultConcurrencyLimit: numberValue(
-      ai.default_concurrency,
-      defaults.defaultConcurrencyLimit,
-    ),
+    defaultConcurrencyLimit: numberValue(ai.default_concurrency, defaults.defaultConcurrencyLimit),
     defaultModels: stringListValue(ai.default_models),
-    registrationEnabled: booleanValue(
-      account.registration_enabled,
-      defaults.registrationEnabled,
-    ),
+    registrationEnabled: booleanValue(account.registration_enabled, defaults.registrationEnabled),
     smsVerificationEnabled: booleanValue(
       account.phone_verification_required,
       defaults.smsVerificationEnabled,
     ),
-    emailLoginEnabled: booleanValue(
-      account.email_login_enabled,
-      defaults.emailLoginEnabled,
-    ),
+    emailLoginEnabled: booleanValue(account.email_login_enabled, defaults.emailLoginEnabled),
     minorModeDefaultEnabled: booleanValue(
       safety.minor_mode_default,
       defaults.minorModeDefaultEnabled,
@@ -281,35 +268,17 @@ function toSettings(value: Record<string, unknown>): SystemSettings {
       voice.continuous_conversation_enabled,
       defaults.continuousConversationEnabled,
     ),
-    voiceIdleWindowSeconds: numberValue(
-      voice.idle_window_seconds,
-      defaults.voiceIdleWindowSeconds,
-    ),
-    bargeInEnabled: booleanValue(
-      voice.barge_in_enabled,
-      defaults.bargeInEnabled,
-    ),
-    farFieldEnabled: booleanValue(
-      voice.far_field_enabled,
-      defaults.farFieldEnabled,
-    ),
+    voiceIdleWindowSeconds: numberValue(voice.idle_window_seconds, defaults.voiceIdleWindowSeconds),
+    bargeInEnabled: booleanValue(voice.barge_in_enabled, defaults.bargeInEnabled),
+    farFieldEnabled: booleanValue(voice.far_field_enabled, defaults.farFieldEnabled),
     releaseChannel: stringValue(update.channel, defaults.releaseChannel),
-    minimumClientVersion: stringValue(
-      update.min_client_version,
-      defaults.minimumClientVersion,
-    ),
+    minimumClientVersion: stringValue(update.min_client_version, defaults.minimumClientVersion),
     mandatoryUpdateThreshold: stringValue(
       update.force_upgrade_below,
       defaults.mandatoryUpdateThreshold,
     ),
-    audioRetentionDays: numberValue(
-      retention.audio_days,
-      defaults.audioRetentionDays,
-    ),
-    imageRetentionDays: numberValue(
-      retention.image_days,
-      defaults.imageRetentionDays,
-    ),
+    audioRetentionDays: numberValue(retention.audio_days, defaults.audioRetentionDays),
+    imageRetentionDays: numberValue(retention.image_days, defaults.imageRetentionDays),
     conversationRetentionDays: numberValue(
       retention.conversation_days,
       defaults.conversationRetentionDays,
@@ -326,9 +295,7 @@ function toPayload(settings: SystemSettings): Record<string, unknown> {
     ai: {
       default_balance_usd: settings.defaultBalanceUsd,
       default_concurrency: settings.defaultConcurrencyLimit,
-      default_models: settings.defaultModels
-        .map((model) => model.trim())
-        .filter(Boolean),
+      default_models: settings.defaultModels.map((model) => model.trim()).filter(Boolean),
     },
     account: {
       registration_enabled: settings.registrationEnabled,
@@ -346,8 +313,7 @@ function toPayload(settings: SystemSettings): Record<string, unknown> {
       allow_image_upload: false,
     },
     voice: {
-      continuous_conversation_enabled:
-        settings.continuousConversationEnabled,
+      continuous_conversation_enabled: settings.continuousConversationEnabled,
       idle_window_seconds: settings.voiceIdleWindowSeconds,
       barge_in_enabled: settings.bargeInEnabled,
       far_field_enabled: settings.farFieldEnabled,

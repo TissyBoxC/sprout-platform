@@ -131,7 +131,7 @@ func (handler usageReportHandler) listGuardianUsageReports(
 		writeError(response, request, http.StatusServiceUnavailable, "service_unavailable", "使用报告暂时无法读取")
 		return
 	}
-	accountID, ok := authenticatedAccountID(request)
+	accountID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return

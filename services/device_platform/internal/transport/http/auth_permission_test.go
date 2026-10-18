@@ -2,6 +2,8 @@ package http
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -95,6 +97,104 @@ func TestRequireAdminPermissionDeniesMissingCapability(t *testing.T) {
 	if reason, _ := audit.events[0].detail["reason"].(string); reason == "" {
 		t.Fatal("denial audit must record the reason")
 	}
+}
+
+func TestRequireAuthenticationFailsClosedWhenDenialAuditFails(t *testing.T) {
+	handler, token := newPermissionMiddlewareWithAudit(
+		t,
+		&authdomain.ParentAccount{
+			ID:               "admin-1",
+			Role:             authdomain.RoleAdmin,
+			Status:           "active",
+			AdminPermissions: []string{authdomain.AdminPermissionWildcard},
+		},
+		failingAudit{},
+	)
+	request := authenticatedRequest(token)
+	request.Header.Del("Authorization")
+	recorder := httptest.NewRecorder()
+	reached := false
+
+	handler.requireAuthentication(func(http.ResponseWriter, *http.Request) {
+		reached = true
+	})(recorder, request)
+
+	if reached {
+		t.Fatal("an unauthenticated request must not reach the handler")
+	}
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf(
+			"status = %d, want %d",
+			recorder.Code,
+			http.StatusUnauthorized,
+		)
+	}
+	var envelope struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode denial response: %v", err)
+	}
+	if envelope.Error.Code != "unauthenticated" {
+		t.Fatalf("error code = %q", envelope.Error.Code)
+	}
+}
+
+func TestRequireAdminPermissionFailsClosedWhenDenialAuditFails(t *testing.T) {
+	handler, token := newPermissionMiddlewareWithAudit(
+		t,
+		&authdomain.ParentAccount{
+			ID:               "admin-1",
+			Role:             authdomain.RoleAdmin,
+			Status:           "active",
+			AdminPermissions: []string{authdomain.AdminPermissionDevicesRead},
+		},
+		failingAudit{},
+	)
+	request := authenticatedRequest(token)
+	recorder := httptest.NewRecorder()
+	reached := false
+
+	handler.requireAdminPermission(
+		authdomain.AdminPermissionServiceUpgrade,
+		func(http.ResponseWriter, *http.Request) { reached = true },
+	)(recorder, request)
+
+	if reached {
+		t.Fatal("a missing capability must not reach the handler")
+	}
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf(
+			"status = %d, want %d",
+			recorder.Code,
+			http.StatusForbidden,
+		)
+	}
+	var envelope struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode denial response: %v", err)
+	}
+	if envelope.Error.Code != "insufficient_permission" {
+		t.Fatalf("error code = %q", envelope.Error.Code)
+	}
+}
+
+type failingAudit struct{}
+
+func (failingAudit) RecordAudit(
+	_ context.Context,
+	_ string,
+	_ string,
+	_ string,
+	_ map[string]any,
+) error {
+	return errors.New("audit storage unavailable")
 }
 
 func TestRequireAdminPermissionGrantsWildcard(t *testing.T) {

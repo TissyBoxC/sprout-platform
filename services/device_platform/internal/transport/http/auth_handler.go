@@ -373,13 +373,28 @@ func (handler authHandler) requireAuthentication(
 	return func(response http.ResponseWriter, request *http.Request) {
 		token, ok := bearerToken(request)
 		if !ok {
-			handler.recordAuthDenied(request, "", "auth.denied", "missing_token")
+			if err := handler.recordAuthDeniedBestEffort(
+				request,
+				"",
+				"auth.denied",
+				"missing_token",
+			); err != nil {
+				// Denial is authoritative even when the append-only audit sink
+				// is degraded. The sink's own monitoring reports the loss.
+			}
 			writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 			return
 		}
 		accountID, err := handler.service.VerifyAccessToken(request.Context(), token)
 		if err != nil {
-			handler.recordAuthDenied(request, "", "auth.denied", "invalid_token")
+			if auditErr := handler.recordAuthDeniedBestEffort(
+				request,
+				"",
+				"auth.denied",
+				"invalid_token",
+			); auditErr != nil {
+				// Keep the stable unauthorized result.
+			}
 			writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 			return
 		}
@@ -481,24 +496,40 @@ func (handler authHandler) authorizeAdmin(
 ) (string, bool) {
 	accountID, ok := authenticatedAccountID(request)
 	if !ok {
-		handler.recordAuthDenied(request, "", "admin.permission.denied", "unauthenticated")
+		if err := handler.recordAuthDeniedBestEffort(
+			request,
+			"",
+			"admin.permission.denied",
+			"unauthenticated",
+		); err != nil {
+			// Keep the stable permission denial.
+		}
 		writeError(response, request, http.StatusForbidden, "insufficient_permission", "你没有权限访问此页面")
 		return "", false
 	}
 	account, err := handler.service.GetIdentity(request.Context(), accountID)
 	if err != nil || account.Role != authdomain.RoleAdmin {
-		handler.recordAuthDenied(request, accountID, "admin.permission.denied", "insufficient_role")
+		if auditErr := handler.recordAuthDeniedBestEffort(
+			request,
+			accountID,
+			"admin.permission.denied",
+			"insufficient_role",
+		); auditErr != nil {
+			// Keep the stable permission denial.
+		}
 		writeError(response, request, http.StatusForbidden, "insufficient_permission", "你没有权限访问此页面")
 		return "", false
 	}
 	if requiredPermission != "" &&
 		!authdomain.HasAdminPermission(account.AdminPermissions, requiredPermission) {
-		handler.recordAuthDenied(
+		if auditErr := handler.recordAuthDeniedBestEffort(
 			request,
 			accountID,
 			"admin.permission.denied",
 			"insufficient_permission:"+requiredPermission,
-		)
+		); auditErr != nil {
+			// Keep the stable permission denial.
+		}
 		writeError(response, request, http.StatusForbidden, "insufficient_permission", "你没有权限访问此页面")
 		return "", false
 	}
@@ -554,11 +585,35 @@ func (handler authHandler) recordAuthDenied(
 	actorAccountID string,
 	action string,
 	reason string,
-) {
+) error {
 	if handler.audit == nil || request == nil {
-		return
+		return authdomain.ErrMFAAuditUnavailable
 	}
-	_ = handler.audit.RecordAudit(
+	return handler.audit.RecordAudit(
+		request.Context(),
+		actorAccountID,
+		"",
+		action,
+		map[string]any{
+			"route":  request.Method + " " + request.URL.Path,
+			"reason": reason,
+		},
+	)
+}
+
+// recordAuthDeniedBestEffort preserves the authentication response during an
+// audit-store outage. The request is still denied, and the audit failure must
+// not make an unauthenticated account look like an operational outage.
+func (handler authHandler) recordAuthDeniedBestEffort(
+	request *http.Request,
+	actorAccountID string,
+	action string,
+	reason string,
+) error {
+	if handler.audit == nil || request == nil {
+		return nil
+	}
+	return handler.audit.RecordAudit(
 		request.Context(),
 		actorAccountID,
 		"",
@@ -672,10 +727,16 @@ func writeAuthServiceError(
 		writeError(response, request, http.StatusUnauthorized, "invalid_verification_code", "验证码不正确，请重新输入")
 	case errors.Is(err, authdomain.ErrAccountDisabled):
 		writeError(response, request, http.StatusForbidden, "account_disabled", "这个账号当前无法登录")
+	case errors.Is(err, authdomain.ErrMFARequired):
+		writeError(response, request, http.StatusForbidden, "mfa_required", "管理员需完成安全验证后登录")
 	case errors.Is(err, authdomain.ErrMFANotConfigured):
 		writeError(response, request, http.StatusServiceUnavailable, "mfa_not_configured", "管理员验证尚未设置，请联系维护人员")
 	case errors.Is(err, authdomain.ErrInvalidMFACode):
 		writeError(response, request, http.StatusUnauthorized, "invalid_mfa_code", "验证码不正确，请重新输入")
+	case errors.Is(err, authdomain.ErrMFAChallengeLocked):
+		writeError(response, request, http.StatusLocked, "mfa_challenge_locked", "验证次数过多，请重新登录")
+	case errors.Is(err, authdomain.ErrMFAAuditUnavailable):
+		writeError(response, request, http.StatusServiceUnavailable, "security_audit_unavailable", "安全验证暂时不可用，请稍后重试")
 	case errors.Is(err, authdomain.ErrMFAChallengeNotFound),
 		errors.Is(err, authdomain.ErrMFAChallengeExpired),
 		errors.Is(err, authdomain.ErrMFAChallengeConsumed):
@@ -725,7 +786,18 @@ func writeRateLimitError(
 
 func decodeJSON(request *http.Request, destination any) error {
 	const maxJSONBodyBytes = 1 << 20
-	body := http.MaxBytesReader(nil, request.Body, maxJSONBodyBytes)
+	return decodeJSONBody(request, destination, maxJSONBodyBytes)
+}
+
+// decodeJSONBody enforces a bounded body and rejects unknown or trailing
+// values. Callers that need a larger provider payload pass an explicit limit;
+// ordinary management requests keep the one-megabyte default.
+func decodeJSONBody(
+	request *http.Request,
+	destination any,
+	maxBytes int64,
+) error {
+	body := http.MaxBytesReader(nil, request.Body, maxBytes)
 	decoder := json.NewDecoder(body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(destination); err != nil {

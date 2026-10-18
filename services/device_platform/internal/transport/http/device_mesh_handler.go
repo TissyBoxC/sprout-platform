@@ -77,7 +77,7 @@ func (handler deviceMeshHandler) listGroups(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -100,7 +100,7 @@ func (handler deviceMeshHandler) createGroup(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -128,7 +128,7 @@ func (handler deviceMeshHandler) deleteGroup(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -146,7 +146,7 @@ func (handler deviceMeshHandler) listMembers(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -170,7 +170,7 @@ func (handler deviceMeshHandler) addMember(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -199,7 +199,7 @@ func (handler deviceMeshHandler) removeMember(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -218,7 +218,7 @@ func (handler deviceMeshHandler) listMessages(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -242,7 +242,7 @@ func (handler deviceMeshHandler) routeMessage(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -270,7 +270,7 @@ func (handler deviceMeshHandler) listContentStates(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -293,7 +293,7 @@ func (handler deviceMeshHandler) reportSync(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return

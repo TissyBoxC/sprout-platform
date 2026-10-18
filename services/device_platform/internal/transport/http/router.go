@@ -13,6 +13,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/packages/go/httpapi"
 	"github.com/TissyBoxC/sprout-platform/packages/go/observability"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/config"
+	gatewaydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/domain"
 	gatewayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/service"
 	alarmreminderservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/alarm_reminder/service"
 	auditdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/domain"
@@ -30,6 +31,7 @@ import (
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
 	displayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/display/service"
 	englishservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/service"
+	familydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/domain"
 	familyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/service"
 	featurecenterservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	formfactorservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/form_factor/service"
@@ -82,6 +84,11 @@ type RouterOptions struct {
 	ReleaseStoreService          *releasestoreservice.Service
 	OTAService                   *otaservice.Service
 	ContentService               *contentservice.Service
+	AIExecutionStore             aiExecutionStore
+	AIExecutionTokenTTL          time.Duration
+	AIExecutionLeaseTTL          time.Duration
+	AIUpstreamURL                string
+	AIUpstreamHTTPClient         *http.Client
 	ContentOfflinePolicyService  *contentofflinepolicyservice.Service
 	UITextService                *ui_textservice.Service
 	EnglishService               *englishservice.Service
@@ -172,6 +179,16 @@ type auditService interface {
 	) error
 }
 
+// aiExecutionAuthorizer validates an execution model without returning any
+// upstream credential to the transport layer.
+type aiExecutionAuthorizer interface {
+	AuthorizeExecution(
+		ctx context.Context,
+		parentAccountID string,
+		model string,
+	) (*gatewaydomain.Credential, error)
+}
+
 // NewRouter returns the HTTP router for the device platform.
 func NewRouter(options RouterOptions) http.Handler {
 	logger := options.Logger
@@ -238,29 +255,60 @@ func NewRouter(options RouterOptions) http.Handler {
 				service:       options.ChildService,
 				policyService: options.ParentPolicyService,
 			}
+			childAuthorizer := options.FamilyService
+			requireChildRead := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						childAuthorizer,
+						familydomain.ActionChildRead,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
+			requireChildManage := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						childAuthorizer,
+						familydomain.ActionChildManage,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
 			mux.HandleFunc(
 				"GET /api/v1/children",
-				authHandler.requireAuthentication(childHandler.list),
+				requireChildRead(childHandler.list),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/children",
-				authHandler.requireAuthentication(childHandler.create),
+				requireChildManage(childHandler.create),
 			)
 			mux.HandleFunc(
 				"PUT /api/v1/children/{child_id}",
-				authHandler.requireAuthentication(childHandler.update),
+				requireChildManage(childHandler.update),
 			)
 			mux.HandleFunc(
 				"DELETE /api/v1/children/{child_id}",
-				authHandler.requireAuthentication(childHandler.delete),
+				requireChildManage(childHandler.delete),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/children/{child_id}/policy",
-				authHandler.requireAuthentication(childHandler.getPolicy),
+				requireChildRead(childHandler.getPolicy),
 			)
 			mux.HandleFunc(
 				"PUT /api/v1/children/{child_id}/policy",
-				authHandler.requireAuthentication(childHandler.updatePolicy),
+				requireChildManage(childHandler.updatePolicy),
 			)
 		}
 		if options.FamilyService != nil {
@@ -270,7 +318,12 @@ func NewRouter(options RouterOptions) http.Handler {
 			}
 			mux.HandleFunc(
 				"GET /api/v1/family/members",
-				authHandler.requireAuthentication(familyHandler.listMembers),
+				authHandler.requireAuthentication(
+					familyHandler.requireFamilyAction(
+						familydomain.ActionMemberRead,
+						familyHandler.listMembers,
+					),
+				),
 			)
 			mux.HandleFunc(
 				"DELETE /api/v1/family/members/{user_id}",
@@ -278,11 +331,21 @@ func NewRouter(options RouterOptions) http.Handler {
 			)
 			mux.HandleFunc(
 				"PUT /api/v1/family/members/{user_id}",
-				authHandler.requireAuthentication(familyHandler.updateMemberRole),
+				authHandler.requireAuthentication(
+					familyHandler.requireFamilyAction(
+						familydomain.ActionMemberManage,
+						familyHandler.updateMemberRole,
+					),
+				),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/family/invitations",
-				authHandler.requireAuthentication(familyHandler.listInvitations),
+				authHandler.requireAuthentication(
+					familyHandler.requireFamilyAction(
+						familydomain.ActionInvitationRead,
+						familyHandler.listInvitations,
+					),
+				),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/family/invitations/mine",
@@ -290,11 +353,21 @@ func NewRouter(options RouterOptions) http.Handler {
 			)
 			mux.HandleFunc(
 				"POST /api/v1/family/invitations",
-				authHandler.requireAuthentication(familyHandler.createInvitation),
+				authHandler.requireAuthentication(
+					familyHandler.requireFamilyAction(
+						familydomain.ActionInvitationManage,
+						familyHandler.createInvitation,
+					),
+				),
 			)
 			mux.HandleFunc(
 				"DELETE /api/v1/family/invitations/{invitation_id}",
-				authHandler.requireAuthentication(familyHandler.revokeInvitation),
+				authHandler.requireAuthentication(
+					familyHandler.requireFamilyAction(
+						familydomain.ActionInvitationManage,
+						familyHandler.revokeInvitation,
+					),
+				),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/families/{family_id}/invitations/{invitation_id}/accept",
@@ -302,84 +375,164 @@ func NewRouter(options RouterOptions) http.Handler {
 			)
 			mux.HandleFunc(
 				"GET /api/v1/family/capability",
-				authHandler.requireAuthentication(familyHandler.capability),
+				authHandler.requireAuthentication(
+					familyHandler.requireFamilyAction(
+						familydomain.ActionFamilyRead,
+						familyHandler.capability,
+					),
+				),
 			)
 		}
 		if options.CompanionshipService != nil {
 			companionshipHandler := companionshipHandler{
 				service: options.CompanionshipService,
 			}
+			requireCompanionshipRead := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionChildRead,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
+			requireCompanionshipManage := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionChildManage,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
 			mux.HandleFunc(
 				"GET /api/v1/companionship/growth-records",
-				authHandler.requireAuthentication(companionshipHandler.listGrowthRecords),
+				requireCompanionshipRead(companionshipHandler.listGrowthRecords),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/companionship/growth-records",
-				authHandler.requireAuthentication(companionshipHandler.createGrowthRecord),
+				requireCompanionshipManage(companionshipHandler.createGrowthRecord),
 			)
 			mux.HandleFunc(
 				"DELETE /api/v1/companionship/growth-records/{record_id}",
-				authHandler.requireAuthentication(companionshipHandler.deleteGrowthRecord),
+				requireCompanionshipManage(companionshipHandler.deleteGrowthRecord),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/companionship/habit-reminders",
-				authHandler.requireAuthentication(companionshipHandler.listHabitReminders),
+				requireCompanionshipRead(companionshipHandler.listHabitReminders),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/companionship/habit-reminders",
-				authHandler.requireAuthentication(companionshipHandler.createHabitReminder),
+				requireCompanionshipManage(companionshipHandler.createHabitReminder),
 			)
 			mux.HandleFunc(
 				"PUT /api/v1/companionship/habit-reminders/{reminder_id}",
-				authHandler.requireAuthentication(companionshipHandler.updateHabitReminder),
+				requireCompanionshipManage(companionshipHandler.updateHabitReminder),
 			)
 			mux.HandleFunc(
 				"DELETE /api/v1/companionship/habit-reminders/{reminder_id}",
-				authHandler.requireAuthentication(companionshipHandler.deleteHabitReminder),
+				requireCompanionshipManage(companionshipHandler.deleteHabitReminder),
 			)
 		}
 		if options.AlarmReminderService != nil {
 			alarmReminderHandler := alarmReminderHandler{service: options.AlarmReminderService}
+			requireAlarmRead := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionChildRead,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
+			requireAlarmManage := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionChildManage,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
 			mux.HandleFunc(
 				"GET /api/v1/alarm-reminders",
-				authHandler.requireAuthentication(alarmReminderHandler.listAlarms),
+				requireAlarmRead(alarmReminderHandler.listAlarms),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/alarm-reminders",
-				authHandler.requireAuthentication(alarmReminderHandler.createAlarm),
+				requireAlarmManage(alarmReminderHandler.createAlarm),
 			)
 			mux.HandleFunc(
 				"PUT /api/v1/alarm-reminders/{alarm_id}",
-				authHandler.requireAuthentication(alarmReminderHandler.updateAlarm),
+				requireAlarmManage(alarmReminderHandler.updateAlarm),
 			)
 			mux.HandleFunc(
 				"DELETE /api/v1/alarm-reminders/{alarm_id}",
-				authHandler.requireAuthentication(alarmReminderHandler.deleteAlarm),
+				requireAlarmManage(alarmReminderHandler.deleteAlarm),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/alarm-reminders/events",
-				authHandler.requireAuthentication(alarmReminderHandler.listEvents),
+				requireAlarmRead(alarmReminderHandler.listEvents),
 			)
 		}
 		if options.EnglishService != nil {
 			englishHandler := englishHandler{
 				service: options.EnglishService,
 			}
+			requireEnglishRead := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionChildRead,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
 			mux.HandleFunc(
 				"GET /api/v1/english/lessons",
-				authHandler.requireAuthentication(englishHandler.listLessons),
+				requireEnglishRead(englishHandler.listLessons),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/english/lessons/{lesson_id}",
-				authHandler.requireAuthentication(englishHandler.getLesson),
+				requireEnglishRead(englishHandler.getLesson),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/english/progress",
-				authHandler.requireAuthentication(englishHandler.listProgress),
+				requireEnglishRead(englishHandler.listProgress),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/english/attempts",
-				authHandler.requireAuthentication(englishHandler.listAttempts),
+				requireEnglishRead(englishHandler.listAttempts),
 			)
 			// Firmware devices never receive a guardian credential, so the
 			// practice-attempt write is also exposed behind a device session
@@ -404,21 +557,51 @@ func NewRouter(options RouterOptions) http.Handler {
 			playbackHandler := playbackHandler{
 				service: options.PlaybackService,
 			}
+			requirePlaybackRead := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionDeviceRead,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
+			requirePlaybackManage := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionDeviceManage,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
 			mux.HandleFunc(
 				"POST /api/v1/playback/requests",
-				authHandler.requireAuthentication(playbackHandler.create),
+				requirePlaybackManage(playbackHandler.create),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/playback/requests",
-				authHandler.requireAuthentication(playbackHandler.list),
+				requirePlaybackRead(playbackHandler.list),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/playback/requests/{request_id}",
-				authHandler.requireAuthentication(playbackHandler.get),
+				requirePlaybackRead(playbackHandler.get),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/playback/requests/{request_id}/cancel",
-				authHandler.requireAuthentication(playbackHandler.cancel),
+				requirePlaybackManage(playbackHandler.cancel),
 			)
 			// Firmware devices never receive a guardian credential, so the
 			// device-facing reads and outcome writes are exposed behind a
@@ -449,24 +632,66 @@ func NewRouter(options RouterOptions) http.Handler {
 			}
 			mux.HandleFunc(
 				"GET /api/v1/content/recommendations",
-				authHandler.requireAuthentication(recommendationHandler.list),
+				authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionChildRead,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							recommendationHandler.list(response, request)
+						},
+					),
+				),
 			)
 		}
 		if options.LocalCommandService != nil {
 			localCommandHandler := localCommandHandler{
 				service: options.LocalCommandService,
 			}
+			requireLocalCommandRead := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionDeviceRead,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
+			requireLocalCommandManage := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionDeviceManage,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
 			mux.HandleFunc(
 				"GET /api/v1/local-commands",
-				authHandler.requireAuthentication(localCommandHandler.list),
+				requireLocalCommandRead(localCommandHandler.list),
 			)
 			mux.HandleFunc(
 				"PUT /api/v1/local-commands",
-				authHandler.requireAuthentication(localCommandHandler.replace),
+				requireLocalCommandManage(localCommandHandler.replace),
 			)
 			mux.HandleFunc(
 				"DELETE /api/v1/local-commands/{command_id}",
-				authHandler.requireAuthentication(localCommandHandler.delete),
+				requireLocalCommandManage(localCommandHandler.delete),
 			)
 			// Firmware devices read the family's command set with a device
 			// session token so common actions keep working with no guardian
@@ -487,17 +712,47 @@ func NewRouter(options RouterOptions) http.Handler {
 			offlinePolicyHandler := contentOfflinePolicyHandler{
 				service: options.ContentOfflinePolicyService,
 			}
+			requireOfflinePolicyRead := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionDeviceRead,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
+			requireOfflinePolicyManage := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionDeviceManage,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
 			mux.HandleFunc(
 				"GET /api/v1/content/offline-policy",
-				authHandler.requireAuthentication(offlinePolicyHandler.current),
+				requireOfflinePolicyRead(offlinePolicyHandler.current),
 			)
 			mux.HandleFunc(
 				"PUT /api/v1/content/offline-policy",
-				authHandler.requireAuthentication(offlinePolicyHandler.publish),
+				requireOfflinePolicyManage(offlinePolicyHandler.publish),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/content/offline-policy/acknowledgements",
-				authHandler.requireAuthentication(offlinePolicyHandler.acknowledgements),
+				requireOfflinePolicyRead(offlinePolicyHandler.acknowledgements),
 			)
 			// Firmware devices read the fleet policy with a device session
 			// token so the cache budget is enforced without a guardian present.
@@ -777,6 +1032,7 @@ func NewRouter(options RouterOptions) http.Handler {
 				voiceTokenIssuer:  options.VoiceTokenIssuer,
 				voiceWebSocketURL: strings.TrimSpace(options.VoiceWebSocketURL),
 				voiceConsent:      options.VoiceConsentReader,
+				familyAccess:      authenticatedFamilyAccess,
 			}
 			mux.HandleFunc(
 				"POST /api/v1/devices/register",
@@ -804,15 +1060,51 @@ func NewRouter(options RouterOptions) http.Handler {
 			)
 			mux.HandleFunc(
 				"POST /api/v1/devices/bind",
-				authHandler.requireAuthentication(bindingHandler.bind),
+				authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionDeviceBind,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							bindingHandler.bind(response, request)
+						},
+					),
+				),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/devices",
-				authHandler.requireAuthentication(bindingHandler.list),
+				authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionDeviceRead,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							bindingHandler.list(response, request)
+						},
+					),
+				),
 			)
 			mux.HandleFunc(
 				"DELETE /api/v1/devices/{device_id}",
-				authHandler.requireAuthentication(bindingHandler.remove),
+				authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionDeviceManage,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							bindingHandler.remove(response, request)
+						},
+					),
+				),
 			)
 		}
 		if options.RuntimeService != nil {
@@ -821,14 +1113,39 @@ func NewRouter(options RouterOptions) http.Handler {
 				policyService:     options.ParentPolicyService,
 				diagnosticService: options.DiagnosticService,
 				bindingRevoker:    options.BindingService,
+				familyAccess:      authenticatedFamilyAccess,
 			}
 			mux.HandleFunc(
 				"GET /api/v1/devices/status",
-				authHandler.requireAuthentication(runtimeHandler.listForParent),
+				authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionDeviceRead,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							runtimeHandler.listForParent(response, request)
+						},
+					),
+				),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/devices/{device_id}/status",
-				authHandler.requireAuthentication(runtimeHandler.getForParent),
+				authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionDeviceRead,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							runtimeHandler.getForParent(response, request)
+						},
+					),
+				),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/devices/{device_id}/runtime/heartbeat",
@@ -947,7 +1264,23 @@ func NewRouter(options RouterOptions) http.Handler {
 			}
 			mux.HandleFunc(
 				"PUT /api/v1/auth/ai-models",
-				authHandler.requireAuthentication(adminHandler.updateParentAIModels),
+				authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionAIAccountManage,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							ownerAccountID string,
+						) {
+							adminHandler.updateParentAIModelsAuthorized(
+								response,
+								request,
+								ownerAccountID,
+							)
+						},
+					),
+				),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/families",
@@ -1272,20 +1605,45 @@ func NewRouter(options RouterOptions) http.Handler {
 					string,
 				),
 			) http.HandlerFunc {
-				return func(response http.ResponseWriter, request *http.Request) {
-					accountID, ok := authenticatedAccountID(request)
-					if !ok {
-						writeError(
-							response,
-							request,
-							http.StatusUnauthorized,
-							"unauthenticated",
-							"请重新登录",
-						)
-						return
-					}
-					action(response, request, accountID)
-				}
+				return parentScopedFor(
+					options.FamilyService,
+					familydomain.ActionFamilyRead,
+					action,
+				)
+			}
+			privacyMutationScoped := func(
+				action func(
+					http.ResponseWriter,
+					*http.Request,
+					string,
+				),
+			) http.HandlerFunc {
+				return parentScopedFor(
+					options.FamilyService,
+					familydomain.ActionPrivacyManage,
+					action,
+				)
+			}
+			// familyScopedFor wraps a guardian route with the exact family action
+			// it requires. Handlers below read the resolved owner from the request
+			// context, so this also applies to invited guardians and viewers.
+			familyScopedFor := func(
+				action familydomain.Action,
+				next http.HandlerFunc,
+			) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						action,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
 			}
 			// adminScoped resolves the authenticated administrator id for
 			// attribution and audit.
@@ -1314,25 +1672,25 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/privacy/deletion",
 					authHandler.requireAuthentication(
-						parentScoped(privacyHandler.RequestDeletion),
+						privacyMutationScoped(privacyHandler.RequestDeletion),
 					),
 				)
 				mux.HandleFunc(
 					"DELETE /api/v1/privacy/deletion",
 					authHandler.requireAuthentication(
-						parentScoped(privacyHandler.CancelDeletion),
+						privacyMutationScoped(privacyHandler.CancelDeletion),
 					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/privacy/consent/withdraw",
 					authHandler.requireAuthentication(
-						parentScoped(privacyHandler.WithdrawConsent),
+						privacyMutationScoped(privacyHandler.WithdrawConsent),
 					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/privacy/consent/grant",
 					authHandler.requireAuthentication(
-						parentScoped(privacyHandler.GrantConsent),
+						privacyMutationScoped(privacyHandler.GrantConsent),
 					),
 				)
 				mux.HandleFunc(
@@ -1348,37 +1706,61 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/vision/capability",
 					authHandler.requireAuthentication(
-						parentScoped(visionHandler.GetCapability),
+						parentScopedFor(
+							options.FamilyService,
+							familydomain.ActionVisionRead,
+							visionHandler.GetCapability,
+						),
 					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/vision/tasks",
 					authHandler.requireAuthentication(
-						parentScoped(visionHandler.CreateTask),
+						parentScopedFor(
+							options.FamilyService,
+							familydomain.ActionVisionExecute,
+							visionHandler.CreateTask,
+						),
 					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/vision/tasks",
 					authHandler.requireAuthentication(
-						parentScoped(visionHandler.ListTasks),
+						parentScopedFor(
+							options.FamilyService,
+							familydomain.ActionVisionRead,
+							visionHandler.ListTasks,
+						),
 					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/vision/tasks/{task_id}/cancel",
 					authHandler.requireAuthentication(
-						parentScoped(visionHandler.CancelTask),
+						parentScopedFor(
+							options.FamilyService,
+							familydomain.ActionVisionExecute,
+							visionHandler.CancelTask,
+						),
 					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/vision/results",
 					authHandler.requireAuthentication(
-						parentScoped(visionHandler.ListResults),
+						parentScopedFor(
+							options.FamilyService,
+							familydomain.ActionVisionRead,
+							visionHandler.ListResults,
+						),
 					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/vision/results/{task_id}",
 					authHandler.requireAuthentication(
-						parentScoped(visionHandler.GetResult),
+						parentScopedFor(
+							options.FamilyService,
+							familydomain.ActionVisionRead,
+							visionHandler.GetResult,
+						),
 					),
 				)
 				mux.HandleFunc(
@@ -1393,19 +1775,19 @@ func NewRouter(options RouterOptions) http.Handler {
 				displayHandler := displayHandler{service: options.DisplayService}
 				mux.HandleFunc(
 					"GET /api/v1/display/policy",
-					authHandler.requireAuthentication(displayHandler.current),
+					familyScopedFor(familydomain.ActionDeviceRead, displayHandler.current),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/display/policy",
-					authHandler.requireAuthentication(displayHandler.publish),
+					familyScopedFor(familydomain.ActionDeviceManage, displayHandler.publish),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/display/devices",
-					authHandler.requireAuthentication(displayHandler.statuses),
+					familyScopedFor(familydomain.ActionDeviceRead, displayHandler.statuses),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/display/capability",
-					authHandler.requireAuthentication(displayHandler.capability),
+					familyScopedFor(familydomain.ActionDeviceRead, displayHandler.capability),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/display/stats",
@@ -1419,39 +1801,39 @@ func NewRouter(options RouterOptions) http.Handler {
 				screenHandler := screenHandler{service: options.ScreenService}
 				mux.HandleFunc(
 					"GET /api/v1/screen/policy",
-					authHandler.requireAuthentication(screenHandler.current),
+					familyScopedFor(familydomain.ActionDeviceRead, screenHandler.current),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/screen/policy",
-					authHandler.requireAuthentication(screenHandler.publish),
+					familyScopedFor(familydomain.ActionDeviceManage, screenHandler.publish),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/screen/devices",
-					authHandler.requireAuthentication(screenHandler.statuses),
+					familyScopedFor(familydomain.ActionDeviceRead, screenHandler.statuses),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/screen/point-read",
-					authHandler.requireAuthentication(screenHandler.dictionary),
+					familyScopedFor(familydomain.ActionDeviceRead, screenHandler.dictionary),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/screen/point-read",
-					authHandler.requireAuthentication(screenHandler.putDictionaryEntry),
+					familyScopedFor(familydomain.ActionDeviceManage, screenHandler.putDictionaryEntry),
 				)
 				mux.HandleFunc(
 					"DELETE /api/v1/screen/point-read/{entry_id}",
-					authHandler.requireAuthentication(screenHandler.deleteDictionaryEntry),
+					familyScopedFor(familydomain.ActionDeviceManage, screenHandler.deleteDictionaryEntry),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/screen/capability",
-					authHandler.requireAuthentication(screenHandler.capability),
+					familyScopedFor(familydomain.ActionDeviceRead, screenHandler.capability),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/screen/playback",
-					authHandler.requireAuthentication(screenHandler.playback),
+					familyScopedFor(familydomain.ActionDeviceRead, screenHandler.playback),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/devices/{device_id}/screen/playback",
-					authHandler.requireAuthentication(screenHandler.resolvePlayback),
+					familyScopedFor(familydomain.ActionDeviceManage, screenHandler.resolvePlayback),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/screen/stats",
@@ -1465,19 +1847,19 @@ func NewRouter(options RouterOptions) http.Handler {
 				videoSessionHandler := videoSessionHandler{service: options.VideoSessionService}
 				mux.HandleFunc(
 					"GET /api/v1/video-session/policy",
-					authHandler.requireAuthentication(videoSessionHandler.current),
+					familyScopedFor(familydomain.ActionDeviceRead, videoSessionHandler.current),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/video-session/policy",
-					authHandler.requireAuthentication(videoSessionHandler.publish),
+					familyScopedFor(familydomain.ActionDeviceManage, videoSessionHandler.publish),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/video-session/devices",
-					authHandler.requireAuthentication(videoSessionHandler.statuses),
+					familyScopedFor(familydomain.ActionDeviceRead, videoSessionHandler.statuses),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/video-session/capability",
-					authHandler.requireAuthentication(videoSessionHandler.capability),
+					familyScopedFor(familydomain.ActionDeviceRead, videoSessionHandler.capability),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/video-session/stats",
@@ -1493,19 +1875,19 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"GET /api/v1/bluetooth-audio/policy",
-					authHandler.requireAuthentication(bluetoothAudioHandler.current),
+					familyScopedFor(familydomain.ActionDeviceRead, bluetoothAudioHandler.current),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/bluetooth-audio/policy",
-					authHandler.requireAuthentication(bluetoothAudioHandler.publish),
+					familyScopedFor(familydomain.ActionDeviceManage, bluetoothAudioHandler.publish),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/bluetooth-audio/devices",
-					authHandler.requireAuthentication(bluetoothAudioHandler.statuses),
+					familyScopedFor(familydomain.ActionDeviceRead, bluetoothAudioHandler.statuses),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/bluetooth-audio/capability",
-					authHandler.requireAuthentication(bluetoothAudioHandler.capability),
+					familyScopedFor(familydomain.ActionDeviceRead, bluetoothAudioHandler.capability),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/bluetooth-audio/stats",
@@ -1521,19 +1903,19 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"GET /api/v1/learning-visualization/policy",
-					authHandler.requireAuthentication(learningVisualizationHandler.current),
+					familyScopedFor(familydomain.ActionChildRead, learningVisualizationHandler.current),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/learning-visualization/policy",
-					authHandler.requireAuthentication(learningVisualizationHandler.publish),
+					familyScopedFor(familydomain.ActionChildManage, learningVisualizationHandler.publish),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/learning-visualization/devices",
-					authHandler.requireAuthentication(learningVisualizationHandler.statuses),
+					familyScopedFor(familydomain.ActionChildRead, learningVisualizationHandler.statuses),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/learning-visualization/capability",
-					authHandler.requireAuthentication(learningVisualizationHandler.capability),
+					familyScopedFor(familydomain.ActionChildRead, learningVisualizationHandler.capability),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/learning-visualization/stats",
@@ -1549,19 +1931,19 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"GET /api/v1/image-privacy/policy",
-					authHandler.requireAuthentication(imagePrivacyHandler.current),
+					familyScopedFor(familydomain.ActionPrivacyRead, imagePrivacyHandler.current),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/image-privacy/policy",
-					authHandler.requireAuthentication(imagePrivacyHandler.publish),
+					familyScopedFor(familydomain.ActionPrivacyManage, imagePrivacyHandler.publish),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/image-privacy/devices",
-					authHandler.requireAuthentication(imagePrivacyHandler.statuses),
+					familyScopedFor(familydomain.ActionPrivacyRead, imagePrivacyHandler.statuses),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/image-privacy/capability",
-					authHandler.requireAuthentication(imagePrivacyHandler.capability),
+					familyScopedFor(familydomain.ActionPrivacyRead, imagePrivacyHandler.capability),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/image-privacy/stats",
@@ -1575,19 +1957,19 @@ func NewRouter(options RouterOptions) http.Handler {
 				inputHandler := inputHandler{service: options.InputService}
 				mux.HandleFunc(
 					"GET /api/v1/touch/config",
-					authHandler.requireAuthentication(inputHandler.current),
+					familyScopedFor(familydomain.ActionDeviceRead, inputHandler.current),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/touch/config",
-					authHandler.requireAuthentication(inputHandler.publish),
+					familyScopedFor(familydomain.ActionDeviceManage, inputHandler.publish),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/touch/devices",
-					authHandler.requireAuthentication(inputHandler.statuses),
+					familyScopedFor(familydomain.ActionDeviceRead, inputHandler.statuses),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/touch/capability",
-					authHandler.requireAuthentication(inputHandler.capability),
+					familyScopedFor(familydomain.ActionDeviceRead, inputHandler.capability),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/touch/stats",
@@ -1601,19 +1983,19 @@ func NewRouter(options RouterOptions) http.Handler {
 				connectivityHandler := connectivityHandler{service: options.ConnectivityService}
 				mux.HandleFunc(
 					"GET /api/v1/connectivity/policy",
-					authHandler.requireAuthentication(connectivityHandler.current),
+					familyScopedFor(familydomain.ActionDeviceRead, connectivityHandler.current),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/connectivity/policy",
-					authHandler.requireAuthentication(connectivityHandler.publish),
+					familyScopedFor(familydomain.ActionDeviceManage, connectivityHandler.publish),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/connectivity/devices",
-					authHandler.requireAuthentication(connectivityHandler.statuses),
+					familyScopedFor(familydomain.ActionDeviceRead, connectivityHandler.statuses),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/connectivity/capability",
-					authHandler.requireAuthentication(connectivityHandler.capability),
+					familyScopedFor(familydomain.ActionDeviceRead, connectivityHandler.capability),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/connectivity/stats",
@@ -1627,19 +2009,19 @@ func NewRouter(options RouterOptions) http.Handler {
 				powerHandler := powerHandler{service: options.PowerService}
 				mux.HandleFunc(
 					"GET /api/v1/power/policy",
-					authHandler.requireAuthentication(powerHandler.current),
+					familyScopedFor(familydomain.ActionDeviceRead, powerHandler.current),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/power/policy",
-					authHandler.requireAuthentication(powerHandler.publish),
+					familyScopedFor(familydomain.ActionDeviceManage, powerHandler.publish),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/power/devices",
-					authHandler.requireAuthentication(powerHandler.statuses),
+					familyScopedFor(familydomain.ActionDeviceRead, powerHandler.statuses),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/power/capability",
-					authHandler.requireAuthentication(powerHandler.capability),
+					familyScopedFor(familydomain.ActionDeviceRead, powerHandler.capability),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/power/stats",
@@ -1653,19 +2035,19 @@ func NewRouter(options RouterOptions) http.Handler {
 				motionHandler := motionHandler{service: options.MotionService}
 				mux.HandleFunc(
 					"GET /api/v1/motion/policy",
-					authHandler.requireAuthentication(motionHandler.current),
+					familyScopedFor(familydomain.ActionDeviceRead, motionHandler.current),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/motion/policy",
-					authHandler.requireAuthentication(motionHandler.publish),
+					familyScopedFor(familydomain.ActionDeviceManage, motionHandler.publish),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/motion/devices",
-					authHandler.requireAuthentication(motionHandler.statuses),
+					familyScopedFor(familydomain.ActionDeviceRead, motionHandler.statuses),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/motion/capability",
-					authHandler.requireAuthentication(motionHandler.capability),
+					familyScopedFor(familydomain.ActionDeviceRead, motionHandler.capability),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/motion/stats",
@@ -1679,11 +2061,11 @@ func NewRouter(options RouterOptions) http.Handler {
 				formFactorHandler := formFactorHandler{service: options.FormFactorService}
 				mux.HandleFunc(
 					"GET /api/v1/form-factor/devices",
-					authHandler.requireAuthentication(formFactorHandler.statuses),
+					familyScopedFor(familydomain.ActionDeviceRead, formFactorHandler.statuses),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/form-factor/capability",
-					authHandler.requireAuthentication(formFactorHandler.capability),
+					familyScopedFor(familydomain.ActionDeviceRead, formFactorHandler.capability),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/form-factor/stats",
@@ -1697,39 +2079,39 @@ func NewRouter(options RouterOptions) http.Handler {
 				videoHandler := videoCompanionHandler{service: options.VideoCompanionService}
 				mux.HandleFunc(
 					"GET /api/v1/video-companion/contacts",
-					authHandler.requireAuthentication(videoHandler.listContacts),
+					familyScopedFor(familydomain.ActionDeviceRead, videoHandler.listContacts),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/video-companion/contacts",
-					authHandler.requireAuthentication(videoHandler.createContact),
+					familyScopedFor(familydomain.ActionDeviceManage, videoHandler.createContact),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/video-companion/contacts/{contact_id}",
-					authHandler.requireAuthentication(videoHandler.updateContact),
+					familyScopedFor(familydomain.ActionDeviceManage, videoHandler.updateContact),
 				)
 				mux.HandleFunc(
 					"DELETE /api/v1/video-companion/contacts/{contact_id}",
-					authHandler.requireAuthentication(videoHandler.deleteContact),
+					familyScopedFor(familydomain.ActionDeviceManage, videoHandler.deleteContact),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/video-companion/calls",
-					authHandler.requireAuthentication(videoHandler.history),
+					familyScopedFor(familydomain.ActionDeviceRead, videoHandler.history),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/video-companion/calls",
-					authHandler.requireAuthentication(videoHandler.startCall),
+					familyScopedFor(familydomain.ActionDeviceManage, videoHandler.startCall),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/video-companion/calls/{call_id}",
-					authHandler.requireAuthentication(videoHandler.updateCall),
+					familyScopedFor(familydomain.ActionDeviceManage, videoHandler.updateCall),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/video-companion/devices",
-					authHandler.requireAuthentication(videoHandler.statuses),
+					familyScopedFor(familydomain.ActionDeviceRead, videoHandler.statuses),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/video-companion/capability",
-					authHandler.requireAuthentication(videoHandler.capability),
+					familyScopedFor(familydomain.ActionDeviceRead, videoHandler.capability),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/video-companion/stats",
@@ -1743,55 +2125,55 @@ func NewRouter(options RouterOptions) http.Handler {
 				wearableHandler := wearableHandler{service: options.WearableService}
 				mux.HandleFunc(
 					"GET /api/v1/wearable/policy",
-					authHandler.requireAuthentication(wearableHandler.policy),
+					familyScopedFor(familydomain.ActionPrivacyRead, wearableHandler.policy),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/wearable/policy",
-					authHandler.requireAuthentication(wearableHandler.updatePolicy),
+					familyScopedFor(familydomain.ActionPrivacyManage, wearableHandler.updatePolicy),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/wearable/contacts",
-					authHandler.requireAuthentication(wearableHandler.listContacts),
+					familyScopedFor(familydomain.ActionPrivacyRead, wearableHandler.listContacts),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/wearable/contacts",
-					authHandler.requireAuthentication(wearableHandler.createContact),
+					familyScopedFor(familydomain.ActionPrivacyManage, wearableHandler.createContact),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/wearable/contacts/{contact_id}",
-					authHandler.requireAuthentication(wearableHandler.updateContact),
+					familyScopedFor(familydomain.ActionPrivacyManage, wearableHandler.updateContact),
 				)
 				mux.HandleFunc(
 					"DELETE /api/v1/wearable/contacts/{contact_id}",
-					authHandler.requireAuthentication(wearableHandler.deleteContact),
+					familyScopedFor(familydomain.ActionPrivacyManage, wearableHandler.deleteContact),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/wearable/geofence",
-					authHandler.requireAuthentication(wearableHandler.geofence),
+					familyScopedFor(familydomain.ActionPrivacyRead, wearableHandler.geofence),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/wearable/geofence",
-					authHandler.requireAuthentication(wearableHandler.updateGeofence),
+					familyScopedFor(familydomain.ActionPrivacyManage, wearableHandler.updateGeofence),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/wearable/devices",
-					authHandler.requireAuthentication(wearableHandler.statuses),
+					familyScopedFor(familydomain.ActionDeviceRead, wearableHandler.statuses),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/wearable/capability",
-					authHandler.requireAuthentication(wearableHandler.capability),
+					familyScopedFor(familydomain.ActionDeviceRead, wearableHandler.capability),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/wearable/sos",
-					authHandler.requireAuthentication(wearableHandler.sosHistory),
+					familyScopedFor(familydomain.ActionPrivacyRead, wearableHandler.sosHistory),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/wearable/sos/active",
-					authHandler.requireAuthentication(wearableHandler.activeSOS),
+					familyScopedFor(familydomain.ActionPrivacyRead, wearableHandler.activeSOS),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/wearable/sos/{event_id}/cancel",
-					authHandler.requireAuthentication(wearableHandler.cancelSOS),
+					familyScopedFor(familydomain.ActionPrivacyManage, wearableHandler.cancelSOS),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/wearable/stats",
@@ -1805,43 +2187,43 @@ func NewRouter(options RouterOptions) http.Handler {
 				meshHandler := deviceMeshHandler{service: options.DeviceMeshService}
 				mux.HandleFunc(
 					"GET /api/v1/device-mesh/groups",
-					authHandler.requireAuthentication(meshHandler.listGroups),
+					familyScopedFor(familydomain.ActionDeviceRead, meshHandler.listGroups),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/device-mesh/groups",
-					authHandler.requireAuthentication(meshHandler.createGroup),
+					familyScopedFor(familydomain.ActionDeviceManage, meshHandler.createGroup),
 				)
 				mux.HandleFunc(
 					"DELETE /api/v1/device-mesh/groups/{group_id}",
-					authHandler.requireAuthentication(meshHandler.deleteGroup),
+					familyScopedFor(familydomain.ActionDeviceManage, meshHandler.deleteGroup),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/device-mesh/groups/{group_id}/members",
-					authHandler.requireAuthentication(meshHandler.listMembers),
+					familyScopedFor(familydomain.ActionDeviceRead, meshHandler.listMembers),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/device-mesh/groups/{group_id}/members",
-					authHandler.requireAuthentication(meshHandler.addMember),
+					familyScopedFor(familydomain.ActionDeviceManage, meshHandler.addMember),
 				)
 				mux.HandleFunc(
 					"DELETE /api/v1/device-mesh/groups/{group_id}/members/{device_id}",
-					authHandler.requireAuthentication(meshHandler.removeMember),
+					familyScopedFor(familydomain.ActionDeviceManage, meshHandler.removeMember),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/device-mesh/messages",
-					authHandler.requireAuthentication(meshHandler.listMessages),
+					familyScopedFor(familydomain.ActionDeviceRead, meshHandler.listMessages),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/device-mesh/messages",
-					authHandler.requireAuthentication(meshHandler.routeMessage),
+					familyScopedFor(familydomain.ActionDeviceManage, meshHandler.routeMessage),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/device-mesh/content",
-					authHandler.requireAuthentication(meshHandler.listContentStates),
+					familyScopedFor(familydomain.ActionDeviceRead, meshHandler.listContentStates),
 				)
 				mux.HandleFunc(
 					"PUT /api/v1/device-mesh/content",
-					authHandler.requireAuthentication(meshHandler.reportSync),
+					familyScopedFor(familydomain.ActionDeviceManage, meshHandler.reportSync),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/admin/device-mesh/stats",
@@ -1854,40 +2236,68 @@ func NewRouter(options RouterOptions) http.Handler {
 			if options.NotificationService != nil {
 				notificationHandler := notificationhandler.New(options.NotificationService)
 				adminNotificationHandler := notificationhandler.NewAdmin(options.NotificationService)
+				requireNotificationAction := func(
+					action familydomain.Action,
+					next func(
+						http.ResponseWriter,
+						*http.Request,
+						string,
+					),
+				) http.HandlerFunc {
+					return authHandler.requireAuthentication(
+						parentScopedFor(
+							options.FamilyService,
+							action,
+							func(
+								response http.ResponseWriter,
+								request *http.Request,
+								ownerAccountID string,
+							) {
+								next(response, request, ownerAccountID)
+							},
+						),
+					)
+				}
 				mux.HandleFunc(
 					"GET /api/v1/notifications",
-					authHandler.requireAuthentication(
-						parentScoped(notificationHandler.Inbox),
+					requireNotificationAction(
+						familydomain.ActionFamilyRead,
+						notificationHandler.Inbox,
 					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/notifications/unread-count",
-					authHandler.requireAuthentication(
-						parentScoped(notificationHandler.UnreadCount),
+					requireNotificationAction(
+						familydomain.ActionFamilyRead,
+						notificationHandler.UnreadCount,
 					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/notifications/read-all",
-					authHandler.requireAuthentication(
-						parentScoped(notificationHandler.MarkAllRead),
+					requireNotificationAction(
+						familydomain.ActionFamilyRead,
+						notificationHandler.MarkAllRead,
 					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/notifications/{notification_id}/read",
-					authHandler.requireAuthentication(
-						parentScoped(notificationHandler.MarkRead),
+					requireNotificationAction(
+						familydomain.ActionFamilyRead,
+						notificationHandler.MarkRead,
 					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/notifications/family-messages",
-					authHandler.requireAuthentication(
-						parentScoped(notificationHandler.SendFamilyMessage),
+					requireNotificationAction(
+						familydomain.ActionChildManage,
+						notificationHandler.SendFamilyMessage,
 					),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/notifications/devices/{device_id}/messages",
-					authHandler.requireAuthentication(
-						parentScoped(notificationHandler.DeviceMessages),
+					requireNotificationAction(
+						familydomain.ActionDeviceRead,
+						notificationHandler.DeviceMessages,
 					),
 				)
 				mux.HandleFunc(
@@ -2166,7 +2576,19 @@ func NewRouter(options RouterOptions) http.Handler {
 		authHandler := authHandler{service: options.AuthService}
 		mux.HandleFunc(
 			"GET /api/v1/usage-reports",
-			authHandler.requireAuthentication(usageHandler.listGuardianUsageReports),
+			authHandler.requireAuthentication(
+				parentScopedFor(
+					options.FamilyService,
+					familydomain.ActionDeviceRead,
+					func(
+						response http.ResponseWriter,
+						request *http.Request,
+						_ string,
+					) {
+						usageHandler.listGuardianUsageReports(response, request)
+					},
+				),
+			),
 		)
 	}
 
@@ -2175,36 +2597,61 @@ func NewRouter(options RouterOptions) http.Handler {
 			service:         options.ContentService,
 			guardianDevices: guardianDeviceListerFromBinding(options.BindingService),
 		}
+		contentFamilyScopedFor := func(
+			action familydomain.Action,
+		) func(http.HandlerFunc) http.HandlerFunc {
+			return func(next http.HandlerFunc) http.HandlerFunc {
+				if options.AuthService == nil {
+					return next
+				}
+				authHandler := authHandler{service: options.AuthService}
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						action,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
+		}
+		requireContentChildRead := contentFamilyScopedFor(familydomain.ActionChildRead)
+		requireContentChildManage := contentFamilyScopedFor(familydomain.ActionChildManage)
+		requireContentDeviceRead := contentFamilyScopedFor(familydomain.ActionDeviceRead)
 		// The parent app reads the catalog with a guardian session.
 		if options.AuthService != nil {
-			authHandler := authHandler{service: options.AuthService}
 			mux.HandleFunc(
 				"GET /api/v1/content/catalog",
-				authHandler.requireAuthentication(contentHandler.catalog),
+				requireContentChildRead(contentHandler.catalog),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/content/packages/{package_id}/download",
-				authHandler.requireAuthentication(contentHandler.download),
+				requireContentChildRead(contentHandler.download),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/content/favorites",
-				authHandler.requireAuthentication(contentHandler.listFavorites),
+				requireContentChildRead(contentHandler.listFavorites),
 			)
 			mux.HandleFunc(
 				"PUT /api/v1/content/favorites/{package_id}",
-				authHandler.requireAuthentication(contentHandler.addFavorite),
+				requireContentChildManage(contentHandler.addFavorite),
 			)
 			mux.HandleFunc(
 				"DELETE /api/v1/content/favorites/{package_id}",
-				authHandler.requireAuthentication(contentHandler.removeFavorite),
+				requireContentChildManage(contentHandler.removeFavorite),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/content/play-history",
-				authHandler.requireAuthentication(contentHandler.listPlayHistoryForGuardian),
+				requireContentDeviceRead(contentHandler.listPlayHistoryForGuardian),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/content/theme-packs",
-				authHandler.requireAuthentication(contentHandler.listPublishedThemePacks),
+				requireContentChildRead(contentHandler.listPublishedThemePacks),
 			)
 		}
 		// Firmware devices never receive a guardian credential, so the same
@@ -2295,16 +2742,31 @@ func NewRouter(options RouterOptions) http.Handler {
 				),
 			)
 		}
-		if options.BindingService != nil && options.AIService != nil {
+		if options.BindingService != nil &&
+			options.AIService != nil &&
+			options.AIExecutionStore != nil {
 			internalHandler := internalHandler{
-				bindingService: options.BindingService,
-				aiService:      options.AIService,
+				bindingService:       options.BindingService,
+				aiService:            options.AIService,
+				executionStore:       options.AIExecutionStore,
+				executionTokenTTL:    options.AIExecutionTokenTTL,
+				executionLeaseTTL:    options.AIExecutionLeaseTTL,
+				aiUpstreamURL:        options.AIUpstreamURL,
+				aiHTTPClient:         options.AIUpstreamHTTPClient,
+				requireHTTPSUpstream: true,
 			}
 			mux.Handle(
-				"GET /internal/v1/devices/{device_id}/ai-credential",
+				"GET /internal/v1/devices/{device_id}/ai-execution-ticket",
 				requireServiceToken(
 					options.InternalAPIConfig.AuthToken,
-					http.HandlerFunc(internalHandler.aiCredential),
+					http.HandlerFunc(internalHandler.aiExecutionTicket),
+				),
+			)
+			mux.Handle(
+				"POST /internal/v1/ai-execution",
+				requireServiceToken(
+					options.InternalAPIConfig.AuthToken,
+					http.HandlerFunc(internalHandler.aiExecution),
 				),
 			)
 		}
@@ -2382,20 +2844,50 @@ func NewRouter(options RouterOptions) http.Handler {
 			options.BindingService,
 			guardianDeviceVerifierFromBinding(options.BindingService),
 		)
-		var requireAuthentication func(http.HandlerFunc) http.HandlerFunc
 		var requireAdmin func(http.HandlerFunc) http.HandlerFunc
+		var requireOTADeviceRead func(http.HandlerFunc) http.HandlerFunc
+		var requireOTADeviceManage func(http.HandlerFunc) http.HandlerFunc
 		if options.AuthService != nil {
 			authHandler := authHandler{
 				service: options.AuthService,
 				audit:   options.AuditRecorder,
 			}
-			requireAuthentication = authHandler.requireAuthentication
 			requireAdmin = authHandler.requireAdminPermissionAudited(
 				otaPermission,
 				otaAuditAction,
 			)
+			otaFamilyScopedFor := func(
+				action familydomain.Action,
+			) func(http.HandlerFunc) http.HandlerFunc {
+				return func(next http.HandlerFunc) http.HandlerFunc {
+					return authHandler.requireAuthentication(
+						parentScopedFor(
+							options.FamilyService,
+							action,
+							func(
+								response http.ResponseWriter,
+								request *http.Request,
+								_ string,
+							) {
+								next(response, request)
+							},
+						),
+					)
+				}
+			}
+			requireOTADeviceRead = otaFamilyScopedFor(
+				familydomain.ActionDeviceRead,
+			)
+			requireOTADeviceManage = otaFamilyScopedFor(
+				familydomain.ActionDeviceManage,
+			)
 		}
-		ota.registerRoutes(mux, requireAuthentication, requireAdmin)
+		ota.registerRoutes(mux, requireAdmin)
+		ota.registerGuardianRoutes(
+			mux,
+			requireOTADeviceRead,
+			requireOTADeviceManage,
+		)
 	}
 
 	return observability.WithRequestLabels(observability.WithRequestMetadata(

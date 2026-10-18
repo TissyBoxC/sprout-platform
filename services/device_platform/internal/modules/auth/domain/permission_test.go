@@ -1,6 +1,18 @@
 package domain
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
+
+func TestMFAAccountLockedKeepsStableChallengeLockContract(t *testing.T) {
+	if !errors.Is(ErrMFAAccountLocked, ErrMFAChallengeLocked) {
+		t.Fatal("account lock must match the established challenge-lock response")
+	}
+	if errors.Is(ErrMFAChallengeLocked, ErrMFAAccountLocked) {
+		t.Fatal("a challenge-only failure must remain distinguishable from account lock")
+	}
+}
 
 func TestHasAdminPermissionGrantsWildcard(t *testing.T) {
 	if !HasAdminPermission([]string{AdminPermissionWildcard}, AdminPermissionDevicesManage) {

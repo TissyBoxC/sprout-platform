@@ -780,7 +780,32 @@ func (s *Service) CredentialForDevice(
 	return &domain.Credential{
 		ProviderAccountID: account.ProviderAccountID,
 		APIKey:            string(plaintext),
+		KeyID:             account.ProviderAPIKeyID,
+		ConcurrencyLimit:  account.ConcurrencyLimit,
+		AllowedModels:     append([]string(nil), account.AllowedModels...),
 	}, nil
+}
+
+// AuthorizeExecution validates the requested provider model against the
+// account's effective allowlist without returning the upstream credential.
+// The relay uses the account limits before issuing a one-time execution ticket.
+func (s *Service) AuthorizeExecution(
+	ctx context.Context,
+	parentAccountID string,
+	model string,
+) (*domain.Credential, error) {
+	credential, err := s.CredentialForDevice(ctx, parentAccountID)
+	if err != nil {
+		return nil, err
+	}
+	model = strings.TrimSpace(model)
+	if model == "" || !isModelSubset(
+		[]string{model},
+		credential.AllowedModels,
+	) {
+		return nil, domain.ErrModelNotAllowed
+	}
+	return credential, nil
 }
 
 // DeleteForParent removes the provider-side account for one guardian. It is

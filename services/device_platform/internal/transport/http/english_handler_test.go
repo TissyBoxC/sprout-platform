@@ -151,11 +151,7 @@ func englishRequest(method string, target string, body string, accountID string)
 	if accountID == "" {
 		return request
 	}
-	return request.WithContext(context.WithValue(
-		request.Context(),
-		authenticatedAccountKey{},
-		accountID,
-	))
+	return withOwnerFamilyContext(request, accountID)
 }
 
 func TestEnglishListLessonsRequiresAuthentication(t *testing.T) {

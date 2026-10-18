@@ -2,10 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/domain"
+	englishrepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/repository"
 )
 
 type fixedClock struct {
@@ -18,8 +22,12 @@ func (c fixedClock) Now() time.Time {
 
 // memoryRepository is a small in-memory double for the service tests.
 type memoryRepository struct {
-	lessons  map[string]*domain.Lesson
-	attempts []domain.PracticeAttempt
+	lessons          map[string]*domain.Lesson
+	attempts         []domain.PracticeAttempt
+	listCatalogCalls int
+	getLessonCalls   int
+	listAttemptCalls int
+	createAttemptErr error
 }
 
 func newMemoryRepository() *memoryRepository {
@@ -30,6 +38,23 @@ func (r *memoryRepository) ListLessons(
 	_ context.Context,
 	ageTier string,
 ) ([]domain.Lesson, error) {
+	return r.listLessons(ageTier, false, 0)
+}
+
+func (r *memoryRepository) ListLessonCatalog(
+	_ context.Context,
+	ageTier string,
+	limit int,
+) ([]domain.Lesson, error) {
+	r.listCatalogCalls++
+	return r.listLessons(ageTier, true, limit)
+}
+
+func (r *memoryRepository) listLessons(
+	ageTier string,
+	full bool,
+	limit int,
+) ([]domain.Lesson, error) {
 	result := make([]domain.Lesson, 0, len(r.lessons))
 	for _, lesson := range r.lessons {
 		if lesson.Status != domain.LessonStatusPublished {
@@ -38,7 +63,24 @@ func (r *memoryRepository) ListLessons(
 		if ageTier != "" && lesson.AgeTier != ageTier {
 			continue
 		}
-		result = append(result, *lesson)
+		lessonCopy := *lesson
+		if !full {
+			lessonCopy.Words = nil
+			lessonCopy.Sentence = nil
+		}
+		result = append(result, lessonCopy)
+	}
+	sort.SliceStable(result, func(left, right int) bool {
+		if result[left].AgeTier != result[right].AgeTier {
+			return result[left].AgeTier < result[right].AgeTier
+		}
+		if result[left].Sequence != result[right].Sequence {
+			return result[left].Sequence < result[right].Sequence
+		}
+		return result[left].LessonID < result[right].LessonID
+	})
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
 	}
 	return result, nil
 }
@@ -47,6 +89,7 @@ func (r *memoryRepository) GetLesson(
 	_ context.Context,
 	lessonID string,
 ) (*domain.Lesson, error) {
+	r.getLessonCalls++
 	lesson, ok := r.lessons[lessonID]
 	if !ok {
 		return nil, domain.ErrLessonNotFound
@@ -59,6 +102,9 @@ func (r *memoryRepository) CreateAttempt(
 	_ context.Context,
 	attempt *domain.PracticeAttempt,
 ) error {
+	if r.createAttemptErr != nil {
+		return r.createAttemptErr
+	}
 	r.attempts = append(r.attempts, *attempt)
 	return nil
 }
@@ -68,6 +114,7 @@ func (r *memoryRepository) ListAttempts(
 	familyID string,
 	query domain.AttemptQuery,
 ) ([]domain.PracticeAttempt, error) {
+	r.listAttemptCalls++
 	result := make([]domain.PracticeAttempt, 0, len(r.attempts))
 	for _, attempt := range r.attempts {
 		if attempt.FamilyID != familyID {
@@ -85,6 +132,35 @@ func (r *memoryRepository) ListAttempts(
 		result = result[:query.Limit]
 	}
 	return result, nil
+}
+
+func (r *memoryRepository) ListProgress(
+	_ context.Context,
+	familyID string,
+	query domain.AttemptQuery,
+) ([]domain.LessonProgress, []domain.ProgressItem, error) {
+	lessons, items := summarize(r.filteredAttempts(familyID, query))
+	return lessons, items, nil
+}
+
+func (r *memoryRepository) filteredAttempts(
+	familyID string,
+	query domain.AttemptQuery,
+) []domain.PracticeAttempt {
+	result := make([]domain.PracticeAttempt, 0, len(r.attempts))
+	for _, attempt := range r.attempts {
+		if attempt.FamilyID != familyID {
+			continue
+		}
+		if query.ChildID != "" && attempt.ChildID != query.ChildID {
+			continue
+		}
+		if query.LessonID != "" && attempt.LessonID != query.LessonID {
+			continue
+		}
+		result = append(result, attempt)
+	}
+	return result
 }
 
 func newService(t *testing.T) (*Service, *memoryRepository) {
@@ -146,6 +222,127 @@ func TestGetLessonRejectsInvalidID(t *testing.T) {
 	}
 }
 
+func TestLessonCatalogUsesSingleBatchRead(t *testing.T) {
+	service, repository := newService(t)
+	for index, lessonID := range []string{
+		"lesson_fruit",
+		"lesson_school",
+		"lesson_animals",
+	} {
+		repository.lessons[lessonID] = &domain.Lesson{
+			LessonID: lessonID,
+			AgeTier:  domain.AgeTier3To4,
+			Status:   domain.LessonStatusPublished,
+			Words: []domain.Word{
+				{ID: "word-" + lessonID, LessonID: lessonID, Position: 1, Term: "apple"},
+			},
+			Sentence: []domain.Sentence{
+				{ID: "sentence-" + lessonID, LessonID: lessonID, Position: 1, Pattern: "I like ___."},
+			},
+			Sequence: index + 1,
+		}
+	}
+
+	lessons, err := service.LessonCatalog(context.Background(), domain.AgeTier3To4)
+	if err != nil {
+		t.Fatalf("lesson catalog: %v", err)
+	}
+	if len(lessons) != 3 {
+		t.Fatalf("catalog lessons = %d, want 3", len(lessons))
+	}
+	if repository.listCatalogCalls != 1 {
+		t.Fatalf("batch catalog calls = %d, want 1", repository.listCatalogCalls)
+	}
+	if repository.getLessonCalls != 0 {
+		t.Fatalf("per-lesson detail calls = %d, want 0", repository.getLessonCalls)
+	}
+	for _, lesson := range lessons {
+		if len(lesson.Words) != 1 || len(lesson.Sentence) != 1 {
+			t.Fatalf("lesson %s missing batch content: %+v", lesson.LessonID, lesson)
+		}
+	}
+}
+
+// legacyLessonRepository intentionally hides the optional batch catalogue
+// method, proving the original Repository consumers still compile and work.
+type legacyLessonRepository struct {
+	englishrepository.Repository
+}
+
+func TestLessonCatalogFallsBackToLegacyRepository(t *testing.T) {
+	store := newMemoryRepository()
+	store.lessons["lesson_fruit"] = &domain.Lesson{
+		LessonID: "lesson_fruit",
+		AgeTier:  domain.AgeTier3To4,
+		Status:   domain.LessonStatusPublished,
+		Words: []domain.Word{
+			{ID: "word-apple", LessonID: "lesson_fruit", Position: 1, Term: "apple"},
+		},
+		Sentence: []domain.Sentence{
+			{
+				ID:          "sentence-apple",
+				LessonID:    "lesson_fruit",
+				Position:    1,
+				Pattern:     "I like ___.",
+				Prompt:      "说出你喜欢苹果",
+				ModelAnswer: "I like apples.",
+			},
+		},
+	}
+	service, err := New(Options{
+		Repository: legacyLessonRepository{Repository: store},
+		Clock: fixedClock{
+			now: time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC),
+		},
+	})
+	if err != nil {
+		t.Fatalf("create english service: %v", err)
+	}
+
+	lessons, err := service.LessonCatalog(context.Background(), domain.AgeTier3To4)
+	if err != nil {
+		t.Fatalf("legacy lesson catalog: %v", err)
+	}
+	if len(lessons) != 1 {
+		t.Fatalf("legacy catalog lessons = %d, want 1", len(lessons))
+	}
+	if store.getLessonCalls != 1 {
+		t.Fatalf("legacy detail calls = %d, want 1", store.getLessonCalls)
+	}
+	if len(lessons[0].Words) != 1 ||
+		len(lessons[0].Sentence) != 1 ||
+		lessons[0].Sentence[0].ModelAnswer != "I like apples." {
+		t.Fatalf("legacy catalog lost lesson content: %+v", lessons[0])
+	}
+}
+
+func TestLessonCatalogCapsResultsAndKeepsStableOrder(t *testing.T) {
+	service, repository := newService(t)
+	base := time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC)
+	for index := 0; index < 105; index++ {
+		lessonID := fmt.Sprintf("lesson_%03d", index)
+		repository.lessons[lessonID] = &domain.Lesson{
+			LessonID:  lessonID,
+			AgeTier:   domain.AgeTier3To4,
+			Sequence:  105 - index,
+			Status:    domain.LessonStatusPublished,
+			CreatedAt: base,
+			UpdatedAt: base,
+		}
+	}
+
+	lessons, err := service.LessonCatalog(context.Background(), domain.AgeTier3To4)
+	if err != nil {
+		t.Fatalf("lesson catalog: %v", err)
+	}
+	if len(lessons) != 100 {
+		t.Fatalf("lesson catalog length = %d, want 100", len(lessons))
+	}
+	if lessons[0].LessonID != "lesson_104" || lessons[99].LessonID != "lesson_005" {
+		t.Fatalf("unexpected stable order: %s..%s", lessons[0].LessonID, lessons[99].LessonID)
+	}
+}
+
 func TestRecordAttemptDerivesPassAndClampsScore(t *testing.T) {
 	service, _ := newService(t)
 
@@ -197,6 +394,25 @@ func TestRecordAttemptDerivesPassAndClampsScore(t *testing.T) {
 	}
 	if failed.Score != 0 || failed.Passed {
 		t.Fatalf("failed attempt = %+v, want score 0 and not passed", failed)
+	}
+}
+
+func TestRecordAttemptReturnsStableDataIntegrityErrors(t *testing.T) {
+	service, repository := newService(t)
+	repository.createAttemptErr = domain.ErrChildFamilyMismatch
+	_, err := service.RecordAttempt(
+		context.Background(),
+		"family-1",
+		domain.AttemptInput{
+			ChildID:    "child-2",
+			LessonID:   "lesson_fruit",
+			ItemID:     "word-apple",
+			ItemType:   domain.ItemTypeWord,
+			TargetText: "apple",
+		},
+	)
+	if !errors.Is(err, domain.ErrChildFamilyMismatch) {
+		t.Fatalf("error = %v, want ErrChildFamilyMismatch", err)
 	}
 }
 
@@ -327,8 +543,9 @@ func TestProgressClampsLimit(t *testing.T) {
 			Score:    50,
 		})
 	}
-	// MaxAttemptLimit is not exceeded by the repository call.
-	_, items, err := service.Progress(context.Background(), "family-1", domain.AttemptQuery{Limit: 99999})
+	// Progress is a full aggregate, not a bounded browse. The explicit limit
+	// must not be forwarded to the repository.
+	lessons, items, err := service.Progress(context.Background(), "family-1", domain.AttemptQuery{Limit: 99999})
 	if err != nil {
 		t.Fatalf("progress: %v", err)
 	}
@@ -337,5 +554,198 @@ func TestProgressClampsLimit(t *testing.T) {
 	}
 	if items[0].Attempts != 5 {
 		t.Fatalf("attempts = %d, want 5", items[0].Attempts)
+	}
+	if len(lessons) != 1 || lessons[0].Attempts != 5 {
+		t.Fatalf("lessons = %+v, want 5 attempts", lessons)
+	}
+}
+
+func TestProgressUsesFullAggregateWithoutBrowsingLimit(t *testing.T) {
+	service, repository := newService(t)
+	base := time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)
+	for index := 0; index < MaxAttemptLimit+257; index++ {
+		repository.attempts = append(repository.attempts, domain.PracticeAttempt{
+			FamilyID:    "family-1",
+			ChildID:     "child-1",
+			LessonID:    "lesson_fruit",
+			ItemID:      "word-apple",
+			ItemType:    domain.ItemTypeWord,
+			TargetText:  "apple",
+			Score:       index % 101,
+			Passed:      index%101 >= domain.PassingScore,
+			PracticedAt: base.Add(time.Duration(index) * time.Second),
+		})
+	}
+
+	lessons, items, err := service.Progress(
+		context.Background(),
+		"family-1",
+		domain.AttemptQuery{Limit: 1},
+	)
+	if err != nil {
+		t.Fatalf("progress: %v", err)
+	}
+	if repository.listAttemptCalls != 0 {
+		t.Fatalf("progress fell back to bounded attempts: %d calls", repository.listAttemptCalls)
+	}
+	if len(lessons) != 1 || lessons[0].Attempts != MaxAttemptLimit+257 {
+		t.Fatalf("lessons = %+v, want full attempt count", lessons)
+	}
+	if len(items) != 1 || items[0].Attempts != MaxAttemptLimit+257 {
+		t.Fatalf("items = %+v, want full attempt count", items)
+	}
+}
+
+func TestProgressKeepsFamilyAndChildFilters(t *testing.T) {
+	service, repository := newService(t)
+	repository.attempts = []domain.PracticeAttempt{
+		{FamilyID: "family-1", ChildID: "child-1", LessonID: "lesson_fruit", ItemID: "word-apple", Score: 80, Passed: true},
+		{FamilyID: "family-1", ChildID: "child-2", LessonID: "lesson_fruit", ItemID: "word-pear", Score: 30},
+		{FamilyID: "family-2", ChildID: "child-1", LessonID: "lesson_fruit", ItemID: "word-apple", Score: 100, Passed: true},
+	}
+
+	_, items, err := service.Progress(
+		context.Background(),
+		"family-1",
+		domain.AttemptQuery{ChildID: "child-1"},
+	)
+	if err != nil {
+		t.Fatalf("progress: %v", err)
+	}
+	if len(items) != 1 || items[0].ItemID != "word-apple" || items[0].Attempts != 1 {
+		t.Fatalf("items = %+v, want only family-1 child-1", items)
+	}
+}
+
+func TestRecordAttemptRejectsBlankFamily(t *testing.T) {
+	service, _ := newService(t)
+	_, err := service.RecordAttempt(
+		context.Background(),
+		"  ",
+		domain.AttemptInput{
+			LessonID:   "lesson_fruit",
+			ItemID:     "word-apple",
+			ItemType:   domain.ItemTypeWord,
+			TargetText: "apple",
+		},
+	)
+	if !errors.Is(err, domain.ErrInvalidAttempt) {
+		t.Fatalf("error = %v, want ErrInvalidAttempt", err)
+	}
+}
+
+// legacyProgressRepository hides ListProgress so the service falls back to the
+// original bounded attempt reader for older adapters.
+type legacyProgressRepository struct {
+	englishrepository.Repository
+}
+
+func TestProgressKeepsLegacyRepositoryCompatible(t *testing.T) {
+	store := newMemoryRepository()
+	store.attempts = []domain.PracticeAttempt{{
+		FamilyID:   "family-1",
+		ChildID:    "child-1",
+		LessonID:   "lesson_fruit",
+		ItemID:     "word-apple",
+		ItemType:   domain.ItemTypeWord,
+		Score:      75,
+		Passed:     true,
+		TargetText: "apple",
+	}}
+	service, err := New(Options{
+		Repository: legacyProgressRepository{Repository: store},
+		Clock:      fixedClock{now: time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC)},
+	})
+	if err != nil {
+		t.Fatalf("create english service: %v", err)
+	}
+
+	lessons, items, err := service.Progress(context.Background(), "family-1", domain.AttemptQuery{})
+	if err != nil {
+		t.Fatalf("legacy progress: %v", err)
+	}
+	if len(lessons) != 1 || len(items) != 1 {
+		t.Fatalf("legacy progress = %+v / %+v", lessons, items)
+	}
+}
+
+func TestRecordAttemptAcceptsMissingLessonWhenRepositoryRejects(t *testing.T) {
+	service, repository := newService(t)
+	repository.createAttemptErr = domain.ErrLessonNotFound
+	_, err := service.RecordAttempt(
+		context.Background(),
+		"family-1",
+		domain.AttemptInput{
+			LessonID:   "lesson_missing",
+			ItemID:     "word-apple",
+			ItemType:   domain.ItemTypeWord,
+			TargetText: "apple",
+		},
+	)
+	if !errors.Is(err, domain.ErrLessonNotFound) {
+		t.Fatalf("error = %v, want ErrLessonNotFound", err)
+	}
+}
+
+func TestProgressReadsAllAttemptsWhenBrowsingLimitIsExplicit(t *testing.T) {
+	service, repository := newService(t)
+	for index := 0; index < MaxAttemptLimit+1; index++ {
+		repository.attempts = append(repository.attempts, domain.PracticeAttempt{
+			FamilyID: "family-1",
+			LessonID: "lesson_fruit",
+			ItemID:   "word-apple",
+			ItemType: domain.ItemTypeWord,
+			Score:    60,
+			Passed:   true,
+		})
+	}
+
+	lessons, items, err := service.Progress(
+		context.Background(),
+		"family-1",
+		domain.AttemptQuery{Limit: 1},
+	)
+	if err != nil {
+		t.Fatalf("progress: %v", err)
+	}
+	if len(lessons) != 1 || lessons[0].Attempts != MaxAttemptLimit+1 {
+		t.Fatalf("lessons = %+v, want all attempts", lessons)
+	}
+	if len(items) != 1 || items[0].Attempts != MaxAttemptLimit+1 {
+		t.Fatalf("items = %+v, want all attempts", items)
+	}
+}
+
+func TestLegacyProgressFallbackCannotHonorBrowsingLimit(t *testing.T) {
+	store := newMemoryRepository()
+	for index := 0; index < MaxAttemptLimit+1; index++ {
+		store.attempts = append(store.attempts, domain.PracticeAttempt{
+			FamilyID:   "family-1",
+			LessonID:   "lesson_fruit",
+			ItemID:     "word-apple",
+			ItemType:   domain.ItemTypeWord,
+			TargetText: "apple",
+			Score:      60,
+			Passed:     true,
+		})
+	}
+	service, err := New(Options{
+		Repository: legacyProgressRepository{Repository: store},
+		Clock:      fixedClock{now: time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC)},
+	})
+	if err != nil {
+		t.Fatalf("create english service: %v", err)
+	}
+
+	lessons, _, err := service.Progress(
+		context.Background(),
+		"family-1",
+		domain.AttemptQuery{Limit: 1},
+	)
+	if err != nil {
+		t.Fatalf("legacy progress: %v", err)
+	}
+	if len(lessons) != 1 || lessons[0].Attempts != MaxAttemptLimit+1 {
+		t.Fatalf("legacy aggregate = %+v, want full attempt count", lessons)
 	}
 }

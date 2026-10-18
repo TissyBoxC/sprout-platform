@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,17 +15,35 @@ import (
 )
 
 type memoryRepository struct {
+	mu      sync.RWMutex
 	configs map[string]*domain.FeatureConfig
+	health  map[string]domain.HealthSnapshot
+}
+
+type failingHealthRepository struct {
+	*memoryRepository
+}
+
+func (r *failingHealthRepository) SaveHealth(
+	_ context.Context,
+	_ *domain.HealthSnapshot,
+) error {
+	return errors.New("health snapshot storage unavailable")
 }
 
 func newMemoryRepository() *memoryRepository {
-	return &memoryRepository{configs: map[string]*domain.FeatureConfig{}}
+	return &memoryRepository{
+		configs: map[string]*domain.FeatureConfig{},
+		health:  map[string]domain.HealthSnapshot{},
+	}
 }
 
 func (r *memoryRepository) Get(
 	_ context.Context,
 	featureID string,
 ) (*domain.FeatureConfig, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	config := r.configs[featureID]
 	if config == nil {
 		return nil, domain.ErrFeatureConfigNotFound
@@ -36,6 +56,8 @@ func (r *memoryRepository) Get(
 func (r *memoryRepository) List(
 	_ context.Context,
 ) ([]domain.FeatureConfig, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	result := make([]domain.FeatureConfig, 0, len(r.configs))
 	for _, config := range r.configs {
 		copyConfig := *config
@@ -45,6 +67,49 @@ func (r *memoryRepository) List(
 	return result, nil
 }
 
+func (r *memoryRepository) ListHealth(
+	_ context.Context,
+) ([]domain.HealthSnapshot, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make([]domain.HealthSnapshot, 0, len(r.health))
+	for _, snapshot := range r.health {
+		result = append(result, snapshot)
+	}
+	return result, nil
+}
+
+func (r *memoryRepository) GetHealth(
+	_ context.Context,
+	featureID string,
+) (*domain.HealthSnapshot, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	snapshot, ok := r.health[featureID]
+	if !ok {
+		return nil, domain.ErrFeatureConfigNotFound
+	}
+	copySnapshot := snapshot
+	return &copySnapshot, nil
+}
+
+func (r *memoryRepository) SaveHealth(
+	_ context.Context,
+	snapshot *domain.HealthSnapshot,
+) error {
+	if snapshot == nil || !snapshot.Status.Valid() {
+		return domain.ErrHealthCheckFailed
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if current, ok := r.health[snapshot.FeatureID]; ok &&
+		current.CheckedAt.After(snapshot.CheckedAt) {
+		return domain.ErrHealthSnapshotStale
+	}
+	r.health[snapshot.FeatureID] = *snapshot
+	return nil
+}
+
 func (r *memoryRepository) Save(
 	_ context.Context,
 	featureID string,
@@ -52,6 +117,8 @@ func (r *memoryRepository) Save(
 	actorID string,
 	expectedVersion int64,
 ) (*domain.FeatureConfig, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	current := r.configs[featureID]
 	currentVersion := int64(0)
 	if current != nil {
@@ -80,6 +147,102 @@ type fixedClock struct{}
 
 func (fixedClock) Now() time.Time {
 	return time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+}
+
+type advancingClock struct {
+	mu      sync.Mutex
+	current time.Time
+	step    time.Duration
+}
+
+func (c *advancingClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	result := c.current
+	c.current = c.current.Add(c.step)
+	return result
+}
+
+// memorySchedulerLease models a shared exclusive lease across service
+// instances. It intentionally returns the scheduler's public lease error so
+// tests exercise the same skip path as PostgreSQL advisory locking.
+type memorySchedulerLease struct {
+	mu       sync.Mutex
+	acquired int
+}
+
+func (lease *memorySchedulerLease) WithLeaderLease(
+	ctx context.Context,
+	work func(context.Context) error,
+) error {
+	lease.mu.Lock()
+	if lease.acquired > 0 {
+		lease.mu.Unlock()
+		return domain.ErrSchedulerLeaseUnavailable
+	}
+	lease.acquired++
+	lease.mu.Unlock()
+	defer func() {
+		lease.mu.Lock()
+		lease.acquired--
+		lease.mu.Unlock()
+	}()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return work(ctx)
+}
+
+type recordingAudit struct {
+	mu      sync.Mutex
+	entries []recordedAudit
+	err     error
+}
+
+type recordedAudit struct {
+	ActorID   string
+	TargetID  string
+	Action    string
+	Detail    map[string]any
+	CreatedAt time.Time
+}
+
+func (audit *recordingAudit) RecordAudit(
+	_ context.Context,
+	actorAccountID string,
+	targetAccountID string,
+	action string,
+	detail map[string]any,
+) error {
+	audit.mu.Lock()
+	if audit.err != nil {
+		audit.mu.Unlock()
+		return audit.err
+	}
+	safeDetail := make(map[string]any, len(detail))
+	for key, value := range detail {
+		safeDetail[key] = value
+	}
+	audit.entries = append(audit.entries, recordedAudit{
+		ActorID:  actorAccountID,
+		TargetID: targetAccountID,
+		Action:   action,
+		Detail:   safeDetail,
+	})
+	audit.mu.Unlock()
+	return nil
+}
+
+func (audit *recordingAudit) setError(err error) {
+	audit.mu.Lock()
+	audit.err = err
+	audit.mu.Unlock()
+}
+
+func (audit *recordingAudit) snapshot() []recordedAudit {
+	audit.mu.Lock()
+	defer audit.mu.Unlock()
+	return append([]recordedAudit(nil), audit.entries...)
 }
 
 type memoryRuntimeSettings struct {
@@ -155,7 +318,8 @@ func newTestService(t *testing.T) (*Service, *memoryRepository) {
 				return domain.HealthHealthy, nil
 			}),
 		},
-		Clock: fixedClock{},
+		Clock:          fixedClock{},
+		SchedulerLease: &memorySchedulerLease{},
 	})
 	if err != nil {
 		t.Fatalf("create feature center service: %v", err)
@@ -202,6 +366,111 @@ func TestUpdateConfigValidatesAndPersistsValues(t *testing.T) {
 	}
 	if secret["mask"] == "super-secret-value" {
 		t.Fatal("secret plaintext was returned")
+	}
+}
+
+func TestUpdateConfigRecordsVersionedAudit(t *testing.T) {
+	repository := newMemoryRepository()
+	audit := &recordingAudit{}
+	definition := featureDef(
+		"voice_gateway",
+		"语音网关",
+		"测试功能",
+		"voice",
+		"语音平台",
+		true,
+		configFields(
+			boolField("enabled", "启用", false, true),
+		),
+		nil,
+	)
+	service, err := New(Options{
+		Repository:  repository,
+		Definitions: []Definition{definition},
+		Clock:       fixedClock{},
+		Audit:       audit,
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	if _, err := service.UpdateConfig(
+		context.Background(),
+		"voice_gateway",
+		map[string]any{"enabled": true},
+		"admin-001",
+		0,
+	); err != nil {
+		t.Fatalf("first update: %v", err)
+	}
+	if _, err := service.UpdateConfig(
+		context.Background(),
+		"voice_gateway",
+		map[string]any{"enabled": false},
+		"admin-001",
+		1,
+	); err != nil {
+		t.Fatalf("second update: %v", err)
+	}
+	entries := audit.snapshot()
+	if len(entries) != 2 {
+		t.Fatalf("audit entry count = %d, want 2", len(entries))
+	}
+	first := entries[0].Detail
+	second := entries[1].Detail
+	if first["previous_version"] != int64(0) ||
+		first["version"] != int64(1) ||
+		second["previous_version"] != int64(1) ||
+		second["version"] != int64(2) {
+		t.Fatalf("unexpected version audit: %#v %#v", first, second)
+	}
+	if _, leaked := second["enabled"]; leaked {
+		t.Fatalf("audit leaked configuration values: %#v", second)
+	}
+}
+
+func TestConfigAuditFailureReportsPrimaryWriteCompleted(t *testing.T) {
+	audit := &recordingAudit{err: errors.New("audit storage unavailable")}
+	definition := featureDef(
+		"voice_gateway",
+		"语音网关",
+		"测试功能",
+		"voice",
+		"语音平台",
+		true,
+		configFields(
+			boolField("enabled", "启用", false, true),
+		),
+		nil,
+	)
+	repository := newMemoryRepository()
+	service, err := New(Options{
+		Repository:  repository,
+		Definitions: []Definition{definition},
+		Clock:       fixedClock{},
+		Audit:       audit,
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	feature, err := service.UpdateConfig(
+		context.Background(),
+		"voice_gateway",
+		map[string]any{"enabled": true},
+		"admin-001",
+		0,
+	)
+	var auditErr *AuditWriteError
+	if !errors.As(err, &auditErr) || !auditErr.PrimaryWriteCompleted {
+		t.Fatalf("expected completed-primary audit error, got %v", err)
+	}
+	if feature == nil ||
+		feature.ConfigVersion != 1 ||
+		feature.Values["enabled"] != true {
+		t.Fatalf("audit failure did not return the saved feature: %+v", feature)
+	}
+	saved, getErr := repository.Get(context.Background(), "voice_gateway")
+	if getErr != nil || saved.Version != 1 {
+		t.Fatalf("primary config write was not retained: %+v %v", saved, getErr)
 	}
 }
 
@@ -828,6 +1097,682 @@ func TestCheckHealthUsesInjectedProbe(t *testing.T) {
 	}
 }
 
+func TestManualHealthCheckRecordsSafeAttributedAudit(t *testing.T) {
+	repository := newMemoryRepository()
+	audit := &recordingAudit{}
+	service, err := New(Options{
+		Repository: repository,
+		Definitions: []Definition{
+			registeredDefinition(t, "voice_gateway"),
+		},
+		HealthProbes: map[string]HealthProbe{
+			"voice_gateway": HealthProbeFunc(func(
+				_ context.Context,
+				_ string,
+			) (domain.HealthStatus, error) {
+				return domain.HealthDegraded, nil
+			}),
+		},
+		Clock: &advancingClock{
+			current: time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC),
+			step:    0,
+		},
+		Audit: audit,
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	_, err = service.CheckHealthAs(
+		context.Background(),
+		"voice_gateway",
+		"admin-001",
+	)
+	if err != nil {
+		t.Fatalf("check health: %v", err)
+	}
+	entries := audit.snapshot()
+	if len(entries) != 1 {
+		t.Fatalf("audit entry count = %d, want 1", len(entries))
+	}
+	entry := entries[0]
+	if entry.ActorID != "admin-001" ||
+		entry.Action != "admin.feature_center.health.checked" ||
+		entry.Detail["feature_id"] != "voice_gateway" ||
+		entry.Detail["status"] != string(domain.HealthDegraded) ||
+		entry.Detail["trigger"] != domain.HealthTriggerManual ||
+		entry.Detail["message"] != "功能可用，但部分能力受到影响" {
+		t.Fatalf("unexpected health audit: %+v", entry)
+	}
+	if _, ok := entry.Detail["checked_at"].(time.Time); !ok {
+		t.Fatalf("checked_at audit value = %#v, want time.Time", entry.Detail["checked_at"])
+	}
+}
+
+func TestManualHealthAuditFailureReturnsUpdatedFeature(t *testing.T) {
+	repository := newMemoryRepository()
+	service, err := New(Options{
+		Repository: repository,
+		Definitions: []Definition{
+			registeredDefinition(t, "voice_gateway"),
+		},
+		HealthProbes: map[string]HealthProbe{
+			"voice_gateway": HealthProbeFunc(func(
+				_ context.Context,
+				_ string,
+			) (domain.HealthStatus, error) {
+				return domain.HealthHealthy, nil
+			}),
+		},
+		Clock: fixedClock{},
+		Audit: &recordingAudit{
+			err: errors.New("audit storage unavailable"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	feature, err := service.CheckHealthAs(
+		context.Background(),
+		"voice_gateway",
+		"admin-001",
+	)
+	var auditErr *AuditWriteError
+	if !errors.As(err, &auditErr) || !auditErr.PrimaryWriteCompleted {
+		t.Fatalf("expected completed-primary audit error, got %v", err)
+	}
+	if feature == nil ||
+		feature.Health != domain.HealthHealthy ||
+		feature.HealthDetail == nil {
+		t.Fatalf("audit failure did not return refreshed health: %+v", feature)
+	}
+	stored, getErr := repository.GetHealth(context.Background(), "voice_gateway")
+	if getErr != nil || stored.Status != domain.HealthHealthy {
+		t.Fatalf("health snapshot was not retained: %+v %v", stored, getErr)
+	}
+}
+
+func TestProbeFailureLeavesPreviousHealthSnapshotUntouched(t *testing.T) {
+	repository := newMemoryRepository()
+	currentStatus := domain.HealthHealthy
+	service, err := New(Options{
+		Repository: repository,
+		Definitions: []Definition{
+			registeredDefinition(t, "voice_gateway"),
+		},
+		HealthProbes: map[string]HealthProbe{
+			"voice_gateway": HealthProbeFunc(func(
+				_ context.Context,
+				_ string,
+			) (domain.HealthStatus, error) {
+				if currentStatus == "" {
+					return "", errors.New("probe socket unavailable")
+				}
+				return currentStatus, nil
+			}),
+		},
+		Clock: &advancingClock{
+			current: time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC),
+			step:    time.Second,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	initial, err := service.CheckHealth(
+		context.Background(),
+		"voice_gateway",
+	)
+	if err != nil {
+		t.Fatalf("initial check: %v", err)
+	}
+	if initial.HealthDetail == nil {
+		t.Fatal("initial health detail missing")
+	}
+	checkedAt := initial.HealthDetail.CheckedAt
+
+	currentStatus = ""
+	if _, err := service.CheckHealth(
+		context.Background(),
+		"voice_gateway",
+	); err == nil {
+		t.Fatal("expected probe failure")
+	}
+	stored, err := repository.GetHealth(
+		context.Background(),
+		"voice_gateway",
+	)
+	if err != nil {
+		t.Fatalf("read stored health: %v", err)
+	}
+	if stored.Status != domain.HealthHealthy ||
+		stored.CheckedAt != checkedAt {
+		t.Fatalf("probe failure overwrote last known health: %+v", stored)
+	}
+}
+
+func TestHealthSnapshotFailureDoesNotReturnHealthyProjection(t *testing.T) {
+	repository := &failingHealthRepository{
+		memoryRepository: newMemoryRepository(),
+	}
+	service, err := New(Options{
+		Repository: repository,
+		Definitions: []Definition{
+			registeredDefinition(t, "voice_gateway"),
+		},
+		HealthProbes: map[string]HealthProbe{
+			"voice_gateway": HealthProbeFunc(func(
+				_ context.Context,
+				_ string,
+			) (domain.HealthStatus, error) {
+				return domain.HealthHealthy, nil
+			}),
+		},
+		Clock:          fixedClock{},
+		SchedulerLease: &memorySchedulerLease{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	feature, err := service.CheckHealth(
+		context.Background(),
+		"voice_gateway",
+	)
+	if err == nil || feature != nil {
+		t.Fatalf(
+			"persistence failure must not return a healthy projection: %+v %v",
+			feature,
+			err,
+		)
+	}
+}
+
+func TestStaleHealthSnapshotDoesNotAuditOrProjectSuccess(t *testing.T) {
+	repository := newMemoryRepository()
+	staleAt := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	if err := repository.SaveHealth(context.Background(), &domain.HealthSnapshot{
+		FeatureID: "voice_gateway",
+		Status:    domain.HealthUnavailable,
+		CheckedAt: staleAt.Add(time.Minute),
+		Message:   "功能暂时不可用",
+		LatencyMS: 9,
+		Trigger:   domain.HealthTriggerSchedule,
+	}); err != nil {
+		t.Fatalf("seed newer health snapshot: %v", err)
+	}
+	audit := &recordingAudit{}
+	service, err := New(Options{
+		Repository: repository,
+		Definitions: []Definition{
+			registeredDefinition(t, "voice_gateway"),
+		},
+		HealthProbes: map[string]HealthProbe{
+			"voice_gateway": HealthProbeFunc(func(
+				_ context.Context,
+				_ string,
+			) (domain.HealthStatus, error) {
+				return domain.HealthHealthy, nil
+			}),
+		},
+		Clock: fixedClock{},
+		Audit: audit,
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	feature, err := service.CheckHealthAs(
+		context.Background(),
+		"voice_gateway",
+		"admin-001",
+	)
+	if !errors.Is(err, domain.ErrHealthSnapshotStale) {
+		t.Fatalf("expected stale snapshot error, got %v", err)
+	}
+	if feature != nil {
+		t.Fatalf("stale snapshot returned a successful projection: %+v", feature)
+	}
+	if entries := audit.snapshot(); len(entries) != 0 {
+		t.Fatalf("stale snapshot produced audit success: %+v", entries)
+	}
+	stored, err := repository.GetHealth(context.Background(), "voice_gateway")
+	if err != nil {
+		t.Fatalf("load stored health: %v", err)
+	}
+	if stored.Status != domain.HealthUnavailable ||
+		stored.CheckedAt != staleAt.Add(time.Minute) {
+		t.Fatalf("newer snapshot was overwritten: %+v", stored)
+	}
+}
+
+func TestScheduledHealthCheckRecordsSystemAudit(t *testing.T) {
+	repository := newMemoryRepository()
+	audit := &recordingAudit{}
+	service, err := New(Options{
+		Repository: repository,
+		Definitions: []Definition{
+			registeredDefinition(t, "service_version"),
+		},
+		HealthProbes: map[string]HealthProbe{
+			"service_version": HealthProbeFunc(func(
+				_ context.Context,
+				_ string,
+			) (domain.HealthStatus, error) {
+				return domain.HealthUnavailable, nil
+			}),
+		},
+		Clock: fixedClock{},
+		Audit: audit,
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	if _, err := service.CheckScheduledHealth(
+		context.Background(),
+		"service_version",
+	); err != nil {
+		t.Fatalf("check scheduled health: %v", err)
+	}
+	entries := audit.snapshot()
+	if len(entries) != 1 {
+		t.Fatalf("audit entry count = %d, want 1", len(entries))
+	}
+	entry := entries[0]
+	if entry.ActorID != "" ||
+		entry.Action != "system.feature_center.health.checked" ||
+		entry.Detail["status"] != string(domain.HealthUnavailable) ||
+		entry.Detail["trigger"] != domain.HealthTriggerSchedule {
+		t.Fatalf("unexpected scheduled audit: %+v", entry)
+	}
+}
+
+func TestScheduledHealthContinuesAfterOneProbeFails(t *testing.T) {
+	repository := newMemoryRepository()
+	definitions := []Definition{
+		registeredDefinition(t, "voice_gateway"),
+		registeredDefinition(t, "service_version"),
+	}
+	service, err := New(Options{
+		Repository:  repository,
+		Definitions: definitions,
+		HealthProbes: map[string]HealthProbe{
+			"voice_gateway": HealthProbeFunc(func(
+				_ context.Context,
+				_ string,
+			) (domain.HealthStatus, error) {
+				return "", errors.New("voice probe unavailable")
+			}),
+			"service_version": HealthProbeFunc(func(
+				_ context.Context,
+				_ string,
+			) (domain.HealthStatus, error) {
+				return domain.HealthHealthy, nil
+			}),
+		},
+		Clock:          fixedClock{},
+		SchedulerLease: &memorySchedulerLease{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	features, err := service.CheckAllScheduledHealth(context.Background())
+	if err == nil {
+		t.Fatal("expected aggregate scheduler error")
+	}
+	if len(features) != 1 || features[0].ID != "service_version" {
+		t.Fatalf("later healthy feature was not checked: %+v", features)
+	}
+	if _, err := repository.GetHealth(
+		context.Background(),
+		"service_version",
+	); err != nil {
+		t.Fatalf("second feature snapshot missing: %v", err)
+	}
+	if _, err := repository.GetHealth(
+		context.Background(),
+		"voice_gateway",
+	); !errors.Is(err, domain.ErrFeatureConfigNotFound) {
+		t.Fatalf("failed probe fabricated a snapshot: %v", err)
+	}
+}
+
+func TestScheduledHealthRequiresSharedLeaderLease(t *testing.T) {
+	service, repository := newTestService(t)
+	service.schedulerLease = nil
+
+	features, err := service.CheckAllScheduledHealth(context.Background())
+	if !errors.Is(err, domain.ErrSchedulerLeaseRequired) {
+		t.Fatalf("expected required lease error, got %v", err)
+	}
+	if features != nil {
+		t.Fatalf("unexpected features without lease: %+v", features)
+	}
+	if _, err := repository.GetHealth(
+		context.Background(),
+		"voice_gateway",
+	); !errors.Is(err, domain.ErrFeatureConfigNotFound) {
+		t.Fatalf("scheduler without lease persisted health: %v", err)
+	}
+}
+
+func TestScheduledHealthSkipsWhenAnotherReplicaOwnsLease(t *testing.T) {
+	outerLease := &memorySchedulerLease{}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	exited := make(chan struct{})
+	go func() {
+		defer close(exited)
+		leaseErr := outerLease.WithLeaderLease(context.Background(), func(context.Context) error {
+			close(entered)
+			<-release
+			return nil
+		})
+		if leaseErr != nil {
+			t.Errorf("outer lease: %v", leaseErr)
+		}
+	}()
+	<-entered
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+		<-exited
+	}()
+	service, repository := newTestService(t)
+	service.schedulerLease = outerLease
+
+	features, err := service.CheckAllScheduledHealth(context.Background())
+	if !errors.Is(err, domain.ErrSchedulerLeaseUnavailable) {
+		t.Fatalf("expected lease unavailable error, got %v", err)
+	}
+	if features != nil {
+		t.Fatalf("skipped scheduler returned features: %+v", features)
+	}
+	if _, err := repository.GetHealth(
+		context.Background(),
+		"voice_gateway",
+	); !errors.Is(err, domain.ErrFeatureConfigNotFound) {
+		t.Fatalf("non-leader replica persisted health: %v", err)
+	}
+}
+
+type failingCallbackLease struct{}
+
+func (failingCallbackLease) WithLeaderLease(
+	_ context.Context,
+	work func(context.Context) error,
+) error {
+	return work(context.Background())
+}
+
+type failingReleaseLease struct{}
+
+func (failingReleaseLease) WithLeaderLease(
+	ctx context.Context,
+	work func(context.Context) error,
+) error {
+	workErr := work(ctx)
+	return &repository.SchedulerLeaseReleaseError{
+		Err: errors.Join(domain.ErrSchedulerLeaseReleaseFailed, workErr),
+	}
+}
+
+func TestScheduledHealthPreservesProbeFailureWhenLeaseSucceeds(t *testing.T) {
+	service, _ := newTestService(t)
+	service.schedulerLease = failingCallbackLease{}
+	service.probes["voice_gateway"] = HealthProbeFunc(func(
+		context.Context,
+		string,
+	) (domain.HealthStatus, error) {
+		return "", errors.New("probe unavailable")
+	})
+
+	features, err := service.CheckAllScheduledHealth(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "probe unavailable") {
+		t.Fatalf("scheduled cycle failure = %v, want probe cause", err)
+	}
+	if errors.Is(err, domain.ErrSchedulerLeaseReleaseFailed) {
+		t.Fatalf("successful lease release was misreported: %v", err)
+	}
+	if len(features) != 0 {
+		t.Fatalf("failed probe returned features: %+v", features)
+	}
+}
+
+func TestScheduledHealthPreservesReleaseFailureWhenProbeAlsoFails(t *testing.T) {
+	service, _ := newTestService(t)
+	service.schedulerLease = failingReleaseLease{}
+	service.probes["voice_gateway"] = HealthProbeFunc(func(
+		context.Context,
+		string,
+	) (domain.HealthStatus, error) {
+		return "", errors.New("probe unavailable")
+	})
+
+	_, err := service.CheckAllScheduledHealth(context.Background())
+	if !errors.Is(err, domain.ErrSchedulerLeaseReleaseFailed) {
+		t.Fatalf("scheduled lease failure = %v, want release failure", err)
+	}
+	if !strings.Contains(err.Error(), "probe unavailable") {
+		t.Fatalf("scheduled lease failure = %v, want callback cause retained", err)
+	}
+}
+
+func TestScheduledLeaseProtectsOneCycleAcrossServiceInstances(t *testing.T) {
+	lease := &memorySchedulerLease{}
+	repository := newMemoryRepository()
+	definitions := []Definition{registeredDefinition(t, "voice_gateway")}
+	var probeCalls int
+	var probeMu sync.Mutex
+	started := make(chan struct{}, 1)
+	probe := HealthProbeFunc(func(
+		_ context.Context,
+		_ string,
+	) (domain.HealthStatus, error) {
+		probeMu.Lock()
+		probeCalls++
+		probeMu.Unlock()
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		time.Sleep(100 * time.Millisecond)
+		return domain.HealthHealthy, nil
+	})
+	newInstance := func() *Service {
+		instance, err := New(Options{
+			Repository:     repository,
+			Definitions:    definitions,
+			HealthProbes:   map[string]HealthProbe{"voice_gateway": probe},
+			Clock:          fixedClock{},
+			SchedulerLease: lease,
+		})
+		if err != nil {
+			t.Fatalf("create service instance: %v", err)
+		}
+		return instance
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := newInstance().CheckAllScheduledHealth(context.Background())
+		errCh <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("leader probe did not start")
+	}
+
+	second, err := newInstance().CheckAllScheduledHealth(context.Background())
+	if !errors.Is(err, domain.ErrSchedulerLeaseUnavailable) {
+		t.Fatalf("second replica should skip while lease is held, got %v", err)
+	}
+	if second != nil {
+		t.Fatalf("second replica returned work: %+v", second)
+	}
+	probeMu.Lock()
+	calls := probeCalls
+	probeMu.Unlock()
+	if calls != 1 {
+		t.Fatalf("probe calls = %d, want exactly one leader cycle", calls)
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("leader cycle = %v, want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("leader cycle did not finish")
+	}
+}
+
+func TestRunHealthSchedulerRunsOneFullIntervalAfterSlowCycle(t *testing.T) {
+	service, _ := newTestService(t)
+	firstStarted := make(chan struct{})
+	secondStarted := make(chan time.Time, 1)
+	var calls atomic.Int64
+	service.probes["voice_gateway"] = HealthProbeFunc(func(
+		context.Context,
+		string,
+	) (domain.HealthStatus, error) {
+		call := calls.Add(1)
+		if call == 1 {
+			close(firstStarted)
+			time.Sleep(40 * time.Millisecond)
+		} else if call == 2 {
+			secondStarted <- time.Now()
+		}
+		return domain.HealthHealthy, nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	startedAt := time.Now()
+	go func() {
+		errCh <- service.RunHealthScheduler(ctx, 80*time.Millisecond)
+	}()
+	<-firstStarted
+	time.Sleep(55 * time.Millisecond)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("cycles within fixed ticker window = %d, want 1", got)
+	}
+	select {
+	case secondAt := <-secondStarted:
+		if elapsed := secondAt.Sub(startedAt); elapsed < 110*time.Millisecond {
+			t.Fatalf("second cycle started too early after %s", elapsed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second scheduled cycle did not start")
+	}
+	cancel()
+	if err := <-errCh; !errors.Is(err, context.Canceled) {
+		t.Fatalf("scheduler shutdown = %v, want context.Canceled", err)
+	}
+}
+
+func TestScheduledAuditFailureRetainsHealthAndCanBeDrained(t *testing.T) {
+	repository := newMemoryRepository()
+	audit := &recordingAudit{err: errors.New("audit storage unavailable")}
+	service, err := New(Options{
+		Repository: repository,
+		Definitions: []Definition{
+			registeredDefinition(t, "voice_gateway"),
+		},
+		HealthProbes: map[string]HealthProbe{
+			"voice_gateway": HealthProbeFunc(func(
+				_ context.Context,
+				_ string,
+			) (domain.HealthStatus, error) {
+				return domain.HealthHealthy, nil
+			}),
+		},
+		Clock: fixedClock{},
+		Audit: audit,
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	feature, err := service.CheckScheduledHealth(
+		context.Background(),
+		"voice_gateway",
+	)
+	if err != nil {
+		t.Fatalf("scheduled check should retain its snapshot: %v", err)
+	}
+	if feature.Health != domain.HealthHealthy {
+		t.Fatalf("health = %q, want healthy", feature.Health)
+	}
+	failures := service.DrainAuditFailures()
+	if len(failures) != 1 ||
+		failures[0].Snapshot == nil ||
+		failures[0].Snapshot.FeatureID != "voice_gateway" {
+		t.Fatalf("unexpected audit failures: %+v", failures)
+	}
+	if remaining := service.DrainAuditFailures(); len(remaining) != 0 {
+		t.Fatalf("drain did not clear failures: %+v", remaining)
+	}
+}
+
+func TestAuditFailureQueueIsRaceSafeUnderConcurrentDrain(t *testing.T) {
+	repository := newMemoryRepository()
+	audit := &recordingAudit{err: errors.New("audit storage unavailable")}
+	service, err := New(Options{
+		Repository: repository,
+		Definitions: []Definition{
+			registeredDefinition(t, "voice_gateway"),
+		},
+		HealthProbes: map[string]HealthProbe{
+			"voice_gateway": HealthProbeFunc(func(
+				_ context.Context,
+				_ string,
+			) (domain.HealthStatus, error) {
+				return domain.HealthHealthy, nil
+			}),
+		},
+		Clock:          fixedClock{},
+		Audit:          audit,
+		SchedulerLease: &memorySchedulerLease{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	const workers = 8
+	const checksPerWorker = 25
+	var wg sync.WaitGroup
+	var totalDrained int64
+	for index := 0; index < workers; index++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for attempt := 0; attempt < checksPerWorker; attempt++ {
+				_, _ = service.CheckScheduledHealth(
+					context.Background(),
+					"voice_gateway",
+				)
+				atomic.AddInt64(
+					&totalDrained,
+					int64(len(service.DrainAuditFailures())),
+				)
+			}
+		}()
+	}
+	wg.Wait()
+	totalDrained += int64(len(service.DrainAuditFailures()))
+	if totalDrained != workers*checksPerWorker {
+		t.Fatalf(
+			"audit failures drained = %d, want %d",
+			totalDrained,
+			workers*checksPerWorker,
+		)
+	}
+}
+
 func TestValidateHealthProbeCoverageRejectsMissingActiveProbe(t *testing.T) {
 	err := ValidateHealthProbeCoverage(
 		[]Definition{
@@ -857,27 +1802,77 @@ func TestCheckHealthRejectsFeatureWithoutProbe(t *testing.T) {
 	}
 }
 
-func TestCheckHealthDoesNotMutateSharedRegistry(t *testing.T) {
-	service, _ := newTestService(t)
-	if _, err := service.CheckHealth(context.Background(), "voice_gateway"); err != nil {
+func TestCheckHealthPersistsSnapshotAcrossServiceRestart(t *testing.T) {
+	repository := newMemoryRepository()
+	definitions := []Definition{registeredDefinition(t, "voice_gateway")}
+	probes := map[string]HealthProbe{
+		"voice_gateway": HealthProbeFunc(func(
+			_ context.Context,
+			_ string,
+		) (domain.HealthStatus, error) {
+			return domain.HealthDegraded, nil
+		}),
+	}
+	checkedAt := time.Date(2026, 10, 8, 12, 0, 1, 0, time.UTC)
+	first, err := New(Options{
+		Repository:   repository,
+		Definitions:  definitions,
+		HealthProbes: probes,
+		Clock: &advancingClock{
+			current: checkedAt,
+			step:    25 * time.Millisecond,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create first service: %v", err)
+	}
+	checked, err := first.CheckHealth(context.Background(), "voice_gateway")
+	if err != nil {
 		t.Fatalf("check health: %v", err)
 	}
-	// A subsequent list must still report the registry default, not a probe
-	// result leaked from the previous caller.
-	features, err := service.List(context.Background())
-	if err != nil {
-		t.Fatalf("list features: %v", err)
+	if checked.Health != domain.HealthDegraded ||
+		checked.HealthDetail == nil ||
+		checked.HealthDetail.LatencyMS == nil ||
+		*checked.HealthDetail.LatencyMS != 25 {
+		t.Fatalf("unexpected checked projection: %+v", checked.HealthDetail)
 	}
-	for _, feature := range features {
-		if feature.ID != "voice_gateway" {
-			continue
-		}
-		if feature.Health != domain.HealthUnknown {
-			t.Fatalf("registry health leaked: %q", feature.Health)
-		}
-		if feature.HealthDetail != nil {
-			t.Fatal("registry health detail leaked across callers")
-		}
+
+	restarted, err := New(Options{
+		Repository:   repository,
+		Definitions:  definitions,
+		HealthProbes: probes,
+		Clock:        fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create restarted service: %v", err)
+	}
+	features, err := restarted.List(context.Background())
+	if err != nil {
+		t.Fatalf("list after restart: %v", err)
+	}
+	if len(features) != 1 {
+		t.Fatalf("feature count = %d, want 1", len(features))
+	}
+	feature := features[0]
+	if feature.Health != domain.HealthDegraded ||
+		feature.HealthDetail == nil {
+		t.Fatalf("durable health missing after restart: %+v", feature)
+	}
+	if feature.HealthDetail.CheckedAt != checked.HealthDetail.CheckedAt ||
+		feature.HealthDetail.Message != "功能可用，但部分能力受到影响" ||
+		feature.HealthDetail.LatencyMS == nil ||
+		*feature.HealthDetail.LatencyMS != 25 {
+		t.Fatalf("durable health detail changed: %+v", feature.HealthDetail)
+	}
+
+	// The registry definition is shared with other services; recording a
+	// health observation must not mutate it in place.
+	inspection, err := restarted.Get(context.Background(), "voice_gateway")
+	if err != nil {
+		t.Fatalf("get after restart: %v", err)
+	}
+	if inspection.Health != domain.HealthDegraded {
+		t.Fatalf("get health = %q, want degraded", inspection.Health)
 	}
 }
 

@@ -84,7 +84,7 @@ func (handler learningVisualizationHandler) current(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -108,7 +108,7 @@ func (handler learningVisualizationHandler) publish(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -143,7 +143,7 @@ func (handler learningVisualizationHandler) statuses(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -164,7 +164,7 @@ func (handler learningVisualizationHandler) capability(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return

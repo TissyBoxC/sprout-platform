@@ -99,7 +99,7 @@ func (handler videoCompanionHandler) listContacts(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -122,7 +122,7 @@ func (handler videoCompanionHandler) createContact(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -150,7 +150,7 @@ func (handler videoCompanionHandler) updateContact(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -184,7 +184,7 @@ func (handler videoCompanionHandler) deleteContact(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -202,7 +202,7 @@ func (handler videoCompanionHandler) startCall(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -229,7 +229,7 @@ func (handler videoCompanionHandler) updateCall(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -260,7 +260,7 @@ func (handler videoCompanionHandler) history(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -286,7 +286,7 @@ func (handler videoCompanionHandler) statuses(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -307,7 +307,7 @@ func (handler videoCompanionHandler) capability(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return

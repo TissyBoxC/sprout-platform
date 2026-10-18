@@ -151,8 +151,20 @@ type PlayRecordInput struct {
 type PlayHistoryQuery struct {
 	FamilyID string
 	DeviceID string
-	Limit    int
+	// DeviceIDs reads several family-owned devices in one query. A non-empty
+	// DeviceID narrows the query to that single device.
+	DeviceIDs []string
+	Limit     int
 }
+
+const (
+	FavoriteListMax              = 500
+	PackageDetailVersionMax      = 100
+	PackageReviewHistoryMax      = 500
+	ThemePackListDefaultPageSize = 50
+	ThemePackListMaxPageSize     = 100
+	PlayHistoryQueryMax          = 200
+)
 
 // ThemePackStatus is the review and delivery lifecycle of one theme pack.
 // A theme pack is a curated, ordered collection of published content packages
@@ -202,8 +214,18 @@ type ThemePackInput struct {
 
 // ThemePackQuery filters the admin theme pack list.
 type ThemePackQuery struct {
-	Status  string
-	Keyword string
+	Status   string
+	Keyword  string
+	Page     int
+	PageSize int
+}
+
+// ThemePackPage is one stable page of theme packs.
+type ThemePackPage struct {
+	ThemePacks []ThemePack `json:"theme_packs"`
+	Page       int         `json:"page"`
+	PageSize   int         `json:"page_size"`
+	Total      int         `json:"total"`
 }
 
 // ValidateThemePack normalizes and validates one theme pack payload.

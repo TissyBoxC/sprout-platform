@@ -57,7 +57,97 @@ const (
 	MinUsageReportRetentionDays     = 1
 	MaxUsageReportRetentionDays     = 3650
 	DefaultUsageReportRetentionDays = 365
+
+	// Management list bounds. Both operations lists use stable offset paging
+	// ordered by created_at DESC, id DESC. The id tie-breaker keeps rows from
+	// moving when several records share the same timestamp.
+	DefaultListPageSize = 20
+	MaxListPageSize     = 100
 )
+
+// PageRequest is the normalized offset page used by operator-facing lists.
+// Offset is zero-based and derived from an already validated page and size.
+type PageRequest struct {
+	Page     int `json:"page"`
+	PageSize int `json:"page_size"`
+	Offset   int `json:"offset"`
+}
+
+// Pagination describes the page returned alongside a list. NextOffset is nil
+// on the last page; callers can keep using offset for stateless refreshes.
+type Pagination struct {
+	Page         int  `json:"page"`
+	PageSize     int  `json:"page_size"`
+	Total        int  `json:"total"`
+	TotalPages   int  `json:"total_pages"`
+	HasPrevious  bool `json:"has_previous"`
+	HasMore      bool `json:"has_more"`
+	PreviousPage *int `json:"previous_page"`
+	NextPage     *int `json:"next_page"`
+	NextOffset   *int `json:"next_offset"`
+}
+
+// FamilyAccountPage and ReleasePage preserve the existing list fields while
+// adding total and next-page metadata for the management console.
+type FamilyAccountPage struct {
+	Accounts   []FamilyAccount `json:"accounts"`
+	Pagination Pagination      `json:"pagination"`
+}
+
+type ReleasePage struct {
+	Releases   []Release  `json:"releases"`
+	Pagination Pagination `json:"pagination"`
+}
+
+// NormalizePageRequest clamps caller input into the supported management-list
+// range and returns the zero-based SQL offset.
+func NormalizePageRequest(page int, pageSize int) PageRequest {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = DefaultListPageSize
+	}
+	if pageSize > MaxListPageSize {
+		pageSize = MaxListPageSize
+	}
+	return PageRequest{
+		Page:     page,
+		PageSize: pageSize,
+		Offset:   (page - 1) * pageSize,
+	}
+}
+
+// NewPagination builds complete next/previous page metadata. A zero-total
+// list reports zero pages rather than pretending one empty page exists.
+func NewPagination(request PageRequest, total int) Pagination {
+	if total < 0 {
+		total = 0
+	}
+	totalPages := 0
+	if total > 0 {
+		totalPages = (total + request.PageSize - 1) / request.PageSize
+	}
+	pagination := Pagination{
+		Page:       request.Page,
+		PageSize:   request.PageSize,
+		Total:      total,
+		TotalPages: totalPages,
+	}
+	if request.Page > 1 {
+		previousPage := request.Page - 1
+		pagination.HasPrevious = true
+		pagination.PreviousPage = &previousPage
+	}
+	if totalPages > 0 && request.Page < totalPages {
+		nextPage := request.Page + 1
+		nextOffset := request.Offset + request.PageSize
+		pagination.HasMore = true
+		pagination.NextPage = &nextPage
+		pagination.NextOffset = &nextOffset
+	}
+	return pagination
+}
 
 // Overview is the operations dashboard projection.
 //

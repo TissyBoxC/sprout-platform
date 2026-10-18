@@ -68,7 +68,7 @@ func (handler motionHandler) current(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -86,7 +86,7 @@ func (handler motionHandler) publish(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -116,7 +116,7 @@ func (handler motionHandler) capability(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -139,7 +139,7 @@ func (handler motionHandler) statuses(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return

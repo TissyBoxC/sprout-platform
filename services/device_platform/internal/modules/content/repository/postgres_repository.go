@@ -10,12 +10,17 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/domain"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // PostgresRepository persists content packages in device_platform's database.
 type PostgresRepository struct {
 	pool *pgxpool.Pool
+}
+
+type queryRower interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 // NewPostgresRepository creates the durable content repository.
@@ -105,8 +110,10 @@ func (r *PostgresRepository) GetDetail(
 		`SELECT `+packageVersionColumns+`
 		 FROM content_package_versions
 		 WHERE package_id = $1
-		 ORDER BY package_version DESC`,
+		 ORDER BY package_version DESC
+		 LIMIT $2`,
 		packageID,
+		domain.PackageDetailVersionMax,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get content package versions: %w", err)
@@ -132,8 +139,10 @@ func (r *PostgresRepository) GetDetail(
 		        to_status, reason, actor_account_id, created_at
 		 FROM content_review_logs
 		 WHERE package_id = $1
-		 ORDER BY created_at DESC, id DESC`,
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT $2`,
 		packageID,
+		domain.PackageReviewHistoryMax,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get content review history: %w", err)
@@ -772,6 +781,20 @@ func (r *PostgresRepository) ListFavorites(
 	ctx context.Context,
 	parentAccountID string,
 ) ([]domain.FavoriteView, error) {
+	return r.listFavorites(ctx, parentAccountID, domain.FavoriteListMax)
+}
+
+func (r *PostgresRepository) listFavorites(
+	ctx context.Context,
+	parentAccountID string,
+	limit int,
+) ([]domain.FavoriteView, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > domain.FavoriteListMax {
+		limit = domain.FavoriteListMax
+	}
 	rows, err := r.pool.Query(
 		ctx,
 		`SELECT f.package_id,
@@ -801,8 +824,10 @@ func (r *PostgresRepository) ListFavorites(
 		     LIMIT 1
 		 ) latest ON TRUE
 		 WHERE f.parent_account_id = $1
-		 ORDER BY f.created_at DESC, f.package_id ASC`,
+		 ORDER BY f.created_at DESC, f.package_id ASC
+		 LIMIT $2`,
 		parentAccountID,
+		limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list content favorites: %w", err)
@@ -837,6 +862,130 @@ func (r *PostgresRepository) ListFavorites(
 		return nil, fmt.Errorf("iterate content favorites: %w", err)
 	}
 	return views, nil
+}
+
+// ListRecentPublishedCategories resolves categories for a bounded set of
+// package ids in one query. Missing or withdrawn packages are omitted so the
+// recommender never scores against stale metadata.
+func (r *PostgresRepository) ListRecentPublishedCategories(
+	ctx context.Context,
+	packageIDs []string,
+) (map[string]string, error) {
+	if len(packageIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	if len(packageIDs) > domain.PlayHistoryQueryMax {
+		packageIDs = packageIDs[:domain.PlayHistoryQueryMax]
+	}
+	rows, err := r.pool.Query(
+		ctx,
+		`SELECT DISTINCT ON (package_id)
+		     package_id,
+		     category
+		 FROM content_package_versions
+		 WHERE package_id = ANY($1)
+		   AND status = 'published'
+		 ORDER BY package_id, package_version DESC`,
+		packageIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list recent content categories: %w", err)
+	}
+	defer rows.Close()
+	result := make(map[string]string, len(packageIDs))
+	for rows.Next() {
+		var packageID string
+		var category string
+		if err := rows.Scan(&packageID, &category); err != nil {
+			return nil, fmt.Errorf("scan recent content category: %w", err)
+		}
+		result[packageID] = category
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate recent content categories: %w", err)
+	}
+	return result, nil
+}
+
+// ListExistingPackageIDs returns the requested package ids that have at
+// least one stored version. Theme validation uses this one bounded query
+// instead of loading every package detail in a loop.
+func (r *PostgresRepository) ListExistingPackageIDs(
+	ctx context.Context,
+	packageIDs []string,
+) ([]string, error) {
+	packageIDs = uniqueTrimmedStrings(packageIDs)
+	if len(packageIDs) == 0 {
+		return []string{}, nil
+	}
+	if len(packageIDs) > 50 {
+		packageIDs = packageIDs[:50]
+	}
+	rows, err := r.pool.Query(
+		ctx,
+		`SELECT DISTINCT package_id
+		 FROM content_package_versions
+		 WHERE package_id = ANY($1)
+		 ORDER BY package_id ASC`,
+		packageIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list existing content package ids: %w", err)
+	}
+	defer rows.Close()
+	result := make([]string, 0, len(packageIDs))
+	for rows.Next() {
+		var packageID string
+		if err := rows.Scan(&packageID); err != nil {
+			return nil, fmt.Errorf("scan existing content package id: %w", err)
+		}
+		result = append(result, packageID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate existing content package ids: %w", err)
+	}
+	return result, nil
+}
+
+// ListPublishedPackageIDs returns requested package ids with a published
+// version. Theme publication uses this as one preflight instead of one
+// download lookup per member.
+func (r *PostgresRepository) ListPublishedPackageIDs(
+	ctx context.Context,
+	packageIDs []string,
+) ([]string, error) {
+	packageIDs = uniqueTrimmedStrings(packageIDs)
+	if len(packageIDs) == 0 {
+		return []string{}, nil
+	}
+	if len(packageIDs) > 50 {
+		packageIDs = packageIDs[:50]
+	}
+	rows, err := r.pool.Query(
+		ctx,
+		`SELECT package_id
+		 FROM content_package_versions
+		 WHERE package_id = ANY($1)
+		   AND status = 'published'
+		 ORDER BY package_id ASC`,
+		packageIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list published content package ids: %w", err)
+	}
+	defer rows.Close()
+	result := make([]string, 0, len(packageIDs))
+	for rows.Next() {
+		var packageID string
+		if err := rows.Scan(&packageID); err != nil {
+			return nil, fmt.Errorf("scan published content package id: %w", err)
+		}
+		result = append(result, packageID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate published content package ids: %w", err)
+	}
+	return result, nil
 }
 
 // RecordPlayback appends one bounded history row and prunes older rows for the
@@ -917,9 +1066,36 @@ func (r *PostgresRepository) ListPlayHistory(
 	ctx context.Context,
 	query domain.PlayHistoryQuery,
 ) ([]domain.PlayRecord, error) {
+	return r.listPlayHistoryForDevices(
+		ctx,
+		query,
+		[]string{query.DeviceID},
+	)
+}
+
+// ListPlayHistoryForDevices reads several family-owned devices in one bounded
+// query. The family predicate remains mandatory, and ordering happens before
+// LIMIT so the merged result is stable.
+func (r *PostgresRepository) ListPlayHistoryForDevices(
+	ctx context.Context,
+	query domain.PlayHistoryQuery,
+	deviceIDs []string,
+) ([]domain.PlayRecord, error) {
+	return r.listPlayHistoryForDevices(ctx, query, deviceIDs)
+}
+
+func (r *PostgresRepository) listPlayHistoryForDevices(
+	ctx context.Context,
+	query domain.PlayHistoryQuery,
+	deviceIDs []string,
+) ([]domain.PlayRecord, error) {
 	limit := query.Limit
-	if limit < 1 || limit > 200 {
+	if limit < 1 || limit > domain.PlayHistoryQueryMax {
 		limit = 50
+	}
+	deviceIDs = uniqueTrimmedStrings(deviceIDs)
+	if len(deviceIDs) == 0 {
+		return []domain.PlayRecord{}, nil
 	}
 	rows, err := r.pool.Query(
 		ctx,
@@ -927,11 +1103,11 @@ func (r *PostgresRepository) ListPlayHistory(
 		        played_seconds, played_at
 		 FROM content_play_history
 		 WHERE family_id = $1
-		   AND device_id = $2
+		   AND device_id = ANY($2)
 		 ORDER BY played_at DESC, id DESC
 		 LIMIT $3`,
 		query.FamilyID,
-		query.DeviceID,
+		deviceIDs,
 		limit,
 	)
 	if err != nil {
@@ -961,6 +1137,24 @@ func (r *PostgresRepository) ListPlayHistory(
 	return records, nil
 }
 
+// uniqueTrimmedStrings removes empty duplicates before binding an ID array.
+func uniqueTrimmedStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
 const themePackColumns = `
 	theme_id,
 	title,
@@ -979,6 +1173,30 @@ func (r *PostgresRepository) ListThemePacks(
 	ctx context.Context,
 	query domain.ThemePackQuery,
 ) ([]domain.ThemePack, error) {
+	page, err := r.ListThemePackPage(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return page.ThemePacks, nil
+}
+
+// ListThemePackPage is the optional paged read used by the service. The base
+// ListThemePacks method remains on the original slice contract.
+func (r *PostgresRepository) ListThemePackPage(
+	ctx context.Context,
+	query domain.ThemePackQuery,
+) (domain.ThemePackPage, error) {
+	page := query.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := query.PageSize
+	if pageSize < 1 {
+		pageSize = domain.ThemePackListDefaultPageSize
+	}
+	if pageSize > domain.ThemePackListMaxPageSize {
+		pageSize = domain.ThemePackListMaxPageSize
+	}
 	conditions := []string{"1 = 1"}
 	args := make([]any, 0, 3)
 	if query.Status != "" {
@@ -994,30 +1212,47 @@ func (r *PostgresRepository) ListThemePacks(
 			len(args),
 		))
 	}
+	where := strings.Join(conditions, " AND ")
+	var total int
+	if err := r.pool.QueryRow(
+		ctx,
+		"SELECT COUNT(*) FROM content_theme_packs WHERE "+where,
+		args...,
+	).Scan(&total); err != nil {
+		return domain.ThemePackPage{}, fmt.Errorf("count content theme packs: %w", err)
+	}
+	offset := (page - 1) * pageSize
+	pageArgs := append(append([]any{}, args...), pageSize, offset)
 	rows, err := r.pool.Query(
 		ctx,
 		`SELECT `+themePackColumns+`
 		 FROM content_theme_packs
-		 WHERE `+strings.Join(conditions, " AND ")+`
-		 ORDER BY updated_at DESC, theme_id ASC`,
-		args...,
+		 WHERE `+where+`
+		 ORDER BY updated_at DESC, theme_id ASC
+		 LIMIT $`+fmt.Sprint(len(pageArgs)-1)+` OFFSET $`+fmt.Sprint(len(pageArgs)),
+		pageArgs...,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("list content theme packs: %w", err)
+		return domain.ThemePackPage{}, fmt.Errorf("list content theme packs: %w", err)
 	}
 	defer rows.Close()
 	packs := make([]domain.ThemePack, 0)
 	for rows.Next() {
 		pack, scanErr := scanThemePack(rows)
 		if scanErr != nil {
-			return nil, scanErr
+			return domain.ThemePackPage{}, scanErr
 		}
 		packs = append(packs, *pack)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate content theme packs: %w", err)
+		return domain.ThemePackPage{}, fmt.Errorf("iterate content theme packs: %w", err)
 	}
-	return packs, nil
+	return domain.ThemePackPage{
+		ThemePacks: packs,
+		Page:       page,
+		PageSize:   pageSize,
+		Total:      total,
+	}, nil
 }
 
 // GetThemePack loads one theme pack or reports ErrThemePackNotFound.
@@ -1089,16 +1324,35 @@ func (r *PostgresRepository) TransitionThemePack(
 	action domain.Action,
 	now time.Time,
 ) (*domain.ThemePack, error) {
-	var target domain.ThemePackStatus
-	switch action {
-	case domain.ActionPublish:
-		target = domain.ThemePackPublished
-	case domain.ActionWithdraw:
-		target = domain.ThemePackWithdrawn
-	default:
+	source, target, err := themePackTransition(action)
+	if err != nil {
 		return nil, domain.ErrThemeTransitionInvalid
 	}
-	row := r.pool.QueryRow(
+	pack, transitionErr := r.transitionThemePackAtomic(
+		ctx,
+		themeID,
+		source,
+		target,
+		now,
+	)
+	if transitionErr != nil {
+		return nil, transitionErr
+	}
+	return pack, nil
+}
+
+func transitionThemePack(
+	ctx context.Context,
+	executor interface {
+		Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+		QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	},
+	themeID string,
+	source domain.ThemePackStatus,
+	target domain.ThemePackStatus,
+	now time.Time,
+) (*domain.ThemePack, error) {
+	tag, err := executor.Exec(
 		ctx,
 		`UPDATE content_theme_packs
 		 SET status = $2,
@@ -1109,23 +1363,89 @@ func (r *PostgresRepository) TransitionThemePack(
 		         ELSE 0 END,
 		     published_at = CASE WHEN $2 = 'published' THEN $3 ELSE published_at END,
 		     updated_at = $3
-		 WHERE theme_id = $1
-		 RETURNING `+themePackColumns,
+		 WHERE theme_id = $1 AND status = $4
+		`,
 		themeID,
 		string(target),
 		now,
+		string(source),
 	)
-	pack, err := scanThemePack(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, domain.ErrThemePackNotFound
-	}
 	if err != nil {
 		return nil, fmt.Errorf("transition content theme pack: %w", err)
 	}
-	if pack.Status != target {
+	if tag.RowsAffected() != 1 {
+		var currentStatus domain.ThemePackStatus
+		lookupErr := executor.QueryRow(
+			ctx,
+			`SELECT status
+			 FROM content_theme_packs
+			 WHERE theme_id = $1`,
+			themeID,
+		).Scan(&currentStatus)
+		if errors.Is(lookupErr, pgx.ErrNoRows) {
+			return nil, domain.ErrThemePackNotFound
+		}
+		if lookupErr != nil {
+			return nil, fmt.Errorf(
+				"classify content theme pack transition: %w",
+				lookupErr,
+			)
+		}
 		return nil, domain.ErrThemeTransitionInvalid
 	}
+	pack, err := scanThemePack(executor.QueryRow(
+		ctx,
+		`SELECT `+themePackColumns+`
+		 FROM content_theme_packs
+		 WHERE theme_id = $1`,
+		themeID,
+	))
+	if err != nil {
+		return nil, fmt.Errorf("read transitioned content theme pack: %w", err)
+	}
 	return pack, nil
+}
+
+func (r *PostgresRepository) transitionThemePackAtomic(
+	ctx context.Context,
+	themeID string,
+	source domain.ThemePackStatus,
+	target domain.ThemePackStatus,
+	now time.Time,
+) (*domain.ThemePack, error) {
+	transaction, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin content theme pack transition: %w", err)
+	}
+	defer func() { _ = transaction.Rollback(context.Background()) }()
+	pack, err := transitionThemePack(
+		ctx,
+		transaction,
+		themeID,
+		source,
+		target,
+		now,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit content theme pack transition: %w", err)
+	}
+	return pack, nil
+}
+
+func themePackTransition(
+	action domain.Action,
+) (domain.ThemePackStatus, domain.ThemePackStatus, error) {
+	switch action {
+	case domain.ActionPublish:
+		return domain.ThemePackDraft, domain.ThemePackPublished, nil
+	case domain.ActionWithdraw:
+		return domain.ThemePackPublished, domain.ThemePackWithdrawn, nil
+	default:
+		return "", "", domain.ErrThemeTransitionInvalid
+	}
 }
 
 // DeleteThemePack removes one pack. A published pack is never deleted so an

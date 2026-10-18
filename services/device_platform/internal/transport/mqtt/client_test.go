@@ -33,6 +33,7 @@ func (token *stubToken) Error() error                   { return token.err }
 
 // stubPahoClient records the most recent publish.
 type stubPahoClient struct {
+	mu          sync.Mutex
 	connected   bool
 	topic       string
 	qos         byte
@@ -61,6 +62,8 @@ func (client *stubPahoClient) Publish(
 	retained bool,
 	payload interface{},
 ) paho.Token {
+	client.mu.Lock()
+	defer client.mu.Unlock()
 	client.publishCall++
 	client.topic = topic
 	client.qos = qos
@@ -74,6 +77,8 @@ func (client *stubPahoClient) Subscribe(
 	qos byte,
 	callback paho.MessageHandler,
 ) paho.Token {
+	client.mu.Lock()
+	defer client.mu.Unlock()
 	client.subscribed = true
 	client.subTopic = topic
 	client.subQoS = qos
@@ -82,11 +87,49 @@ func (client *stubPahoClient) Subscribe(
 }
 
 func (client *stubPahoClient) Unsubscribe(topics ...string) paho.Token {
+	client.mu.Lock()
+	defer client.mu.Unlock()
 	client.unsubCalls++
 	if len(topics) > 0 {
 		client.unsubTopic = topics[0]
 	}
 	return newStubToken(nil)
+}
+
+func (client *stubPahoClient) snapshotSubscription() (
+	topic string,
+	qos byte,
+	handler paho.MessageHandler,
+	subscribed bool,
+	unsubscribeCalls int,
+	unsubscribeTopic string,
+) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	return client.subTopic,
+		client.subQoS,
+		client.subHandler,
+		client.subscribed,
+		client.unsubCalls,
+		client.unsubTopic
+}
+
+func (client *stubPahoClient) subscriptionActive() bool {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	return client.subscribed
+}
+
+func (client *stubPahoClient) unsubscribeCount() int {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	return client.unsubCalls
+}
+
+func (client *Client) commandAckSubscriptionActive() bool {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	return client.acks != nil
 }
 
 func sampleCommand() *runtimedomain.Command {
@@ -134,19 +177,25 @@ func TestPublishCommandUsesVersionedTopicAndEnvelope(t *testing.T) {
 	if !ok {
 		t.Fatal("unexpected client type")
 	}
-	if stub.topic != "sprout/v1/devices/device_test_001/commands" {
-		t.Fatalf("unexpected topic: %q", stub.topic)
+	stub.mu.Lock()
+	recordedTopic := stub.topic
+	recordedQoS := stub.qos
+	recordedRetained := stub.retained
+	recordedPayload := stub.payload
+	stub.mu.Unlock()
+	if recordedTopic != "sprout/v1/devices/device_test_001/commands" {
+		t.Fatalf("unexpected topic: %q", recordedTopic)
 	}
-	if stub.qos != 1 {
-		t.Fatalf("expected QoS 1, got %d", stub.qos)
+	if recordedQoS != 1 {
+		t.Fatalf("expected QoS 1, got %d", recordedQoS)
 	}
-	if stub.retained {
+	if recordedRetained {
 		t.Fatal("command publishes must not be retained")
 	}
 
-	encoded, ok := stub.payload.([]byte)
+	encoded, ok := recordedPayload.([]byte)
 	if !ok {
-		t.Fatalf("expected a []byte payload, got %T", stub.payload)
+		t.Fatalf("expected a []byte payload, got %T", recordedPayload)
 	}
 	var event DeviceCommandEvent
 	if err := json.Unmarshal(encoded, &event); err != nil {
@@ -327,26 +376,31 @@ func TestSubscribeCommandAcksDispatchesValidAck(t *testing.T) {
 	handler := &stubAckHandler{}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	subscriptionDone := make(chan error, 1)
 	go func() {
 		subscriptionDone <- client.SubscribeCommandAcks(ctx, handler)
 	}()
-	waitFor(t, func() bool { return stub.subscribed })
-	if !stub.subscribed {
+	waitFor(t, func() bool {
+		_, _, _, subscribed, _, _ := stub.snapshotSubscription()
+		return subscribed
+	})
+	subTopic, subQoS, subHandler, subscribed, _, _ := stub.snapshotSubscription()
+	if !subscribed {
 		t.Fatal("expected the client to subscribe")
 	}
-	if stub.subTopic != "sprout/v1/devices/+/commands/ack" {
-		t.Fatalf("unexpected subscription topic: %q", stub.subTopic)
+	if subTopic != "sprout/v1/devices/+/commands/ack" {
+		t.Fatalf("unexpected subscription topic: %q", subTopic)
 	}
-	if stub.subQoS != 1 {
-		t.Fatalf("expected QoS 1, got %d", stub.subQoS)
+	if subQoS != 1 {
+		t.Fatalf("expected QoS 1, got %d", subQoS)
 	}
 
 	payload, err := json.Marshal(validCommandAckFixture())
 	if err != nil {
 		t.Fatalf("marshal ack: %v", err)
 	}
-	stub.subHandler(nil, stubMessage{
+	subHandler(nil, stubMessage{
 		topic:   "sprout/v1/devices/device_test_001/commands/ack",
 		payload: payload,
 	})
@@ -376,9 +430,13 @@ func TestSubscribeCommandAcksDispatchesValidAck(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("subscription setup did not return")
 	}
-	waitFor(t, func() bool { return stub.unsubCalls == 1 })
-	if stub.unsubTopic != commandAckTopic {
-		t.Fatalf("unexpected unsubscribe topic: %q", stub.unsubTopic)
+	waitFor(t, func() bool {
+		_, _, _, _, unsubscribeCalls, _ := stub.snapshotSubscription()
+		return unsubscribeCalls == 1
+	})
+	_, _, _, _, _, unsubTopic := stub.snapshotSubscription()
+	if unsubTopic != commandAckTopic {
+		t.Fatalf("unexpected unsubscribe topic: %q", unsubTopic)
 	}
 }
 
@@ -393,7 +451,11 @@ func TestSubscribeCommandAcksDropsInvalidMessages(t *testing.T) {
 	if err := client.SubscribeCommandAcks(ctx, handler); err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
-	waitFor(t, func() bool { return stub.subscribed })
+	waitFor(t, func() bool {
+		_, _, _, subscribed, _, _ := stub.snapshotSubscription()
+		return subscribed
+	})
+	_, _, subHandler, _, _, _ := stub.snapshotSubscription()
 
 	tests := []struct {
 		name   string
@@ -526,7 +588,7 @@ func TestSubscribeCommandAcksDropsInvalidMessages(t *testing.T) {
 				}
 				payload = encoded
 			}
-			stub.subHandler(nil, stubMessage{
+			subHandler(nil, stubMessage{
 				topic:   topic,
 				payload: payload,
 			})
@@ -573,14 +635,18 @@ func TestSubscribeCommandAcksCancellationStopsWithoutCallbackPanic(t *testing.T)
 		t.Fatalf("marshal ack: %v", err)
 	}
 	cancel()
-	waitFor(t, func() bool { return stub.unsubCalls == 1 })
+	waitFor(t, func() bool {
+		_, _, _, _, unsubscribeCalls, _ := stub.snapshotSubscription()
+		return unsubscribeCalls == 1
+	})
+	_, _, subHandler, _, _, _ := stub.snapshotSubscription()
 	// Paho may already be dispatching a callback while Unsubscribe is in
 	// flight. It must be safe for that callback to observe cancellation.
-	stub.subHandler(nil, stubMessage{
+	subHandler(nil, stubMessage{
 		topic:   "sprout/v1/devices/device_test_001/commands/ack",
 		payload: payload,
 	})
-	waitFor(t, func() bool { return client.acks == nil })
+	waitFor(t, func() bool { return !client.commandAckSubscriptionActive() })
 }
 
 func waitFor(t *testing.T, condition func() bool) {

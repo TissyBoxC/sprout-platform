@@ -15,6 +15,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/packages/go/observability"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/config"
+	aiExecution "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/execution"
 	aiProvider "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/provider"
 	aiRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/repository"
 	aiService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/service"
@@ -180,6 +181,11 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create AI account service: %w", err)
 	}
+	aiExecutionStore := aiExecution.NewRedisTicketStore(
+		redisCache.Client(),
+		"sprout:ai:execution",
+		nil,
+	)
 	var phoneVerifier authService.PhoneVerifier
 	if cfg.Auth.PhoneVerificationMode == "local" {
 		phoneVerifier = authService.NewLocalPhoneVerifier(
@@ -496,8 +502,17 @@ func Run() error {
 		),
 		"ai_model_gateway": featureCenterService.HealthProbeFunc(
 			func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
-				if _, err := aiAccountService.RuntimeConfigForAdmin(ctx); err != nil {
+				if cfg.AI.ExecutionTokenTTL <= 0 ||
+					cfg.AI.ExecutionLeaseTTL < cfg.AI.ExecutionTokenTTL ||
+					strings.TrimSpace(cfg.AI.BaseURL) == "" ||
+					strings.TrimSpace(cfg.AI.ServiceToken) == "" {
 					return featureCenterDomain.HealthUnavailable, nil
+				}
+				if err := redisCache.Client().Ping(ctx).Err(); err != nil {
+					return featureCenterDomain.HealthUnavailable, nil
+				}
+				if _, err := aiAccountService.RuntimeConfigForAdmin(ctx); err != nil {
+					return featureCenterDomain.HealthDegraded, nil
 				}
 				return featureCenterDomain.HealthHealthy, nil
 			},
@@ -653,6 +668,7 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create privacy service: %w", err)
 	}
+	parentAuthService.SetMFAAuditor(privacy)
 	notifications, err := notificationService.New(notificationService.Options{
 		Repository: notificationRepository.NewPostgresRepository(databaseStore.Pool()),
 		Commander:  deviceRuntimeService,
@@ -681,11 +697,14 @@ func Run() error {
 	); err != nil {
 		return fmt.Errorf("validate feature center health coverage: %w", err)
 	}
+	featurePersistence := featureCenterRepository.NewPostgresRepository(
+		databaseStore.Pool(),
+	)
 	featureCenter, err := featureCenterService.New(featureCenterService.Options{
-		Repository: featureCenterRepository.NewPostgresRepository(
-			databaseStore.Pool(),
-		),
-		HealthProbes: featureCenterHealthProbes,
+		Repository:     featurePersistence,
+		HealthProbes:   featureCenterHealthProbes,
+		Audit:          privacy,
+		SchedulerLease: featurePersistence,
 	})
 	if err != nil {
 		return fmt.Errorf("create feature center service: %w", err)
@@ -841,6 +860,10 @@ func Run() error {
 			AlarmReminderService:         alarmReminder,
 			ParentPolicyService:          parentPolicyService,
 			AIService:                    aiAccountService,
+			AIExecutionStore:             aiExecutionStore,
+			AIExecutionTokenTTL:          cfg.AI.ExecutionTokenTTL,
+			AIExecutionLeaseTTL:          cfg.AI.ExecutionLeaseTTL,
+			AIUpstreamURL:                cfg.AI.BaseURL,
 			OperationsService:            operations,
 			BindingService:               deviceBindingService,
 			RuntimeService:               deviceRuntimeService,
@@ -897,6 +920,7 @@ func Run() error {
 
 	go runDeletionWorker(runtimeCtx, logger, privacy)
 	go runRetentionWorker(runtimeCtx, logger, privacy, vision)
+	go runFeatureHealthScheduler(runtimeCtx, logger, featureCenter)
 	go runNotificationDeliveryWorker(
 		runtimeCtx,
 		logger,
@@ -921,6 +945,53 @@ func Run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return server.Shutdown(shutdownCtx)
+}
+
+// runFeatureHealthScheduler keeps the last-known feature health current even
+// when no administrator has the console open. A failed probe leaves its
+// previous snapshot untouched; an audit failure is logged separately so the
+// successful snapshot is never presented as the only record of the operation.
+func runFeatureHealthScheduler(
+	ctx context.Context,
+	logger *slog.Logger,
+	featureCenter *featureCenterService.Service,
+) {
+	if featureCenter == nil {
+		return
+	}
+	const interval = 5 * time.Minute
+	if logger == nil {
+		logger = slog.Default()
+	}
+	run := func() {
+		features, err := featureCenter.CheckAllScheduledHealth(ctx)
+		if err != nil {
+			logger.Error("feature health scheduler completed with failures", "error", err)
+		}
+		logger.Info("feature health scheduler completed", "checked", len(features))
+		for _, failure := range featureCenter.DrainAuditFailures() {
+			featureID := ""
+			if failure.Snapshot != nil {
+				featureID = failure.Snapshot.FeatureID
+			}
+			logger.Error(
+				"feature health audit write failed",
+				"feature_id", featureID,
+				"error", failure.Err,
+			)
+		}
+	}
+	run()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
 }
 
 func runDeletionWorker(

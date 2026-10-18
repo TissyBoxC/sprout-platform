@@ -18,6 +18,8 @@ type fakeSettingsRepository struct {
 	currentVersion   int64
 	requestedChannel string
 	latestUpdate     *domain.Release
+	familyPage       domain.PageRequest
+	releasePage      domain.PageRequest
 }
 
 func (repository *fakeSettingsRepository) GetSettings(
@@ -55,16 +57,24 @@ func (*fakeSettingsRepository) Overview(context.Context, time.Duration) (*domain
 	return nil, nil
 }
 
-func (*fakeSettingsRepository) ListFamilyAccounts(context.Context) ([]domain.FamilyAccount, error) {
-	return nil, nil
+func (repository *fakeSettingsRepository) ListFamilyAccounts(
+	_ context.Context,
+	page domain.PageRequest,
+) ([]domain.FamilyAccount, int, error) {
+	repository.familyPage = page
+	return nil, 0, nil
 }
 
 func (*fakeSettingsRepository) ParentOverview(context.Context, string, time.Duration) (*authdomain.ParentOverview, error) {
 	return nil, nil
 }
 
-func (*fakeSettingsRepository) ListReleases(context.Context) ([]domain.Release, error) {
-	return nil, nil
+func (repository *fakeSettingsRepository) ListReleases(
+	_ context.Context,
+	page domain.PageRequest,
+) ([]domain.Release, int, error) {
+	repository.releasePage = page
+	return nil, 0, nil
 }
 
 func (*fakeSettingsRepository) CreateRelease(context.Context, *domain.Release) error {
@@ -139,6 +149,54 @@ func TestUpdateSettingsSavesWithMatchingVersion(t *testing.T) {
 	}
 	if repository.savedActorID != "actor-id" {
 		t.Fatalf("expected trimmed actor id, got %q", repository.savedActorID)
+	}
+}
+
+func TestListFamilyAccountsNormalizesPaginationBeforeRepository(t *testing.T) {
+	repository := &fakeSettingsRepository{}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	page, err := service.ListFamilyAccounts(context.Background(), 3, 500)
+	if err != nil {
+		t.Fatalf("list family accounts: %v", err)
+	}
+	if repository.familyPage.Page != 3 ||
+		repository.familyPage.PageSize != domain.MaxListPageSize ||
+		repository.familyPage.Offset != 2*domain.MaxListPageSize {
+		t.Fatalf("unexpected repository page: %+v", repository.familyPage)
+	}
+	if page.Pagination.Page != 3 ||
+		page.Pagination.PageSize != domain.MaxListPageSize ||
+		page.Pagination.Total != 0 ||
+		page.Pagination.TotalPages != 0 {
+		t.Fatalf("unexpected response pagination: %+v", page.Pagination)
+	}
+}
+
+func TestListReleasesNormalizesPaginationBeforeRepository(t *testing.T) {
+	repository := &fakeSettingsRepository{}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	page, err := service.ListReleases(context.Background(), -2, 0)
+	if err != nil {
+		t.Fatalf("list releases: %v", err)
+	}
+	if repository.releasePage.Page != 1 ||
+		repository.releasePage.PageSize != domain.DefaultListPageSize ||
+		repository.releasePage.Offset != 0 {
+		t.Fatalf("unexpected repository page: %+v", repository.releasePage)
+	}
+	if page.Pagination.Page != 1 ||
+		page.Pagination.PageSize != domain.DefaultListPageSize ||
+		page.Pagination.Total != 0 ||
+		page.Pagination.TotalPages != 0 {
+		t.Fatalf("unexpected response pagination: %+v", page.Pagination)
 	}
 }
 

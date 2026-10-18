@@ -79,7 +79,7 @@ func (handler englishHandler) listLessons(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	if _, ok := authenticatedAccountID(request); !ok {
+	if _, ok := authenticatedFamilyOwnerID(request); !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
 	}
@@ -104,7 +104,7 @@ func (handler englishHandler) getLesson(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	if _, ok := authenticatedAccountID(request); !ok {
+	if _, ok := authenticatedFamilyOwnerID(request); !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
 	}
@@ -125,7 +125,7 @@ func (handler englishHandler) listProgress(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -158,7 +158,7 @@ func (handler englishHandler) listAttempts(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return

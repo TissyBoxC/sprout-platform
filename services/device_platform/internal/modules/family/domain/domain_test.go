@@ -36,6 +36,105 @@ func TestInviteAndManagePermissions(t *testing.T) {
 	}
 }
 
+func TestPermissionMatrixEnforcesRoleBoundaries(t *testing.T) {
+	// Viewers are strictly read-only.
+	for _, action := range []Action{
+		ActionMemberManage,
+		ActionInvitationManage,
+		ActionChildManage,
+		ActionDeviceBind,
+		ActionDeviceManage,
+		ActionVisionExecute,
+		ActionPrivacyManage,
+		ActionAIAccountManage,
+		ActionFamilyProfileWrite,
+	} {
+		if Can(RoleViewer, action) {
+			t.Fatalf("viewer must not be allowed to perform %q", action)
+		}
+	}
+	for _, action := range []Action{
+		ActionFamilyRead,
+		ActionMemberRead,
+		ActionInvitationRead,
+		ActionChildRead,
+		ActionDeviceRead,
+		ActionVisionRead,
+		ActionPrivacyRead,
+		ActionAIAccountRead,
+	} {
+		if !Can(RoleViewer, action) {
+			t.Fatalf("viewer must be allowed to read %q", action)
+		}
+	}
+
+	// Guardians can operate family devices, run Vision and edit child/privacy
+	// policy, but cannot manage members or the owner's AI account.
+	for _, action := range []Action{
+		ActionDeviceBind,
+		ActionDeviceManage,
+		ActionVisionExecute,
+		ActionPrivacyManage,
+		ActionChildManage,
+		ActionInvitationManage,
+	} {
+		if !Can(RoleGuardian, action) {
+			t.Fatalf("guardian must be allowed to perform %q", action)
+		}
+	}
+	for _, action := range []Action{
+		ActionMemberManage,
+		ActionAIAccountManage,
+		ActionFamilyProfileWrite,
+	} {
+		if Can(RoleGuardian, action) {
+			t.Fatalf("guardian must not be allowed to perform %q", action)
+		}
+	}
+	for _, action := range []Action{
+		ActionMemberManage,
+		ActionInvitationManage,
+		ActionDeviceBind,
+		ActionDeviceManage,
+		ActionVisionExecute,
+		ActionPrivacyManage,
+		ActionAIAccountManage,
+		ActionFamilyProfileWrite,
+	} {
+		if !Can(RoleOwner, action) {
+			t.Fatalf("owner must be allowed to perform %q", action)
+		}
+	}
+}
+
+func TestPermissionMatrixFailsClosed(t *testing.T) {
+	if Can("admin", ActionFamilyRead) {
+		t.Fatal("unknown roles must not receive family permissions")
+	}
+	if Can(RoleOwner, Action("unknown_action")) {
+		t.Fatal("unknown actions must be denied")
+	}
+}
+
+func TestActionCatalogueCoversEveryKnownAction(t *testing.T) {
+	if len(Actions) == 0 {
+		t.Fatal("action catalogue is empty")
+	}
+	seen := make(map[Action]struct{}, len(Actions))
+	for _, action := range Actions {
+		if action == "" {
+			t.Fatal("action catalogue contains an empty action")
+		}
+		if _, exists := seen[action]; exists {
+			t.Fatalf("action catalogue repeats %q", action)
+		}
+		seen[action] = struct{}{}
+		if !Can(RoleOwner, action) {
+			t.Fatalf("owner does not cover catalogue action %q", action)
+		}
+	}
+}
+
 func TestValidateFamilyName(t *testing.T) {
 	name, err := ValidateFamilyName("  初芽之家  ")
 	if err != nil {

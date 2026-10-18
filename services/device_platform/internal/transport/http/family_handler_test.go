@@ -16,6 +16,10 @@ import (
 type familyTestService struct {
 	members     map[string]familydomain.Member
 	invitations map[string]familydomain.Invitation
+	authorize   func(
+		userID string,
+		action familydomain.Action,
+	) (familydomain.Access, error)
 }
 
 func newFamilyTestService() *familyTestService {
@@ -69,6 +73,37 @@ func (s *familyTestService) ResolveFamily(
 	return member, nil
 }
 
+func (s *familyTestService) Authorize(
+	_ context.Context,
+	userID string,
+	action familydomain.Action,
+) (familydomain.Access, error) {
+	if s.authorize != nil {
+		return s.authorize(userID, action)
+	}
+	member, ok := s.members[userID]
+	if !ok {
+		return familydomain.Access{}, familydomain.ErrMemberNotFound
+	}
+	if !familydomain.Can(member.Role, action) {
+		return familydomain.Access{}, familydomain.ErrPermissionDenied
+	}
+	ownerUserID := ""
+	for _, candidate := range s.members {
+		if candidate.FamilyID == member.FamilyID &&
+			candidate.Role == familydomain.RoleOwner {
+			ownerUserID = candidate.UserID
+			break
+		}
+	}
+	return familydomain.Access{
+		FamilyID:    member.FamilyID,
+		ActorUserID: member.UserID,
+		OwnerUserID: ownerUserID,
+		Role:        member.Role,
+	}, nil
+}
+
 func (s *familyTestService) Invitations(
 	_ context.Context,
 	familyID string,
@@ -114,7 +149,7 @@ func (s *familyTestService) CreateInvitation(
 		return familydomain.Invitation{}, familydomain.ErrMemberNotFound
 	}
 	if !familydomain.CanInvite(actor.Role) {
-		return familydomain.Invitation{}, familydomain.ErrInvalidMember
+		return familydomain.Invitation{}, familydomain.ErrPermissionDenied
 	}
 	if err := familydomain.ValidateInviteEmail(email); err != nil {
 		return familydomain.Invitation{}, err
@@ -144,7 +179,7 @@ func (s *familyTestService) RevokeInvitation(
 		return familydomain.ErrMemberNotFound
 	}
 	if !familydomain.CanInvite(actor.Role) {
-		return familydomain.ErrInvalidMember
+		return familydomain.ErrPermissionDenied
 	}
 	invitation, ok := s.invitations[invitationID]
 	if !ok || invitation.FamilyID != familyID {
@@ -189,7 +224,7 @@ func (s *familyTestService) UpdateMemberRole(
 		return familydomain.Member{}, familydomain.ErrMemberNotFound
 	}
 	if !familydomain.CanManageMembers(actor.Role) {
-		return familydomain.Member{}, familydomain.ErrInvalidMember
+		return familydomain.Member{}, familydomain.ErrPermissionDenied
 	}
 	target, ok := s.members[targetUserID]
 	if !ok {
@@ -221,7 +256,7 @@ func (s *familyTestService) RemoveMember(
 		return familydomain.ErrLastOwner
 	}
 	if actor.UserID != targetUserID && !familydomain.CanManageMembers(actor.Role) {
-		return familydomain.ErrInvalidMember
+		return familydomain.ErrPermissionDenied
 	}
 	delete(s.members, targetUserID)
 	return nil
@@ -320,6 +355,16 @@ func TestFamilyOwnerRoleInviteRejected(t *testing.T) {
 func TestFamilyCapabilityReportsOwner(t *testing.T) {
 	handler, _ := newFamilyHandlerForTest()
 	request := englishRequest(http.MethodGet, "/api/v1/family/capability", "", "owner-1")
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		familyAccessKey{},
+		familydomain.Access{
+			FamilyID:    "family-1",
+			ActorUserID: "owner-1",
+			OwnerUserID: "owner-1",
+			Role:        familydomain.RoleOwner,
+		},
+	))
 	recorder := httptest.NewRecorder()
 	handler.capability(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -330,6 +375,7 @@ func TestFamilyCapabilityReportsOwner(t *testing.T) {
 		Data struct {
 			OwnerUserID string `json:"owner_user_id"`
 			MemberCount int    `json:"member_count"`
+			Permissions map[string]bool `json:"permissions"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
@@ -337,6 +383,10 @@ func TestFamilyCapabilityReportsOwner(t *testing.T) {
 	}
 	if envelope.Data.OwnerUserID != "owner-1" || envelope.Data.MemberCount != 1 {
 		t.Fatalf("unexpected capability: %+v", envelope.Data)
+	}
+	if !envelope.Data.Permissions["member_manage"] ||
+		!envelope.Data.Permissions["ai_account_manage"] {
+		t.Fatalf("owner permissions missing: %+v", envelope.Data.Permissions)
 	}
 }
 
@@ -443,5 +493,157 @@ func TestFamilyRemoveOwnerRejected(t *testing.T) {
 	if recorder.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want %d: %s",
 			recorder.Code, http.StatusConflict, recorder.Body.String())
+	}
+}
+
+func TestFamilyViewerMemberRoutesAreReadOnly(t *testing.T) {
+	handler, service := newFamilyHandlerForTest()
+	service.members["viewer-1"] = familydomain.Member{
+		ID:       "member-viewer",
+		FamilyID: "family-1",
+		UserID:   "viewer-1",
+		Role:     familydomain.RoleViewer,
+	}
+
+	readRequest := englishRequest(
+		http.MethodGet,
+		"/api/v1/family/members",
+		"",
+		"viewer-1",
+	)
+	readRecorder := httptest.NewRecorder()
+	handler.requireFamilyAction(
+		familydomain.ActionMemberRead,
+		handler.listMembers,
+	)(readRecorder, readRequest)
+	if readRecorder.Code != http.StatusOK {
+		t.Fatalf("viewer read status = %d, want 200: %s",
+			readRecorder.Code, readRecorder.Body.String())
+	}
+
+	writeRequest := englishRequest(
+		http.MethodPut,
+		"/api/v1/family/members/owner-1",
+		`{"role":"viewer"}`,
+		"viewer-1",
+	)
+	writeRequest.SetPathValue("user_id", "owner-1")
+	writeRecorder := httptest.NewRecorder()
+	handler.requireFamilyAction(
+		familydomain.ActionMemberManage,
+		handler.updateMemberRole,
+	)(writeRecorder, writeRequest)
+	if writeRecorder.Code != http.StatusForbidden {
+		t.Fatalf("viewer write status = %d, want 403: %s",
+			writeRecorder.Code, writeRecorder.Body.String())
+	}
+
+	capabilityRequest := englishRequest(
+		http.MethodGet,
+		"/api/v1/family/capability",
+		"",
+		"viewer-1",
+	)
+	capabilityRequest = capabilityRequest.WithContext(context.WithValue(
+		capabilityRequest.Context(),
+		familyAccessKey{},
+		familydomain.Access{
+			FamilyID:    "family-1",
+			ActorUserID: "viewer-1",
+			OwnerUserID: "owner-1",
+			Role:        familydomain.RoleViewer,
+		},
+	))
+	capabilityRecorder := httptest.NewRecorder()
+	handler.capability(capabilityRecorder, capabilityRequest)
+	if capabilityRecorder.Code != http.StatusOK {
+		t.Fatalf("viewer capability status = %d, want 200: %s",
+			capabilityRecorder.Code, capabilityRecorder.Body.String())
+	}
+	var capabilityEnvelope struct {
+		Data struct {
+			Permissions map[string]bool `json:"permissions"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(capabilityRecorder.Body.Bytes(), &capabilityEnvelope); err != nil {
+		t.Fatalf("decode capability: %v", err)
+	}
+	if capabilityEnvelope.Data.Permissions["device_manage"] ||
+		capabilityEnvelope.Data.Permissions["device_bind"] ||
+		capabilityEnvelope.Data.Permissions["vision_execute"] ||
+		capabilityEnvelope.Data.Permissions["privacy_manage"] ||
+		capabilityEnvelope.Data.Permissions["ai_account_manage"] {
+		t.Fatalf("viewer received write permissions: %+v",
+			capabilityEnvelope.Data.Permissions)
+	}
+	if !capabilityEnvelope.Data.Permissions["device_read"] ||
+		!capabilityEnvelope.Data.Permissions["vision_read"] {
+		t.Fatalf("viewer read permissions missing: %+v",
+			capabilityEnvelope.Data.Permissions)
+	}
+}
+
+func TestFamilyGuardianCannotChangeOwnerOrRemovePeers(t *testing.T) {
+	handler, service := newFamilyHandlerForTest()
+	service.members["guardian-1"] = familydomain.Member{
+		ID:       "member-guardian",
+		FamilyID: "family-1",
+		UserID:   "guardian-1",
+		Role:     familydomain.RoleGuardian,
+	}
+
+	updateRequest := englishRequest(
+		http.MethodPut,
+		"/api/v1/family/members/owner-1",
+		`{"role":"viewer"}`,
+		"guardian-1",
+	)
+	updateRequest.SetPathValue("user_id", "owner-1")
+	updateRecorder := httptest.NewRecorder()
+	handler.requireFamilyAction(
+		familydomain.ActionMemberManage,
+		handler.updateMemberRole,
+	)(updateRecorder, updateRequest)
+	if updateRecorder.Code != http.StatusForbidden {
+		t.Fatalf("guardian update status = %d, want 403: %s",
+			updateRecorder.Code, updateRecorder.Body.String())
+	}
+
+	removeRequest := englishRequest(
+		http.MethodDelete,
+		"/api/v1/family/members/owner-1",
+		"",
+		"guardian-1",
+	)
+	removeRequest.SetPathValue("user_id", "owner-1")
+	removeRecorder := httptest.NewRecorder()
+	handler.removeMember(removeRecorder, removeRequest)
+	if removeRecorder.Code != http.StatusConflict {
+		t.Fatalf("guardian remove owner status = %d, want 409: %s",
+			removeRecorder.Code, removeRecorder.Body.String())
+	}
+}
+
+func TestFamilyGuardianCanSelfLeave(t *testing.T) {
+	handler, service := newFamilyHandlerForTest()
+	service.members["guardian-1"] = familydomain.Member{
+		ID:       "member-guardian",
+		FamilyID: "family-1",
+		UserID:   "guardian-1",
+		Role:     familydomain.RoleGuardian,
+	}
+
+	request := englishRequest(
+		http.MethodDelete,
+		"/api/v1/family/members/guardian-1",
+		"",
+		"guardian-1",
+	)
+	request.SetPathValue("user_id", "guardian-1")
+	recorder := httptest.NewRecorder()
+	handler.removeMember(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("guardian self-leave status = %d, want 200: %s",
+			recorder.Code, recorder.Body.String())
 	}
 }

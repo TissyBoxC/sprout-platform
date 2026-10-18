@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,9 +17,26 @@ type fixedClock struct {
 
 func (c fixedClock) Now() time.Time { return c.now }
 
+type stepClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *stepClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	current := c.now
+	c.now = c.now.Add(time.Minute)
+	return current
+}
+
 type fakeRepository struct {
+	mu          sync.Mutex
 	members     map[string]domain.Member
 	invitations map[string]domain.Invitation
+	audits      []domain.AuditEvent
+	auditErr    error
+	acceptCalls int
 }
 
 func newFakeRepository() *fakeRepository {
@@ -31,6 +49,8 @@ func newFakeRepository() *fakeRepository {
 func memberKey(familyID, userID string) string { return familyID + "|" + userID }
 
 func (r *fakeRepository) CreateMember(_ context.Context, member domain.Member) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	key := memberKey(member.FamilyID, member.UserID)
 	if _, exists := r.members[key]; exists {
 		return domain.ErrMemberExists
@@ -47,6 +67,27 @@ func (r *fakeRepository) CreateMember(_ context.Context, member domain.Member) e
 }
 
 func (r *fakeRepository) UpdateMemberRole(_ context.Context, member domain.Member) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := memberKey(member.FamilyID, member.UserID)
+	if _, exists := r.members[key]; !exists {
+		return domain.ErrMemberNotFound
+	}
+	r.members[key] = member
+	return nil
+}
+
+func (r *fakeRepository) UpdateMemberRoleWithAudit(
+	ctx context.Context,
+	member domain.Member,
+	audit domain.AuditEvent,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.auditErr != nil {
+		return r.auditErr
+	}
+	r.audits = append(r.audits, audit)
 	key := memberKey(member.FamilyID, member.UserID)
 	if _, exists := r.members[key]; !exists {
 		return domain.ErrMemberNotFound
@@ -56,6 +97,8 @@ func (r *fakeRepository) UpdateMemberRole(_ context.Context, member domain.Membe
 }
 
 func (r *fakeRepository) DeleteMember(_ context.Context, familyID, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	key := memberKey(familyID, userID)
 	if _, exists := r.members[key]; !exists {
 		return domain.ErrMemberNotFound
@@ -64,7 +107,29 @@ func (r *fakeRepository) DeleteMember(_ context.Context, familyID, userID string
 	return nil
 }
 
+func (r *fakeRepository) DeleteMemberWithAudit(
+	_ context.Context,
+	familyID string,
+	userID string,
+	audit domain.AuditEvent,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.auditErr != nil {
+		return r.auditErr
+	}
+	key := memberKey(familyID, userID)
+	if _, exists := r.members[key]; !exists {
+		return domain.ErrMemberNotFound
+	}
+	delete(r.members, key)
+	r.audits = append(r.audits, audit)
+	return nil
+}
+
 func (r *fakeRepository) Members(_ context.Context, familyID string) ([]domain.Member, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	members := make([]domain.Member, 0, 8)
 	for _, member := range r.members {
 		if member.FamilyID == familyID {
@@ -79,6 +144,8 @@ func (r *fakeRepository) Member(
 	familyID string,
 	userID string,
 ) (domain.Member, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	member, ok := r.members[memberKey(familyID, userID)]
 	return member, ok, nil
 }
@@ -87,6 +154,8 @@ func (r *fakeRepository) MemberByUser(
 	_ context.Context,
 	userID string,
 ) (domain.Member, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	for _, member := range r.members {
 		if member.UserID == userID {
 			return member, true, nil
@@ -95,7 +164,16 @@ func (r *fakeRepository) MemberByUser(
 	return domain.Member{}, false, nil
 }
 
-func (r *fakeRepository) CreateInvitation(_ context.Context, invitation domain.Invitation) error {
+func (r *fakeRepository) CreateInvitation(
+	_ context.Context,
+	invitation domain.Invitation,
+	audit domain.AuditEvent,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.auditErr != nil {
+		return r.auditErr
+	}
 	for _, existing := range r.invitations {
 		if existing.FamilyID == invitation.FamilyID &&
 			existing.Status == domain.InvitationPending &&
@@ -103,7 +181,16 @@ func (r *fakeRepository) CreateInvitation(_ context.Context, invitation domain.I
 			return domain.ErrInvitationState
 		}
 	}
+	r.audits = append(r.audits, audit)
 	r.invitations[invitation.ID] = invitation
+	return nil
+}
+
+func (r *fakeRepository) recordAudit(audit domain.AuditEvent) error {
+	if r.auditErr != nil {
+		return r.auditErr
+	}
+	r.audits = append(r.audits, audit)
 	return nil
 }
 
@@ -112,6 +199,8 @@ func (r *fakeRepository) Invitation(
 	familyID string,
 	invitationID string,
 ) (domain.Invitation, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	invitation, ok := r.invitations[invitationID]
 	if !ok || invitation.FamilyID != familyID {
 		return domain.Invitation{}, false, nil
@@ -120,6 +209,8 @@ func (r *fakeRepository) Invitation(
 }
 
 func (r *fakeRepository) Invitations(_ context.Context, familyID string) ([]domain.Invitation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	invitations := make([]domain.Invitation, 0, 8)
 	for _, invitation := range r.invitations {
 		if invitation.FamilyID == familyID {
@@ -133,6 +224,8 @@ func (r *fakeRepository) PendingInvitationsByEmail(
 	_ context.Context,
 	email string,
 ) ([]domain.Invitation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	normalized := domain.NormalizeEmail(email)
 	invitations := make([]domain.Invitation, 0, 4)
 	for _, invitation := range r.invitations {
@@ -150,6 +243,8 @@ func (r *fakeRepository) UpdateInvitationState(
 	invitationID string,
 	status string,
 ) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	invitation, ok := r.invitations[invitationID]
 	if !ok || invitation.FamilyID != familyID || invitation.Status != domain.InvitationPending {
 		return domain.ErrInvitationState
@@ -164,19 +259,28 @@ func (r *fakeRepository) UpdateInvitationState(
 }
 
 func (r *fakeRepository) AcceptInvitation(
-	_ context.Context,
+	ctx context.Context,
 	member domain.Member,
 	familyID string,
 	invitationID string,
+	audit domain.AuditEvent,
 ) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.acceptCalls++
 	invitation, ok := r.invitations[invitationID]
 	if !ok || invitation.FamilyID != familyID ||
 		invitation.Status != domain.InvitationPending {
 		return domain.ErrInvitationState
 	}
-	if err := r.CreateMember(context.Background(), member); err != nil {
-		return err
+	if r.auditErr != nil {
+		return r.auditErr
 	}
+	r.audits = append(r.audits, audit)
+	if _, exists := r.members[memberKey(member.FamilyID, member.UserID)]; exists {
+		return domain.ErrMemberExists
+	}
+	r.members[memberKey(member.FamilyID, member.UserID)] = member
 	invitation.Status = domain.InvitationAccepted
 	now := time.Now().UTC()
 	invitation.AcceptedAt = &now
@@ -399,7 +503,7 @@ func TestOwnerInvariantOnRoleAndRemoval(t *testing.T) {
 	// A guardian cannot manage a peer, but may leave the family.
 	if _, err := service.UpdateMemberRole(
 		context.Background(), "family-1", "user-2", "owner-1", domain.RoleViewer,
-	); !errors.Is(err, domain.ErrInvalidMember) {
+	); !errors.Is(err, domain.ErrPermissionDenied) {
 		t.Fatalf("guardian must not manage peers, got %v", err)
 	}
 	if err := service.RemoveMember(
@@ -445,5 +549,169 @@ func TestCapabilitySummarizesMembership(t *testing.T) {
 		context.Background(), "family-1", "stranger",
 	); !errors.Is(err, domain.ErrMemberNotFound) {
 		t.Fatalf("non-member capability must be rejected, got %v", err)
+	}
+}
+
+func TestAuthorizeUsesStoredRoleAndResolvesOwner(t *testing.T) {
+	repository := newFakeRepository()
+	service := newService(
+		t,
+		repository,
+		time.Date(2026, time.October, 13, 9, 0, 0, 0, time.UTC),
+	)
+	if _, err := service.BootstrapOwner(
+		context.Background(),
+		"family-owner",
+		"owner-account",
+	); err != nil {
+		t.Fatalf("bootstrap owner: %v", err)
+	}
+	repository.members[memberKey("family-owner", "guardian-account")] = domain.Member{
+		ID:       "guardian-member",
+		FamilyID: "family-owner",
+		UserID:   "guardian-account",
+		Role:     domain.RoleGuardian,
+	}
+	repository.members[memberKey("family-owner", "viewer-account")] = domain.Member{
+		ID:       "viewer-member",
+		FamilyID: "family-owner",
+		UserID:   "viewer-account",
+		Role:     domain.RoleViewer,
+	}
+
+	cases := []struct {
+		name    string
+		userID  string
+		action  domain.Action
+		allowed bool
+	}{
+		{"owner manages ai", "owner-account", domain.ActionAIAccountManage, true},
+		{"guardian reads ai", "guardian-account", domain.ActionAIAccountRead, true},
+		{"guardian cannot manage ai", "guardian-account", domain.ActionAIAccountManage, false},
+		{"guardian manages device", "guardian-account", domain.ActionDeviceManage, true},
+		{"viewer reads device", "viewer-account", domain.ActionDeviceRead, true},
+		{"viewer cannot bind device", "viewer-account", domain.ActionDeviceBind, false},
+		{"viewer cannot run vision", "viewer-account", domain.ActionVisionExecute, false},
+		{"guardian executes vision", "guardian-account", domain.ActionVisionExecute, true},
+		{"guardian cannot manage members", "guardian-account", domain.ActionMemberManage, false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			access, err := service.Authorize(
+				context.Background(),
+				testCase.userID,
+				testCase.action,
+			)
+			if !testCase.allowed {
+				if !errors.Is(err, domain.ErrPermissionDenied) {
+					t.Fatalf("err = %v, want ErrPermissionDenied", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("authorize: %v", err)
+			}
+			if access.FamilyID != "family-owner" ||
+				access.OwnerUserID != "owner-account" ||
+				access.ActorUserID != testCase.userID {
+				t.Fatalf("unexpected access context: %+v", access)
+			}
+		})
+	}
+}
+
+func TestAuthorizeRejectsNonMember(t *testing.T) {
+	repository := newFakeRepository()
+	service := newService(
+		t,
+		repository,
+		time.Date(2026, time.October, 13, 9, 0, 0, 0, time.UTC),
+	)
+	if _, err := service.BootstrapOwner(
+		context.Background(),
+		"family-owner",
+		"owner-account",
+	); err != nil {
+		t.Fatalf("bootstrap owner: %v", err)
+	}
+	if _, err := service.Authorize(
+		context.Background(),
+		"stranger",
+		domain.ActionFamilyRead,
+	); !errors.Is(err, domain.ErrMemberNotFound) {
+		t.Fatalf("err = %v, want ErrMemberNotFound", err)
+	}
+}
+
+func TestFamilyMutationsReturnPermissionDenied(t *testing.T) {
+	repository := newFakeRepository()
+	service := newService(
+		t,
+		repository,
+		time.Date(2026, time.October, 13, 9, 0, 0, 0, time.UTC),
+	)
+	if _, err := service.BootstrapOwner(
+		context.Background(),
+		"family-1",
+		"owner-1",
+	); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	repository.members[memberKey("family-1", "guardian-1")] = domain.Member{
+		ID:       "guardian-member",
+		FamilyID: "family-1",
+		UserID:   "guardian-1",
+		Role:     domain.RoleGuardian,
+	}
+	repository.members[memberKey("family-1", "viewer-1")] = domain.Member{
+		ID:       "viewer-member",
+		FamilyID: "family-1",
+		UserID:   "viewer-1",
+		Role:     domain.RoleViewer,
+	}
+	invitation, err := service.CreateInvitation(
+		context.Background(),
+		"family-1",
+		"owner-1",
+		"new-viewer@example.com",
+		domain.RoleViewer,
+	)
+	if err != nil {
+		t.Fatalf("create invitation: %v", err)
+	}
+
+	if _, err := service.CreateInvitation(
+		context.Background(),
+		"family-1",
+		"viewer-1",
+		"blocked@example.com",
+		domain.RoleViewer,
+	); !errors.Is(err, domain.ErrPermissionDenied) {
+		t.Fatalf("viewer invite err = %v, want ErrPermissionDenied", err)
+	}
+	if err := service.RevokeInvitation(
+		context.Background(),
+		"family-1",
+		"viewer-1",
+		invitation.ID,
+	); !errors.Is(err, domain.ErrPermissionDenied) {
+		t.Fatalf("viewer revoke err = %v, want ErrPermissionDenied", err)
+	}
+	if _, err := service.UpdateMemberRole(
+		context.Background(),
+		"family-1",
+		"guardian-1",
+		"viewer-1",
+		domain.RoleGuardian,
+	); !errors.Is(err, domain.ErrPermissionDenied) {
+		t.Fatalf("guardian manage err = %v, want ErrPermissionDenied", err)
+	}
+	if err := service.RemoveMember(
+		context.Background(),
+		"family-1",
+		"guardian-1",
+		"viewer-1",
+	); !errors.Is(err, domain.ErrPermissionDenied) {
+		t.Fatalf("guardian remove peer err = %v, want ErrPermissionDenied", err)
 	}
 }

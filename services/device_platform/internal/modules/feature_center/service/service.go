@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/repository"
@@ -39,10 +41,53 @@ func (probe HealthProbeFunc) Check(
 
 // Options contains feature-center service dependencies.
 type Options struct {
-	Repository   repository.Repository
-	Definitions  []Definition
-	HealthProbes map[string]HealthProbe
-	Clock        clock.Clock
+	Repository     repository.Repository
+	Definitions    []Definition
+	HealthProbes   map[string]HealthProbe
+	Clock          clock.Clock
+	Audit          AuditRecorder
+	SchedulerLease repository.SchedulerLease
+}
+
+// AuditRecorder writes safe, attributable feature-center operations.
+type AuditRecorder interface {
+	RecordAudit(
+		ctx context.Context,
+		actorAccountID string,
+		targetAccountID string,
+		action string,
+		detail map[string]any,
+	) error
+}
+
+// AuditWriteError indicates that the primary write completed but the audit
+// event could not be persisted. Operators must retry the audit path.
+type AuditWriteError struct {
+	Err                   error
+	PrimaryWriteCompleted bool
+}
+
+// FeatureAuditFailure captures a health snapshot whose primary persistence
+// succeeded but whose audit event was rejected by the audit store.
+type FeatureAuditFailure struct {
+	Snapshot *domain.HealthSnapshot
+	Err      error
+}
+
+// Error implements error.
+func (e *AuditWriteError) Error() string {
+	if e == nil || e.Err == nil {
+		return "feature center audit write failed"
+	}
+	return "feature center audit write failed: " + e.Err.Error()
+}
+
+// Unwrap exposes the audit dependency error.
+func (e *AuditWriteError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
 }
 
 // Service is the feature-center application service.
@@ -56,6 +101,10 @@ type Service struct {
 	runtimeSettings RuntimeSettingsReader
 	modelCatalog    ModelCatalogReader
 	metrics         MetricsReader
+	audit           AuditRecorder
+	schedulerLease  repository.SchedulerLease
+	auditFailuresMu sync.Mutex
+	auditFailures   []FeatureAuditFailure
 }
 
 // ValidateHealthProbeCoverage rejects a runtime composition where an active
@@ -112,11 +161,13 @@ func New(options Options) (*Service, error) {
 		timeSource = clock.SystemClock{}
 	}
 	return &Service{
-		repository:  options.Repository,
-		definitions: append([]Definition(nil), definitions...),
-		byID:        byID,
-		probes:      options.HealthProbes,
-		clock:       timeSource,
+		repository:     options.Repository,
+		definitions:    append([]Definition(nil), definitions...),
+		byID:           byID,
+		probes:         options.HealthProbes,
+		clock:          timeSource,
+		audit:          options.Audit,
+		schedulerLease: options.SchedulerLease,
 	}, nil
 }
 
@@ -126,9 +177,17 @@ func (s *Service) List(ctx context.Context) ([]domain.Feature, error) {
 	if err != nil {
 		return nil, err
 	}
+	healthSnapshots, err := s.repository.ListHealth(ctx)
+	if err != nil {
+		return nil, err
+	}
 	byID := make(map[string]domain.FeatureConfig, len(overlays))
 	for _, overlay := range overlays {
 		byID[overlay.FeatureID] = overlay
+	}
+	healthByID := make(map[string]domain.HealthSnapshot, len(healthSnapshots))
+	for _, snapshot := range healthSnapshots {
+		healthByID[snapshot.FeatureID] = snapshot
 	}
 	result := make([]domain.Feature, 0, len(s.definitions))
 	for _, definition := range s.definitions {
@@ -137,7 +196,13 @@ func (s *Service) List(ctx context.Context) ([]domain.Feature, error) {
 			copyConfig := current
 			overlay = &copyConfig
 		}
-		result = append(result, s.project(ctx, definition, overlay))
+		snapshot, hasHealth := healthByID[definition.Feature.ID]
+		result = append(result, s.project(
+			ctx,
+			definition,
+			overlay,
+			healthPointer(snapshot, hasHealth),
+		))
 	}
 	return result, nil
 }
@@ -155,7 +220,11 @@ func (s *Service) Get(ctx context.Context, featureID string) (*domain.Feature, e
 	} else if err != nil {
 		return nil, err
 	}
-	feature := s.project(ctx, definition, overlay)
+	health, healthErr := s.loadHealth(ctx, featureID)
+	if healthErr != nil {
+		return nil, healthErr
+	}
+	feature := s.project(ctx, definition, overlay, health)
 	return &feature, nil
 }
 
@@ -192,7 +261,24 @@ func (s *Service) UpdateConfig(
 		return nil, err
 	}
 	if runtimeHandled {
-		return s.Get(ctx, featureID)
+		current, currentErr := s.repository.Get(ctx, featureID)
+		if currentErr != nil &&
+			!errors.Is(currentErr, domain.ErrFeatureConfigNotFound) {
+			return nil, currentErr
+		}
+		previousVersion := valueVersion(current)
+		auditErr := s.recordConfigAudit(
+			ctx,
+			featureID,
+			strings.TrimSpace(actorID),
+			previousVersion,
+			previousVersion+1,
+		)
+		feature, readErr := s.Get(ctx, featureID)
+		if readErr != nil {
+			return nil, errors.Join(auditErr, readErr)
+		}
+		return feature, auditErr
 	}
 	current, err := s.repository.Get(ctx, featureID)
 	if errors.Is(err, domain.ErrFeatureConfigNotFound) {
@@ -208,22 +294,230 @@ func (s *Service) UpdateConfig(
 	if err := validateObject(definition.Feature.ConfigSchema, merged, definition.ImmutableKeys, ""); err != nil {
 		return nil, err
 	}
-	saved, err := s.repository.Save(ctx, featureID, merged, strings.TrimSpace(actorID), expectedVersion)
+	saved, err := s.repository.Save(
+		ctx,
+		featureID,
+		merged,
+		strings.TrimSpace(actorID),
+		expectedVersion,
+	)
 	if err != nil {
 		return nil, err
 	}
-	feature := s.project(ctx, definition, saved)
-	return &feature, nil
+	auditErr := s.recordConfigAudit(
+		ctx,
+		featureID,
+		strings.TrimSpace(actorID),
+		valueVersion(current),
+		saved.Version,
+	)
+	health, err := s.loadHealth(ctx, featureID)
+	if err != nil {
+		return nil, errors.Join(auditErr, err)
+	}
+	feature := s.project(ctx, definition, saved, health)
+	return &feature, auditErr
 }
 
 // CheckHealth runs the configured probe and returns the resulting feature.
 //
-// The refreshed health detail is attached to the caller's response only. The
-// shared registry map is never mutated, so concurrent list, get, and health
-// requests cannot race or leak a previous caller's probe result.
+// The result is persisted before it becomes visible so a process restart does
+// not erase the last observed state. A probe or persistence failure returns an
+// error and leaves the previous snapshot untouched.
 func (s *Service) CheckHealth(
 	ctx context.Context,
 	featureID string,
+) (*domain.Feature, error) {
+	return s.checkHealth(
+		ctx,
+		featureID,
+		domain.HealthTriggerManual,
+		"",
+		false,
+	)
+}
+
+// CheckHealthAs runs a manual health check attributed to one administrator.
+// The actor is persisted with the health audit entry so the operation remains
+// attributable after the request context is gone.
+func (s *Service) CheckHealthAs(
+	ctx context.Context,
+	featureID string,
+	actorID string,
+) (*domain.Feature, error) {
+	return s.checkHealth(
+		ctx,
+		featureID,
+		domain.HealthTriggerManual,
+		strings.TrimSpace(actorID),
+		false,
+	)
+}
+
+// CheckScheduledHealth runs one probe without an administrator actor and
+// records it with the schedule trigger.
+func (s *Service) CheckScheduledHealth(
+	ctx context.Context,
+	featureID string,
+) (*domain.Feature, error) {
+	return s.checkHealth(
+		ctx,
+		featureID,
+		domain.HealthTriggerSchedule,
+		"",
+		true,
+	)
+}
+
+// CheckAllScheduledHealth probes every active feature once. Each feature is
+// independent so one unavailable dependency does not suppress later results.
+// The returned error describes the first failure after all probes were tried.
+func (s *Service) CheckAllScheduledHealth(
+	ctx context.Context,
+) ([]domain.Feature, error) {
+	if s == nil {
+		return nil, errors.New("feature center service is required")
+	}
+	if s.schedulerLease == nil {
+		return nil, domain.ErrSchedulerLeaseRequired
+	}
+	var results []domain.Feature
+	var cycleFailure *scheduledCycleError
+	leaseErr := s.schedulerLease.WithLeaderLease(ctx, func(leaseCtx context.Context) error {
+		var cycleErr error
+		results, cycleErr = s.checkAllScheduledHealth(leaseCtx)
+		if cycleErr != nil && ctx.Err() == nil {
+			cycleFailure = &scheduledCycleError{Err: cycleErr}
+			return cycleFailure
+		}
+		return nil
+	})
+	if leaseErr != nil {
+		if errors.Is(leaseErr, domain.ErrSchedulerLeaseUnavailable) ||
+			errors.Is(leaseErr, domain.ErrSchedulerLeaseRequired) {
+			return nil, leaseErr
+		}
+
+		if errors.As(leaseErr, &cycleFailure) {
+			var releaseFailure *repository.SchedulerLeaseReleaseError
+			if errors.As(leaseErr, &releaseFailure) {
+				return results, leaseErr
+			}
+			return results, cycleFailure.Err
+		}
+		return results, fmt.Errorf("run feature health scheduler lease: %w", leaseErr)
+	}
+	return results, nil
+}
+
+// scheduledCycleError marks aggregate probe failures as the non-lease cause of
+// a WithLeaderLease error. It keeps lease release failures distinguishable from
+// expected feature health failures.
+type scheduledCycleError struct {
+	Err error
+}
+
+func (err *scheduledCycleError) Error() string {
+	if err == nil || err.Err == nil {
+		return "scheduled feature health cycle failed"
+	}
+	return err.Err.Error()
+}
+
+func (err *scheduledCycleError) Unwrap() error {
+	if err == nil {
+		return nil
+	}
+	return err.Err
+}
+
+func (s *Service) checkAllScheduledHealth(
+	ctx context.Context,
+) ([]domain.Feature, error) {
+	results := make([]domain.Feature, 0, len(s.definitions))
+	var firstErr error
+	for _, definition := range s.definitions {
+		if definition.Feature.Status != domain.FeatureStatusActive {
+			continue
+		}
+		feature, err := s.CheckScheduledHealth(ctx, definition.Feature.ID)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf(
+					"check scheduled health for %s: %w",
+					definition.Feature.ID,
+					err,
+				)
+			}
+			continue
+		}
+		results = append(results, *feature)
+	}
+	return results, firstErr
+}
+
+// RunHealthScheduler executes one complete scheduled cycle immediately and
+// then waits for the supplied interval. Individual probe and audit failures
+// are recorded without preventing later features from being checked.
+func (s *Service) RunHealthScheduler(
+	ctx context.Context,
+	interval time.Duration,
+) error {
+	if s == nil {
+		return errors.New("feature center service is required")
+	}
+	if interval <= 0 {
+		return errors.New("feature health interval must be positive")
+	}
+	if s.schedulerLease == nil {
+		return domain.ErrSchedulerLeaseRequired
+	}
+	for {
+		_, _ = s.CheckAllScheduledHealth(ctx)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// A cycle that overruns its interval must not be followed immediately by
+		// another one. Start the next fixed delay only after this cycle finishes.
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+// DrainAuditFailures returns and clears health snapshots whose primary write
+// succeeded but whose audit event could not be persisted. This lets a
+// background scheduler surface the degraded security trail without converting
+// a successful health observation into a fabricated success or discarding it.
+func (s *Service) DrainAuditFailures() []FeatureAuditFailure {
+	if s == nil {
+		return nil
+	}
+	s.auditFailuresMu.Lock()
+	defer s.auditFailuresMu.Unlock()
+	if len(s.auditFailures) == 0 {
+		return nil
+	}
+	failures := append([]FeatureAuditFailure(nil), s.auditFailures...)
+	s.auditFailures = nil
+	return failures
+}
+
+func (s *Service) checkHealth(
+	ctx context.Context,
+	featureID string,
+	trigger string,
+	actorID string,
+	allowAuditFailure bool,
 ) (*domain.Feature, error) {
 	featureID = strings.TrimSpace(featureID)
 	definition, ok := s.byID[featureID]
@@ -242,26 +536,138 @@ func (s *Service) CheckHealth(
 	if !status.Valid() {
 		return nil, domain.ErrHealthCheckFailed
 	}
-	overlay, err := s.repository.Get(ctx, featureID)
+	checkedAt := s.clock.Now().UTC()
+	elapsed := int(checkedAt.Sub(startedAt).Milliseconds())
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	snapshot := &domain.HealthSnapshot{
+		FeatureID: featureID,
+		Status:    status,
+		CheckedAt: checkedAt,
+		Message:   healthMessage(status),
+		LatencyMS: elapsed,
+		Trigger:   trigger,
+	}
+	if err := s.repository.SaveHealth(ctx, snapshot); err != nil {
+		return nil, err
+	}
+	auditErr := s.recordHealthAudit(ctx, snapshot, actorID)
+	if auditErr != nil && allowAuditFailure {
+		s.auditFailuresMu.Lock()
+		s.auditFailures = append(s.auditFailures, FeatureAuditFailure{
+			Snapshot: snapshot,
+			Err:      auditErr,
+		})
+		s.auditFailuresMu.Unlock()
+	}
+	feature, projectionErr := s.featureAfterHealthWrite(ctx, definition, snapshot)
+	if projectionErr != nil {
+		return nil, errors.Join(auditErr, projectionErr)
+	}
+	if allowAuditFailure {
+		return feature, nil
+	}
+	return feature, auditErr
+}
+
+func (s *Service) featureAfterHealthWrite(
+	ctx context.Context,
+	definition Definition,
+	snapshot *domain.HealthSnapshot,
+) (*domain.Feature, error) {
+	overlay, err := s.repository.Get(ctx, definition.Feature.ID)
 	if errors.Is(err, domain.ErrFeatureConfigNotFound) {
 		overlay = nil
 	} else if err != nil {
 		return nil, err
 	}
-	feature := s.project(ctx, definition, overlay)
-	elapsed := int(s.clock.Now().UTC().Sub(startedAt).Milliseconds())
-	if elapsed < 0 {
-		elapsed = 0
-	}
-	checkedAt := s.clock.Now().UTC()
-	feature.Health = status
-	feature.HealthDetail = &domain.HealthDetail{
-		Status:    status,
-		CheckedAt: checkedAt,
-		Message:   healthMessage(status),
-		LatencyMS: &elapsed,
-	}
+	feature := s.project(ctx, definition, overlay, snapshot)
 	return &feature, nil
+}
+
+func (s *Service) loadHealth(
+	ctx context.Context,
+	featureID string,
+) (*domain.HealthSnapshot, error) {
+	snapshot, err := s.repository.GetHealth(ctx, featureID)
+	if errors.Is(err, domain.ErrFeatureConfigNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return snapshot, nil
+}
+
+func healthPointer(
+	snapshot domain.HealthSnapshot,
+	ok bool,
+) *domain.HealthSnapshot {
+	if !ok {
+		return nil
+	}
+	return &snapshot
+}
+
+func (s *Service) recordConfigAudit(
+	ctx context.Context,
+	featureID string,
+	actorID string,
+	previousVersion int64,
+	currentVersion int64,
+) error {
+	if s.audit == nil {
+		return nil
+	}
+	if err := s.audit.RecordAudit(
+		ctx,
+		actorID,
+		"",
+		"admin.feature_center.config.updated",
+		map[string]any{
+			"feature_id":       featureID,
+			"previous_version": previousVersion,
+			"version":          currentVersion,
+		},
+	); err != nil {
+		return &AuditWriteError{Err: err, PrimaryWriteCompleted: true}
+	}
+	return nil
+}
+
+func (s *Service) recordHealthAudit(
+	ctx context.Context,
+	snapshot *domain.HealthSnapshot,
+	actorID string,
+) error {
+	if s.audit == nil || snapshot == nil {
+		return nil
+	}
+	if err := s.audit.RecordAudit(
+		ctx,
+		strings.TrimSpace(actorID),
+		"",
+		featureHealthAuditAction(snapshot.Trigger),
+		map[string]any{
+			"feature_id": snapshot.FeatureID,
+			"status":     string(snapshot.Status),
+			"latency_ms": snapshot.LatencyMS,
+			"trigger":    snapshot.Trigger,
+			"checked_at": snapshot.CheckedAt.UTC(),
+			"message":    snapshot.Message,
+		},
+	); err != nil {
+		return &AuditWriteError{Err: err, PrimaryWriteCompleted: true}
+	}
+	return nil
+}
+
+func featureHealthAuditAction(trigger string) string {
+	if trigger == domain.HealthTriggerSchedule {
+		return "system.feature_center.health.checked"
+	}
+	return "admin.feature_center.health.checked"
 }
 
 func healthMessage(status domain.HealthStatus) string {
@@ -281,6 +687,7 @@ func (s *Service) project(
 	ctx context.Context,
 	definition Definition,
 	overlay *domain.FeatureConfig,
+	health *domain.HealthSnapshot,
 ) domain.Feature {
 	feature := definition.Feature
 	feature.ConfigSchema = cloneFields(feature.ConfigSchema)
@@ -288,6 +695,16 @@ func (s *Service) project(
 	feature.Values = effectiveValues(feature.ConfigSchema)
 	feature.ConfigVersion = 0
 	feature.UpdatedAt = nil
+	if health != nil && health.Status.Valid() {
+		feature.Health = health.Status
+		latency := health.LatencyMS
+		feature.HealthDetail = &domain.HealthDetail{
+			Status:    health.Status,
+			CheckedAt: health.CheckedAt.UTC(),
+			Message:   health.Message,
+			LatencyMS: &latency,
+		}
+	}
 	if overlay != nil {
 		feature.Values = mergeValues(feature.Values, overlay.Values)
 		if feature.ConfigVersion == 0 {
@@ -404,6 +821,13 @@ func valueMap(config *domain.FeatureConfig) map[string]any {
 		return map[string]any{}
 	}
 	return config.Values
+}
+
+func valueVersion(config *domain.FeatureConfig) int64 {
+	if config == nil {
+		return 0
+	}
+	return config.Version
 }
 
 func mergeValues(maps ...map[string]any) map[string]any {

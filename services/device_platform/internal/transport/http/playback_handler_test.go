@@ -223,11 +223,7 @@ func playbackRequest(
 	if accountID == "" {
 		return request
 	}
-	return request.WithContext(context.WithValue(
-		request.Context(),
-		authenticatedAccountKey{},
-		accountID,
-	))
+	return withOwnerFamilyContext(request, accountID)
 }
 
 func TestPlaybackCreateRequiresAuthentication(t *testing.T) {

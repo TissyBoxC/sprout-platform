@@ -191,7 +191,19 @@ func (s *Service) GetDetail(
 	ctx context.Context,
 	packageID string,
 ) (*domain.PackageDetail, error) {
-	return s.repository.GetDetail(ctx, strings.TrimSpace(packageID))
+	detail, err := s.repository.GetDetail(ctx, strings.TrimSpace(packageID))
+	if err != nil {
+		return nil, err
+	}
+	// The repository applies SQL LIMIT; these copies keep in-memory callers
+	// within the same response contract.
+	if len(detail.Versions) > domain.PackageDetailVersionMax {
+		detail.Versions = detail.Versions[:domain.PackageDetailVersionMax]
+	}
+	if len(detail.History) > domain.PackageReviewHistoryMax {
+		detail.History = detail.History[:domain.PackageReviewHistoryMax]
+	}
+	return detail, nil
 }
 
 // Submit moves one draft into review.
@@ -527,6 +539,9 @@ func (s *Service) ListFavorites(
 	if err != nil {
 		return nil, err
 	}
+	if len(views) > domain.FavoriteListMax {
+		views = views[:domain.FavoriteListMax]
+	}
 	for index := range views {
 		if views[index].AgeTiers == nil {
 			views[index].AgeTiers = []domain.AgeTier{}
@@ -591,20 +606,94 @@ const playHistoryRetentionLimit = 50
 
 // ListThemePacks returns theme packs for the admin console and, filtered to
 // published, for the guardian and device surfaces.
+func (s *Service) ListThemePackPage(
+	ctx context.Context,
+	query domain.ThemePackQuery,
+) (domain.ThemePackPage, error) {
+	query.Status = strings.TrimSpace(query.Status)
+	query.Keyword = strings.TrimSpace(query.Keyword)
+	switch domain.ThemePackStatus(query.Status) {
+	case "", domain.ThemePackDraft, domain.ThemePackPublished, domain.ThemePackWithdrawn:
+	default:
+		return domain.ThemePackPage{}, domain.ErrInvalidMetadata
+	}
+	if query.Page < 1 {
+		query.Page = 1
+	}
+	if query.PageSize < 1 {
+		query.PageSize = domain.ThemePackListDefaultPageSize
+	}
+	if query.PageSize > domain.ThemePackListMaxPageSize {
+		query.PageSize = domain.ThemePackListMaxPageSize
+	}
+	result, err := s.listThemePackPage(ctx, query)
+	if err != nil {
+		return domain.ThemePackPage{}, err
+	}
+	if result.ThemePacks == nil {
+		result.ThemePacks = []domain.ThemePack{}
+	}
+	result.Page = query.Page
+	result.PageSize = query.PageSize
+	for index := range result.ThemePacks {
+		normalizeThemePack(&result.ThemePacks[index])
+	}
+	return result, nil
+}
+
+// themePackPageReader is the optional paged read implemented by the
+// PostgreSQL repository. The core Repository contract stays on the original
+// collection shape so existing adapters and test doubles remain compatible.
+type themePackPageReader interface {
+	ListThemePackPage(
+		ctx context.Context,
+		query domain.ThemePackQuery,
+	) (domain.ThemePackPage, error)
+}
+
+func (s *Service) listThemePackPage(
+	ctx context.Context,
+	query domain.ThemePackQuery,
+) (domain.ThemePackPage, error) {
+	if reader, ok := s.repository.(themePackPageReader); ok {
+		return reader.ListThemePackPage(ctx, query)
+	}
+	packs, err := s.repository.ListThemePacks(ctx, query)
+	if err != nil {
+		return domain.ThemePackPage{}, err
+	}
+	total := len(packs)
+	start := (query.Page - 1) * query.PageSize
+	if start > total {
+		start = total
+	}
+	end := start + query.PageSize
+	if end > total {
+		end = total
+	}
+	return domain.ThemePackPage{
+		ThemePacks: packs[start:end],
+		Page:       query.Page,
+		PageSize:   query.PageSize,
+		Total:      total,
+	}, nil
+}
+
+// ListThemePacks preserves the original collection return type for callers
+// that already encode it as the theme_packs array. The bounded page is always
+// the first page, so this remains API-compatible while still preventing an
+// unbounded response.
 func (s *Service) ListThemePacks(
 	ctx context.Context,
 	query domain.ThemePackQuery,
 ) ([]domain.ThemePack, error) {
-	query.Status = strings.TrimSpace(query.Status)
-	query.Keyword = strings.TrimSpace(query.Keyword)
-	packs, err := s.repository.ListThemePacks(ctx, query)
+	query.Page = 1
+	query.PageSize = domain.ThemePackListMaxPageSize
+	page, err := s.ListThemePackPage(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	for index := range packs {
-		normalizeThemePack(&packs[index])
-	}
-	return packs, nil
+	return page.ThemePacks, nil
 }
 
 // GetThemePack returns one theme pack with normalized slices.
@@ -638,10 +727,12 @@ func (s *Service) UpsertThemePack(
 	if err != nil {
 		return nil, err
 	}
-	for _, packageID := range normalized.PackageIDs {
-		if _, err := s.repository.GetDetail(ctx, packageID); err != nil {
-			return nil, err
-		}
+	allExist, err := s.packageIDsExist(ctx, normalized.PackageIDs)
+	if err != nil {
+		return nil, err
+	}
+	if !allExist {
+		return nil, domain.ErrPackageNotFound
 	}
 	pack, err := s.repository.UpsertThemePack(
 		ctx,
@@ -673,13 +764,12 @@ func (s *Service) PublishThemePack(
 	if err != nil {
 		return nil, err
 	}
-	for _, packageID := range pack.PackageIDs {
-		if _, err := s.repository.PublishedDownload(ctx, packageID); err != nil {
-			if errors.Is(err, domain.ErrPackageNotFound) {
-				return nil, domain.ErrThemeMembersInvalid
-			}
-			return nil, err
-		}
+	allPublished, err := s.packageIDsPublished(ctx, pack.PackageIDs)
+	if err != nil {
+		return nil, err
+	}
+	if !allPublished {
+		return nil, domain.ErrThemeMembersInvalid
 	}
 	return s.transitionThemePack(ctx, themeID, domain.ActionPublish)
 }
@@ -752,20 +842,126 @@ func (s *Service) ListPlayHistoryForParent(
 	if familyID == "" {
 		return nil, domain.ErrInvalidMetadata
 	}
-	if limit < 1 || limit > 200 {
+	if limit < 1 || limit > domain.PlayHistoryQueryMax {
 		limit = 50
 	}
-	merged := make([]domain.PlayRecord, 0, limit)
-	for _, rawDeviceID := range deviceIDs {
-		deviceID := strings.TrimSpace(rawDeviceID)
-		if deviceID == "" {
-			continue
+	deviceIDs = normalizeDeviceIDs(deviceIDs)
+	if len(deviceIDs) == 0 {
+		return []domain.PlayRecord{}, nil
+	}
+	records, err := s.listPlayHistoryForDevices(ctx, familyID, deviceIDs, limit)
+	if err != nil {
+		return nil, err
+	}
+	if records == nil {
+		records = []domain.PlayRecord{}
+	}
+	return records, nil
+}
+
+// batchPackageReader is implemented by the PostgreSQL repository. Keeping it
+// optional preserves the existing Repository contract for lightweight test
+// doubles and external adapters while production uses one query.
+type batchPackageReader interface {
+	ListExistingPackageIDs(
+		ctx context.Context,
+		packageIDs []string,
+	) ([]string, error)
+	ListPublishedPackageIDs(
+		ctx context.Context,
+		packageIDs []string,
+	) ([]string, error)
+}
+
+// recentCategoryReader is an optional batch lookup. Callers that only expose
+// the original Repository surface continue to compile and can use the
+// per-package PublishedDownload fallback when needed.
+type recentCategoryReader interface {
+	ListRecentPublishedCategories(
+		ctx context.Context,
+		packageIDs []string,
+	) (map[string]string, error)
+}
+
+func (s *Service) packageIDsExist(
+	ctx context.Context,
+	packageIDs []string,
+) (bool, error) {
+	if reader, ok := s.repository.(batchPackageReader); ok {
+		existing, err := reader.ListExistingPackageIDs(ctx, packageIDs)
+		if err != nil {
+			return false, err
 		}
-		records, err := s.repository.ListPlayHistory(ctx, domain.PlayHistoryQuery{
-			FamilyID: familyID,
-			DeviceID: deviceID,
-			Limit:    limit,
-		})
+		return len(existing) == len(packageIDs), nil
+	}
+	for _, packageID := range packageIDs {
+		if _, err := s.repository.GetDetail(ctx, packageID); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+func (s *Service) packageIDsPublished(
+	ctx context.Context,
+	packageIDs []string,
+) (bool, error) {
+	if reader, ok := s.repository.(batchPackageReader); ok {
+		published, err := reader.ListPublishedPackageIDs(ctx, packageIDs)
+		if err != nil {
+			return false, err
+		}
+		return len(published) == len(packageIDs), nil
+	}
+	for _, packageID := range packageIDs {
+		if _, err := s.repository.PublishedDownload(ctx, packageID); err != nil {
+			if errors.Is(err, domain.ErrPackageNotFound) {
+				return false, nil
+			}
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// batchPlayHistoryReader is the optional cross-device read. The production
+// repository implements it in one SQL statement.
+type batchPlayHistoryReader interface {
+	ListPlayHistoryForDevices(
+		ctx context.Context,
+		query domain.PlayHistoryQuery,
+		deviceIDs []string,
+	) ([]domain.PlayRecord, error)
+}
+
+func (s *Service) listPlayHistoryForDevices(
+	ctx context.Context,
+	familyID string,
+	deviceIDs []string,
+	limit int,
+) ([]domain.PlayRecord, error) {
+	if reader, ok := s.repository.(batchPlayHistoryReader); ok {
+		return reader.ListPlayHistoryForDevices(
+			ctx,
+			domain.PlayHistoryQuery{
+				FamilyID: familyID,
+				Limit:    limit,
+			},
+			deviceIDs,
+		)
+	}
+	// Compatibility fallback for implementations that predate the batch
+	// reader. The production path above issues one query.
+	merged := make([]domain.PlayRecord, 0, limit)
+	for _, deviceID := range deviceIDs {
+		records, err := s.repository.ListPlayHistory(
+			ctx,
+			domain.PlayHistoryQuery{
+				FamilyID: familyID,
+				DeviceID: deviceID,
+				Limit:    limit,
+			},
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -781,6 +977,23 @@ func (s *Service) ListPlayHistoryForParent(
 		merged = merged[:limit]
 	}
 	return merged, nil
+}
+
+func normalizeDeviceIDs(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
 }
 
 func intersectCategories(requested []string, allowed []string) []string {

@@ -37,13 +37,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResponseEnvelope"
-  /internal/v1/devices/{device_id}/ai-credential:
+  /internal/v1/devices/{device_id}/ai-execution-ticket:
     get:
-      summary: Resolve the AI credential for one bound device
+      summary: Issue one single-use AI execution ticket for a bound device
       description: >
-        Returns the decrypted provider key owned by the bound guardian. This
-        endpoint is restricted to the internal AI relay service token and must
-        never be exposed to guardians, administrators, or firmware clients.
+        Validates the bound device, the guardian's effective model allowlist,
+        and the requested project context. The response contains only a
+        short-lived opaque ticket. Provider credentials are never returned to
+        the relay, guardians, administrators, or firmware clients.
       parameters:
         - name: device_id
           in: path
@@ -52,9 +53,34 @@ paths:
             type: string
             minLength: 8
             maxLength: 128
+        - name: model
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - name: project
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: "^[a-z][a-z0-9_]{0,63}$"
+        - name: session_id
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
       responses:
         "200":
-          description: Device AI credential
+          description: Single-use execution ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIExecutionTicketEnvelope"
+        "400":
+          description: Model, project, or session identifier invalid
           content:
             application/json:
               schema:
@@ -65,8 +91,95 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResponseEnvelope"
+        "403":
+          description: Requested model is not allowed for this guardian
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
         "404":
-          description: Device or credential not found
+          description: Device or AI account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "502":
+          description: Provider account service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          description: AI execution service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+  /internal/v1/ai-execution:
+    post:
+      summary: Execute one ticket-authorized chat completion
+      description: >
+        Atomically consumes a single-use ticket, reloads the current device
+        binding, enforces the guardian's model allowlist and per-device
+        concurrency lease, then forwards an OpenAI-compatible streaming request
+        to Sub2API. The upstream provider key remains inside device_platform.
+      parameters:
+        - name: ticket
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 16
+            maxLength: 256
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AIExecutionRequest"
+      responses:
+        "200":
+          description: Streamed OpenAI-compatible chat completion
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          description: Malformed or non-streaming execution request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          description: Ticket expired, was consumed, or service authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "403":
+          description: Requested model differs from the ticket model
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "429":
+          description: Device concurrency or provider capacity exhausted
+          headers:
+            Retry-After:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "502":
+          description: Provider request failed without exposing upstream details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          description: Execution dependencies unavailable
           content:
             application/json:
               schema:
@@ -4298,6 +4411,12 @@ paths:
                 $ref: "#/components/schemas/ResponseEnvelope"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The authenticated guardian lacks device or family permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
         "404":
           description: Device or update not found
           content:
@@ -4328,6 +4447,12 @@ paths:
                 $ref: "#/components/schemas/DeviceUpdateEnvelope"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The authenticated guardian lacks device read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
         "404":
           description: Device or update not found
           content:
@@ -4352,6 +4477,12 @@ paths:
                 $ref: "#/components/schemas/DeviceUpdateEnvelope"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The authenticated guardian lacks device manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
         "404":
           description: Device or deployment not found
           content:
@@ -4382,6 +4513,12 @@ paths:
                 $ref: "#/components/schemas/DeviceUpdateEnvelope"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The authenticated guardian lacks device manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
         "404":
           description: Device or deployment not found
           content:
@@ -7961,6 +8098,9 @@ paths:
       summary: List parent accounts with their dependent AI account
       security:
         - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
       responses:
         "200":
           description: Parent accounts and AI account state
@@ -7968,6 +8108,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AdminFamiliesEnvelope"
+        "400":
+          description: Page or page size is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -8476,6 +8622,9 @@ paths:
       summary: List registered client and resource releases
       security:
         - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
       responses:
         "200":
           description: Registered releases
@@ -8483,6 +8632,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AdminReleasesEnvelope"
+        "400":
+          description: Page or page size is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -9369,6 +9524,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FeatureCenterEnvelope"
+        "202":
+          description: Feature configuration saved but audit recording failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeatureCenterEnvelope"
         "400":
           description: Malformed request body or missing config version
           content:
@@ -9415,6 +9576,12 @@ paths:
       responses:
         "200":
           description: Feature health refreshed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeatureCenterEnvelope"
+        "202":
+          description: Feature health refreshed but audit recording failed
           content:
             application/json:
               schema:
@@ -10793,6 +10960,118 @@ components:
           oneOf:
             - type: "null"
             - $ref: "#/components/schemas/Error"
+    AIExecutionTicketEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - ticket
+                - expires_in
+                - model
+              properties:
+                ticket:
+                  type: string
+                  minLength: 16
+                  maxLength: 256
+                expires_in:
+                  type: integer
+                  minimum: 1
+                  maximum: 600
+                model:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+    AIExecutionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - model
+        - stream
+        - messages
+      properties:
+        model:
+          type: string
+          minLength: 1
+          maxLength: 128
+        stream:
+          type: boolean
+          const: true
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 256
+          items:
+            $ref: "#/components/schemas/AIExecutionMessage"
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+        top_p:
+          type: number
+          minimum: 0
+          maximum: 1
+        max_tokens:
+          type: integer
+          minimum: 1
+          maximum: 32768
+        stop:
+          oneOf:
+            - type: string
+              maxLength: 256
+            - type: array
+              maxItems: 16
+              items:
+                type: string
+                maxLength: 256
+        tools:
+          type: array
+          maxItems: 64
+          items:
+            type: object
+        tool_choice:
+          oneOf:
+            - type: string
+            - type: object
+        metadata:
+          type: object
+    AIExecutionMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - role
+      properties:
+        role:
+          type: string
+          enum:
+            - system
+            - developer
+            - user
+            - assistant
+            - tool
+        content:
+          oneOf:
+            - type: string
+              maxLength: 131072
+            - type: array
+              maxItems: 128
+              items:
+                type: object
+        name:
+          type: string
+          maxLength: 128
+        tool_call_id:
+          type: string
+          maxLength: 256
+        tool_calls:
+          type: array
+          maxItems: 64
+          items:
+            type: object
+            additionalProperties: true
     EffectiveParentPolicyEnvelope:
       allOf:
         - $ref: "#/components/schemas/ResponseEnvelope"
@@ -11997,11 +12276,54 @@ components:
               additionalProperties: false
               required:
                 - accounts
+                - pagination
               properties:
                 accounts:
                   type: array
                   items:
                     $ref: "#/components/schemas/AdminFamilyAccount"
+                pagination:
+                  $ref: "#/components/schemas/AdminPagination"
+    AdminPagination:
+      type: object
+      additionalProperties: false
+      required:
+        - page
+        - page_size
+        - total
+        - total_pages
+        - has_previous
+        - has_more
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
+        total:
+          type: integer
+          minimum: 0
+        total_pages:
+          type: integer
+          minimum: 0
+        has_previous:
+          type: boolean
+        has_more:
+          type: boolean
+        previous_page:
+          nullable: true
+          type: integer
+          minimum: 1
+        next_page:
+          nullable: true
+          type: integer
+          minimum: 1
+        next_offset:
+          nullable: true
+          type: integer
+          minimum: 0
     AdminAIAccount:
       type: object
       additionalProperties: false
@@ -12442,11 +12764,14 @@ components:
               additionalProperties: false
               required:
                 - releases
+                - pagination
               properties:
                 releases:
                   type: array
                   items:
                     $ref: "#/components/schemas/AdminRelease"
+                pagination:
+                  $ref: "#/components/schemas/AdminPagination"
     AdminReleaseEnvelope:
       allOf:
         - $ref: "#/components/schemas/ResponseEnvelope"
@@ -23552,6 +23877,21 @@ components:
               properties:
                 feature:
                   $ref: "#/components/schemas/FeatureCenterFeature"
+                notice:
+                  $ref: "#/components/schemas/FeatureCenterMutationNotice"
+    FeatureCenterMutationNotice:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          enum:
+            - audit_write_failed
+        message:
+          type: string
     FeatureCenterConfigUpdateRequest:
       type: object
       additionalProperties: false

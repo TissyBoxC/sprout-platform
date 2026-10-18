@@ -17,6 +17,11 @@ type settingsAdminService struct {
 	updateActorID  string
 	updateVersion  int64
 	updateErr      error
+	familyPage     int
+	familyPageSize int
+	releasePage    int
+	releaseSize    int
+	listFamilyErr  error
 }
 
 func (*settingsAdminService) Settings(
@@ -44,12 +49,59 @@ func (*settingsAdminService) Overview(context.Context) (*operationsdomain.Overvi
 	return nil, nil
 }
 
-func (*settingsAdminService) ListFamilyAccounts(context.Context) ([]operationsdomain.FamilyAccount, error) {
-	return nil, nil
+func (service *settingsAdminService) ListFamilyAccounts(
+	_ context.Context,
+	page int,
+	pageSize int,
+) (operationsdomain.FamilyAccountPage, error) {
+	service.familyPage = page
+	service.familyPageSize = pageSize
+	if service.listFamilyErr != nil {
+		return operationsdomain.FamilyAccountPage{}, service.listFamilyErr
+	}
+	return operationsdomain.FamilyAccountPage{
+		Accounts: []operationsdomain.FamilyAccount{},
+		Pagination: operationsdomain.NewPagination(
+			operationsdomain.NormalizePageRequest(page, pageSize),
+			45,
+		),
+	}, nil
 }
 
-func (*settingsAdminService) ListReleases(context.Context) ([]operationsdomain.Release, error) {
-	return nil, nil
+func TestListFamiliesRejectsInvalidPageSizeBeforeService(t *testing.T) {
+	service := &settingsAdminService{}
+	handler := adminHandler{operationsService: service}
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/admin/families?page=1&page_size=101",
+		nil,
+	)
+	recorder := httptest.NewRecorder()
+
+	handler.listFamilies(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", recorder.Code, recorder.Body.String())
+	}
+	if service.familyPage != 0 {
+		t.Fatal("invalid page size must not reach the service")
+	}
+}
+
+func (service *settingsAdminService) ListReleases(
+	_ context.Context,
+	page int,
+	pageSize int,
+) (operationsdomain.ReleasePage, error) {
+	service.releasePage = page
+	service.releaseSize = pageSize
+	return operationsdomain.ReleasePage{
+		Releases: []operationsdomain.Release{},
+		Pagination: operationsdomain.NewPagination(
+			operationsdomain.NormalizePageRequest(page, pageSize),
+			40,
+		),
+	}, nil
 }
 
 func (*settingsAdminService) CreateRelease(context.Context, operationsdomain.ReleaseInput) (*operationsdomain.Release, error) {
@@ -162,5 +214,97 @@ func TestSettingsVersionConflictUsesErrorsIs(t *testing.T) {
 	err := &operationsdomain.SettingsVersionConflictError{}
 	if !errors.Is(err, operationsdomain.ErrSettingsVersionConflict) {
 		t.Fatal("expected settings version conflict error to unwrap to the stable sentinel")
+	}
+}
+
+func TestListFamiliesPassesPaginationAndReturnsMetadata(t *testing.T) {
+	service := &settingsAdminService{}
+	handler := adminHandler{operationsService: service}
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/admin/families?page=2&page_size=10",
+		nil,
+	)
+	recorder := httptest.NewRecorder()
+
+	handler.listFamilies(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	if service.familyPage != 2 || service.familyPageSize != 10 {
+		t.Fatalf(
+			"delegated page = %d/%d, want 2/10",
+			service.familyPage,
+			service.familyPageSize,
+		)
+	}
+	var envelope struct {
+		Data struct {
+			Accounts   []operationsdomain.FamilyAccount `json:"accounts"`
+			Pagination operationsdomain.Pagination      `json:"pagination"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if envelope.Data.Pagination.Total != 45 ||
+		envelope.Data.Pagination.Page != 2 ||
+		envelope.Data.Pagination.NextPage == nil ||
+		*envelope.Data.Pagination.NextPage != 3 {
+		t.Fatalf("unexpected pagination: %+v", envelope.Data.Pagination)
+	}
+}
+
+func TestListReleasesDefaultsToFirstBoundedPage(t *testing.T) {
+	service := &settingsAdminService{}
+	handler := adminHandler{operationsService: service}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/releases", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.listReleases(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	if service.releasePage != 1 ||
+		service.releaseSize != operationsdomain.DefaultListPageSize {
+		t.Fatalf(
+			"delegated page = %d/%d, want 1/%d",
+			service.releasePage,
+			service.releaseSize,
+			operationsdomain.DefaultListPageSize,
+		)
+	}
+}
+
+func TestListReleasesRejectsInvalidPagination(t *testing.T) {
+	cases := []string{
+		"/api/v1/admin/releases?page=0",
+		"/api/v1/admin/releases?page=two",
+		"/api/v1/admin/releases?page_size=0",
+		"/api/v1/admin/releases?page_size=101",
+	}
+	for _, target := range cases {
+		target := target
+		t.Run(target, func(t *testing.T) {
+			service := &settingsAdminService{}
+			handler := adminHandler{operationsService: service}
+			request := httptest.NewRequest(http.MethodGet, target, nil)
+			recorder := httptest.NewRecorder()
+
+			handler.listReleases(recorder, request)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf(
+					"status = %d, want 400: %s",
+					recorder.Code,
+					recorder.Body.String(),
+				)
+			}
+			if service.releasePage != 0 {
+				t.Fatal("invalid pagination must not reach the service")
+			}
+		})
 	}
 }

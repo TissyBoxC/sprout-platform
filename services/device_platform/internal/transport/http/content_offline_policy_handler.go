@@ -62,7 +62,7 @@ func (handler contentOfflinePolicyHandler) current(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	if _, ok := authenticatedAccountID(request); !ok {
+	if _, ok := authenticatedFamilyOwnerID(request); !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
 	}
@@ -79,7 +79,7 @@ func (handler contentOfflinePolicyHandler) acknowledgements(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	familyID, ok := authenticatedAccountID(request)
+	familyID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -153,7 +153,7 @@ func (handler contentOfflinePolicyHandler) publish(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	if _, ok := authenticatedAccountID(request); !ok {
+	if _, ok := authenticatedFamilyOwnerID(request); !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
 	}

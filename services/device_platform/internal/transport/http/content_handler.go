@@ -518,7 +518,7 @@ func (handler contentHandler) listFavorites(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	accountID, ok := authenticatedAccountID(request)
+	accountID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -538,7 +538,7 @@ func (handler contentHandler) addFavorite(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	accountID, ok := authenticatedAccountID(request)
+	accountID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -571,7 +571,7 @@ func (handler contentHandler) removeFavorite(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	accountID, ok := authenticatedAccountID(request)
+	accountID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
@@ -609,20 +609,25 @@ func (handler contentHandler) listThemePacks(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	packs, err := handler.service.ListThemePacks(
+	page, pageSize, err := contentPageParams(request)
+	if err != nil {
+		writeError(response, request, http.StatusUnprocessableEntity, "invalid_page", "请检查分页参数")
+		return
+	}
+	result, err := handler.service.ListThemePackPage(
 		request.Context(),
 		contentdomain.ThemePackQuery{
-			Status:  strings.TrimSpace(request.URL.Query().Get("status")),
-			Keyword: strings.TrimSpace(request.URL.Query().Get("keyword")),
+			Status:   strings.TrimSpace(request.URL.Query().Get("status")),
+			Keyword:  strings.TrimSpace(request.URL.Query().Get("keyword")),
+			Page:     page,
+			PageSize: pageSize,
 		},
 	)
 	if err != nil {
 		writeContentError(response, request, err)
 		return
 	}
-	writeSuccess(response, request, http.StatusOK, map[string]any{
-		"theme_packs": packs,
-	})
+	writeSuccess(response, request, http.StatusOK, result)
 }
 
 // getThemePack returns one admin theme pack.
@@ -754,7 +759,7 @@ func (handler contentHandler) listPlayHistoryForGuardian(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	accountID, ok := authenticatedAccountID(request)
+	accountID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return

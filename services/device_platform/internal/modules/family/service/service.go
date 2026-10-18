@@ -22,11 +22,26 @@ type Repository interface {
 	CreateMember(ctx context.Context, member domain.Member) error
 	UpdateMemberRole(ctx context.Context, member domain.Member) error
 	DeleteMember(ctx context.Context, familyID string, userID string) error
+	UpdateMemberRoleWithAudit(
+		ctx context.Context,
+		member domain.Member,
+		audit domain.AuditEvent,
+	) error
+	DeleteMemberWithAudit(
+		ctx context.Context,
+		familyID string,
+		userID string,
+		audit domain.AuditEvent,
+	) error
 	Members(ctx context.Context, familyID string) ([]domain.Member, error)
 	Member(ctx context.Context, familyID string, userID string) (domain.Member, bool, error)
 	MemberByUser(ctx context.Context, userID string) (domain.Member, bool, error)
 
-	CreateInvitation(ctx context.Context, invitation domain.Invitation) error
+	CreateInvitation(
+		ctx context.Context,
+		invitation domain.Invitation,
+		audit domain.AuditEvent,
+	) error
 	Invitation(
 		ctx context.Context,
 		familyID string,
@@ -48,6 +63,7 @@ type Repository interface {
 		member domain.Member,
 		familyID string,
 		invitationID string,
+		audit domain.AuditEvent,
 	) error
 }
 
@@ -72,7 +88,10 @@ func New(options Options) (*Service, error) {
 	if timeSource == nil {
 		timeSource = clock.SystemClock{}
 	}
-	return &Service{repository: options.Repository, clock: timeSource}, nil
+	return &Service{
+		repository: options.Repository,
+		clock:      timeSource,
+	}, nil
 }
 
 // BootstrapOwner makes userID the owner of familyID when the family has no
@@ -151,6 +170,33 @@ func (s *Service) ResolveFamily(
 	return member, nil
 }
 
+// Authorize resolves the caller's stored membership and checks one canonical
+// family action. The returned Access carries the real family id and the
+// owner's account id, which may differ from an invited member's account id.
+func (s *Service) Authorize(
+	ctx context.Context,
+	userID string,
+	action domain.Action,
+) (domain.Access, error) {
+	member, err := s.ResolveFamily(ctx, userID)
+	if err != nil {
+		return domain.Access{}, err
+	}
+	if !domain.Can(member.Role, action) {
+		return domain.Access{}, domain.ErrPermissionDenied
+	}
+	ownerUserID, err := s.ownerUserID(ctx, member.FamilyID)
+	if err != nil {
+		return domain.Access{}, err
+	}
+	return domain.Access{
+		FamilyID:    member.FamilyID,
+		ActorUserID: member.UserID,
+		OwnerUserID: ownerUserID,
+		Role:        member.Role,
+	}, nil
+}
+
 // PendingInvitationsForAccount lists the pending invitations addressed to the
 // authenticated account's email. It is how an invitee discovers an invitation
 // before joining, when it has no family id to scope a request with. The email
@@ -196,7 +242,7 @@ func (s *Service) CreateInvitation(
 		return domain.Invitation{}, err
 	}
 	if !domain.CanInvite(actor.Role) {
-		return domain.Invitation{}, domain.ErrInvalidMember
+		return domain.Invitation{}, domain.ErrPermissionDenied
 	}
 	normalizedEmail := domain.NormalizeEmail(email)
 	if err := domain.ValidateInviteEmail(normalizedEmail); err != nil {
@@ -216,7 +262,22 @@ func (s *Service) CreateInvitation(
 		CreatedAt:       now,
 		ExpiresAt:       now.Add(domain.InvitationTTLHours * time.Hour),
 	}
-	if err := s.repository.CreateInvitation(ctx, invitation); err != nil {
+	if err := s.repository.CreateInvitation(
+		ctx,
+		invitation,
+		domain.AuditEvent{
+			ID:             uuid.NewString(),
+			ActorAccountID: actor.UserID,
+			Action:         domain.AuditInvitationCreated,
+			Detail: map[string]any{
+				"family_id":     invitation.FamilyID,
+				"invitation_id": invitation.ID,
+				"role":          invitation.Role,
+				"expires_at":    invitation.ExpiresAt.UTC().Format(time.RFC3339),
+			},
+			CreatedAt: now,
+		},
+	); err != nil {
 		return domain.Invitation{}, err
 	}
 	return invitation, nil
@@ -235,7 +296,7 @@ func (s *Service) RevokeInvitation(
 		return err
 	}
 	if !domain.CanInvite(actor.Role) {
-		return domain.ErrInvalidMember
+		return domain.ErrPermissionDenied
 	}
 	invitationID = strings.TrimSpace(invitationID)
 	if invitationID == "" {
@@ -300,7 +361,23 @@ func (s *Service) AcceptInvitation(
 		member,
 		familyID,
 		invitationID,
+		domain.AuditEvent{
+			ID:              uuid.NewString(),
+			ActorAccountID:  userID,
+			TargetAccountID: userID,
+			Action:          domain.AuditInvitationAccepted,
+			Detail: map[string]any{
+				"family_id":     familyID,
+				"invitation_id": invitationID,
+				"member_id":     member.ID,
+				"role":          member.Role,
+			},
+			CreatedAt: now,
+		},
 	); err != nil {
+		if errors.Is(err, domain.ErrInvitationConcurrent) {
+			return domain.Member{}, domain.ErrInvitationConcurrent
+		}
 		return domain.Member{}, err
 	}
 	return member, nil
@@ -320,7 +397,7 @@ func (s *Service) UpdateMemberRole(
 		return domain.Member{}, err
 	}
 	if !domain.CanManageMembers(actor.Role) {
-		return domain.Member{}, domain.ErrInvalidMember
+		return domain.Member{}, domain.ErrPermissionDenied
 	}
 	if role != domain.RoleGuardian && role != domain.RoleViewer {
 		return domain.Member{}, domain.ErrInvalidMember
@@ -338,7 +415,22 @@ func (s *Service) UpdateMemberRole(
 	}
 	target.Role = role
 	target.UpdatedAt = s.clock.Now().UTC()
-	if err := s.repository.UpdateMemberRole(ctx, target); err != nil {
+	if err := s.repository.UpdateMemberRoleWithAudit(
+		ctx,
+		target,
+		domain.AuditEvent{
+			ID:              uuid.NewString(),
+			ActorAccountID:  actor.UserID,
+			TargetAccountID: target.UserID,
+			Action:          domain.AuditMemberRoleUpdated,
+			Detail: map[string]any{
+				"family_id":   target.FamilyID,
+				"member_id":   target.ID,
+				"target_role": target.Role,
+			},
+			CreatedAt: target.UpdatedAt,
+		},
+	); err != nil {
 		return domain.Member{}, err
 	}
 	return target, nil
@@ -372,9 +464,26 @@ func (s *Service) RemoveMember(
 		return domain.ErrLastOwner
 	}
 	if actor.UserID != targetUserID && !domain.CanManageMembers(actor.Role) {
-		return domain.ErrInvalidMember
+		return domain.ErrPermissionDenied
 	}
-	return s.repository.DeleteMember(ctx, familyID, targetUserID)
+	return s.repository.DeleteMemberWithAudit(
+		ctx,
+		familyID,
+		targetUserID,
+		domain.AuditEvent{
+			ID:              uuid.NewString(),
+			ActorAccountID:  actor.UserID,
+			TargetAccountID: targetUserID,
+			Action:          domain.AuditMemberRemoved,
+			Detail: map[string]any{
+				"family_id":   familyID,
+				"member_id":   target.ID,
+				"self_leave":  actor.UserID == targetUserID,
+				"target_role": target.Role,
+			},
+			CreatedAt: s.clock.Now().UTC(),
+		},
+	)
 }
 
 // Capability summarizes the membership surface for the guardian view.
@@ -435,4 +544,20 @@ func (s *Service) requireMember(
 		return domain.Member{}, domain.ErrMemberNotFound
 	}
 	return member, nil
+}
+
+func (s *Service) ownerUserID(
+	ctx context.Context,
+	familyID string,
+) (string, error) {
+	members, err := s.repository.Members(ctx, familyID)
+	if err != nil {
+		return "", err
+	}
+	for _, member := range members {
+		if member.Role == domain.RoleOwner {
+			return member.UserID, nil
+		}
+	}
+	return "", domain.ErrLastOwner
 }

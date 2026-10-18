@@ -24,6 +24,11 @@ type familyService interface {
 		ctx context.Context,
 		userID string,
 	) (familydomain.Member, error)
+	Authorize(
+		ctx context.Context,
+		userID string,
+		action familydomain.Action,
+	) (familydomain.Access, error)
 	Members(
 		ctx context.Context,
 		familyID string,
@@ -354,6 +359,7 @@ func (handler familyHandler) capability(
 	if !ok {
 		return
 	}
+	access, _ := authenticatedFamilyAccess(request)
 	capability, err := handler.service.Capability(
 		request.Context(),
 		familyID,
@@ -369,6 +375,7 @@ func (handler familyHandler) capability(
 		"member_count":         capability.MemberCount,
 		"pending_invite_count": capability.PendingInvites,
 		"schema_version":       capability.SchemaVersion,
+		"permissions":          familyActionForReport(access.Role),
 	})
 }
 
@@ -380,6 +387,9 @@ func (handler familyHandler) authenticatedMember(
 	response http.ResponseWriter,
 	request *http.Request,
 ) (string, string, bool) {
+	if access, ok := authenticatedFamilyAccess(request); ok {
+		return access.FamilyID, access.ActorUserID, true
+	}
 	accountID, ok := authenticatedAccountID(request)
 	if !ok {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
@@ -424,6 +434,14 @@ func writeFamilyError(
 	err error,
 ) {
 	switch {
+	case errors.Is(err, familydomain.ErrPermissionDenied):
+		writeError(
+			response,
+			request,
+			http.StatusForbidden,
+			"insufficient_permission",
+			"当前角色没有执行该操作的权限",
+		)
 	case errors.Is(err, familydomain.ErrMemberNotFound),
 		errors.Is(err, familydomain.ErrInvitationNotFound):
 		writeError(response, request, http.StatusNotFound, "family_not_found", "没有找到这个成员或邀请")

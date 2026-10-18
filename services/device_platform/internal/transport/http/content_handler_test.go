@@ -75,6 +75,27 @@ func (repository *contentTestRepository) GetDetail(
 	}, nil
 }
 
+func (repository *contentTestRepository) ListRecentPublishedCategories(
+	_ context.Context,
+	packageIDs []string,
+) (map[string]string, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	requested := make(map[string]struct{}, len(packageIDs))
+	for _, packageID := range packageIDs {
+		requested[packageID] = struct{}{}
+	}
+	result := make(map[string]string, len(packageIDs))
+	for _, version := range repository.versions {
+		if _, ok := requested[version.PackageID]; !ok ||
+			version.Status != contentdomain.StatusPublished {
+			continue
+		}
+		result[version.PackageID] = string(version.Category)
+	}
+	return result, nil
+}
+
 func (repository *contentTestRepository) GetVersion(
 	_ context.Context,
 	packageID string,
@@ -625,11 +646,7 @@ func TestContentFavoriteLifecycleEndpoints(t *testing.T) {
 	authed := func(method string, target string) *http.Request {
 		request := httptest.NewRequest(method, target, nil)
 		request.SetPathValue("package_id", "content_story_001")
-		return request.WithContext(context.WithValue(
-			request.Context(),
-			authenticatedAccountKey{},
-			"parent-001",
-		))
+		return withOwnerFamilyContext(request, "parent-001")
 	}
 
 	// Add.
@@ -880,11 +897,7 @@ func TestGuardianPlayHistoryMergesOwnedDevices(t *testing.T) {
 	}
 	authed := func(target string) *http.Request {
 		request := httptest.NewRequest(http.MethodGet, target, nil)
-		return request.WithContext(context.WithValue(
-			request.Context(),
-			authenticatedAccountKey{},
-			"parent-001",
-		))
+		return withOwnerFamilyContext(request, "parent-001")
 	}
 	decodeHistory := func(body []byte) []struct {
 		DeviceID      string `json:"device_id"`
@@ -920,15 +933,14 @@ func TestGuardianPlayHistoryMergesOwnedDevices(t *testing.T) {
 			t.Fatalf("history leaked unowned device: %s", recorder.Body.String())
 		}
 	}
-	otherAccount := httptest.NewRequest(
-		http.MethodGet,
-		"/api/v1/content/play-history",
-		nil,
-	).WithContext(context.WithValue(
-		context.Background(),
-		authenticatedAccountKey{},
+	otherAccount := withOwnerFamilyContext(
+		httptest.NewRequest(
+			http.MethodGet,
+			"/api/v1/content/play-history",
+			nil,
+		),
 		"parent-002",
-	))
+	)
 	recorder = httptest.NewRecorder()
 	handler.listPlayHistoryForGuardian(recorder, otherAccount)
 	if recorder.Code != http.StatusOK || len(decodeHistory(recorder.Body.Bytes())) != 0 {
@@ -1228,6 +1240,31 @@ func (repository *contentTestRepository) ListThemePacks(
 		packs = append(packs, cloneContentTestThemePack(pack))
 	}
 	return packs, nil
+}
+
+func (repository *contentTestRepository) ListThemePackPage(
+	_ context.Context,
+	query contentdomain.ThemePackQuery,
+) (contentdomain.ThemePackPage, error) {
+	packs, err := repository.ListThemePacks(context.Background(), query)
+	if err != nil {
+		return contentdomain.ThemePackPage{}, err
+	}
+	total := len(packs)
+	start := (query.Page - 1) * query.PageSize
+	if start > total {
+		start = total
+	}
+	end := start + query.PageSize
+	if end > total {
+		end = total
+	}
+	return contentdomain.ThemePackPage{
+		ThemePacks: packs[start:end],
+		Page:       query.Page,
+		PageSize:   query.PageSize,
+		Total:      total,
+	}, nil
 }
 
 func (repository *contentTestRepository) GetThemePack(

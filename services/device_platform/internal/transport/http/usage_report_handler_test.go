@@ -187,11 +187,7 @@ func TestGuardianUsageReportIsFamilyScoped(t *testing.T) {
 	}
 	handler := usageReportHandler{service: usageService}
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/usage-reports?days=1", nil)
-	request = request.WithContext(context.WithValue(
-		request.Context(),
-		authenticatedAccountKey{},
-		"family_001",
-	))
+	request = withOwnerFamilyContext(request, "family_001")
 	recorder := httptest.NewRecorder()
 	handler.listGuardianUsageReports(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -239,11 +235,7 @@ func TestGuardianUsageReportReturnsMissingPolicyWithoutInventingALimit(t *testin
 		service: usageService,
 	}
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/usage-reports?days=1", nil)
-	request = request.WithContext(context.WithValue(
-		request.Context(),
-		authenticatedAccountKey{},
-		"family_001",
-	))
+	request = withOwnerFamilyContext(request, "family_001")
 	recorder := httptest.NewRecorder()
 	handler.listGuardianUsageReports(recorder, request)
 	if recorder.Code != http.StatusOK {

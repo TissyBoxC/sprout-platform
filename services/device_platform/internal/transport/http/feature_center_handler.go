@@ -22,6 +22,11 @@ type FeatureCenterService interface {
 		expectedVersion int64,
 	) (*featuredomain.Feature, error)
 	CheckHealth(ctx context.Context, featureID string) (*featuredomain.Feature, error)
+	CheckHealthAs(
+		ctx context.Context,
+		featureID string,
+		actorID string,
+	) (*featuredomain.Feature, error)
 }
 
 // FeatureCenterHandler exposes feature registry and configuration endpoints.
@@ -154,6 +159,17 @@ func (handler *FeatureCenterHandler) UpdateConfig(
 		expectedVersion,
 	)
 	if err != nil {
+		var auditWrite *featureservice.AuditWriteError
+		if errors.As(err, &auditWrite) && auditWrite.PrimaryWriteCompleted {
+			writeSuccess(response, request, http.StatusAccepted, map[string]any{
+				"feature": featureCenterFeatureResponse(current),
+				"notice": map[string]any{
+					"code":    "audit_write_failed",
+					"message": "配置已经保存，但安全记录没有完成。请联系管理员核对后再继续。",
+				},
+			})
+			return
+		}
 		writeFeatureCenterError(response, request, err)
 		return
 	}
@@ -171,11 +187,28 @@ func (handler *FeatureCenterHandler) HealthCheck(
 		writeError(response, request, http.StatusServiceUnavailable, "service_unavailable", "功能状态暂时无法检查，请稍后重试")
 		return
 	}
-	current, err := handler.service.CheckHealth(
+	actorID, ok := authenticatedAccountID(request)
+	if !ok {
+		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
+		return
+	}
+	current, err := handler.service.CheckHealthAs(
 		request.Context(),
 		strings.TrimSpace(request.PathValue("feature")),
+		actorID,
 	)
 	if err != nil {
+		var auditWrite *featureservice.AuditWriteError
+		if errors.As(err, &auditWrite) && auditWrite.PrimaryWriteCompleted {
+			writeSuccess(response, request, http.StatusAccepted, map[string]any{
+				"feature": featureCenterFeatureResponse(current),
+				"notice": map[string]any{
+					"code":    "audit_write_failed",
+					"message": "健康状态已经更新，但安全记录没有完成。请联系管理员核对后再继续。",
+				},
+			})
+			return
+		}
 		writeFeatureCenterError(response, request, err)
 		return
 	}
@@ -249,6 +282,7 @@ func writeFeatureCenterError(
 ) {
 	var conflict *featuredomain.VersionConflictError
 	var validation *featuredomain.ConfigValidationError
+	var auditWrite *featureservice.AuditWriteError
 	switch {
 	case errors.As(err, &conflict):
 		writeError(
@@ -282,6 +316,14 @@ func writeFeatureCenterError(
 			http.StatusNotImplemented,
 			"health_check_unavailable",
 			"该功能暂未接入健康检查",
+		)
+	case errors.As(err, &auditWrite):
+		writeError(
+			response,
+			request,
+			http.StatusInternalServerError,
+			"audit_write_failed",
+			"操作已经保存，但安全记录没有完成。请联系管理员核对后再继续。",
 		)
 	default:
 		writeError(response, request, http.StatusInternalServerError, "service_error", "操作没有完成，请稍后重试")

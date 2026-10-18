@@ -66,6 +66,8 @@ type AuthConfig struct {
 type AIConfig struct {
 	BaseURL            string
 	ServiceToken       string
+	ExecutionTokenTTL  time.Duration
+	ExecutionLeaseTTL  time.Duration
 	DefaultBalanceUSD  float64
 	DefaultConcurrency int
 	DefaultModels      []string
@@ -214,6 +216,14 @@ func Load() (Config, error) {
 		AI: AIConfig{
 			BaseURL:            env("DEVICE_PLATFORM_SUB2API_BASE_URL", "http://127.0.0.1:8080"),
 			ServiceToken:       env("DEVICE_PLATFORM_SUB2API_SERVICE_TOKEN", ""),
+			ExecutionTokenTTL: envDuration(
+				"DEVICE_PLATFORM_AI_EXECUTION_TOKEN_TTL",
+				2*time.Minute,
+			),
+			ExecutionLeaseTTL: envDuration(
+				"DEVICE_PLATFORM_AI_EXECUTION_LEASE_TTL",
+				10*time.Minute,
+			),
 			DefaultBalanceUSD:  envFloat("DEVICE_PLATFORM_AI_DEFAULT_BALANCE_USD", 0),
 			DefaultConcurrency: envInt("DEVICE_PLATFORM_AI_DEFAULT_CONCURRENCY", 1),
 			DefaultModels:      envList("DEVICE_PLATFORM_AI_DEFAULT_MODELS", []string{}),
@@ -349,6 +359,15 @@ func Load() (Config, error) {
 	}
 	if cfg.AI.DefaultConcurrency < 1 {
 		return Config{}, fmt.Errorf("DEVICE_PLATFORM_AI_DEFAULT_CONCURRENCY must be greater than zero")
+	}
+	if cfg.AI.ExecutionTokenTTL <= 0 {
+		return Config{}, fmt.Errorf("DEVICE_PLATFORM_AI_EXECUTION_TOKEN_TTL must be positive")
+	}
+	if cfg.AI.ExecutionTokenTTL > 10*time.Minute {
+		return Config{}, fmt.Errorf("DEVICE_PLATFORM_AI_EXECUTION_TOKEN_TTL must not exceed 10 minutes")
+	}
+	if cfg.AI.ExecutionLeaseTTL < cfg.AI.ExecutionTokenTTL {
+		return Config{}, fmt.Errorf("DEVICE_PLATFORM_AI_EXECUTION_LEASE_TTL must be at least the execution token TTL")
 	}
 	if cfg.DeviceRuntime.OfflineThreshold <= 0 {
 		return Config{}, fmt.Errorf("DEVICE_PLATFORM_RUNTIME_OFFLINE_THRESHOLD must be positive")

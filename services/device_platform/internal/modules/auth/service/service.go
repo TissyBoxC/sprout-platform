@@ -29,6 +29,8 @@ const (
 	accountStatusActive              = "active"
 	defaultConsent                   = "2026-01"
 	defaultMFAChallengeTTL           = 5 * time.Minute
+	defaultMFAAccountLockDuration    = 15 * time.Minute
+	defaultMFAMaxAttempts            = 5
 	defaultTOTPKeyVersion            = 1
 	defaultTOTPPeriodSeconds         = 30
 	phoneVerificationPurposeRegister = "register"
@@ -61,10 +63,26 @@ type Service struct {
 	phoneVerifier    PhoneVerifier
 	overviewReader   ParentOverviewReader
 	policyReader     RegistrationPolicyReader
+	mfaAuditor       MFAAuditor
 	timeSource       clock.Clock
 	accessTTL        time.Duration
 	refreshTTL       time.Duration
 	mfaChallengeTTL  time.Duration
+	mfaMaxAttempts   int
+	mfaLockDuration  time.Duration
+}
+
+// MFAAuditor writes the mandatory administrator MFA security trail. A nil
+// auditor means the deployment is missing a required security dependency and
+// MFA fails closed.
+type MFAAuditor interface {
+	RecordAudit(
+		ctx context.Context,
+		actorAccountID string,
+		targetAccountID string,
+		action string,
+		detail map[string]any,
+	) error
 }
 
 // ParentOverviewReader supplies the guardian dashboard projection.
@@ -116,18 +134,21 @@ type MFACipher interface {
 
 // Options contains authentication service dependencies and policies.
 type Options struct {
-	Repository       repository.Repository
-	TokenIssuer      security.TokenIssuer
-	AIProvisioner    AIAccountProvisioner
-	ChildProvisioner ChildAccountProvisioner
-	MFACipher        MFACipher
-	PhoneVerifier    PhoneVerifier
-	OverviewReader   ParentOverviewReader
-	PolicyReader     RegistrationPolicyReader
-	MFAChallengeTTL  time.Duration
-	Clock            clock.Clock
-	AccessTTL        time.Duration
-	RefreshTTL       time.Duration
+	Repository             repository.Repository
+	TokenIssuer            security.TokenIssuer
+	AIProvisioner          AIAccountProvisioner
+	ChildProvisioner       ChildAccountProvisioner
+	MFACipher              MFACipher
+	PhoneVerifier          PhoneVerifier
+	OverviewReader         ParentOverviewReader
+	PolicyReader           RegistrationPolicyReader
+	MFAAuditor             MFAAuditor
+	MFAChallengeTTL        time.Duration
+	MFAMaxAttempts         int
+	MFAAccountLockDuration time.Duration
+	Clock                  clock.Clock
+	AccessTTL              time.Duration
+	RefreshTTL             time.Duration
 }
 
 // New creates the parent authentication service.
@@ -145,6 +166,14 @@ func New(options Options) (*Service, error) {
 	if mfaChallengeTTL <= 0 {
 		mfaChallengeTTL = defaultMFAChallengeTTL
 	}
+	mfaMaxAttempts := options.MFAMaxAttempts
+	if mfaMaxAttempts <= 0 {
+		mfaMaxAttempts = defaultMFAMaxAttempts
+	}
+	mfaLockDuration := options.MFAAccountLockDuration
+	if mfaLockDuration <= 0 {
+		mfaLockDuration = defaultMFAAccountLockDuration
+	}
 	timeSource := options.Clock
 	if timeSource == nil {
 		timeSource = clock.SystemClock{}
@@ -158,11 +187,20 @@ func New(options Options) (*Service, error) {
 		phoneVerifier:    options.PhoneVerifier,
 		overviewReader:   options.OverviewReader,
 		policyReader:     options.PolicyReader,
+		mfaAuditor:       options.MFAAuditor,
 		timeSource:       timeSource,
 		accessTTL:        options.AccessTTL,
 		refreshTTL:       options.RefreshTTL,
 		mfaChallengeTTL:  mfaChallengeTTL,
+		mfaMaxAttempts:   mfaMaxAttempts,
+		mfaLockDuration:  mfaLockDuration,
 	}, nil
+}
+
+// SetMFAAuditor wires the administrator security audit after both the auth
+// and privacy services exist. MFA remains unavailable until this is set.
+func (s *Service) SetMFAAuditor(auditor MFAAuditor) {
+	s.mfaAuditor = auditor
 }
 
 // SetOverviewReader wires the optional dashboard projection after both
@@ -348,6 +386,11 @@ func (s *Service) Login(
 	); err != nil {
 		return nil, nil, nil, domain.ErrInvalidCredentials
 	}
+	// Administrators must use the dedicated password plus TOTP flow. Falling
+	// through here would issue a normal session and bypass the second factor.
+	if account.Role == domain.RoleAdmin {
+		return nil, nil, nil, domain.ErrMFARequired
+	}
 
 	if err := s.repository.UpdateLastLogin(ctx, account.ID); err != nil {
 		return nil, nil, nil, err
@@ -438,6 +481,9 @@ func (s *Service) BindEmail(
 
 // StartAdminLogin validates an administrator password and creates a
 // short-lived MFA challenge. No access token is issued before TOTP succeeds.
+// The challenge is persisted before its mandatory audit event; if the audit
+// store is unavailable, the token is withheld and the challenge is removed so
+// an operator never sees a started event for an unusable challenge.
 func (s *Service) StartAdminLogin(
 	ctx context.Context,
 	input domain.LoginInput,
@@ -469,19 +515,77 @@ func (s *Service) StartAdminLogin(
 		return "", nil, domain.ErrMFANotConfigured
 	}
 
+	now := s.timeSource.Now().UTC()
+	accountFailureState, err := s.repository.ClearExpiredMFAAccountLock(
+		ctx,
+		account.ID,
+		now,
+	)
+	if err != nil {
+		return "", nil, err
+	}
+	if accountFailureState.LockedUntil != nil &&
+		accountFailureState.LockedUntil.After(now) {
+		if err := s.recordMFAEvent(
+			ctx,
+			account.ID,
+			account.ID,
+			"admin.mfa.account_locked",
+			map[string]any{
+				"outcome":         "account_locked",
+				"failed_attempts": accountFailureState.FailedAttempts,
+			},
+		); err != nil {
+			return "", nil, err
+		}
+		return "", nil, domain.ErrMFAAccountLocked
+	}
+	if accountFailureState.Recovered {
+		if err := s.recordMFAEvent(
+			ctx,
+			account.ID,
+			account.ID,
+			"admin.mfa.account_recovered",
+			map[string]any{
+				"outcome":         "lock_expired",
+				"failed_attempts": 0,
+			},
+		); err != nil {
+			return "", nil, err
+		}
+	}
+
 	challengeToken, err := randomToken()
 	if err != nil {
 		return "", nil, fmt.Errorf("generate MFA challenge: %w", err)
 	}
-	now := s.timeSource.Now().UTC()
+	if s.mfaAuditor == nil {
+		return "", nil, domain.ErrMFAAuditUnavailable
+	}
 	challenge := &domain.MFAChallenge{
 		ID:              uuid.NewString(),
 		ParentAccountID: account.ID,
 		ChallengeHash:   hashRefreshToken(challengeToken),
 		ExpiresAt:       now.Add(s.mfaChallengeTTL),
+		FailedAttempts:  accountFailureState.FailedAttempts,
 		CreatedAt:       now,
 	}
 	if err := s.repository.CreateMFAChallenge(ctx, challenge); err != nil {
+		return "", nil, err
+	}
+	if err := s.recordMFAEvent(
+		ctx,
+		account.ID,
+		account.ID,
+		"admin.mfa.challenge.started",
+		map[string]any{"outcome": "challenge_started"},
+	); err != nil {
+		if deleteErr := s.repository.DeleteMFAChallenge(ctx, challenge.ID); deleteErr != nil {
+			return "", nil, errors.Join(err, fmt.Errorf(
+				"remove unaudited MFA challenge: %w",
+				deleteErr,
+			))
+		}
 		return "", nil, err
 	}
 	return challengeToken, account, nil
@@ -498,6 +602,9 @@ func (s *Service) CompleteAdminLogin(
 	if input.ChallengeToken == "" || len(input.Code) != 6 {
 		return nil, nil, domain.ErrInvalidMFACode
 	}
+	if s.mfaAuditor == nil {
+		return nil, nil, domain.ErrMFAAuditUnavailable
+	}
 	challenge, err := s.repository.GetMFAChallengeByHash(
 		ctx,
 		hashRefreshToken(input.ChallengeToken),
@@ -507,10 +614,38 @@ func (s *Service) CompleteAdminLogin(
 	}
 	now := s.timeSource.Now().UTC()
 	if challenge.ConsumedAt != nil {
+		if auditErr := s.recordMFAEvent(
+			ctx,
+			challenge.ParentAccountID,
+			challenge.ParentAccountID,
+			"admin.mfa.replayed",
+			map[string]any{"outcome": "challenge_replayed"},
+		); auditErr != nil {
+			return nil, nil, auditErr
+		}
 		return nil, nil, domain.ErrMFAChallengeConsumed
 	}
 	if !challenge.ExpiresAt.After(now) {
+		if auditErr := s.recordMFAEvent(
+			ctx,
+			challenge.ParentAccountID,
+			challenge.ParentAccountID,
+			"admin.mfa.expired",
+			map[string]any{"outcome": "challenge_expired"},
+		); auditErr != nil {
+			return nil, nil, auditErr
+		}
 		return nil, nil, domain.ErrMFAChallengeExpired
+	}
+	if challenge.LockedAt != nil {
+		if auditErr := s.recordMFAChallengeLockedObservation(
+			ctx,
+			challenge.ParentAccountID,
+			challenge.FailedAttempts,
+		); auditErr != nil {
+			return nil, nil, auditErr
+		}
+		return nil, nil, domain.ErrMFAAccountLocked
 	}
 	account, err := s.repository.GetParentAccountByID(
 		ctx,
@@ -520,6 +655,15 @@ func (s *Service) CompleteAdminLogin(
 		return nil, nil, err
 	}
 	if account.Role != domain.RoleAdmin || account.Status != accountStatusActive {
+		if auditErr := s.recordMFAEvent(
+			ctx,
+			account.ID,
+			account.ID,
+			"admin.mfa.denied",
+			map[string]any{"outcome": "insufficient_privilege"},
+		); auditErr != nil {
+			return nil, nil, auditErr
+		}
 		return nil, nil, domain.ErrInsufficientPrivilege
 	}
 	if s.mfaCipher == nil {
@@ -529,6 +673,24 @@ func (s *Service) CompleteAdminLogin(
 	if err != nil {
 		return nil, nil, err
 	}
+	accountFailureState, err := s.repository.GetMFAAccountFailureState(
+		ctx,
+		account.ID,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	if accountFailureState.LockedUntil != nil &&
+		accountFailureState.LockedUntil.After(now) {
+		if auditErr := s.recordMFAAccountLockedObservation(
+			ctx,
+			account.ID,
+			accountFailureState.FailedAttempts,
+		); auditErr != nil {
+			return nil, nil, auditErr
+		}
+		return nil, nil, domain.ErrMFAAccountLocked
+	}
 	secret, err := s.mfaCipher.Decrypt(
 		credential.EncryptedSecret,
 		credential.SecretNonce,
@@ -537,9 +699,124 @@ func (s *Service) CompleteAdminLogin(
 		return nil, nil, domain.ErrInvalidMFACode
 	}
 	if !totp.Validate(input.Code, string(secret)) {
+		updated, accountState, failureOutcome, failureErr :=
+			s.repository.RecordMFAChallengeFailure(
+				ctx,
+				challenge.ID,
+				s.mfaMaxAttempts,
+				s.mfaLockDuration,
+				now,
+			)
+		if failureErr != nil {
+			observed := updated
+			if observed == nil {
+				observed = challenge
+			}
+			if auditErr := s.auditMFAFailureRejection(
+				ctx,
+				observed,
+				failureErr,
+			); auditErr != nil {
+				return nil, nil, auditErr
+			}
+			return nil, nil, failureErr
+		}
+		if accountState != nil && accountState.LockedUntil != nil {
+			if failureOutcome == repository.MFAFailureLockedNow {
+				if err := s.recordMFAEvent(
+					ctx,
+					account.ID,
+					account.ID,
+					"admin.mfa.locked",
+					map[string]any{
+						"outcome":         "account_locked",
+						"failed_attempts": accountState.FailedAttempts,
+					},
+				); err != nil {
+					return nil, nil, err
+				}
+			} else {
+				if err := s.recordMFAAccountLockedObservation(
+					ctx,
+					account.ID,
+					accountState.FailedAttempts,
+				); err != nil {
+					return nil, nil, err
+				}
+			}
+			return nil, nil, domain.ErrMFAAccountLocked
+		}
+		if err := s.recordMFAEvent(
+			ctx,
+			account.ID,
+			account.ID,
+			"admin.mfa.failed",
+			map[string]any{
+				"outcome":            "invalid_code",
+				"failed_attempts":    accountState.FailedAttempts,
+				"remaining_attempts": max(0, s.mfaMaxAttempts-accountState.FailedAttempts),
+			},
+		); err != nil {
+			return nil, nil, err
+		}
 		return nil, nil, domain.ErrInvalidMFACode
 	}
-	if err := s.repository.ConsumeMFAChallenge(ctx, challenge.ID); err != nil {
+	if err := s.repository.ConsumeMFAChallenge(ctx, challenge.ID, now); err != nil {
+		if errors.Is(err, domain.ErrMFAAccountLocked) {
+			currentState, stateErr := s.repository.GetMFAAccountFailureState(
+				ctx,
+				account.ID,
+			)
+			if stateErr != nil {
+				return nil, nil, stateErr
+			}
+			if auditErr := s.recordMFAAccountLockedObservation(
+				ctx,
+				account.ID,
+				currentState.FailedAttempts,
+			); auditErr != nil {
+				return nil, nil, auditErr
+			}
+			return nil, nil, domain.ErrMFAAccountLocked
+		}
+		if errors.Is(err, domain.ErrMFAChallengeLocked) &&
+			!errors.Is(err, domain.ErrMFAAccountLocked) {
+			current, readErr := s.repository.GetMFAChallengeByHash(
+				ctx,
+				challenge.ChallengeHash,
+			)
+			if readErr != nil {
+				return nil, nil, readErr
+			}
+			if auditErr := s.recordMFAChallengeLockedObservation(
+				ctx,
+				current.ParentAccountID,
+				current.FailedAttempts,
+			); auditErr != nil {
+				return nil, nil, auditErr
+			}
+			return nil, nil, domain.ErrMFAAccountLocked
+		} else if errors.Is(err, domain.ErrMFAChallengeExpired) ||
+			errors.Is(err, domain.ErrMFAChallengeConsumed) {
+			if auditErr := s.recordMFAEvent(
+				ctx,
+				account.ID,
+				account.ID,
+				"admin.mfa."+mfaChallengeResultAction(err),
+				map[string]any{"outcome": mfaChallengeResultAction(err)},
+			); auditErr != nil {
+				return nil, nil, auditErr
+			}
+		}
+		return nil, nil, err
+	}
+	if err := s.recordMFAEvent(
+		ctx,
+		account.ID,
+		account.ID,
+		"admin.mfa.succeeded",
+		map[string]any{"outcome": "succeeded"},
+	); err != nil {
 		return nil, nil, err
 	}
 	if err := s.repository.UpdateLastLogin(ctx, account.ID); err != nil {
@@ -550,6 +827,80 @@ func (s *Service) CompleteAdminLogin(
 		return nil, nil, err
 	}
 	return account, tokenPair, nil
+}
+
+func (s *Service) recordMFAAccountLockedObservation(
+	ctx context.Context,
+	accountID string,
+	failedAttempts int,
+) error {
+	return s.recordMFAEvent(
+		ctx,
+		accountID,
+		accountID,
+		"admin.mfa.locked_observed",
+		map[string]any{
+			"outcome":         "account_locked",
+			"failed_attempts": failedAttempts,
+		},
+	)
+}
+
+// recordMFAChallengeLockedObservation emits one audit event for each request
+// that observes the terminal lock created by another concurrent attempt.
+// The single lock transition emits admin.mfa.locked; every request that loses
+// the race emits this observation event with no challenge token or TOTP.
+func (s *Service) recordMFAChallengeLockedObservation(
+	ctx context.Context,
+	accountID string,
+	failedAttempts int,
+) error {
+	if err := s.recordMFAEvent(
+		ctx,
+		accountID,
+		accountID,
+		"admin.mfa.locked_observed",
+		map[string]any{
+			"outcome":         "account_locked",
+			"failed_attempts": failedAttempts,
+		},
+	); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) recordMFAEvent(
+	ctx context.Context,
+	actorAccountID string,
+	targetAccountID string,
+	action string,
+	detail map[string]any,
+) error {
+	if s.mfaAuditor == nil {
+		return domain.ErrMFAAuditUnavailable
+	}
+	if err := s.mfaAuditor.RecordAudit(
+		ctx,
+		actorAccountID,
+		targetAccountID,
+		action,
+		detail,
+	); err != nil {
+		return domain.ErrMFAAuditUnavailable
+	}
+	return nil
+}
+
+func mfaChallengeResultAction(err error) string {
+	switch {
+	case errors.Is(err, domain.ErrMFAChallengeConsumed):
+		return "replayed"
+	case errors.Is(err, domain.ErrMFAAccountLocked):
+		return "locked"
+	default:
+		return "expired"
+	}
 }
 
 // EnrollAdminTOTP creates and encrypts a TOTP secret for one administrator.
@@ -762,6 +1113,47 @@ func (s *Service) issueSession(
 		RefreshToken: refreshToken,
 		ExpiresIn:    s.accessTTL,
 	}, nil
+}
+
+// auditMFAFailureRejection preserves one audit event for a wrong code that
+// cannot advance the counter because another request already changed the
+// challenge. The repository returns the observed row together with the domain
+// error, so replay, expiry, and lock races remain distinguishable without a
+// second read that could observe yet another state.
+func (s *Service) auditMFAFailureRejection(
+	ctx context.Context,
+	challenge *domain.MFAChallenge,
+	failureErr error,
+) error {
+	if challenge == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(failureErr, domain.ErrMFAAccountLocked):
+		return s.recordMFAChallengeLockedObservation(
+			ctx,
+			challenge.ParentAccountID,
+			challenge.FailedAttempts,
+		)
+	case errors.Is(failureErr, domain.ErrMFAChallengeConsumed):
+		return s.recordMFAEvent(
+			ctx,
+			challenge.ParentAccountID,
+			challenge.ParentAccountID,
+			"admin.mfa.replayed",
+			map[string]any{"outcome": "challenge_replayed"},
+		)
+	case errors.Is(failureErr, domain.ErrMFAChallengeExpired):
+		return s.recordMFAEvent(
+			ctx,
+			challenge.ParentAccountID,
+			challenge.ParentAccountID,
+			"admin.mfa.expired",
+			map[string]any{"outcome": "challenge_expired"},
+		)
+	default:
+		return nil
+	}
 }
 
 func (s *Service) issueAccessToken(

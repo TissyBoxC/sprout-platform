@@ -18,6 +18,8 @@ var (
 	ErrMFAChallengeNotFound   = errors.New("MFA challenge not found")
 	ErrMFAChallengeExpired    = errors.New("MFA challenge expired")
 	ErrMFAChallengeConsumed   = errors.New("MFA challenge already used")
+	ErrMFAChallengeLocked     = errors.New("MFA challenge locked")
+	ErrMFAAuditUnavailable    = errors.New("MFA audit is unavailable")
 	ErrInvalidMFACode         = errors.New("invalid MFA code")
 	ErrMFANotConfigured       = errors.New("administrator MFA is not configured")
 	ErrTOTPAlreadyConfigured  = errors.New("administrator TOTP is already configured")
@@ -38,6 +40,20 @@ var (
 	ErrRegistrationDisabled   = errors.New("registration is disabled")
 	ErrEmailLoginDisabled     = errors.New("email login is disabled")
 )
+
+// ErrMFAAccountLocked unwraps to ErrMFAChallengeLocked so the existing HTTP
+// contract keeps returning 423 mfa_challenge_locked for account-wide locks.
+var ErrMFAAccountLocked = &mfaAccountLockedError{}
+
+type mfaAccountLockedError struct{}
+
+func (*mfaAccountLockedError) Error() string {
+	return "MFA account temporarily locked"
+}
+
+func (*mfaAccountLockedError) Unwrap() error {
+	return ErrMFAChallengeLocked
+}
 
 const (
 	RoleParent = "parent"
@@ -127,7 +143,23 @@ type MFAChallenge struct {
 	ChallengeHash   string
 	ExpiresAt       time.Time
 	ConsumedAt      *time.Time
+	FailedAttempts  int
+	LockedAt        *time.Time
 	CreatedAt       time.Time
+}
+
+// MFAAccountFailureState is the authenticated account's shared MFA failure
+// budget. It spans password-login challenges so starting a new challenge
+// cannot reset an attacker's failed-attempt count.
+type MFAAccountFailureState struct {
+	ParentAccountID string
+	FailedAttempts  int
+	LockedUntil     *time.Time
+	LastFailedAt    *time.Time
+	UpdatedAt       time.Time
+	// Recovered is set by ClearExpiredMFAAccountLock when this call transitioned
+	// an expired lock back to a clean budget. It is not persisted.
+	Recovered bool
 }
 
 // PhoneVerificationCode stores only a hash of a short-lived SMS code.

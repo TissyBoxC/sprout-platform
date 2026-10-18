@@ -86,7 +86,6 @@ type otaInstallRequest struct {
 
 func (handler otaHandler) registerRoutes(
 	mux *http.ServeMux,
-	requireAuthentication func(http.HandlerFunc) http.HandlerFunc,
 	requireAdmin func(http.HandlerFunc) http.HandlerFunc,
 ) {
 	if handler.service == nil {
@@ -94,24 +93,6 @@ func (handler otaHandler) registerRoutes(
 	}
 	mux.HandleFunc("GET /api/v1/devices/{device_id}/ota", handler.deviceUpdate)
 	mux.HandleFunc("POST /api/v1/devices/{device_id}/ota/events", handler.recordDeviceEvent)
-	if requireAuthentication != nil {
-		mux.HandleFunc(
-			"POST /api/v1/devices/{device_id}/ota/install",
-			requireAuthentication(handler.installForGuardian),
-		)
-		mux.HandleFunc(
-			"GET /api/v1/devices/{device_id}/ota/status",
-			requireAuthentication(handler.statusForGuardian),
-		)
-		mux.HandleFunc(
-			"POST /api/v1/devices/{device_id}/ota/retry",
-			requireAuthentication(handler.retryForGuardian),
-		)
-		mux.HandleFunc(
-			"POST /api/v1/devices/{device_id}/ota/rollback",
-			requireAuthentication(handler.rollbackForGuardian),
-		)
-	}
 	if requireAdmin == nil {
 		return
 	}
@@ -159,6 +140,40 @@ func (handler otaHandler) registerRoutes(
 		"GET /api/v1/admin/ota/statistics",
 		requireAdmin(handler.adminStatistics),
 	)
+}
+
+// registerGuardianRoutes registers parent-app OTA routes behind the family
+// action that applies to each operation. Device-session routes stay separate
+// because firmware authenticates with a device credential rather than a
+// guardian membership.
+func (handler otaHandler) registerGuardianRoutes(
+	mux *http.ServeMux,
+	deviceRead func(http.HandlerFunc) http.HandlerFunc,
+	deviceManage func(http.HandlerFunc) http.HandlerFunc,
+) {
+	if handler.service == nil {
+		return
+	}
+	if deviceRead != nil {
+		mux.HandleFunc(
+			"GET /api/v1/devices/{device_id}/ota/status",
+			deviceRead(handler.statusForGuardian),
+		)
+	}
+	if deviceManage != nil {
+		mux.HandleFunc(
+			"POST /api/v1/devices/{device_id}/ota/install",
+			deviceManage(handler.installForGuardian),
+		)
+		mux.HandleFunc(
+			"POST /api/v1/devices/{device_id}/ota/retry",
+			deviceManage(handler.retryForGuardian),
+		)
+		mux.HandleFunc(
+			"POST /api/v1/devices/{device_id}/ota/rollback",
+			deviceManage(handler.rollbackForGuardian),
+		)
+	}
 }
 
 func (handler otaHandler) deviceUpdate(
@@ -915,14 +930,14 @@ func (handler otaHandler) verifyGuardianDevice(
 	response http.ResponseWriter,
 	request *http.Request,
 ) (string, string, bool) {
-	parentID, ok := authenticatedAccountID(request)
+	parentID, ok := authenticatedFamilyOwnerID(request)
 	if !ok {
 		writeError(
 			response,
 			request,
-			http.StatusUnauthorized,
-			"unauthenticated",
-			"请重新登录",
+			http.StatusForbidden,
+			"insufficient_permission",
+			"你没有权限管理这台设备",
 		)
 		return "", "", false
 	}

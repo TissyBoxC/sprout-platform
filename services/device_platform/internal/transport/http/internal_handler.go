@@ -4,24 +4,54 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	gatewaydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/domain"
-	gatewayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/service"
+	aiexecution "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/execution"
 	bindingdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/domain"
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 	policydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/domain"
 	releaseStoredomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/domain"
 )
 
+var (
+	aiExecutionProjectPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+	aiExecutionSessionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
+)
+
 // internalHandler exposes service-to-service endpoints for the AI relay.
 // Every route must be mounted behind the internal service token.
 type internalHandler struct {
-	bindingService      *bindingservice.Service
-	aiService           *gatewayservice.Service
-	policyService       internalPolicyService
-	releaseStoreService releaseStoreAdminService
+	bindingService       *bindingservice.Service
+	aiService            aiExecutionAuthorizer
+	executionStore       aiExecutionStore
+	executionTokenTTL    time.Duration
+	executionLeaseTTL    time.Duration
+	aiUpstreamURL        string
+	aiHTTPClient         *http.Client
+	requireHTTPSUpstream bool
+	policyService        internalPolicyService
+	releaseStoreService  releaseStoreAdminService
+}
+
+// aiExecutionStore issues and consumes one-time relay tickets. Redis is the
+// production implementation so duplicate execution is rejected across replicas.
+type aiExecutionStore interface {
+	Issue(
+		ctx context.Context,
+		ticket aiexecution.Ticket,
+		ttl time.Duration,
+	) (string, error)
+	Consume(ctx context.Context, token string) (aiexecution.Ticket, error)
+	AcquireDeviceLease(
+		ctx context.Context,
+		deviceID string,
+		limit int,
+		ttl time.Duration,
+	) (string, func(), error)
 }
 
 // internalPolicyService resolves the effective parent policy for the device
@@ -118,33 +148,79 @@ func (handler internalHandler) refreshReleaseIndex(
 	writeSuccess(response, request, http.StatusOK, map[string]any{"release": result})
 }
 
-// aiCredential resolves the AI execution credential for one bound device.
-//
-// The relay asks by device id because that is the only identity it already
-// holds. The platform resolves the owning guardian and returns the decrypted
-// provider key, which must never reach a guardian, admin, or firmware client.
-func (handler internalHandler) aiCredential(
+// aiExecutionTicket authorizes one bound-device model execution without
+// returning the provider credential. The relay presents the one-time ticket
+// to the platform-owned execution proxy, which alone decrypts the key.
+func (handler internalHandler) aiExecutionTicket(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
 	deviceID := strings.TrimSpace(request.PathValue("device_id"))
 	binding, err := handler.bindingService.GetByDeviceID(request.Context(), deviceID)
 	if err != nil {
-		writeInternalCredentialError(response, request, err)
+		writeInternalExecutionError(response, request, err)
 		return
 	}
-	credential, err := handler.aiService.CredentialForDevice(
+	model := strings.TrimSpace(request.URL.Query().Get("model"))
+	if model == "" {
+		writeError(response, request, http.StatusBadRequest, "invalid_model", "请选择一个可用模型")
+		return
+	}
+	project := strings.TrimSpace(request.URL.Query().Get("project"))
+	if !aiExecutionProjectPattern.MatchString(project) {
+		writeError(response, request, http.StatusBadRequest, "invalid_project", "无法识别这次对话的使用场景")
+		return
+	}
+	sessionID := strings.TrimSpace(request.URL.Query().Get("session_id"))
+	if !aiExecutionSessionPattern.MatchString(sessionID) {
+		writeError(response, request, http.StatusBadRequest, "invalid_session", "无法识别这次对话")
+		return
+	}
+	if handler.aiService == nil {
+		writeError(response, request, http.StatusServiceUnavailable, "execution_unavailable", "AI 服务暂时不可用，请稍后重试")
+		return
+	}
+	credential, err := handler.aiService.AuthorizeExecution(
 		request.Context(),
 		binding.ParentAccountID,
+		model,
 	)
 	if err != nil {
-		writeInternalCredentialError(response, request, err)
+		writeInternalExecutionError(response, request, err)
+		return
+	}
+	if handler.executionStore == nil {
+		writeError(response, request, http.StatusServiceUnavailable, "execution_unavailable", "AI 服务暂时不可用，请稍后重试")
+		return
+	}
+	if handler.executionTokenTTL <= 0 {
+		writeError(response, request, http.StatusServiceUnavailable, "execution_unavailable", "AI 服务暂时不可用，请稍后重试")
+		return
+	}
+	if credential.ConcurrencyLimit < 1 {
+		writeError(response, request, http.StatusServiceUnavailable, "execution_unavailable", "AI 服务暂时不可用，请稍后重试")
+		return
+	}
+	issued, err := handler.executionStore.Issue(
+		request.Context(),
+		aiexecution.Ticket{
+			DeviceID:        binding.DeviceID,
+			ParentAccountID: binding.ParentAccountID,
+			SessionID:       sessionID,
+			Project:         project,
+			Model:           model,
+			Concurrency:     credential.ConcurrencyLimit,
+		},
+		handler.executionTokenTTL,
+	)
+	if err != nil {
+		writeError(response, request, http.StatusServiceUnavailable, "execution_unavailable", "AI 服务暂时不可用，请稍后重试")
 		return
 	}
 	writeSuccess(response, request, http.StatusOK, map[string]any{
-		"device_id":           binding.DeviceID,
-		"provider_account_id": credential.ProviderAccountID,
-		"api_key":             credential.APIKey,
+		"ticket":     issued,
+		"expires_in": int(handler.executionTokenTTL.Seconds()),
+		"model":      model,
 	})
 }
 
@@ -176,7 +252,7 @@ func (handler internalHandler) effectivePolicies(
 	})
 }
 
-func writeInternalCredentialError(
+func writeInternalExecutionError(
 	response http.ResponseWriter,
 	request *http.Request,
 	err error,
@@ -188,6 +264,8 @@ func writeInternalCredentialError(
 	case errors.Is(err, gatewaydomain.ErrAccountNotFound),
 		errors.Is(err, gatewaydomain.ErrCredentialInvalid):
 		writeError(response, request, http.StatusNotFound, "credential_not_found", "这台设备还没有可用的 AI 服务")
+	case errors.Is(err, gatewaydomain.ErrModelNotAllowed):
+		writeError(response, request, http.StatusForbidden, "model_not_allowed", "这个模型当前不可用")
 	case errors.Is(err, gatewaydomain.ErrProviderUnavailable):
 		writeError(response, request, http.StatusBadGateway, "ai_service_unavailable", "AI 服务暂时不可用，请稍后重试")
 	default:

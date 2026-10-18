@@ -16,15 +16,18 @@ import (
 )
 
 var (
-	ErrLessonNotFound  = errors.New("english lesson not found")
-	ErrAttemptNotFound = errors.New("english practice attempt not found")
-	ErrInvalidLesson   = errors.New("invalid english lesson")
-	ErrInvalidWord     = errors.New("invalid english word")
-	ErrInvalidSentence = errors.New("invalid english sentence")
-	ErrInvalidAttempt  = errors.New("invalid english practice attempt")
-	ErrInvalidAgeTier  = errors.New("invalid english age tier")
-	ErrInvalidLessonID = errors.New("invalid english lesson id")
-	ErrInvalidItemType = errors.New("invalid english practice item type")
+	ErrLessonNotFound       = errors.New("english lesson not found")
+	ErrAttemptNotFound      = errors.New("english practice attempt not found")
+	ErrInvalidLesson        = errors.New("invalid english lesson")
+	ErrInvalidWord          = errors.New("invalid english word")
+	ErrInvalidSentence      = errors.New("invalid english sentence")
+	ErrInvalidAttempt       = errors.New("invalid english practice attempt")
+	ErrInvalidAgeTier       = errors.New("invalid english age tier")
+	ErrInvalidLessonID      = errors.New("invalid english lesson id")
+	ErrInvalidItemType      = errors.New("invalid english practice item type")
+	ErrPracticeItemNotFound = errors.New("english practice item not found")
+	ErrChildNotFound        = errors.New("english child profile not found")
+	ErrChildFamilyMismatch  = errors.New("english child profile does not belong to family")
 )
 
 // Age tiers reused from the child profile so the catalog matches the child's

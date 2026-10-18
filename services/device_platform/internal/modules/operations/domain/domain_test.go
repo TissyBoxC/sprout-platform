@@ -95,3 +95,58 @@ func TestRetentionApplyUsageReportDefaultsPreservesExplicitValue(t *testing.T) {
 		t.Fatalf("explicit zero was overwritten with %d", settings.Retention.UsageReportDays)
 	}
 }
+
+func TestNormalizePageRequestClampsBoundsAndComputesOffset(t *testing.T) {
+	t.Parallel()
+
+	request := NormalizePageRequest(3, 25)
+	if request.Page != 3 || request.PageSize != 25 || request.Offset != 50 {
+		t.Fatalf("unexpected normalized page: %+v", request)
+	}
+	request = NormalizePageRequest(-4, 0)
+	if request.Page != 1 ||
+		request.PageSize != DefaultListPageSize ||
+		request.Offset != 0 {
+		t.Fatalf("default page not applied: %+v", request)
+	}
+	request = NormalizePageRequest(2, MaxListPageSize+50)
+	if request.PageSize != MaxListPageSize || request.Offset != MaxListPageSize {
+		t.Fatalf("page size not clamped: %+v", request)
+	}
+}
+
+func TestNewPaginationReportsNextAndPreviousStableMetadata(t *testing.T) {
+	t.Parallel()
+
+	request := NormalizePageRequest(2, 20)
+	pagination := NewPagination(request, 55)
+	if pagination.Total != 55 || pagination.TotalPages != 3 {
+		t.Fatalf("unexpected counters: %+v", pagination)
+	}
+	if !pagination.HasPrevious ||
+		pagination.PreviousPage == nil ||
+		*pagination.PreviousPage != 1 {
+		t.Fatalf("missing previous page: %+v", pagination)
+	}
+	if !pagination.HasMore ||
+		pagination.NextPage == nil ||
+		*pagination.NextPage != 3 ||
+		pagination.NextOffset == nil ||
+		*pagination.NextOffset != 40 {
+		t.Fatalf("missing next page: %+v", pagination)
+	}
+
+	last := NewPagination(NormalizePageRequest(3, 20), 55)
+	if last.HasMore || last.NextPage != nil || last.NextOffset != nil {
+		t.Fatalf("last page advertises a next page: %+v", last)
+	}
+}
+
+func TestNewPaginationEmptyListHasNoPhantomPage(t *testing.T) {
+	t.Parallel()
+
+	pagination := NewPagination(NormalizePageRequest(1, 20), 0)
+	if pagination.TotalPages != 0 || pagination.HasMore || pagination.HasPrevious {
+		t.Fatalf("empty pagination is misleading: %+v", pagination)
+	}
+}

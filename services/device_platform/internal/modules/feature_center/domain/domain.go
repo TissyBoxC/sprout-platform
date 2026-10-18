@@ -28,6 +28,18 @@ var (
 	ErrHealthCheckFailed = errors.New("feature health check failed")
 	// ErrHealthCheckUnavailable reports a feature without a wired probe.
 	ErrHealthCheckUnavailable = errors.New("feature health check is not available")
+	// ErrHealthSnapshotStale reports a health observation that was accepted by
+	// its probe but not persisted because a newer durable snapshot exists.
+	ErrHealthSnapshotStale = errors.New("feature health snapshot is stale")
+	// ErrSchedulerLeaseUnavailable reports a scheduled cycle that could not
+	// acquire the cross-replica leader lease.
+	ErrSchedulerLeaseUnavailable = errors.New("feature health scheduler lease unavailable")
+	// ErrSchedulerLeaseRequired reports a scheduler started without a shared
+	// lease. Running without one would duplicate work in every replica.
+	ErrSchedulerLeaseRequired = errors.New("feature health scheduler lease is required")
+	// ErrSchedulerLeaseReleaseFailed reports that the callback finished but
+	// the cross-replica lease could not be explicitly released.
+	ErrSchedulerLeaseReleaseFailed = errors.New("feature health scheduler lease release failed")
 )
 
 // HealthStatus is the stable health projection for one registered feature.
@@ -165,6 +177,25 @@ type HealthDetail struct {
 	Message   string       `json:"message,omitempty"`
 	LatencyMS *int         `json:"latency_ms,omitempty"`
 }
+
+// HealthSnapshot is the durable result of one completed feature health probe.
+//
+// A snapshot is stored separately from the configuration overlay so changing
+// runtime settings never erases the latest verified health observation.
+type HealthSnapshot struct {
+	FeatureID string
+	Status    HealthStatus
+	CheckedAt time.Time
+	Message   string
+	LatencyMS int
+	Trigger   string
+}
+
+// Health check trigger values are part of the audit contract.
+const (
+	HealthTriggerManual   = "manual"
+	HealthTriggerSchedule = "schedule"
+)
 
 // FeatureConfig is the persisted overlay for one feature registry entry.
 type FeatureConfig struct {

@@ -10,6 +10,7 @@ import (
 	stdhttp "net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -32,6 +33,70 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 	if recorder.Header().Get("X-Request-ID") == "" {
 		t.Fatal("expected X-Request-ID response header")
+	}
+}
+
+func TestGuardianOTAContractDocumentsPermissionDenials(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, operation := range []string{
+		"/api/v1/devices/{device_id}/ota/install:",
+		"/api/v1/devices/{device_id}/ota/status:",
+		"/api/v1/devices/{device_id}/ota/retry:",
+		"/api/v1/devices/{device_id}/ota/rollback:",
+	} {
+		start := bytes.Index(contract, []byte(operation))
+		if start < 0 {
+			t.Fatalf("missing guardian OTA operation %s", operation)
+		}
+		next := bytes.Index(contract[start+len(operation):], []byte("\n  /"))
+		end := len(contract)
+		if next >= 0 {
+			end = start + len(operation) + next
+		}
+		block := contract[start:end]
+		if !regexp.MustCompile(`(?m)^        "403":\r?$`).Match(block) {
+			t.Fatalf("guardian OTA operation %s must document a 403 permission denial", operation)
+		}
+	}
+}
+
+func TestFeatureCenterContractDocumentsPartialSuccess(t *testing.T) {
+	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read internal API contract: %v", err)
+	}
+	for _, operation := range []string{
+		"/api/v1/admin/feature-center/{feature}/config:",
+		"/api/v1/admin/feature-center/{feature}/health-check:",
+	} {
+		start := bytes.Index(contract, []byte(operation))
+		if start < 0 {
+			t.Fatalf("missing feature center operation %s", operation)
+		}
+		next := bytes.Index(contract[start+len(operation):], []byte("\n  /"))
+		end := len(contract)
+		if next >= 0 {
+			end = start + len(operation) + next
+		}
+		block := contract[start:end]
+		if !regexp.MustCompile(`(?m)^        "202":\r?$`).Match(block) {
+			t.Fatalf("feature center operation %s must document partial success", operation)
+		}
+		if !bytes.Contains(
+			block,
+			[]byte("#/components/schemas/FeatureCenterEnvelope"),
+		) {
+			t.Fatalf("feature center operation %s must return the saved feature", operation)
+		}
+	}
+	if !bytes.Contains(
+		contract,
+		[]byte("#/components/schemas/FeatureCenterMutationNotice"),
+	) || !bytes.Contains(contract, []byte("audit_write_failed")) {
+		t.Fatal("feature center partial-success notice schema is incomplete")
 	}
 }
 
@@ -190,16 +255,23 @@ func TestInternalAPIContractDocumentsRuntimeEndpoint(t *testing.T) {
 	}
 }
 
-// The relay resolves AI credentials by device id, so the contract must keep the
-// device-scoped endpoint documented alongside the runtime probe.
-func TestInternalAPIContractDocumentsDeviceCredentialEndpoint(t *testing.T) {
+// The relay must never receive a reusable provider credential. Its documented
+// surface is a short-lived execution ticket followed by the platform proxy.
+func TestInternalAPIContractDocumentsDeviceExecutionEndpoints(t *testing.T) {
 	contract, err := os.ReadFile("../../contracts/http/openapi.yaml")
 	if err != nil {
 		t.Fatalf("read internal API contract: %v", err)
 	}
-	expected := "/internal/v1/devices/{device_id}/ai-credential"
-	if !bytes.Contains(contract, []byte(expected)) {
-		t.Fatalf("expected %s in internal API contract", expected)
+	for _, expected := range []string{
+		"/internal/v1/devices/{device_id}/ai-execution-ticket:",
+		"/internal/v1/ai-execution:",
+	} {
+		if !bytes.Contains(contract, []byte(expected)) {
+			t.Fatalf("expected %s in internal API contract", expected)
+		}
+	}
+	if bytes.Contains(contract, []byte("/internal/v1/devices/{device_id}/ai-credential:")) {
+		t.Fatal("the plaintext credential endpoint must not remain in the contract")
 	}
 }
 
@@ -1621,10 +1693,10 @@ func TestInternalContentAndReleasePublicationContractDocumentsRoutes(t *testing.
 	}
 }
 
-func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
+func TestInternalExecutionRoutesAreHiddenWhenDisabled(t *testing.T) {
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,
-		"/internal/v1/devices/device-0001/ai-credential",
+		"/internal/v1/devices/device-0001/ai-execution-ticket",
 		nil,
 	)
 	recorder := httptest.NewRecorder()
@@ -1636,7 +1708,7 @@ func TestInternalCredentialRouteIsHiddenWhenDisabled(t *testing.T) {
 	}
 }
 
-func TestInternalCredentialRouteRequiresServiceToken(t *testing.T) {
+func TestInternalExecutionTicketRouteRequiresServiceToken(t *testing.T) {
 	options := newTestRouterOptions()
 	options.InternalAPIConfig = config.InternalAPIConfig{
 		Enabled:   true,
@@ -1644,10 +1716,11 @@ func TestInternalCredentialRouteRequiresServiceToken(t *testing.T) {
 	}
 	options.BindingService = &bindingservice.Service{}
 	options.AIService = &gatewayservice.Service{}
+	options.AIExecutionStore = &fakeAIExecutionStore{}
 
 	request := httptest.NewRequest(
 		stdhttp.MethodGet,
-		"/internal/v1/devices/device-0001/ai-credential",
+		"/internal/v1/devices/device-0001/ai-execution-ticket",
 		nil,
 	)
 	recorder := httptest.NewRecorder()
@@ -1655,6 +1728,32 @@ func TestInternalCredentialRouteRequiresServiceToken(t *testing.T) {
 
 	if recorder.Code != stdhttp.StatusUnauthorized {
 		t.Fatalf("expected status %d, got %d", stdhttp.StatusUnauthorized, recorder.Code)
+	}
+}
+
+// The removed route must be indistinguishable from any other unknown internal
+// path even when every execution dependency is configured.
+func TestRemovedPlaintextCredentialRouteReturnsNotFound(t *testing.T) {
+	options := newTestRouterOptions()
+	options.InternalAPIConfig = config.InternalAPIConfig{
+		Enabled:   true,
+		AuthToken: strings.Repeat("t", 32),
+	}
+	options.BindingService = &bindingservice.Service{}
+	options.AIService = &gatewayservice.Service{}
+	options.AIExecutionStore = &fakeAIExecutionStore{}
+
+	request := httptest.NewRequest(
+		stdhttp.MethodGet,
+		"/internal/v1/devices/device-0001/ai-credential",
+		nil,
+	)
+	request.Header.Set("Authorization", "Bearer "+strings.Repeat("t", 32))
+	recorder := httptest.NewRecorder()
+	NewRouter(options).ServeHTTP(recorder, request)
+
+	if recorder.Code != stdhttp.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", stdhttp.StatusNotFound, recorder.Code)
 	}
 }
 

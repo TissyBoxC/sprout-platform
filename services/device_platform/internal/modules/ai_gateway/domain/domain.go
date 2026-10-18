@@ -183,4 +183,6 @@ type Credential struct {
 	ProviderAccountID string
 	APIKey            string
 	KeyID             int64
+	ConcurrencyLimit  int
+	AllowedModels     []string
 }

@@ -31,13 +31,16 @@ type Repository interface {
 		ctx context.Context,
 		onlineThreshold time.Duration,
 	) (*domain.Overview, error)
-	ListFamilyAccounts(ctx context.Context) ([]domain.FamilyAccount, error)
+	ListFamilyAccounts(
+		ctx context.Context,
+		page domain.PageRequest,
+	) ([]domain.FamilyAccount, int, error)
 	ParentOverview(
 		ctx context.Context,
 		parentAccountID string,
 		onlineThreshold time.Duration,
 	) (*authdomain.ParentOverview, error)
-	ListReleases(ctx context.Context) ([]domain.Release, error)
+	ListReleases(ctx context.Context, page domain.PageRequest) ([]domain.Release, int, error)
 	CreateRelease(ctx context.Context, release *domain.Release) error
 	PublishRelease(ctx context.Context, version string, actorAccountID string) error
 	DeleteRelease(ctx context.Context, version string) error
@@ -116,7 +119,16 @@ func (r *PostgresRepository) RuntimePolicy(
 // provisioning failed must remain visible to operators.
 func (r *PostgresRepository) ListFamilyAccounts(
 	ctx context.Context,
-) ([]domain.FamilyAccount, error) {
+	page domain.PageRequest,
+) ([]domain.FamilyAccount, int, error) {
+	var total int
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM parent_accounts
+		WHERE parent_accounts.role = 'parent'
+	`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count family accounts: %w", err)
+	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT
 			parent_accounts.id,
@@ -141,13 +153,14 @@ func (r *PostgresRepository) ListFamilyAccounts(
 		FROM parent_accounts
 		LEFT JOIN ai_accounts ON ai_accounts.parent_account_id = parent_accounts.id
 		WHERE parent_accounts.role = 'parent'
-		ORDER BY parent_accounts.created_at DESC
-	`)
+		ORDER BY parent_accounts.created_at DESC, parent_accounts.id DESC
+		LIMIT $1 OFFSET $2
+	`, page.PageSize, page.Offset)
 	if err != nil {
-		return nil, fmt.Errorf("list family accounts: %w", err)
+		return nil, 0, fmt.Errorf("list family accounts: %w", err)
 	}
 	defer rows.Close()
-	accounts := make([]domain.FamilyAccount, 0)
+	accounts := make([]domain.FamilyAccount, 0, page.PageSize)
 	for rows.Next() {
 		var account domain.FamilyAccount
 		var providerAccountID *string
@@ -180,7 +193,7 @@ func (r *PostgresRepository) ListFamilyAccounts(
 			&credentialReady,
 			&aiUpdatedAt,
 		); err != nil {
-			return nil, fmt.Errorf("scan family account: %w", err)
+			return nil, 0, fmt.Errorf("scan family account: %w", err)
 		}
 		if providerAccountID != nil {
 			account.AIAccount = &domain.FamilyAIAccount{
@@ -198,9 +211,9 @@ func (r *PostgresRepository) ListFamilyAccounts(
 		accounts = append(accounts, account)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate family accounts: %w", err)
+		return nil, 0, fmt.Errorf("iterate family accounts: %w", err)
 	}
-	return accounts, nil
+	return accounts, total, nil
 }
 
 // PostgresRepository is the PostgreSQL-backed operations repository.
@@ -366,13 +379,12 @@ func (r *PostgresRepository) Overview(
 	); err != nil {
 		return nil, fmt.Errorf("load operations overview: %w", err)
 	}
-	releases, err := r.ListReleases(ctx)
+	releases, _, err := r.ListReleases(
+		ctx,
+		domain.PageRequest{Page: 1, PageSize: 5},
+	)
 	if err != nil {
 		return nil, err
-	}
-	const recentReleaseLimit = 5
-	if len(releases) > recentReleaseLimit {
-		releases = releases[:recentReleaseLimit]
 	}
 	overview.RecentReleases = releases
 	return overview, nil
@@ -435,7 +447,14 @@ func (r *PostgresRepository) ParentOverview(
 // ListReleases returns the newest release records for operators.
 func (r *PostgresRepository) ListReleases(
 	ctx context.Context,
-) ([]domain.Release, error) {
+	page domain.PageRequest,
+) ([]domain.Release, int, error) {
+	var total int
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM platform_releases
+	`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count platform releases: %w", err)
+	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT
 			id,
@@ -453,25 +472,25 @@ func (r *PostgresRepository) ListReleases(
 			created_at,
 			updated_at
 		FROM platform_releases
-		ORDER BY created_at DESC
-		LIMIT 100
-	`)
+		ORDER BY created_at DESC, id DESC
+		LIMIT $1 OFFSET $2
+	`, page.PageSize, page.Offset)
 	if err != nil {
-		return nil, fmt.Errorf("list platform releases: %w", err)
+		return nil, 0, fmt.Errorf("list platform releases: %w", err)
 	}
 	defer rows.Close()
-	releases := make([]domain.Release, 0)
+	releases := make([]domain.Release, 0, page.PageSize)
 	for rows.Next() {
 		release, err := scanRelease(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		releases = append(releases, *release)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate platform releases: %w", err)
+		return nil, 0, fmt.Errorf("iterate platform releases: %w", err)
 	}
-	return releases, nil
+	return releases, total, nil
 }
 
 // CreateRelease stores a draft release. Publishing is a separate action so a

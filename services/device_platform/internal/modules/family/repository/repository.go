@@ -3,12 +3,14 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/domain"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -17,11 +19,26 @@ type Repository interface {
 	CreateMember(ctx context.Context, member domain.Member) error
 	UpdateMemberRole(ctx context.Context, member domain.Member) error
 	DeleteMember(ctx context.Context, familyID string, userID string) error
+	UpdateMemberRoleWithAudit(
+		ctx context.Context,
+		member domain.Member,
+		audit domain.AuditEvent,
+	) error
+	DeleteMemberWithAudit(
+		ctx context.Context,
+		familyID string,
+		userID string,
+		audit domain.AuditEvent,
+	) error
 	Members(ctx context.Context, familyID string) ([]domain.Member, error)
 	Member(ctx context.Context, familyID string, userID string) (domain.Member, bool, error)
 	MemberByUser(ctx context.Context, userID string) (domain.Member, bool, error)
 
-	CreateInvitation(ctx context.Context, invitation domain.Invitation) error
+	CreateInvitation(
+		ctx context.Context,
+		invitation domain.Invitation,
+		audit domain.AuditEvent,
+	) error
 	Invitation(
 		ctx context.Context,
 		familyID string,
@@ -43,16 +60,28 @@ type Repository interface {
 		member domain.Member,
 		familyID string,
 		invitationID string,
+		audit domain.AuditEvent,
 	) error
 }
 
 // PostgresRepository is the PostgreSQL-backed family repository.
 type PostgresRepository struct {
-	pool *pgxpool.Pool
+	pool familyDatabase
+}
+
+type familyDatabase interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
 // NewPostgresRepository creates a family repository.
 func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
+	return &PostgresRepository{pool: pool}
+}
+
+func newRepositoryWithDatabase(pool familyDatabase) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
 }
 
@@ -80,6 +109,82 @@ func (r *PostgresRepository) CreateMember(
 			return domain.ErrMemberExists
 		}
 		return fmt.Errorf("insert family member: %w", err)
+	}
+	return nil
+}
+
+// UpdateMemberRoleWithAudit changes one member role and appends its security
+// audit record in the same transaction. A failed audit rolls the role back.
+func (r *PostgresRepository) UpdateMemberRoleWithAudit(
+	ctx context.Context,
+	member domain.Member,
+	audit domain.AuditEvent,
+) error {
+	transaction, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin family role audit transaction: %w", err)
+	}
+	defer func() {
+		_ = transaction.Rollback(ctx)
+	}()
+	tag, err := transaction.Exec(ctx, `
+		UPDATE family_members
+		SET role = $3, updated_at = $4
+		WHERE family_id = $1 AND user_id = $2
+	`,
+		member.FamilyID,
+		member.UserID,
+		member.Role,
+		member.UpdatedAt,
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return domain.ErrLastOwner
+		}
+		return fmt.Errorf("update family member role: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrMemberNotFound
+	}
+	if err := insertAudit(ctx, transaction, audit); err != nil {
+		return err
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return fmt.Errorf("commit family role audit transaction: %w", err)
+	}
+	return nil
+}
+
+// DeleteMemberWithAudit removes one member and appends its security audit
+// record in the same transaction.
+func (r *PostgresRepository) DeleteMemberWithAudit(
+	ctx context.Context,
+	familyID string,
+	userID string,
+	audit domain.AuditEvent,
+) error {
+	transaction, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin family removal audit transaction: %w", err)
+	}
+	defer func() {
+		_ = transaction.Rollback(ctx)
+	}()
+	tag, err := transaction.Exec(ctx, `
+		DELETE FROM family_members
+		WHERE family_id = $1 AND user_id = $2
+	`, familyID, userID)
+	if err != nil {
+		return fmt.Errorf("delete family member: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrMemberNotFound
+	}
+	if err := insertAudit(ctx, transaction, audit); err != nil {
+		return err
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return fmt.Errorf("commit family removal audit transaction: %w", err)
 	}
 	return nil
 }
@@ -232,8 +337,16 @@ func (r *PostgresRepository) MemberByUser(
 func (r *PostgresRepository) CreateInvitation(
 	ctx context.Context,
 	invitation domain.Invitation,
+	audit domain.AuditEvent,
 ) error {
-	_, err := r.pool.Exec(ctx, `
+	transaction, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin family invitation audit transaction: %w", err)
+	}
+	defer func() {
+		_ = transaction.Rollback(ctx)
+	}()
+	_, err = transaction.Exec(ctx, `
 		INSERT INTO family_invitations (
 			id, family_id, email, role, status, invited_by_user_id,
 			created_at, expires_at
@@ -253,6 +366,12 @@ func (r *PostgresRepository) CreateInvitation(
 			return domain.ErrInvitationState
 		}
 		return fmt.Errorf("insert family invitation: %w", err)
+	}
+	if err := insertAudit(ctx, transaction, audit); err != nil {
+		return err
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return fmt.Errorf("commit family invitation audit transaction: %w", err)
 	}
 	return nil
 }
@@ -348,29 +467,44 @@ func (r *PostgresRepository) UpdateInvitationState(
 	invitationID string,
 	status string,
 ) error {
-	tag, err := r.pool.Exec(ctx, `
+	transaction, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin revoke family invitation: %w", err)
+	}
+	defer func() {
+		_ = transaction.Rollback(ctx)
+	}()
+	tag, err := transaction.Exec(ctx, `
 		UPDATE family_invitations
 		SET status = $3,
 		    accepted_at = CASE WHEN $3 = 'accepted' THEN NOW() ELSE accepted_at END
-		WHERE family_id = $1 AND id = $2 AND status = 'pending'
+		WHERE family_id = $1
+		  AND id = $2
+		  AND status = 'pending'
+		  AND expires_at > NOW()
 	`, familyID, invitationID, status)
 	if err != nil {
 		return fmt.Errorf("update family invitation: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return domain.ErrInvitationState
+		return classifyFailedInvitationUpdate(ctx, transaction, familyID, invitationID)
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return fmt.Errorf("commit revoke family invitation: %w", err)
 	}
 	return nil
 }
 
 // AcceptInvitation consumes a pending invitation and creates its membership in
-// one transaction. A concurrent or repeated acceptance observes
-// ErrInvitationState and writes no membership.
+// one transaction. The conditional update checks both lifecycle and expiry so
+// an expired invitation cannot be accepted even when the initial read raced
+// with expiry. A concurrent or repeated acceptance writes no membership.
 func (r *PostgresRepository) AcceptInvitation(
 	ctx context.Context,
 	member domain.Member,
 	familyID string,
 	invitationID string,
+	audit domain.AuditEvent,
 ) error {
 	transaction, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -384,13 +518,16 @@ func (r *PostgresRepository) AcceptInvitation(
 		UPDATE family_invitations
 		SET status = 'accepted',
 		    accepted_at = NOW()
-		WHERE family_id = $1 AND id = $2 AND status = 'pending'
+		WHERE family_id = $1
+		  AND id = $2
+		  AND status = 'pending'
+		  AND expires_at > NOW()
 	`, familyID, invitationID)
 	if err != nil {
 		return fmt.Errorf("consume family invitation: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return domain.ErrInvitationState
+		return classifyFailedInvitationUpdate(ctx, transaction, familyID, invitationID)
 	}
 	if _, err := transaction.Exec(ctx, `
 		INSERT INTO family_members (
@@ -409,8 +546,83 @@ func (r *PostgresRepository) AcceptInvitation(
 		}
 		return fmt.Errorf("insert accepted family member: %w", err)
 	}
+	if err := insertAudit(ctx, transaction, audit); err != nil {
+		return err
+	}
 	if err := transaction.Commit(ctx); err != nil {
 		return fmt.Errorf("commit accepted family invitation: %w", err)
+	}
+	return nil
+}
+
+func classifyFailedInvitationUpdate(
+	ctx context.Context,
+	transaction pgx.Tx,
+	familyID string,
+	invitationID string,
+) error {
+	var status string
+	var expired bool
+	err := transaction.QueryRow(ctx, `
+		SELECT status, expires_at <= NOW()
+		FROM family_invitations
+		WHERE family_id = $1 AND id = $2
+		FOR UPDATE
+	`, familyID, invitationID).Scan(&status, &expired)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrInvitationNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("classify family invitation update: %w", err)
+	}
+	if status == domain.InvitationPending && expired {
+		return domain.ErrInvitationExpired
+	}
+	if status == domain.InvitationPending {
+		return domain.ErrInvitationState
+	}
+	return domain.ErrInvitationConcurrent
+}
+
+type auditInserter interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}
+
+func insertAudit(
+	ctx context.Context,
+	executor auditInserter,
+	event domain.AuditEvent,
+) error {
+	if event.ID == "" || event.Action == "" || event.CreatedAt.IsZero() {
+		return domain.ErrInvalidMember
+	}
+	detail, err := json.Marshal(event.Detail)
+	if err != nil {
+		return domain.ErrInvalidMember
+	}
+	if len(detail) > 1<<20 {
+		return domain.ErrInvalidMember
+	}
+	if _, err := executor.Exec(ctx, `
+		INSERT INTO platform_parent_audit (
+			id, actor_account_id, target_account_id, action, detail, created_at
+		) VALUES (
+			$1,
+			NULLIF($2, '')::uuid,
+			NULLIF($3, '')::uuid,
+			$4,
+			$5::jsonb,
+			$6
+		)
+	`,
+		event.ID,
+		event.ActorAccountID,
+		event.TargetAccountID,
+		event.Action,
+		detail,
+		event.CreatedAt,
+	); err != nil {
+		return fmt.Errorf("insert family security audit: %w", err)
 	}
 	return nil
 }

@@ -82,11 +82,7 @@ func TestUpdatePolicyReturnsConflictForStaleVersion(t *testing.T) {
 		}`),
 	)
 	request.SetPathValue("child_id", "child_001")
-	request = request.WithContext(context.WithValue(
-		request.Context(),
-		authenticatedAccountKey{},
-		"family_001",
-	))
+	request = withOwnerFamilyContext(request, "family_001")
 	recorder := httptest.NewRecorder()
 	handler.updatePolicy(recorder, request)
 	if recorder.Code != http.StatusConflict {
@@ -139,11 +135,7 @@ func TestUpdatePolicySucceedsWithCurrentVersion(t *testing.T) {
 		}`),
 	)
 	request.SetPathValue("child_id", "child_001")
-	request = request.WithContext(context.WithValue(
-		request.Context(),
-		authenticatedAccountKey{},
-		"family_001",
-	))
+	request = withOwnerFamilyContext(request, "family_001")
 	recorder := httptest.NewRecorder()
 	handler.updatePolicy(recorder, request)
 	if recorder.Code != http.StatusOK {

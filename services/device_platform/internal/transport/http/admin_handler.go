@@ -66,8 +66,16 @@ type operationsAdminService interface {
 		expectedVersion int64,
 	) (*operationsdomain.Settings, int64, error)
 	Overview(ctx context.Context) (*operationsdomain.Overview, error)
-	ListFamilyAccounts(ctx context.Context) ([]operationsdomain.FamilyAccount, error)
-	ListReleases(ctx context.Context) ([]operationsdomain.Release, error)
+	ListFamilyAccounts(
+		ctx context.Context,
+		page int,
+		pageSize int,
+	) (operationsdomain.FamilyAccountPage, error)
+	ListReleases(
+		ctx context.Context,
+		page int,
+		pageSize int,
+	) (operationsdomain.ReleasePage, error)
 	CreateRelease(
 		ctx context.Context,
 		input operationsdomain.ReleaseInput,

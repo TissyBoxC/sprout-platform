@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -51,11 +52,37 @@ type Repository interface {
 	RevokeSession(ctx context.Context, sessionID string) error
 	RevokeAllSessions(ctx context.Context, parentAccountID string) error
 	CreateMFAChallenge(ctx context.Context, challenge *domain.MFAChallenge) error
+	DeleteMFAChallenge(ctx context.Context, challengeID string) error
 	GetMFAChallengeByHash(
 		ctx context.Context,
 		challengeHash string,
 	) (*domain.MFAChallenge, error)
-	ConsumeMFAChallenge(ctx context.Context, challengeID string) error
+	GetMFAAccountFailureState(
+		ctx context.Context,
+		parentAccountID string,
+	) (*domain.MFAAccountFailureState, error)
+	ClearExpiredMFAAccountLock(
+		ctx context.Context,
+		parentAccountID string,
+		now time.Time,
+	) (*domain.MFAAccountFailureState, error)
+	ConsumeMFAChallenge(
+		ctx context.Context,
+		challengeID string,
+		now time.Time,
+	) error
+	RecordMFAChallengeFailure(
+		ctx context.Context,
+		challengeID string,
+		maxAttempts int,
+		lockDuration time.Duration,
+		now time.Time,
+	) (
+		*domain.MFAChallenge,
+		*domain.MFAAccountFailureState,
+		MFAFailureOutcome,
+		error,
+	)
 	GetTOTPCredential(
 		ctx context.Context,
 		parentAccountID string,
@@ -72,6 +99,18 @@ type Repository interface {
 		codeHash string,
 	) error
 }
+
+// MFAFailureOutcome distinguishes the account-state transition performed by
+// RecordMFAChallengeFailure from a request that observed another request's
+// terminal state.
+type MFAFailureOutcome string
+
+const (
+	MFAFailureIncremented   MFAFailureOutcome = "incremented"
+	MFAFailureLockedNow     MFAFailureOutcome = "locked_now"
+	MFAFailureAlreadyLocked MFAFailureOutcome = "already_locked"
+	MFAFailureLockExpired   MFAFailureOutcome = "lock_expired"
+)
 
 // PostgresRepository is the PostgreSQL-backed authentication repository.
 type PostgresRepository struct {
@@ -314,13 +353,22 @@ func (r *PostgresRepository) GetParentAccountByID(
 	return scanParentAccount(row)
 }
 
-// UpdateLastLogin records a successful parent login without changing the
-// account's other authentication state.
+// UpdateLastLogin records a successful parent login and clears the shared MFA
+// failure budget in the same transaction. A successful password login resets
+// the account's pre-MFA failure state without issuing an administrator session.
 func (r *PostgresRepository) UpdateLastLogin(
 	ctx context.Context,
 	accountID string,
 ) error {
-	tag, err := r.pool.Exec(ctx, `
+	transaction, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin parent last login: %w", err)
+	}
+	defer func() {
+		_ = transaction.Rollback(ctx)
+	}()
+
+	tag, err := transaction.Exec(ctx, `
 		UPDATE parent_accounts
 		SET last_login_at = NOW(),
 		    updated_at = NOW()
@@ -332,6 +380,20 @@ func (r *PostgresRepository) UpdateLastLogin(
 	}
 	if tag.RowsAffected() == 0 {
 		return domain.ErrAccountNotFound
+	}
+	if _, err := transaction.Exec(ctx, `
+		UPDATE admin_mfa_challenges
+		SET failed_attempts = 0,
+		    locked_until = NULL,
+		    last_failed_at = NULL,
+		    updated_at = NOW()
+		WHERE parent_account_id = $1
+		  AND challenge_hash IS NULL
+	`, accountID); err != nil {
+		return fmt.Errorf("clear parent MFA failures after login: %w", err)
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return fmt.Errorf("commit parent last login: %w", err)
 	}
 	return nil
 }
@@ -620,28 +682,93 @@ func (r *PostgresRepository) RevokeAllSessions(
 }
 
 // CreateMFAChallenge stores one hashed, short-lived administrator challenge.
+// The account state is checked in the same transaction so a lock committed by a
+// concurrent failure cannot be bypassed by an in-flight password login.
 func (r *PostgresRepository) CreateMFAChallenge(
 	ctx context.Context,
 	challenge *domain.MFAChallenge,
 ) error {
-	_, err := r.pool.Exec(ctx, `
+	transaction, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin administrator MFA challenge: %w", err)
+	}
+	defer func() {
+		_ = transaction.Rollback(ctx)
+	}()
+
+	state, err := lockMFAAccountFailureState(
+		ctx,
+		transaction,
+		challenge.ParentAccountID,
+		challenge.CreatedAt,
+	)
+	if err != nil {
+		return err
+	}
+	if state.LockedUntil != nil &&
+		!state.LockedUntil.After(challenge.CreatedAt) {
+		state.FailedAttempts = 0
+		state.LockedUntil = nil
+		state.LastFailedAt = nil
+		state.UpdatedAt = challenge.CreatedAt
+		if _, err := transaction.Exec(ctx, `
+			UPDATE admin_mfa_challenges
+			SET failed_attempts = 0,
+			    locked_until = NULL,
+			    last_failed_at = NULL,
+			    updated_at = $2
+			WHERE parent_account_id = $1
+			  AND challenge_hash IS NULL
+		`, challenge.ParentAccountID, challenge.CreatedAt); err != nil {
+			return fmt.Errorf("clear expired administrator MFA account state: %w", err)
+		}
+	}
+	if state.LockedUntil != nil &&
+		state.LockedUntil.After(challenge.CreatedAt) {
+		return domain.ErrMFAAccountLocked
+	}
+	challenge.FailedAttempts = state.FailedAttempts
+	if _, err := transaction.Exec(ctx, `
 		INSERT INTO admin_mfa_challenges (
 			id,
 			parent_account_id,
 			challenge_hash,
 			expires_at,
+			failed_attempts,
 			created_at
 		)
-		VALUES ($1, $2, $3, $4, $5)
+		VALUES ($1, $2, $3, $4, $5, $6)
 	`,
 		challenge.ID,
 		challenge.ParentAccountID,
 		challenge.ChallengeHash,
 		challenge.ExpiresAt,
+		challenge.FailedAttempts,
 		challenge.CreatedAt,
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("insert administrator MFA challenge: %w", err)
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return fmt.Errorf("commit administrator MFA challenge: %w", err)
+	}
+	return nil
+}
+
+// DeleteMFAChallenge removes a challenge that could not be audited before its
+// token was returned. It is intentionally limited to that issuance failure
+// path; normal challenge lifecycle changes use consume or lock.
+func (r *PostgresRepository) DeleteMFAChallenge(
+	ctx context.Context,
+	challengeID string,
+) error {
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM admin_mfa_challenges
+		WHERE id = $1
+		  AND consumed_at IS NULL
+		  AND locked_at IS NULL
+	`, challengeID)
+	if err != nil {
+		return fmt.Errorf("delete unaudited administrator MFA challenge: %w", err)
 	}
 	return nil
 }
@@ -658,6 +785,8 @@ func (r *PostgresRepository) GetMFAChallengeByHash(
 			challenge_hash,
 			expires_at,
 			consumed_at,
+			failed_attempts,
+			locked_at,
 			created_at
 		FROM admin_mfa_challenges
 		WHERE challenge_hash = $1
@@ -670,6 +799,8 @@ func (r *PostgresRepository) GetMFAChallengeByHash(
 		&challenge.ChallengeHash,
 		&challenge.ExpiresAt,
 		&challenge.ConsumedAt,
+		&challenge.FailedAttempts,
+		&challenge.LockedAt,
 		&challenge.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -681,25 +812,399 @@ func (r *PostgresRepository) GetMFAChallengeByHash(
 	return &challenge, nil
 }
 
-// ConsumeMFAChallenge atomically prevents replay of an administrator challenge.
+// GetMFAAccountFailureState reads the account-wide MFA failure budget. A
+// missing row is a clean state rather than an error.
+func (r *PostgresRepository) GetMFAAccountFailureState(
+	ctx context.Context,
+	parentAccountID string,
+) (*domain.MFAAccountFailureState, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT
+			parent_account_id,
+			failed_attempts,
+			locked_until,
+			last_failed_at,
+			updated_at
+		FROM admin_mfa_challenges
+		WHERE parent_account_id = $1
+		  AND challenge_hash IS NULL
+	`, parentAccountID)
+
+	state, err := scanMFAAccountFailureState(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return &domain.MFAAccountFailureState{
+			ParentAccountID: parentAccountID,
+		}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get administrator MFA account state: %w", err)
+	}
+	return state, nil
+}
+
+// ClearExpiredMFAAccountLock atomically resets a lock whose deadline passed.
+// The reset happens before a new challenge is inserted so its 5-minute lifetime
+// does not shorten a 15-minute account lockout.
+func (r *PostgresRepository) ClearExpiredMFAAccountLock(
+	ctx context.Context,
+	parentAccountID string,
+	now time.Time,
+) (*domain.MFAAccountFailureState, error) {
+	transaction, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin administrator MFA lock recovery: %w", err)
+	}
+	defer func() {
+		_ = transaction.Rollback(ctx)
+	}()
+
+	state, err := lockMFAAccountFailureState(
+		ctx,
+		transaction,
+		parentAccountID,
+		now,
+	)
+	if err != nil {
+		return nil, err
+	}
+	recovered := false
+	if state.LockedUntil != nil && !state.LockedUntil.After(now) {
+		recovered = true
+		state.FailedAttempts = 0
+		state.LockedUntil = nil
+		state.UpdatedAt = now
+		state.LastFailedAt = nil
+		if _, err := transaction.Exec(ctx, `
+			UPDATE admin_mfa_challenges
+			SET failed_attempts = 0,
+			    locked_until = NULL,
+			    last_failed_at = NULL,
+			    updated_at = $2
+			WHERE parent_account_id = $1
+			  AND challenge_hash IS NULL
+		`, parentAccountID, now); err != nil {
+			return nil, fmt.Errorf("clear expired administrator MFA lock: %w", err)
+		}
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit administrator MFA lock recovery: %w", err)
+	}
+	state.Recovered = recovered
+	return state, nil
+}
+
+// ConsumeMFAChallenge atomically prevents replay and clears the account's
+// shared failure budget. The challenge and account state are locked in one
+// transaction so a concurrent failure cannot repopulate a just-cleared budget.
 func (r *PostgresRepository) ConsumeMFAChallenge(
 	ctx context.Context,
 	challengeID string,
+	now time.Time,
 ) error {
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE admin_mfa_challenges
-		SET consumed_at = NOW()
-		WHERE id = $1
-		  AND consumed_at IS NULL
-		  AND expires_at > NOW()
-	`, challengeID)
+	transaction, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("consume administrator MFA challenge: %w", err)
+		return fmt.Errorf("begin administrator MFA consumption: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
+	defer func() {
+		_ = transaction.Rollback(ctx)
+	}()
+
+	var parentAccountID string
+	if err := transaction.QueryRow(ctx, `
+		SELECT parent_account_id
+		FROM admin_mfa_challenges
+		WHERE id = $1
+	`, challengeID).Scan(&parentAccountID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrMFAChallengeNotFound
+		}
+		return fmt.Errorf("find administrator MFA challenge account: %w", err)
+	}
+	if _, err := lockMFAAccountFailureState(
+		ctx,
+		transaction,
+		parentAccountID,
+		now,
+	); err != nil {
+		return err
+	}
+
+	var challenge domain.MFAChallenge
+	if err := transaction.QueryRow(ctx, `
+		SELECT
+			id,
+			parent_account_id,
+			challenge_hash,
+			expires_at,
+			consumed_at,
+			failed_attempts,
+			locked_at,
+			created_at
+		FROM admin_mfa_challenges
+		WHERE id = $1
+		FOR UPDATE
+	`, challengeID).Scan(
+		&challenge.ID,
+		&challenge.ParentAccountID,
+		&challenge.ChallengeHash,
+		&challenge.ExpiresAt,
+		&challenge.ConsumedAt,
+		&challenge.FailedAttempts,
+		&challenge.LockedAt,
+		&challenge.CreatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrMFAChallengeNotFound
+		}
+		return fmt.Errorf("lock administrator MFA challenge: %w", err)
+	}
+	if state, stateErr := scanMFAAccountFailureState(
+		transaction.QueryRow(ctx, `
+			SELECT
+				parent_account_id,
+				failed_attempts,
+				locked_until,
+				last_failed_at,
+				updated_at
+			FROM admin_mfa_challenges
+			WHERE parent_account_id = $1
+			  AND challenge_hash IS NULL
+		`, parentAccountID),
+	); stateErr == nil {
+		if state.LockedUntil != nil && state.LockedUntil.After(now) {
+			return domain.ErrMFAAccountLocked
+		}
+	} else if !errors.Is(stateErr, pgx.ErrNoRows) {
+		return fmt.Errorf("read administrator MFA account state: %w", stateErr)
+	}
+	if challenge.ConsumedAt != nil {
 		return domain.ErrMFAChallengeConsumed
 	}
+	if !challenge.ExpiresAt.After(now) {
+		return domain.ErrMFAChallengeExpired
+	}
+	if challenge.LockedAt != nil {
+		return domain.ErrMFAAccountLocked
+	}
+	if strings.TrimSpace(challenge.ChallengeHash) != "" {
+		if _, err := transaction.Exec(ctx, `
+			UPDATE admin_mfa_challenges
+			SET consumed_at = $2
+			WHERE id = $1
+		`, challengeID, now); err != nil {
+			return fmt.Errorf("consume administrator MFA challenge: %w", err)
+		}
+	}
+	if _, err := transaction.Exec(ctx, `
+		UPDATE admin_mfa_challenges
+		SET failed_attempts = 0,
+		    locked_until = NULL,
+		    last_failed_at = NULL,
+		    updated_at = $2
+		WHERE parent_account_id = $1
+		  AND challenge_hash IS NULL
+	`, parentAccountID, now); err != nil {
+		return fmt.Errorf("clear administrator MFA account failures: %w", err)
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return fmt.Errorf("commit administrator MFA consumption: %w", err)
+	}
 	return nil
+}
+
+// RecordMFAChallengeFailure increments the account-wide counter and applies
+// the terminal lock in one transaction. The account row, not the challenge, is
+// the lockout authority, so starting a new challenge cannot reset the budget.
+func (r *PostgresRepository) RecordMFAChallengeFailure(
+	ctx context.Context,
+	challengeID string,
+	maxAttempts int,
+	lockDuration time.Duration,
+	now time.Time,
+) (
+	*domain.MFAChallenge,
+	*domain.MFAAccountFailureState,
+	MFAFailureOutcome,
+	error,
+) {
+	if maxAttempts <= 0 {
+		return nil, nil, "", errors.New("MFA maximum attempts must be positive")
+	}
+	if lockDuration <= 0 {
+		return nil, nil, "", errors.New("MFA lock duration must be positive")
+	}
+	transaction, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("begin administrator MFA failure: %w", err)
+	}
+	defer func() {
+		_ = transaction.Rollback(ctx)
+	}()
+
+	var parentAccountID string
+	if err := transaction.QueryRow(ctx, `
+		SELECT parent_account_id
+		FROM admin_mfa_challenges
+		WHERE id = $1
+	`, challengeID).Scan(&parentAccountID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, "", domain.ErrMFAChallengeNotFound
+		}
+		return nil, nil, "", fmt.Errorf("find administrator MFA challenge account: %w", err)
+	}
+	state, err := lockMFAAccountFailureState(
+		ctx,
+		transaction,
+		parentAccountID,
+		now,
+	)
+	if err != nil {
+		return nil, nil, "", err
+	}
+
+	var challenge domain.MFAChallenge
+	if err := transaction.QueryRow(ctx, `
+		SELECT
+			id,
+			parent_account_id,
+			challenge_hash,
+			expires_at,
+			consumed_at,
+			failed_attempts,
+			locked_at,
+			created_at
+		FROM admin_mfa_challenges
+		WHERE id = $1
+		FOR UPDATE
+	`, challengeID).Scan(
+		&challenge.ID,
+		&challenge.ParentAccountID,
+		&challenge.ChallengeHash,
+		&challenge.ExpiresAt,
+		&challenge.ConsumedAt,
+		&challenge.FailedAttempts,
+		&challenge.LockedAt,
+		&challenge.CreatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, "", domain.ErrMFAChallengeNotFound
+		}
+		return nil, nil, "", fmt.Errorf("lock administrator MFA challenge: %w", err)
+	}
+	if challenge.ConsumedAt != nil {
+		return &challenge, state, "", domain.ErrMFAChallengeConsumed
+	}
+	if !challenge.ExpiresAt.After(now) {
+		return &challenge, state, "", domain.ErrMFAChallengeExpired
+	}
+	if challenge.LockedAt != nil {
+		return &challenge, state, MFAFailureAlreadyLocked, domain.ErrMFAAccountLocked
+	}
+	if state.LockedUntil != nil && state.LockedUntil.After(now) {
+		return &challenge, state, MFAFailureAlreadyLocked, domain.ErrMFAAccountLocked
+	}
+
+	outcome := MFAFailureIncremented
+	if state.LockedUntil != nil {
+		state.FailedAttempts = 0
+		state.LockedUntil = nil
+		state.LastFailedAt = nil
+		outcome = MFAFailureLockExpired
+	}
+	state.FailedAttempts++
+	state.LastFailedAt = &now
+	state.UpdatedAt = now
+	if state.FailedAttempts >= maxAttempts {
+		lockedUntil := now.Add(lockDuration)
+		state.LockedUntil = &lockedUntil
+		challenge.LockedAt = &now
+		outcome = MFAFailureLockedNow
+	}
+
+	if _, err := transaction.Exec(ctx, `
+		UPDATE admin_mfa_challenges
+		SET failed_attempts = $2,
+		    locked_until = $3,
+		    last_failed_at = $4,
+		    updated_at = $5
+		WHERE parent_account_id = $1
+		  AND challenge_hash IS NULL
+	`, state.ParentAccountID, state.FailedAttempts, state.LockedUntil,
+		state.LastFailedAt, state.UpdatedAt); err != nil {
+		return nil, nil, "", fmt.Errorf("update administrator MFA account failures: %w", err)
+	}
+	challenge.FailedAttempts = state.FailedAttempts
+	if _, err := transaction.Exec(ctx, `
+		UPDATE admin_mfa_challenges
+		SET failed_attempts = $2,
+		    locked_at = $3
+		WHERE id = $1
+		  AND locked_at IS NULL
+	`, challenge.ID, challenge.FailedAttempts, challenge.LockedAt); err != nil {
+		return nil, nil, "", fmt.Errorf("record administrator MFA challenge failures: %w", err)
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return nil, nil, "", fmt.Errorf("commit administrator MFA failure: %w", err)
+	}
+	return &challenge, state, outcome, nil
+}
+
+func lockMFAAccountFailureState(
+	ctx context.Context,
+	transaction pgx.Tx,
+	parentAccountID string,
+	now time.Time,
+) (*domain.MFAAccountFailureState, error) {
+	if _, err := transaction.Exec(ctx, `
+		INSERT INTO admin_mfa_challenges (
+			id,
+			parent_account_id,
+			challenge_hash,
+			expires_at,
+			failed_attempts,
+			consumed_at,
+			created_at,
+			updated_at
+		)
+		VALUES ($1, $2, NULL, 'infinity', 0, $3, $3, $3)
+		ON CONFLICT (parent_account_id)
+		WHERE challenge_hash IS NULL
+		DO NOTHING
+	`, uuid.NewString(), parentAccountID, now); err != nil {
+		return nil, fmt.Errorf("ensure administrator MFA account state: %w", err)
+	}
+	state, err := scanMFAAccountFailureState(transaction.QueryRow(ctx, `
+		SELECT
+			parent_account_id,
+			failed_attempts,
+			locked_until,
+			last_failed_at,
+			updated_at
+		FROM admin_mfa_challenges
+		WHERE parent_account_id = $1
+		  AND challenge_hash IS NULL
+		FOR UPDATE
+	`, parentAccountID))
+	if err != nil {
+		return nil, fmt.Errorf("lock administrator MFA account state: %w", err)
+	}
+	return state, nil
+}
+
+func scanMFAAccountFailureState(
+	row rowScanner,
+) (*domain.MFAAccountFailureState, error) {
+	var state domain.MFAAccountFailureState
+	if err := row.Scan(
+		&state.ParentAccountID,
+		&state.FailedAttempts,
+		&state.LockedUntil,
+		&state.LastFailedAt,
+		&state.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	return &state, nil
 }
 
 // GetTOTPCredential loads the encrypted TOTP enrollment for one administrator.

@@ -30,7 +30,34 @@ var (
 	ErrInvitationExpired = errors.New("family invitation expired")
 	// ErrInvitationState reports an invitation that is no longer pending.
 	ErrInvitationState = errors.New("family invitation is not pending")
+	// ErrPermissionDenied reports an action the member's role cannot perform.
+	ErrPermissionDenied = errors.New("family permission denied")
+	// ErrInvitationConcurrent reports an invitation changed under a concurrent
+	// accept. The caller must reload the invitation before deciding the next
+	// user-visible state.
+	ErrInvitationConcurrent = errors.New("family invitation changed concurrently")
 )
+
+// Security audit action names. They are stable operator-facing identifiers and
+// never contain invitation emails, credentials, or child data.
+const (
+	AuditInvitationCreated  = "family.invitation.created"
+	AuditInvitationAccepted = "family.invitation.accepted"
+	AuditMemberRoleUpdated  = "family.member.role_updated"
+	AuditMemberRemoved      = "family.member.removed"
+)
+
+// AuditEvent is one safe family security audit record. Detail must contain
+// only stable identifiers, roles, and timestamps; never an invitee email or
+// child data.
+type AuditEvent struct {
+	ID              string
+	ActorAccountID  string
+	TargetAccountID string
+	Action          string
+	Detail          map[string]any
+	CreatedAt       time.Time
+}
 
 // SchemaVersion is the family contract version shared with the clients.
 const SchemaVersion = "1.0.0"
@@ -46,6 +73,63 @@ const (
 // Roles is the canonical ordered role catalogue shared by clients and
 // validation.
 var Roles = []string{RoleOwner, RoleGuardian, RoleViewer}
+
+// Action identifies one family-scoped permission check. Callers must use the
+// canonical action constants below so HTTP routes and service use cases cannot
+// drift into different privilege rules.
+type Action string
+
+// Actions is the complete, ordered permission catalogue. Client capability
+// reports and tests use the same list as the policy evaluator.
+var Actions = []Action{
+	ActionFamilyRead,
+	ActionMemberRead,
+	ActionMemberManage,
+	ActionInvitationRead,
+	ActionInvitationManage,
+	ActionChildRead,
+	ActionChildManage,
+	ActionDeviceRead,
+	ActionDeviceBind,
+	ActionDeviceManage,
+	ActionVisionRead,
+	ActionVisionExecute,
+	ActionPrivacyRead,
+	ActionPrivacyManage,
+	ActionAIAccountRead,
+	ActionAIAccountManage,
+	ActionFamilyProfileWrite,
+}
+
+const (
+	ActionFamilyRead         Action = "family_read"
+	ActionMemberRead         Action = "member_read"
+	ActionMemberManage       Action = "member_manage"
+	ActionInvitationRead     Action = "invitation_read"
+	ActionInvitationManage   Action = "invitation_manage"
+	ActionChildRead          Action = "child_read"
+	ActionChildManage        Action = "child_manage"
+	ActionDeviceRead         Action = "device_read"
+	ActionDeviceBind         Action = "device_bind"
+	ActionDeviceManage       Action = "device_manage"
+	ActionVisionRead         Action = "vision_read"
+	ActionVisionExecute      Action = "vision_execute"
+	ActionPrivacyRead        Action = "privacy_read"
+	ActionPrivacyManage      Action = "privacy_manage"
+	ActionAIAccountRead      Action = "ai_account_read"
+	ActionAIAccountManage    Action = "ai_account_manage"
+	ActionFamilyProfileWrite Action = "family_profile_write"
+)
+
+// Access is the resolved authorization context for one authenticated family
+// member. OwnerUserID is the account under which family devices, children and
+// AI data are stored.
+type Access struct {
+	FamilyID    string
+	ActorUserID string
+	OwnerUserID string
+	Role        string
+}
 
 // The invitation lifecycle states.
 const (
@@ -112,6 +196,84 @@ func CanInvite(role string) bool {
 // members. Only the owner may, so a guardian cannot remove a peer.
 func CanManageMembers(role string) bool {
 	return role == RoleOwner
+}
+
+// Can reports whether role may perform action. Unknown roles and actions fail
+// closed so adding a route without a policy cannot accidentally grant access.
+func Can(role string, action Action) bool {
+	switch role {
+	case RoleOwner:
+		return ownerCan(action)
+	case RoleGuardian:
+		return guardianCan(action)
+	case RoleViewer:
+		return viewerCan(action)
+	default:
+		return false
+	}
+}
+
+func ownerCan(action Action) bool {
+	switch action {
+	case ActionFamilyRead,
+		ActionMemberRead,
+		ActionMemberManage,
+		ActionInvitationRead,
+		ActionInvitationManage,
+		ActionChildRead,
+		ActionChildManage,
+		ActionDeviceRead,
+		ActionDeviceBind,
+		ActionDeviceManage,
+		ActionVisionRead,
+		ActionVisionExecute,
+		ActionPrivacyRead,
+		ActionPrivacyManage,
+		ActionAIAccountRead,
+		ActionAIAccountManage,
+		ActionFamilyProfileWrite:
+		return true
+	default:
+		return false
+	}
+}
+
+func guardianCan(action Action) bool {
+	switch action {
+	case ActionFamilyRead,
+		ActionMemberRead,
+		ActionInvitationRead,
+		ActionInvitationManage,
+		ActionChildRead,
+		ActionChildManage,
+		ActionDeviceRead,
+		ActionDeviceBind,
+		ActionDeviceManage,
+		ActionVisionRead,
+		ActionVisionExecute,
+		ActionPrivacyRead,
+		ActionPrivacyManage,
+		ActionAIAccountRead:
+		return true
+	default:
+		return false
+	}
+}
+
+func viewerCan(action Action) bool {
+	switch action {
+	case ActionFamilyRead,
+		ActionMemberRead,
+		ActionInvitationRead,
+		ActionChildRead,
+		ActionDeviceRead,
+		ActionVisionRead,
+		ActionPrivacyRead,
+		ActionAIAccountRead:
+		return true
+	default:
+		return false
+	}
 }
 
 // NormalizeEmail lowercases and trims an invitation email.

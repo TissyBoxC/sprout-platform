@@ -99,8 +99,21 @@ func (s *Service) SetArtifactStore(store ReleaseArtifactStore) {
 // ListFamilyAccounts returns parent accounts with their dependent AI account.
 func (s *Service) ListFamilyAccounts(
 	ctx context.Context,
-) ([]domain.FamilyAccount, error) {
-	return s.repository.ListFamilyAccounts(ctx)
+	page int,
+	pageSize int,
+) (domain.FamilyAccountPage, error) {
+	request := domain.NormalizePageRequest(page, pageSize)
+	accounts, total, err := s.repository.ListFamilyAccounts(ctx, request)
+	if err != nil {
+		return domain.FamilyAccountPage{}, err
+	}
+	if accounts == nil {
+		accounts = make([]domain.FamilyAccount, 0)
+	}
+	return domain.FamilyAccountPage{
+		Accounts:   accounts,
+		Pagination: domain.NewPagination(request, total),
+	}, nil
 }
 
 // AppUpdate returns the newest published update for one client.
@@ -284,11 +297,26 @@ func (s *Service) ParentOverview(
 	)
 }
 
-// ListReleases returns all release records for the management console.
+// ListReleases returns one stable page of release records for the management
+// console. Ordering is created_at DESC, id DESC so equal timestamps never
+// reorder rows between page loads.
 func (s *Service) ListReleases(
 	ctx context.Context,
-) ([]domain.Release, error) {
-	return s.repository.ListReleases(ctx)
+	page int,
+	pageSize int,
+) (domain.ReleasePage, error) {
+	request := domain.NormalizePageRequest(page, pageSize)
+	releases, total, err := s.repository.ListReleases(ctx, request)
+	if err != nil {
+		return domain.ReleasePage{}, err
+	}
+	if releases == nil {
+		releases = make([]domain.Release, 0)
+	}
+	return domain.ReleasePage{
+		Releases:   releases,
+		Pagination: domain.NewPagination(request, total),
+	}, nil
 }
 
 // FindReleaseArtifact resolves a downloadable release file from the persisted

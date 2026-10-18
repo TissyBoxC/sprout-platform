@@ -11,12 +11,16 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/packages/go/httpapi"
 	featuredomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
+	featureservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 )
 
 type featureCenterTestService struct {
-	features []featuredomain.Feature
-	err      error
-	updates  []featureCenterUpdate
+	features     []featuredomain.Feature
+	err          error
+	updateResult *featuredomain.Feature
+	updateErr    error
+	updates      []featureCenterUpdate
+	healthActors []string
 }
 
 type featureCenterUpdate struct {
@@ -39,6 +43,9 @@ func (service *featureCenterTestService) Get(
 	_ context.Context,
 	featureID string,
 ) (*featuredomain.Feature, error) {
+	if service.updateErr != nil {
+		return service.updateResult, service.updateErr
+	}
 	if service.err != nil {
 		return nil, service.err
 	}
@@ -60,6 +67,9 @@ func (service *featureCenterTestService) UpdateConfig(
 	if service.err != nil {
 		return nil, service.err
 	}
+	if service.updateErr != nil {
+		return service.updateResult, service.updateErr
+	}
 	service.updates = append(service.updates, featureCenterUpdate{
 		FeatureID: featureID,
 		Values:    values,
@@ -77,6 +87,9 @@ func (service *featureCenterTestService) CheckHealth(
 	_ context.Context,
 	featureID string,
 ) (*featuredomain.Feature, error) {
+	if service.updateErr != nil {
+		return service.updateResult, service.updateErr
+	}
 	if service.err != nil {
 		return nil, service.err
 	}
@@ -86,6 +99,67 @@ func (service *featureCenterTestService) CheckHealth(
 	}
 	current.Health = featuredomain.HealthHealthy
 	return current, nil
+}
+
+func (service *featureCenterTestService) CheckHealthAs(
+	_ context.Context,
+	featureID string,
+	actorID string,
+) (*featuredomain.Feature, error) {
+	service.healthActors = append(service.healthActors, actorID)
+	return service.CheckHealth(context.Background(), featureID)
+}
+
+func TestFeatureCenterConfigAuditFailureReturnsSavedFeature(t *testing.T) {
+	saved := &featuredomain.Feature{
+		ID:            "voice_gateway",
+		Name:          "语音网关",
+		ConfigVersion: 4,
+		Health:        featuredomain.HealthUnknown,
+	}
+	service := &featureCenterTestService{
+		updateResult: saved,
+		updateErr: &featureservice.AuditWriteError{
+			Err:                   errors.New("audit database unavailable"),
+			PrimaryWriteCompleted: true,
+		},
+	}
+	handler := NewFeatureCenterHandler(service)
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/admin/feature-center/voice_gateway/config",
+		strings.NewReader(`{"values":{"enabled":true},"expected_version":3}`),
+	)
+	request.SetPathValue("feature", "voice_gateway")
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		authenticatedAccountKey{},
+		"admin-001",
+	))
+	recorder := httptest.NewRecorder()
+	handler.UpdateConfig(recorder, request)
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202: %s", recorder.Code, recorder.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Feature map[string]any `json:"feature"`
+			Notice  struct {
+				Code string `json:"code"`
+			} `json:"notice"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if envelope.Data.Notice.Code != "audit_write_failed" ||
+		envelope.Data.Feature["id"] != "voice_gateway" ||
+		envelope.Data.Feature["config_version"] != float64(4) {
+		t.Fatalf("unexpected saved response: %s", recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "database unavailable") {
+		t.Fatalf("response leaked audit dependency details: %s", recorder.Body.String())
+	}
 }
 
 func TestFeatureCenterListUsesSuccessEnvelope(t *testing.T) {
@@ -269,6 +343,11 @@ func TestFeatureCenterHealthCheckUnavailableReturnsStableCode(t *testing.T) {
 		nil,
 	)
 	request.SetPathValue("feature", "notification")
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		authenticatedAccountKey{},
+		"admin-001",
+	))
 	recorder := httptest.NewRecorder()
 	handler.HealthCheck(recorder, request)
 	if recorder.Code != http.StatusNotImplemented {
@@ -283,6 +362,82 @@ func TestFeatureCenterHealthCheckUnavailableReturnsStableCode(t *testing.T) {
 	if envelope.Error == nil ||
 		envelope.Error.Code != "health_check_unavailable" {
 		t.Fatalf("unexpected error envelope: %s", recorder.Body.String())
+	}
+}
+
+func TestFeatureCenterHealthCheckUsesAuthenticatedActor(t *testing.T) {
+	service := &featureCenterTestService{
+		features: []featuredomain.Feature{{ID: "voice_gateway"}},
+	}
+	handler := NewFeatureCenterHandler(service)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/admin/feature-center/voice_gateway/health-check",
+		nil,
+	)
+	request.SetPathValue("feature", "voice_gateway")
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		authenticatedAccountKey{},
+		"admin-001",
+	))
+	recorder := httptest.NewRecorder()
+	handler.HealthCheck(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	if len(service.healthActors) != 1 ||
+		service.healthActors[0] != "admin-001" {
+		t.Fatalf("health actor = %#v, want admin-001", service.healthActors)
+	}
+}
+
+func TestFeatureCenterHealthAuditFailureReturnsUpdatedFeature(t *testing.T) {
+	updated := &featuredomain.Feature{
+		ID:     "voice_gateway",
+		Name:   "语音网关",
+		Health: featuredomain.HealthHealthy,
+	}
+	service := &featureCenterTestService{
+		updateResult: updated,
+		updateErr: &featureservice.AuditWriteError{
+			Err:                   errors.New("audit database unavailable"),
+			PrimaryWriteCompleted: true,
+		},
+	}
+	handler := NewFeatureCenterHandler(service)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/admin/feature-center/voice_gateway/health-check",
+		nil,
+	)
+	request.SetPathValue("feature", "voice_gateway")
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		authenticatedAccountKey{},
+		"admin-001",
+	))
+	recorder := httptest.NewRecorder()
+	handler.HealthCheck(recorder, request)
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202: %s", recorder.Code, recorder.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Feature map[string]any `json:"feature"`
+			Notice  struct {
+				Code string `json:"code"`
+			} `json:"notice"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if envelope.Data.Notice.Code != "audit_write_failed" ||
+		envelope.Data.Feature["id"] != "voice_gateway" ||
+		envelope.Data.Feature["health"] != "healthy" ||
+		strings.Contains(recorder.Body.String(), "database unavailable") {
+		t.Fatalf("unexpected audit failure response: %s", recorder.Body.String())
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	bindingdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
+	familydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/domain"
 	policydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/domain"
 )
 
@@ -19,6 +20,7 @@ type deviceRuntimeHandler struct {
 	policyService     deviceRuntimePolicyService
 	diagnosticService deviceRuntimeDiagnosticService
 	bindingRevoker    deviceRuntimeBindingRevoker
+	familyAccess      func(*http.Request) (familydomain.Access, bool)
 }
 
 // deviceRuntimeBindingRevoker is the narrow device-binding surface required to
@@ -234,12 +236,12 @@ func (handler deviceRuntimeHandler) listForParent(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	accountID, ok := authenticatedAccountID(request)
-	if !ok {
+	access := resolveFamilyAccess(request, handler.familyAccess)
+	if strings.TrimSpace(access.OwnerUserID) == "" {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
 	}
-	statuses, err := handler.service.ListDeviceStatuses(request.Context(), accountID)
+	statuses, err := handler.service.ListDeviceStatuses(request.Context(), access.OwnerUserID)
 	if err != nil {
 		writeDeviceRuntimeError(response, request, err)
 		return
@@ -255,14 +257,14 @@ func (handler deviceRuntimeHandler) getForParent(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	accountID, ok := authenticatedAccountID(request)
-	if !ok {
+	access := resolveFamilyAccess(request, handler.familyAccess)
+	if strings.TrimSpace(access.OwnerUserID) == "" {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
 	}
 	status, err := handler.service.GetDeviceStatus(
 		request.Context(),
-		accountID,
+		access.OwnerUserID,
 		strings.TrimSpace(request.PathValue("device_id")),
 	)
 	if err != nil {

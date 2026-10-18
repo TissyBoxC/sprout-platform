@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	operationsdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/domain"
@@ -175,30 +176,78 @@ func (handler adminHandler) listFamilies(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	accounts, err := handler.operationsService.ListFamilyAccounts(
+	page, pageSize, ok := managementPageQuery(response, request)
+	if !ok {
+		return
+	}
+	result, err := handler.operationsService.ListFamilyAccounts(
 		request.Context(),
+		page,
+		pageSize,
 	)
 	if err != nil {
 		writeError(response, request, http.StatusInternalServerError, "service_error", "暂时无法读取家长账号")
 		return
 	}
-	writeSuccess(response, request, http.StatusOK, map[string]any{
-		"accounts": accounts,
-	})
+	writeSuccess(response, request, http.StatusOK, result)
 }
 
 func (handler adminHandler) listReleases(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	releases, err := handler.operationsService.ListReleases(request.Context())
+	page, pageSize, ok := managementPageQuery(response, request)
+	if !ok {
+		return
+	}
+	result, err := handler.operationsService.ListReleases(
+		request.Context(),
+		page,
+		pageSize,
+	)
 	if err != nil {
 		writeError(response, request, http.StatusInternalServerError, "service_error", "暂时无法读取更新记录")
 		return
 	}
-	writeSuccess(response, request, http.StatusOK, map[string]any{
-		"releases": releases,
-	})
+	writeSuccess(response, request, http.StatusOK, result)
+}
+
+// managementPageQuery validates both pagination fields together so a typo
+// never silently falls back to page one. Omitted values use the shared
+// management defaults; the service still clamps for non-HTTP callers.
+func managementPageQuery(
+	response http.ResponseWriter,
+	request *http.Request,
+) (int, int, bool) {
+	page, err := queryPositiveInt(
+		request.URL.Query().Get("page"),
+		1,
+	)
+	if err != nil {
+		writeError(response, request, http.StatusBadRequest, "invalid_pagination", "请检查页码")
+		return 0, 0, false
+	}
+	pageSize, err := queryPositiveInt(
+		request.URL.Query().Get("page_size"),
+		operationsdomain.DefaultListPageSize,
+	)
+	if err != nil || pageSize > operationsdomain.MaxListPageSize {
+		writeError(response, request, http.StatusBadRequest, "invalid_pagination", "每页数量需要在 1 到 100 之间")
+		return 0, 0, false
+	}
+	return page, pageSize, true
+}
+
+func queryPositiveInt(value string, fallback int) (int, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 1 {
+		return 0, errors.New("invalid positive integer")
+	}
+	return parsed, nil
 }
 
 func (handler adminHandler) createRelease(

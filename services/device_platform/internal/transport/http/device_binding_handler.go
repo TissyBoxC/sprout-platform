@@ -10,13 +10,70 @@ import (
 
 	bindingdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/domain"
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
+	familydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/domain"
 )
 
 type deviceBindingHandler struct {
-	service           *bindingservice.Service
+	service           deviceBindingService
 	voiceTokenIssuer  bindingservice.VoiceTokenIssuer
 	voiceWebSocketURL string
 	voiceConsent      voiceConsentReader
+	familyAccess      func(*http.Request) (familydomain.Access, bool)
+}
+
+type deviceBindingService interface {
+	Bind(
+		ctx context.Context,
+		parentAccountID string,
+		plainToken string,
+		deviceName string,
+	) (*bindingdomain.Binding, error)
+	List(
+		ctx context.Context,
+		parentAccountID string,
+	) ([]bindingdomain.Binding, error)
+	Delete(
+		ctx context.Context,
+		parentAccountID string,
+		deviceID string,
+	) error
+	CreateRegistrationToken(
+		ctx context.Context,
+		deviceID string,
+	) (string, *bindingdomain.RegistrationToken, error)
+	RegisterDevice(
+		ctx context.Context,
+		registrationToken string,
+		input bindingdomain.DeviceRegistrationInput,
+	) (*bindingdomain.DeviceCredential, error)
+	StartDeviceAuthentication(
+		ctx context.Context,
+		deviceID string,
+	) (string, *bindingdomain.DeviceChallenge, error)
+	CompleteDeviceAuthentication(
+		ctx context.Context,
+		deviceID string,
+		nonce string,
+		signature []byte,
+	) (string, error)
+	CreateDeviceProvisioningToken(
+		ctx context.Context,
+		deviceID string,
+		deviceSessionToken string,
+	) (string, *bindingdomain.BindingToken, error)
+	BindingStatus(
+		ctx context.Context,
+		deviceID string,
+		deviceSessionToken string,
+	) (bool, error)
+	VerifyDeviceSession(
+		ctx context.Context,
+		deviceSessionToken string,
+	) (string, error)
+	GetByDeviceID(
+		ctx context.Context,
+		deviceID string,
+	) (*bindingdomain.Binding, error)
 }
 
 // voiceConsentReader is the narrow guardian-consent surface the voice-token
@@ -216,8 +273,8 @@ func (handler deviceBindingHandler) bind(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	accountID, ok := authenticatedAccountID(request)
-	if !ok {
+	access := handler.resolveFamilyAccess(request)
+	if strings.TrimSpace(access.OwnerUserID) == "" {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
 	}
@@ -228,7 +285,7 @@ func (handler deviceBindingHandler) bind(
 	}
 	binding, err := handler.service.Bind(
 		request.Context(),
-		accountID,
+		access.OwnerUserID,
 		payload.Token,
 		payload.DeviceName,
 	)
@@ -333,19 +390,24 @@ func (handler deviceBindingHandler) list(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	accountID, ok := authenticatedAccountID(request)
-	if !ok {
+	access := handler.resolveFamilyAccess(request)
+	if strings.TrimSpace(access.OwnerUserID) == "" {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
 	}
-	bindings, err := handler.service.List(request.Context(), accountID)
+	bindings, err := handler.service.List(request.Context(), access.OwnerUserID)
 	if err != nil {
 		writeError(response, request, http.StatusInternalServerError, "service_error", "暂时无法读取设备")
 		return
 	}
 	result := make([]map[string]any, 0, len(bindings))
 	for index := range bindings {
-		result = append(result, bindingResponse(&bindings[index]))
+		response := bindingResponse(&bindings[index])
+		response["can_manage"] = familydomain.Can(
+			access.Role,
+			familydomain.ActionDeviceManage,
+		)
+		result = append(result, response)
 	}
 	writeSuccess(response, request, http.StatusOK, map[string]any{"devices": result})
 }
@@ -354,17 +416,28 @@ func (handler deviceBindingHandler) remove(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	accountID, ok := authenticatedAccountID(request)
-	if !ok {
+	access := handler.resolveFamilyAccess(request)
+	if strings.TrimSpace(access.OwnerUserID) == "" {
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
 	}
 	deviceID := strings.TrimSpace(request.PathValue("device_id"))
-	if err := handler.service.Delete(request.Context(), accountID, deviceID); err != nil {
+	if err := handler.service.Delete(request.Context(), access.OwnerUserID, deviceID); err != nil {
 		writeDeviceBindingError(response, request, err)
 		return
 	}
 	writeSuccess(response, request, http.StatusOK, map[string]any{"removed": true})
+}
+
+func (handler deviceBindingHandler) resolveFamilyAccess(
+	request *http.Request,
+) familydomain.Access {
+	if handler.familyAccess != nil {
+		if access, ok := handler.familyAccess(request); ok {
+			return access
+		}
+	}
+	return familydomain.Access{}
 }
 
 func bindingResponse(binding *bindingdomain.Binding) map[string]any {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/domain"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/repository"
 	policydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/domain"
 )
 
@@ -31,6 +32,11 @@ type memoryRepository struct {
 	favorites    map[string]domain.Favorite
 	history      []domain.PlayRecord
 	themePacks   map[string]domain.ThemePack
+	// Batch call counters prove the service does not fall back to per-member
+	// or per-device reads.
+	historyBatchCalls   int
+	existingBatchCalls  int
+	publishedBatchCalls int
 }
 
 func newMemoryRepository() *memoryRepository {
@@ -106,11 +112,20 @@ func (repository *memoryRepository) GetDetail(
 	if len(versions) == 0 {
 		return nil, domain.ErrPackageNotFound
 	}
+	sort.Slice(versions, func(left, right int) bool {
+		return versions[left].PackageVersion > versions[right].PackageVersion
+	})
+	if len(versions) > domain.PackageDetailVersionMax {
+		versions = versions[:domain.PackageDetailVersionMax]
+	}
 	history := make([]domain.ReviewLog, 0)
 	for index := len(repository.logs) - 1; index >= 0; index-- {
 		log := repository.logs[index]
 		if log.PackageID == packageID {
 			history = append(history, log)
+			if len(history) >= domain.PackageReviewHistoryMax {
+				break
+			}
 		}
 	}
 	return &domain.PackageDetail{
@@ -1399,6 +1414,76 @@ func (repository *memoryRepository) ListFavorites(
 	return views, nil
 }
 
+func (repository *memoryRepository) ListRecentPublishedCategories(
+	_ context.Context,
+	packageIDs []string,
+) (map[string]string, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	result := make(map[string]string, len(packageIDs))
+	for _, packageID := range packageIDs {
+		for _, version := range repository.versions {
+			if version.PackageID == packageID &&
+				version.Status == domain.StatusPublished {
+				result[packageID] = string(version.Category)
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
+func (repository *memoryRepository) ListExistingPackageIDs(
+	_ context.Context,
+	packageIDs []string,
+) ([]string, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	repository.existingBatchCalls++
+	seen := make(map[string]struct{}, len(packageIDs))
+	result := make([]string, 0, len(packageIDs))
+	for _, packageID := range packageIDs {
+		if _, exists := seen[packageID]; exists {
+			continue
+		}
+		seen[packageID] = struct{}{}
+		for _, version := range repository.versions {
+			if version.PackageID == packageID {
+				result = append(result, packageID)
+				break
+			}
+		}
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func (repository *memoryRepository) ListPublishedPackageIDs(
+	_ context.Context,
+	packageIDs []string,
+) ([]string, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	repository.publishedBatchCalls++
+	seen := make(map[string]struct{}, len(packageIDs))
+	result := make([]string, 0, len(packageIDs))
+	for _, packageID := range packageIDs {
+		if _, exists := seen[packageID]; exists {
+			continue
+		}
+		seen[packageID] = struct{}{}
+		for _, version := range repository.versions {
+			if version.PackageID == packageID &&
+				version.Status == domain.StatusPublished {
+				result = append(result, packageID)
+				break
+			}
+		}
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
 func (repository *memoryRepository) RecordPlayback(
 	_ context.Context,
 	input domain.PlayRecordInput,
@@ -1440,23 +1525,58 @@ func (repository *memoryRepository) ListPlayHistory(
 	_ context.Context,
 	query domain.PlayHistoryQuery,
 ) ([]domain.PlayRecord, error) {
+	return repository.listPlayHistory(query, []string{query.DeviceID}, false)
+}
+
+func (repository *memoryRepository) ListPlayHistoryForDevices(
+	_ context.Context,
+	query domain.PlayHistoryQuery,
+	deviceIDs []string,
+) ([]domain.PlayRecord, error) {
+	return repository.listPlayHistory(query, deviceIDs, true)
+}
+
+func (repository *memoryRepository) listPlayHistory(
+	query domain.PlayHistoryQuery,
+	deviceIDs []string,
+	batch bool,
+) ([]domain.PlayRecord, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
+	if batch {
+		repository.historyBatchCalls++
+	}
 	limit := query.Limit
-	if limit < 1 || limit > 200 {
+	if limit < 1 || limit > domain.PlayHistoryQueryMax {
 		limit = 50
 	}
-	records := make([]domain.PlayRecord, 0)
-	for _, item := range repository.history {
-		if item.FamilyID != query.FamilyID || item.DeviceID != query.DeviceID {
+	allowedDeviceIDs := make(map[string]struct{}, len(deviceIDs))
+	for _, deviceID := range deviceIDs {
+		if trimmed := strings.TrimSpace(deviceID); trimmed != "" {
+			allowedDeviceIDs[trimmed] = struct{}{}
+		}
+	}
+	records := append([]domain.PlayRecord(nil), repository.history...)
+	sort.SliceStable(records, func(left, right int) bool {
+		if records[left].PlayedAt.Equal(records[right].PlayedAt) {
+			return records[left].ID > records[right].ID
+		}
+		return records[left].PlayedAt.After(records[right].PlayedAt)
+	})
+	filtered := make([]domain.PlayRecord, 0, len(records))
+	for _, item := range records {
+		if item.FamilyID != query.FamilyID {
 			continue
 		}
-		records = append(records, item)
-		if len(records) >= limit {
+		if _, allowed := allowedDeviceIDs[item.DeviceID]; !allowed {
+			continue
+		}
+		filtered = append(filtered, item)
+		if len(filtered) >= limit {
 			break
 		}
 	}
-	return records, nil
+	return filtered, nil
 }
 
 func (repository *memoryRepository) ListThemePacks(
@@ -1470,9 +1590,45 @@ func (repository *memoryRepository) ListThemePacks(
 		if query.Status != "" && string(pack.Status) != query.Status {
 			continue
 		}
+		if query.Keyword != "" &&
+			!strings.Contains(pack.ThemeID, query.Keyword) &&
+			!strings.Contains(pack.Title, query.Keyword) {
+			continue
+		}
 		packs = append(packs, cloneThemePack(pack))
 	}
+	sort.SliceStable(packs, func(left, right int) bool {
+		if packs[left].UpdatedAt.Equal(packs[right].UpdatedAt) {
+			return packs[left].ThemeID < packs[right].ThemeID
+		}
+		return packs[left].UpdatedAt.After(packs[right].UpdatedAt)
+	})
 	return packs, nil
+}
+
+func (repository *memoryRepository) ListThemePackPage(
+	_ context.Context,
+	query domain.ThemePackQuery,
+) (domain.ThemePackPage, error) {
+	packs, err := repository.ListThemePacks(context.Background(), query)
+	if err != nil {
+		return domain.ThemePackPage{}, err
+	}
+	total := len(packs)
+	start := (query.Page - 1) * query.PageSize
+	if start > total {
+		start = total
+	}
+	end := start + query.PageSize
+	if end > total {
+		end = total
+	}
+	return domain.ThemePackPage{
+		ThemePacks: packs[start:end],
+		Page:       query.Page,
+		PageSize:   query.PageSize,
+		Total:      total,
+	}, nil
 }
 
 func (repository *memoryRepository) GetThemePack(
@@ -1816,6 +1972,12 @@ func TestListPlayHistoryForParentMergesOwnedDevices(t *testing.T) {
 	if merged[0].PlayedSeconds != 4 {
 		t.Fatalf("merged newest seconds = %d, want 4", merged[0].PlayedSeconds)
 	}
+	if repository.historyBatchCalls != 1 {
+		t.Fatalf(
+			"batch history calls = %d, want 1 for all devices",
+			repository.historyBatchCalls,
+		)
+	}
 
 	// The limit caps the merged result.
 	capped, err := service.ListPlayHistoryForParent(
@@ -1843,6 +2005,48 @@ func TestListPlayHistoryForParentMergesOwnedDevices(t *testing.T) {
 	}
 	if empty == nil || len(empty) != 0 {
 		t.Fatalf("empty history = %v, want empty slice", empty)
+	}
+	if repository.historyBatchCalls != 2 {
+		t.Fatalf(
+			"history batch calls after empty read = %d, want no new query (still 2)",
+			repository.historyBatchCalls,
+		)
+	}
+}
+
+func TestListPlayHistoryForParentCapsLimitAndStableOrder(t *testing.T) {
+	repository := newMemoryRepository()
+	service := newContentService(t, repository, validAssetReader())
+	base := time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC)
+	for index := 0; index < 5; index++ {
+		playedAt := base.Add(time.Duration(index/2) * time.Second)
+		repository.history = append(repository.history, domain.PlayRecord{
+			ID:        fmt.Sprintf("play-%02d", index),
+			FamilyID:  "family_test_001",
+			DeviceID:  "sprout_device_001",
+			PackageID: "content_story_001",
+			PlayedAt:  playedAt,
+		})
+	}
+
+	records, err := service.ListPlayHistoryForParent(
+		context.Background(),
+		"family_test_001",
+		[]string{" sprout_device_001 ", "sprout_device_001", ""},
+		domain.PlayHistoryQueryMax+50,
+	)
+	if err != nil {
+		t.Fatalf("list parent history: %v", err)
+	}
+	if len(records) != 5 {
+		t.Fatalf("history length = %d, want 5", len(records))
+	}
+	// Equal timestamps are resolved by id descending, matching SQL.
+	if records[0].ID != "play-04" || records[1].ID != "play-03" {
+		t.Fatalf("stable order = %q, %q; want play-04, play-03", records[0].ID, records[1].ID)
+	}
+	if records[2].ID != "play-02" || records[3].ID != "play-01" {
+		t.Fatalf("stable order = %q, %q; want play-02, play-01", records[2].ID, records[3].ID)
 	}
 }
 
@@ -1917,6 +2121,12 @@ func TestThemePackLifecycle(t *testing.T) {
 	if len(created.PackageIDs) != 2 {
 		t.Fatalf("theme members = %d, want 2", len(created.PackageIDs))
 	}
+	if repository.existingBatchCalls != 1 {
+		t.Fatalf(
+			"existing package batch calls = %d, want 1",
+			repository.existingBatchCalls,
+		)
+	}
 
 	// An unknown member is rejected so a theme cannot reference a ghost package.
 	if _, err := service.UpsertThemePack(context.Background(), domain.ThemePackInput{
@@ -1963,6 +2173,14 @@ func TestThemePackLifecycle(t *testing.T) {
 	if published.Status != domain.ThemePackPublished || published.PublishedAt == nil {
 		t.Fatalf("published theme = %+v, want published stamp", published)
 	}
+	if repository.publishedBatchCalls != 2 {
+		// One failed preflight with the withdrawn member and one successful
+		// preflight after restoring it. Neither loops per member.
+		t.Fatalf(
+			"published package batch calls = %d, want 2",
+			repository.publishedBatchCalls,
+		)
+	}
 
 	// Publishing twice is an illegal move.
 	if _, err := service.PublishThemePack(context.Background(), "theme_ocean"); !errors.Is(err, domain.ErrThemeTransitionInvalid) {
@@ -1980,13 +2198,15 @@ func TestThemePackLifecycle(t *testing.T) {
 	}
 
 	// The guardian-facing list shows only the published pack.
-	listed, err := service.ListThemePacks(context.Background(), domain.ThemePackQuery{
+	listed, err := service.ListThemePackPage(context.Background(), domain.ThemePackQuery{
 		Status: string(domain.ThemePackPublished),
 	})
 	if err != nil {
 		t.Fatalf("list theme packs: %v", err)
 	}
-	if len(listed) != 1 || listed[0].ThemeID != "theme_ocean" {
+	if listed.Total != 1 ||
+		len(listed.ThemePacks) != 1 ||
+		listed.ThemePacks[0].ThemeID != "theme_ocean" {
 		t.Fatalf("published theme list = %+v, want theme_ocean", listed)
 	}
 
@@ -2004,5 +2224,144 @@ func TestThemePackLifecycle(t *testing.T) {
 	}
 	if _, err := service.GetThemePack(context.Background(), "theme_ocean"); !errors.Is(err, domain.ErrThemePackNotFound) {
 		t.Fatalf("get deleted theme error = %v, want ErrThemePackNotFound", err)
+	}
+}
+
+func TestThemePackListPaginatesWithStableOrderAndBounds(t *testing.T) {
+	repository := newMemoryRepository()
+	service := newContentService(t, repository, validAssetReader())
+	base := time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC)
+	for index := 0; index < 120; index++ {
+		themeID := fmt.Sprintf("theme_pack_%03d", index)
+		repository.themePacks[themeID] = domain.ThemePack{
+			ThemeID:   themeID,
+			Title:     themeID,
+			Status:    domain.ThemePackDraft,
+			CreatedAt: base,
+			UpdatedAt: base.Add(time.Duration(index) * time.Second),
+		}
+	}
+
+	page, err := service.ListThemePackPage(context.Background(), domain.ThemePackQuery{
+		Page:     0,
+		PageSize: domain.ThemePackListMaxPageSize + 25,
+	})
+	if err != nil {
+		t.Fatalf("list theme packs: %v", err)
+	}
+	if page.Page != 1 || page.PageSize != domain.ThemePackListMaxPageSize {
+		t.Fatalf("page metadata = %d/%d, want 1/%d", page.Page, page.PageSize, domain.ThemePackListMaxPageSize)
+	}
+	if page.Total != 120 || len(page.ThemePacks) != domain.ThemePackListMaxPageSize {
+		t.Fatalf("page size/total = %d/%d, want %d/120", len(page.ThemePacks), page.Total, domain.ThemePackListMaxPageSize)
+	}
+	if page.ThemePacks[0].ThemeID != "theme_pack_119" ||
+		page.ThemePacks[len(page.ThemePacks)-1].ThemeID != "theme_pack_020" {
+		t.Fatalf("unexpected first page order: %s..%s", page.ThemePacks[0].ThemeID, page.ThemePacks[len(page.ThemePacks)-1].ThemeID)
+	}
+
+	lastPage, err := service.ListThemePackPage(context.Background(), domain.ThemePackQuery{
+		Page:     2,
+		PageSize: domain.ThemePackListMaxPageSize,
+	})
+	if err != nil {
+		t.Fatalf("list second theme pack page: %v", err)
+	}
+	if len(lastPage.ThemePacks) != 20 ||
+		lastPage.ThemePacks[0].ThemeID != "theme_pack_019" {
+		t.Fatalf("unexpected second page: %+v", lastPage.ThemePacks)
+	}
+
+	if _, err := service.ListThemePackPage(context.Background(), domain.ThemePackQuery{
+		Status: "unknown",
+	}); !errors.Is(err, domain.ErrInvalidMetadata) {
+		t.Fatalf("invalid status error = %v, want ErrInvalidMetadata", err)
+	}
+}
+
+// legacyThemePackRepository intentionally implements only the original
+// slice-returning Repository contract. The service must page it in memory
+// instead of requiring a new method on every existing adapter.
+type legacyThemePackRepository struct {
+	repository.Repository
+}
+
+func TestThemePackListKeepsLegacyRepositoryCompatible(t *testing.T) {
+	store := newMemoryRepository()
+	base := time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC)
+	for index := 0; index < 5; index++ {
+		themeID := fmt.Sprintf("theme_legacy_%02d", index)
+		store.themePacks[themeID] = domain.ThemePack{
+			ThemeID:   themeID,
+			Title:     themeID,
+			Status:    domain.ThemePackDraft,
+			CreatedAt: base,
+			UpdatedAt: base.Add(time.Duration(index) * time.Second),
+		}
+	}
+	repository := legacyThemePackRepository{Repository: store}
+	service, err := New(Options{
+		Repository:  repository,
+		AssetReader: validAssetReader(),
+		Clock: fixedClock{
+			now: base,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create content service: %v", err)
+	}
+
+	page, err := service.ListThemePackPage(context.Background(), domain.ThemePackQuery{
+		Page:     2,
+		PageSize: 2,
+	})
+	if err != nil {
+		t.Fatalf("list legacy theme pack page: %v", err)
+	}
+	if page.Total != 5 || page.Page != 2 || page.PageSize != 2 {
+		t.Fatalf("legacy page metadata = %+v, want total=5 page=2 page_size=2", page)
+	}
+	if len(page.ThemePacks) != 2 ||
+		page.ThemePacks[0].ThemeID != "theme_legacy_02" ||
+		page.ThemePacks[1].ThemeID != "theme_legacy_01" {
+		t.Fatalf("legacy page items = %+v, want theme_legacy_02..theme_legacy_01", page.ThemePacks)
+	}
+}
+
+func TestGetDetailBoundsVersionsAndReviewHistory(t *testing.T) {
+	repository := newMemoryRepository()
+	service := newContentService(t, repository, validAssetReader())
+	const packageID = "content_story_001"
+	base := time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC)
+	for index := 1; index <= domain.PackageDetailVersionMax+10; index++ {
+		repository.versions[repository.key(packageID, index)] = &domain.PackageVersion{
+			PackageID:      packageID,
+			PackageVersion: index,
+			Status:         domain.StatusDraft,
+			CreatedAt:      base,
+			UpdatedAt:      base,
+		}
+	}
+	for index := 0; index < domain.PackageReviewHistoryMax+5; index++ {
+		repository.logs = append(repository.logs, domain.ReviewLog{
+			ID:             fmt.Sprintf("review-%04d", index),
+			PackageID:      packageID,
+			PackageVersion: 1,
+			CreatedAt:      base.Add(time.Duration(index) * time.Second),
+		})
+	}
+
+	detail, err := service.GetDetail(context.Background(), packageID)
+	if err != nil {
+		t.Fatalf("get detail: %v", err)
+	}
+	if len(detail.Versions) != domain.PackageDetailVersionMax {
+		t.Fatalf("versions = %d, want %d", len(detail.Versions), domain.PackageDetailVersionMax)
+	}
+	if len(detail.History) != domain.PackageReviewHistoryMax {
+		t.Fatalf("history = %d, want %d", len(detail.History), domain.PackageReviewHistoryMax)
+	}
+	if detail.Versions[0].PackageVersion != domain.PackageDetailVersionMax+10 {
+		t.Fatalf("first version = %d, want newest version", detail.Versions[0].PackageVersion)
 	}
 }

@@ -17,8 +17,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// DefaultAttemptLimit and MaxAttemptLimit bound a progress read so a
-// long-lived family cannot force an unbounded response.
+// DefaultAttemptLimit and MaxAttemptLimit bound the attempt browsing API.
+// Progress uses a full aggregate and intentionally does not apply these
+// limits.
 const (
 	DefaultAttemptLimit = 100
 	MaxAttemptLimit     = 500
@@ -81,13 +82,23 @@ func (s *Service) LessonCatalog(
 	ctx context.Context,
 	ageTier string,
 ) ([]domain.Lesson, error) {
-	summaries, err := s.ListLessons(ctx, ageTier)
+	normalized := strings.TrimSpace(ageTier)
+	if normalized != "" && !domain.IsAgeTier(normalized) {
+		return nil, domain.ErrInvalidAgeTier
+	}
+	if reader, ok := s.repository.(repository.CatalogReader); ok {
+		return reader.ListLessonCatalog(ctx, normalized, repository.CatalogMaxLessons)
+	}
+	summaries, err := s.repository.ListLessons(ctx, normalized)
 	if err != nil {
 		return nil, err
 	}
 	catalog := make([]domain.Lesson, 0, len(summaries))
 	for index := range summaries {
-		lesson, err := s.GetLesson(ctx, summaries[index].LessonID)
+		if len(catalog) >= repository.CatalogMaxLessons {
+			break
+		}
+		lesson, err := s.repository.GetLesson(ctx, summaries[index].LessonID)
 		if err != nil {
 			return nil, err
 		}
@@ -103,6 +114,10 @@ func (s *Service) RecordAttempt(
 	familyID string,
 	input domain.AttemptInput,
 ) (*domain.PracticeAttempt, error) {
+	familyID = strings.TrimSpace(familyID)
+	if familyID == "" {
+		return nil, domain.ErrInvalidAttempt
+	}
 	normalized, err := domain.ValidateAttemptInput(input)
 	if err != nil {
 		return nil, err
@@ -145,14 +160,26 @@ func (s *Service) ListAttempts(
 	return s.repository.ListAttempts(ctx, familyID, query)
 }
 
-// Progress summarizes one family's attempts into per-item progress and a
-// per-lesson rollup, newest activity first.
+// Progress summarizes every attempt owned by one family into per-item
+// progress and a per-lesson rollup, newest activity first.
 func (s *Service) Progress(
 	ctx context.Context,
 	familyID string,
 	query domain.AttemptQuery,
 ) ([]domain.LessonProgress, []domain.ProgressItem, error) {
-	attempts, err := s.ListAttempts(ctx, familyID, query)
+	familyID = strings.TrimSpace(familyID)
+	if familyID == "" {
+		return nil, nil, domain.ErrInvalidAttempt
+	}
+	query.ChildID = strings.TrimSpace(query.ChildID)
+	query.LessonID = strings.TrimSpace(query.LessonID)
+	if reader, ok := s.repository.(repository.ProgressReader); ok {
+		return reader.ListProgress(ctx, familyID, query)
+	}
+	// The legacy contract has a LIMIT parameter. Force it to zero so a caller
+	// passing the browsing limit cannot silently truncate a progress rollup.
+	query.Limit = 0
+	attempts, err := s.repository.ListAttempts(ctx, familyID, query)
 	if err != nil {
 		return nil, nil, err
 	}

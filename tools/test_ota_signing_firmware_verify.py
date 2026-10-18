@@ -14,7 +14,10 @@ from pathlib import Path
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from tools.sign_ota_artifact import build_release_manifest
+from tools.sign_ota_artifact import (
+    build_release_manifest,
+    canonical_signature_payload,
+)
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
 FIRMWARE_ROOT = WORKSPACE_ROOT / "firmware"
@@ -33,13 +36,22 @@ def find_compiler(name: str) -> str:
 
 
 def encode_c_string(value: str) -> str:
-    escaped = (
-        value.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-    )
-    chunks = [escaped[index : index + 100] for index in range(0, len(escaped), 100)]
+    escaped_characters: list[str] = []
+    for character in value:
+        if character == "\\":
+            escaped_characters.append("\\\\")
+        elif character == '"':
+            escaped_characters.append('\\"')
+        elif character == "\n":
+            escaped_characters.append("\\n")
+        elif character == "\r":
+            escaped_characters.append("\\r")
+        else:
+            escaped_characters.append(character)
+    chunks = [
+        "".join(escaped_characters[index : index + 100])
+        for index in range(0, len(escaped_characters), 100)
+    ]
     if not chunks:
         return '""'
     return "\n".join(f'"{chunk}"' for chunk in chunks)
@@ -58,7 +70,7 @@ class OtaSigningFirmwareVerifyTest(unittest.TestCase):
                 artifact=artifact,
                 private_key=private_key,
                 signature_key_id="release-key-1",
-                release_id="rel_2026_10_17_e2e",
+                release_id="00000000-0000-4000-8000-000000000001",
                 firmware_version="1.2.3",
                 hardware_revision="esp32s3",
                 artifact_key="firmware/1.2.3.bin",
@@ -70,6 +82,8 @@ class OtaSigningFirmwareVerifyTest(unittest.TestCase):
                 release_notes="跨语言 OTA 验签",
                 published_at="2026-10-17T00:00:00Z",
             )
+            self.assertEqual(manifest["signature_payload_version"], "2")
+            signature_payload = canonical_signature_payload(manifest).decode("utf-8")
             public_key = base64.b64encode(
                 private_key.public_key().public_bytes(
                     serialization.Encoding.Raw,
@@ -95,6 +109,8 @@ class OtaSigningFirmwareVerifyTest(unittest.TestCase):
                         f"{encode_c_string(str(manifest['channel']))};",
                         'extern "C" const char *const sprout_test_artifact_url =',
                         f"{encode_c_string(str(manifest['artifact_url']))};",
+                        'extern "C" const char *const sprout_test_artifact_key =',
+                        f"{encode_c_string(str(manifest['artifact_key']))};",
                         'extern "C" const char *const sprout_test_sha256 =',
                         f"{encode_c_string(str(manifest['sha256']))};",
                         'extern "C" const unsigned long long sprout_test_size_bytes =',
@@ -103,8 +119,14 @@ class OtaSigningFirmwareVerifyTest(unittest.TestCase):
                         f"{encode_c_string(str(manifest['signature_key_id']))};",
                         'extern "C" const char *const sprout_test_signature_algorithm =',
                         f"{encode_c_string(str(manifest['signature_algorithm']))};",
+                        'extern "C" const char *const sprout_test_signature_payload_version =',
+                        f"{encode_c_string(str(manifest['signature_payload_version']))};",
                         'extern "C" const char *const sprout_test_signature =',
                         f"{encode_c_string(str(manifest['signature']))};",
+                        'extern "C" const char *const sprout_test_signature_payload =',
+                        f"{encode_c_string(signature_payload)};",
+                        'extern "C" const bool sprout_test_rollback_allowed = true;',
+                        'extern "C" const bool sprout_test_mandatory = false;',
                         'extern "C" const char *const sprout_test_published_at =',
                         f"{encode_c_string(str(manifest['updated_at']))};",
                         'extern "C" const char *const sprout_test_min_source_version =',

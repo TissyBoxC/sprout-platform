@@ -9,8 +9,16 @@ import (
 	"errors"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
+)
+
+// OTAReleaseSchemaVersion identifies the JSON manifest contract. Signature
+// protocol changes use OTAReleaseSignaturePayloadVersion instead.
+const (
+	OTAReleaseSchemaVersion           = "1.0.0"
+	OTAReleaseSignaturePayloadVersion = "2"
 )
 
 var (
@@ -48,6 +56,16 @@ var (
 	ErrSignatureKeyUnknown = errors.New("OTA signature key unknown")
 	// ErrSignatureRequired reports a publish attempt without a detached signature.
 	ErrSignatureRequired = errors.New("OTA signature required")
+	// ErrArtifactMissing reports a signed manifest whose artifact is absent from
+	// the shared download volume.
+	ErrArtifactMissing = errors.New("OTA artifact missing")
+	// ErrArtifactMismatch reports a small or digest mismatch between a signed
+	// manifest and the exact file devices would download.
+	ErrArtifactMismatch = errors.New("OTA artifact does not match manifest")
+	// ErrArtifactUnavailable reports that the download store could not be
+	// inspected. Publication must fail closed rather than assume the file is
+	// present.
+	ErrArtifactUnavailable = errors.New("OTA artifact store unavailable")
 
 	// ErrInvalidTarget reports an invalid release audience.
 	ErrInvalidTarget = errors.New("invalid OTA target")
@@ -653,7 +671,7 @@ func ValidateRelease(release *Release) error {
 		len(release.ArtifactKey) > 512 ||
 		!ValidSHA256(release.SHA256) ||
 		release.SizeBytes <= 0 ||
-		release.SizeBytes > 512*1024*1024 ||
+		release.SizeBytes > MaxArtifactSizeBytes ||
 		!ValidSignatureKeyID(release.SignatureKeyID) ||
 		!ValidSignatureAlgorithm(release.SignatureAlgorithm) ||
 		!ValidSignature(release.Signature) ||
@@ -662,6 +680,10 @@ func ValidateRelease(release *Release) error {
 		return ErrInvalidRelease
 	}
 	if !isHTTPSArtifactURL(release.ArtifactURL) {
+		return ErrInvalidRelease
+	}
+	if !validArtifactKey(release.ArtifactKey) ||
+		!artifactURLMatchesKey(release.ArtifactURL, release.ArtifactKey) {
 		return ErrInvalidRelease
 	}
 	return nil
@@ -698,6 +720,11 @@ func ValidSignature(value string) bool {
 		len(value) <= 8192 &&
 		base64Pattern.MatchString(value)
 }
+
+// MaxArtifactSizeBytes matches the 16 MiB application partition and the
+// shared OTA schema/signer contract. Platform drafts must reject anything a
+// production device cannot install.
+const MaxArtifactSizeBytes int64 = 16 * 1024 * 1024
 
 // ValidateDeployment checks a new release/device assignment.
 func ValidateDeployment(deployment *Deployment) error {
@@ -752,9 +779,38 @@ func ValidSignatureAlgorithm(value string) bool {
 func isHTTPSArtifactURL(value string) bool {
 	parsed, err := url.Parse(value)
 	return err == nil &&
-		parsed.Scheme == "https" &&
+		strings.EqualFold(parsed.Scheme, "https") &&
 		parsed.Host != "" &&
-		parsed.User == nil
+		parsed.Hostname() != "" &&
+		parsed.User == nil &&
+		parsed.Fragment == ""
+}
+
+func validArtifactKey(value string) bool {
+	if value == "" ||
+		len(value) > 512 ||
+		strings.HasPrefix(value, "/") ||
+		strings.ContainsAny(value, "\\\x00\r\n") {
+		return false
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+func artifactURLMatchesKey(artifactURL string, artifactKey string) bool {
+	parsed, err := url.Parse(artifactURL)
+	if err != nil ||
+		parsed.RawPath != "" && strings.Contains(parsed.RawPath, "%") ||
+		!strings.HasPrefix(parsed.Path, "/") ||
+		parsed.Path == "/" ||
+		strings.HasSuffix(parsed.Path, "/") {
+		return false
+	}
+	return strings.HasSuffix(parsed.Path, "/"+artifactKey)
 }
 
 // CanaryContains applies a deterministic percentage rollout. Keeping the hash
@@ -851,6 +907,40 @@ func (release Release) DeviceManifest() DeviceRelease {
 		ReleaseNotes:       release.ReleaseNotes,
 		PublishedAt:        release.PublishedAt,
 	}
+}
+
+// SignaturePayload returns the exact canonical bytes covered by an OTA
+// signature. Field order, lower-case booleans, one LF separator, and the final
+// LF are shared with the release signer and firmware verifier.
+func SignaturePayload(release Release) []byte {
+	values := []struct {
+		name  string
+		value string
+	}{
+		{name: "schema_version", value: OTAReleaseSignaturePayloadVersion},
+		{name: "release_id", value: release.ID},
+		{name: "firmware_version", value: release.Version},
+		{name: "hardware_revision", value: release.HardwareRevision},
+		{name: "channel", value: string(release.Channel)},
+		{name: "artifact_key", value: release.ArtifactKey},
+		{name: "artifact_url", value: release.ArtifactURL},
+		{name: "sha256", value: strings.ToLower(release.SHA256)},
+		{name: "size_bytes", value: strconv.FormatInt(release.SizeBytes, 10)},
+		{name: "signature_key_id", value: release.SignatureKeyID},
+		{name: "signature_algorithm", value: release.SignatureAlgorithm},
+		{name: "rollback_allowed", value: strconv.FormatBool(release.RollbackAllowed)},
+		{name: "mandatory", value: strconv.FormatBool(release.Mandatory)},
+		{name: "min_source_version", value: release.MinSourceVersion},
+	}
+	var payload strings.Builder
+	payload.Grow(512)
+	for _, field := range values {
+		payload.WriteString(field.name)
+		payload.WriteByte('=')
+		payload.WriteString(field.value)
+		payload.WriteByte('\n')
+	}
+	return []byte(payload.String())
 }
 
 // StatusForEvent maps a progress event to the resulting deployment status.

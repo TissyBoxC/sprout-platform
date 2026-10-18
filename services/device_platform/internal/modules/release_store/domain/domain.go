@@ -20,6 +20,8 @@ var (
 	ErrReleaseNotCreated  = errors.New("download release directory not found")
 	ErrArtifactNotFound   = errors.New("download artifact not found")
 	ErrUnsupportedChannel = errors.New("download channel unsupported")
+	ErrArtifactMismatch   = errors.New("download artifact digest mismatch")
+	ErrFileImmutable      = errors.New("published download file is immutable")
 )
 
 const (

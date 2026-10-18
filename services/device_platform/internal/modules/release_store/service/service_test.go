@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -355,6 +356,64 @@ func TestDeleteFileRemovesFileAndEmptyParents(t *testing.T) {
 	}
 }
 
+func TestPublishedArtifactRemainsImmutableAfterServiceRestart(t *testing.T) {
+	service, root := newTestService(t)
+	relativePath := "0.13.0/stable/esp32_s3/firmware/firmware.bin"
+	if _, err := service.UploadFile(
+		context.Background(),
+		domain.UploadInput{RelativePath: relativePath},
+		strings.NewReader("signed firmware"),
+	); err != nil {
+		t.Fatalf("seed upload: %v", err)
+	}
+	if err := service.MarkPublishedArtifact(relativePath); err != nil {
+		t.Fatalf("mark published artifact: %v", err)
+	}
+	if _, err := service.UploadFile(
+		context.Background(),
+		domain.UploadInput{RelativePath: relativePath, Overwrite: true},
+		strings.NewReader("replacement firmware"),
+	); !errors.Is(err, domain.ErrFileImmutable) {
+		t.Fatalf("overwrite error = %v, want immutable", err)
+	}
+	if err := service.DeleteFile(context.Background(), relativePath); !errors.Is(
+		err,
+		domain.ErrFileImmutable,
+	) {
+		t.Fatalf("delete error = %v, want immutable", err)
+	}
+	if err := service.Close(); err != nil {
+		t.Fatalf("close service: %v", err)
+	}
+
+	restarted, err := New(Options{
+		RootDir:       root,
+		PublicBaseURL: "https://download.example.test",
+	})
+	if err != nil {
+		t.Fatalf("restart release store: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = restarted.Close()
+	})
+	if _, err := restarted.UploadFile(
+		context.Background(),
+		domain.UploadInput{RelativePath: relativePath, Overwrite: true},
+		strings.NewReader("replacement after restart"),
+	); !errors.Is(err, domain.ErrFileImmutable) {
+		t.Fatalf("post-restart overwrite error = %v, want immutable", err)
+	}
+	inventory, err := restarted.Inventory(context.Background())
+	if err != nil {
+		t.Fatalf("inventory after restart: %v", err)
+	}
+	for _, file := range inventory.Files {
+		if file.RelativePath == immutableIndexPath {
+			t.Fatal("internal immutability index leaked into inventory")
+		}
+	}
+}
+
 func TestRefreshIndexMatchesPublicReleaseContract(t *testing.T) {
 	service, root := newTestService(t)
 	relativePath := "0.12.3/stable/android/apk/sprout-parent-app-v0.12.3.apk"
@@ -454,6 +513,56 @@ func TestUploadFileBuildsCanonicalReleasePathFromMetadata(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, expected)); err != nil {
 		t.Fatalf("expected canonical file to exist: %v", err)
+	}
+}
+
+func TestReadArtifactReturnsExactSizeDigestAndRejectsTraversal(t *testing.T) {
+	root := t.TempDir()
+	service, err := New(Options{
+		RootDir:       root,
+		PublicBaseURL: "https://download.example.test",
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	defer service.Close()
+
+	relativePath := "0.24.1/stable/esp32_s3/firmware/firmware.bin"
+	fullPath := filepath.Join(root, filepath.FromSlash(relativePath))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("create release directory: %v", err)
+	}
+	payload := []byte("firmware-bytes")
+	if err := os.WriteFile(fullPath, payload, 0o644); err != nil {
+		t.Fatalf("write firmware: %v", err)
+	}
+
+	verified, err := service.ReadArtifact(context.Background(), relativePath)
+	if err != nil {
+		t.Fatalf("read artifact: %v", err)
+	}
+	if verified.SizeBytes != int64(len(payload)) ||
+		verified.SHA256 != fmt.Sprintf("%x", sha256.Sum256(payload)) {
+		t.Fatalf("unexpected artifact verification: %+v", verified)
+	}
+
+	for _, invalid := range []string{
+		"../firmware.bin",
+		"/etc/passwd",
+		"0.24.1/stable/../firmware.bin",
+	} {
+		if _, err := service.ReadArtifact(context.Background(), invalid); !errors.Is(
+			err,
+			domain.ErrPathInvalid,
+		) {
+			t.Fatalf("path %q error = %v, want invalid path", invalid, err)
+		}
+	}
+	if _, err := service.ReadArtifact(
+		context.Background(),
+		"0.24.1/stable/esp32_s3/firmware/missing.bin",
+	); !errors.Is(err, domain.ErrFileNotFound) {
+		t.Fatalf("missing file error = %v, want file not found", err)
 	}
 }
 

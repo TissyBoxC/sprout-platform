@@ -47,6 +47,7 @@ const uploadForm = reactive({
   overwrite: false,
 })
 const releaseForm = reactive<CreateOtaReleaseInput>({
+  releaseId: crypto.randomUUID(),
   firmwareVersion: '',
   hardwareRevision: '',
   channel: 'stable',
@@ -56,6 +57,7 @@ const releaseForm = reactive<CreateOtaReleaseInput>({
   sizeBytes: 0,
   signatureKeyId: '',
   signatureAlgorithm: 'ed25519',
+  signaturePayloadVersion: '2',
   signature: '',
   rollbackAllowed: false,
   minSourceVersion: '',
@@ -102,6 +104,7 @@ function openCreateRelease(): void {
 function openEditRelease(release: OtaRelease): void {
   store.clearMessages()
   editingRelease.value = release
+  releaseForm.releaseId = release.releaseId
   releaseForm.firmwareVersion = release.firmwareVersion
   releaseForm.hardwareRevision = release.hardwareRevision
   releaseForm.channel = release.channel
@@ -132,6 +135,7 @@ function closeReleaseForm(): void {
 }
 
 function resetReleaseForm(): void {
+  releaseForm.releaseId = crypto.randomUUID()
   releaseForm.firmwareVersion = ''
   releaseForm.hardwareRevision = ''
   releaseForm.channel = 'stable'
@@ -156,6 +160,7 @@ async function submitReleaseForm(): Promise<void> {
     return
   }
   const payload: CreateOtaReleaseInput = {
+    releaseId: releaseForm.releaseId,
     firmwareVersion: releaseForm.firmwareVersion.trim(),
     hardwareRevision: releaseForm.hardwareRevision.trim(),
     channel: releaseForm.channel,
@@ -165,6 +170,7 @@ async function submitReleaseForm(): Promise<void> {
     sizeBytes: Math.max(0, Math.trunc(releaseForm.sizeBytes)),
     signatureKeyId: releaseForm.signatureKeyId.trim(),
     signatureAlgorithm: releaseForm.signatureAlgorithm,
+    signaturePayloadVersion: '2',
     signature: releaseForm.signature.trim(),
     rollbackAllowed: releaseForm.rollbackAllowed,
     minSourceVersion: releaseForm.minSourceVersion.trim(),

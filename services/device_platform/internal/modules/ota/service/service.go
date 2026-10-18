@@ -14,16 +14,20 @@ import (
 
 // Service owns firmware releases, targeting, progress, and rollback.
 type Service struct {
-	repository repository.Repository
-	timeSource clock.Clock
-	verifier   SignatureVerifier
+	repository   repository.Repository
+	timeSource   clock.Clock
+	verifier     SignatureVerifier
+	artifacts    ArtifactVerifier
+	artifactLock PublishedArtifactLocker
 }
 
 // Options contains OTA service dependencies.
 type Options struct {
-	Repository repository.Repository
-	Clock      clock.Clock
-	Verifier   SignatureVerifier
+	Repository   repository.Repository
+	Clock        clock.Clock
+	Verifier     SignatureVerifier
+	Artifacts    ArtifactVerifier
+	ArtifactLock PublishedArtifactLocker
 }
 
 // SignatureVerifier validates a detached firmware signature against a trusted
@@ -32,9 +36,20 @@ type SignatureVerifier interface {
 	Verify(
 		algorithm string,
 		keyID string,
-		digest string,
+		manifest []byte,
 		signature string,
 	) error
+}
+
+// ArtifactVerifier resolves one manifest key in the shared download volume and
+// reports the exact size and SHA-256 of the bytes devices can fetch.
+type ArtifactVerifier interface {
+	VerifyArtifact(ctx context.Context, artifactKey string) (sizeBytes int64, digest string, err error)
+}
+
+// PublishedArtifactLocker protects the exact signed bytes after publication.
+type PublishedArtifactLocker interface {
+	MarkPublishedArtifact(artifactKey string) error
 }
 
 // CurrentDeviceUpdate is the active deployment (if any) plus the release it
@@ -57,9 +72,11 @@ func New(options Options) (*Service, error) {
 		timeSource = clock.SystemClock{}
 	}
 	return &Service{
-		repository: options.Repository,
-		timeSource: timeSource,
-		verifier:   options.Verifier,
+		repository:   options.Repository,
+		timeSource:   timeSource,
+		verifier:     options.Verifier,
+		artifacts:    options.Artifacts,
+		artifactLock: options.ArtifactLock,
 	}, nil
 }
 
@@ -76,11 +93,11 @@ func (s *Service) CreateReleaseDraft(
 		return nil, domain.ErrInvalidRelease
 	}
 	now := s.timeSource.Now().UTC()
-	if input.ID != "" && !validUUID(input.ID) {
+	if !validUUID(input.ID) {
 		return nil, domain.ErrInvalidRelease
 	}
 	release := &domain.Release{
-		ID:                 releaseIdentity(input.ID),
+		ID:                 input.ID,
 		Version:            input.Version,
 		Channel:            input.Channel,
 		HardwareRevision:   input.HardwareRevision,
@@ -113,6 +130,9 @@ func (s *Service) CreateReleaseDraft(
 	if err := validateRollbackReference(ctx, s.repository, release); err != nil {
 		return nil, err
 	}
+	// A draft may be prepared before CI has uploaded the immutable artifact.
+	// Publication verifies the real file fail-closed at the point where a
+	// manifest becomes visible to devices.
 	if err := s.repository.CreateRelease(ctx, release); err != nil {
 		return nil, err
 	}
@@ -132,6 +152,10 @@ func (s *Service) UpdateReleaseDraft(
 	current, err := s.repository.GetRelease(ctx, strings.TrimSpace(releaseID))
 	if err != nil {
 		return nil, err
+	}
+	if input.ID != "" &&
+		strings.TrimSpace(input.ID) != strings.TrimSpace(releaseID) {
+		return nil, domain.ErrInvalidRelease
 	}
 	if current.Status != domain.ReleaseStatusDraft {
 		return nil, domain.ErrReleaseStateConflict
@@ -163,6 +187,8 @@ func (s *Service) UpdateReleaseDraft(
 	if err := validateRollbackReference(ctx, s.repository, &release); err != nil {
 		return nil, err
 	}
+	// Artifact presence is checked when publishing so operators may prepare
+	// and review a draft while a CI upload is still in flight.
 	if input.ExpectedVersion <= 0 {
 		return nil, domain.ErrInvalidRelease
 	}
@@ -236,10 +262,22 @@ func (s *Service) PublishRelease(
 	if err := s.verifier.Verify(
 		release.SignatureAlgorithm,
 		release.SignatureKeyID,
-		release.SHA256,
+		domain.SignaturePayload(*release),
 		release.Signature,
 	); err != nil {
 		return nil, err
+	}
+	// Draft creation deliberately allows an in-flight upload, but publication
+	// must prove the exact bytes in the shared download store match the signed
+	// manifest before devices can observe the release.
+	if err := s.verifyArtifact(ctx, release); err != nil {
+		return nil, err
+	}
+	if s.artifactLock == nil {
+		return nil, domain.ErrArtifactUnavailable
+	}
+	if err := s.artifactLock.MarkPublishedArtifact(release.ArtifactKey); err != nil {
+		return nil, domain.ErrArtifactUnavailable
 	}
 	now := s.timeSource.Now().UTC()
 	release.SignatureStatus = domain.SignatureStatusVerified
@@ -252,6 +290,33 @@ func (s *Service) PublishRelease(
 		domain.ReleaseStatusPublished,
 		true,
 	)
+}
+
+func (s *Service) verifyArtifact(
+	ctx context.Context,
+	release *domain.Release,
+) error {
+	if s.artifacts == nil {
+		return domain.ErrArtifactUnavailable
+	}
+	sizeBytes, digest, err := s.artifacts.VerifyArtifact(
+		ctx,
+		release.ArtifactKey,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrArtifactMissing),
+			errors.Is(err, domain.ErrArtifactMismatch):
+			return err
+		default:
+			return domain.ErrArtifactUnavailable
+		}
+	}
+	if sizeBytes != release.SizeBytes ||
+		!strings.EqualFold(digest, release.SHA256) {
+		return domain.ErrArtifactMismatch
+	}
+	return nil
 }
 
 // PauseRelease stops new offers while retaining existing deployments.
@@ -871,7 +936,9 @@ func validateRollbackReference(
 
 func validUUID(value string) bool {
 	parsed, err := uuid.Parse(strings.TrimSpace(value))
-	return err == nil && parsed.String() != "00000000-0000-0000-0000-000000000000"
+	return err == nil &&
+		parsed != uuid.Nil &&
+		parsed.String() == strings.TrimSpace(value)
 }
 
 func releaseIdentity(value string) string {

@@ -22946,6 +22946,7 @@ components:
         - size_bytes
         - signature_key_id
         - signature_algorithm
+        - signature_payload_version
         - signature
         - rollback_allowed
         - mandatory
@@ -22987,6 +22988,9 @@ components:
           type: string
           enum:
             - ed25519
+        signature_payload_version:
+          type: string
+          const: "2"
         signature:
           type: string
           pattern: "^[A-Za-z0-9+/]{86}==$"
@@ -23030,6 +23034,7 @@ components:
         - size_bytes
         - signature_key_id
         - signature_algorithm
+        - signature_payload_version
         - signature
         - signature_status
         - rollback_allowed
@@ -23089,6 +23094,9 @@ components:
           type: string
           enum:
             - ed25519
+        signature_payload_version:
+          type: string
+          const: "2"
         signature:
           type: string
           pattern: "^[A-Za-z0-9+/]{86}==$"
@@ -23430,6 +23438,7 @@ components:
         - size_bytes
         - signature_key_id
         - signature_algorithm
+        - signature_payload_version
         - signature
         - rollback_allowed
         - mandatory
@@ -23472,6 +23481,9 @@ components:
           type: string
           enum:
             - ed25519
+        signature_payload_version:
+          type: string
+          const: "2"
         signature:
           type: string
           pattern: "^[A-Za-z0-9+/]{86}==$"

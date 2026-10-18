@@ -3,7 +3,6 @@ package service
 import (
 	"crypto/ed25519"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -12,9 +11,9 @@ import (
 )
 
 // Ed25519KeyringVerifier verifies detached firmware signatures against a
-// configured set of trusted public keys. The signed payload is the lowercase
-// SHA-256 hex digest encoded as ASCII, matching the artifact manifest and the
-// firmware release automation contract.
+// configured set of trusted public keys. The signed payload is the complete
+// canonical release manifest, so strategy fields cannot be changed after
+// signing. Firmware intentionally retains no legacy digest-only verification.
 type Ed25519KeyringVerifier struct {
 	keys map[string]ed25519.PublicKey
 }
@@ -57,7 +56,7 @@ func NewEd25519KeyringVerifier(encoded string) (*Ed25519KeyringVerifier, error) 
 func (verifier *Ed25519KeyringVerifier) Verify(
 	algorithm string,
 	keyID string,
-	digest string,
+	manifest []byte,
 	signature string,
 ) error {
 	if verifier == nil {
@@ -73,8 +72,7 @@ func (verifier *Ed25519KeyringVerifier) Verify(
 	if !ok || len(publicKey) == 0 {
 		return domain.ErrSignatureKeyUnknown
 	}
-	digest = strings.ToLower(strings.TrimSpace(digest))
-	if _, err := hex.DecodeString(digest); err != nil {
+	if len(manifest) == 0 || len(manifest) > 16384 {
 		return domain.ErrSignatureInvalid
 	}
 	signature = strings.TrimSpace(signature)
@@ -86,7 +84,7 @@ func (verifier *Ed25519KeyringVerifier) Verify(
 		base64.StdEncoding.EncodeToString(rawSignature) != signature {
 		return domain.ErrSignatureInvalid
 	}
-	if !ed25519.Verify(publicKey, []byte(digest), rawSignature) {
+	if !ed25519.Verify(publicKey, manifest, rawSignature) {
 		return domain.ErrSignatureInvalid
 	}
 	return nil

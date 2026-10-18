@@ -21,13 +21,52 @@ type fakeRepository struct {
 
 type acceptingVerifier struct{}
 
+type acceptingArtifactVerifier struct {
+	sizeBytes int64
+	sha256    string
+	err       error
+}
+
+type acceptingArtifactLocker struct{}
+
+func (acceptingArtifactLocker) MarkPublishedArtifact(string) error {
+	return nil
+}
+
+type capturingVerifier struct {
+	manifest []byte
+}
+
+func (verifier *capturingVerifier) Verify(
+	algorithm string,
+	keyID string,
+	manifest []byte,
+	signature string,
+) error {
+	if algorithm != "ed25519" || keyID == "" || signature == "" {
+		return domain.ErrSignatureInvalid
+	}
+	verifier.manifest = append([]byte(nil), manifest...)
+	return nil
+}
+
+func (verifier acceptingArtifactVerifier) VerifyArtifact(
+	context.Context,
+	string,
+) (int64, string, error) {
+	if verifier.err != nil {
+		return 0, "", verifier.err
+	}
+	return verifier.sizeBytes, verifier.sha256, nil
+}
+
 func (acceptingVerifier) Verify(
 	algorithm string,
 	keyID string,
-	digest string,
+	manifest []byte,
 	signature string,
 ) error {
-	if algorithm == "" || keyID == "" || digest == "" || signature == "" {
+	if algorithm == "" || keyID == "" || len(manifest) == 0 || signature == "" {
 		return domain.ErrSignatureInvalid
 	}
 	return nil
@@ -440,6 +479,7 @@ func sameEvent(left *domain.Event, right *domain.Event) bool {
 
 func validReleaseInput() domain.ReleaseInput {
 	return domain.ReleaseInput{
+		ID:                 "00000000-0000-4000-8000-000000000001",
 		Version:            "1.2.3",
 		Channel:            domain.ChannelStable,
 		HardwareRevision:   "sprout-v1",
@@ -459,11 +499,131 @@ func validReleaseInput() domain.ReleaseInput {
 	}
 }
 
+func TestPublishReleaseSignsEveryPolicyField(t *testing.T) {
+	repository := newFakeRepository()
+	verifier := &capturingVerifier{}
+	service, err := New(Options{
+		Repository: repository,
+		Verifier:   verifier,
+		Artifacts: acceptingArtifactVerifier{
+			sizeBytes: validReleaseInput().SizeBytes,
+			sha256:    validReleaseInput().SHA256,
+		},
+		ArtifactLock: acceptingArtifactLocker{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	input := validReleaseInput()
+	input.Mandatory = true
+	release, err := service.CreateReleaseDraft(context.Background(), input)
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+	if _, err := service.PublishRelease(
+		context.Background(),
+		release.ID,
+		"admin-1",
+		release.RecordVersion,
+	); err != nil {
+		t.Fatalf("publish release: %v", err)
+	}
+	want := strings.Join([]string{
+		"schema_version=2",
+		"release_id=00000000-0000-4000-8000-000000000001",
+		"firmware_version=1.2.3",
+		"hardware_revision=sprout-v1",
+		"channel=stable",
+		"artifact_key=firmware/1.2.3.bin",
+		"artifact_url=https://download.clarkhub.cn/firmware/1.2.3.bin",
+		"sha256=" + strings.Repeat("a", 64),
+		"size_bytes=1024",
+		"signature_key_id=firmware-prod-2026",
+		"signature_algorithm=ed25519",
+		"rollback_allowed=true",
+		"mandatory=true",
+		"min_source_version=1.0.0",
+		"",
+	}, "\n")
+	if string(verifier.manifest) != want {
+		t.Fatalf("canonical manifest mismatch:\n%s", verifier.manifest)
+	}
+}
+
+func TestReleaseValidationRejectsUnsafeArtifactPaths(t *testing.T) {
+	valid := validReleaseInput()
+	invalid := []struct {
+		name        string
+		artifactKey string
+		artifactURL string
+	}{
+		{
+			name:        "absolute key",
+			artifactKey: "/firmware/1.2.3.bin",
+			artifactURL: valid.ArtifactURL,
+		},
+		{
+			name:        "backslash key",
+			artifactKey: `firmware\1.2.3.bin`,
+			artifactURL: valid.ArtifactURL,
+		},
+		{
+			name:        "dot segment",
+			artifactKey: "firmware/../1.2.3.bin",
+			artifactURL: valid.ArtifactURL,
+		},
+		{
+			name:        "url does not end with key",
+			artifactKey: "firmware/1.2.3.bin",
+			artifactURL: "https://download.clarkhub.cn/other/1.2.3.bin",
+		},
+		{
+			name:        "percent encoded path",
+			artifactKey: "firmware/1.2.3.bin",
+			artifactURL: "https://download.clarkhub.cn/firmware/%31.2.3.bin",
+		},
+		{
+			name:        "fragment",
+			artifactKey: "firmware/1.2.3.bin",
+			artifactURL: "https://download.clarkhub.cn/firmware/1.2.3.bin#fragment",
+		},
+	}
+	for _, testCase := range invalid {
+		t.Run(testCase.name, func(t *testing.T) {
+			release := &domain.Release{
+				ID:                 valid.ID,
+				Version:            valid.Version,
+				Channel:            valid.Channel,
+				HardwareRevision:   valid.HardwareRevision,
+				MinSourceVersion:   valid.MinSourceVersion,
+				ArtifactURL:        testCase.artifactURL,
+				ArtifactKey:        testCase.artifactKey,
+				SHA256:             valid.SHA256,
+				SizeBytes:          valid.SizeBytes,
+				SignatureKeyID:     valid.SignatureKeyID,
+				SignatureAlgorithm: valid.SignatureAlgorithm,
+				Signature:          valid.Signature,
+				RollbackAllowed:    valid.RollbackAllowed,
+				Mandatory:          valid.Mandatory,
+				Target:             valid.Target,
+			}
+			if err := domain.ValidateRelease(release); !errors.Is(err, domain.ErrInvalidRelease) {
+				t.Fatalf("expected invalid release, got %v", err)
+			}
+		})
+	}
+}
+
 func TestCreateReleaseDraftValidatesManifest(t *testing.T) {
 	repository := newFakeRepository()
 	service, err := New(Options{
 		Repository: repository,
 		Verifier:   acceptingVerifier{},
+		Artifacts: acceptingArtifactVerifier{
+			sizeBytes: validReleaseInput().SizeBytes,
+			sha256:    validReleaseInput().SHA256,
+		},
+		ArtifactLock: acceptingArtifactLocker{},
 	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
@@ -476,6 +636,15 @@ func TestCreateReleaseDraftValidatesManifest(t *testing.T) {
 		domain.ErrInvalidRelease,
 	) {
 		t.Fatalf("expected invalid release, got %v", err)
+	}
+
+	input = validReleaseInput()
+	input.SizeBytes = domain.MaxArtifactSizeBytes + 1
+	if _, err := service.CreateReleaseDraft(context.Background(), input); !errors.Is(
+		err,
+		domain.ErrInvalidRelease,
+	) {
+		t.Fatalf("expected oversize artifact rejection, got %v", err)
 	}
 
 	input = validReleaseInput()
@@ -554,6 +723,11 @@ func TestReleaseStateMachineAndOptimisticConflict(t *testing.T) {
 	service, err := New(Options{
 		Repository: repository,
 		Verifier:   acceptingVerifier{},
+		Artifacts: acceptingArtifactVerifier{
+			sizeBytes: validReleaseInput().SizeBytes,
+			sha256:    validReleaseInput().SHA256,
+		},
+		ArtifactLock: acceptingArtifactLocker{},
 	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
@@ -584,11 +758,57 @@ func TestReleaseStateMachineAndOptimisticConflict(t *testing.T) {
 	}
 }
 
+func TestUpdateReleaseDraftRequiresMatchingSignedIdentity(t *testing.T) {
+	repository := newFakeRepository()
+	service, err := New(Options{
+		Repository: repository,
+		Verifier:   acceptingVerifier{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	release, err := service.CreateReleaseDraft(
+		context.Background(),
+		validReleaseInput(),
+	)
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+	input := validReleaseInput()
+	input.ID = "00000000-0000-4000-8000-000000000099"
+	input.ExpectedVersion = release.RecordVersion
+	if _, err := service.UpdateReleaseDraft(
+		context.Background(),
+		release.ID,
+		input,
+	); !errors.Is(err, domain.ErrInvalidRelease) {
+		t.Fatalf("identity mismatch error = %v, want invalid release", err)
+	}
+	if _, err := service.UpdateReleaseDraft(
+		context.Background(),
+		release.ID,
+		validReleaseInputWithExpectedVersion(release.RecordVersion),
+	); err != nil {
+		t.Fatalf("matching identity update: %v", err)
+	}
+}
+
+func validReleaseInputWithExpectedVersion(expectedVersion int64) domain.ReleaseInput {
+	input := validReleaseInput()
+	input.ExpectedVersion = expectedVersion
+	return input
+}
+
 func TestPublishReleaseRejectsPlaceholderSignature(t *testing.T) {
 	repository := newFakeRepository()
 	service, err := New(Options{
 		Repository: repository,
 		Verifier:   acceptingVerifier{},
+		Artifacts: acceptingArtifactVerifier{
+			sizeBytes: validReleaseInput().SizeBytes,
+			sha256:    validReleaseInput().SHA256,
+		},
+		ArtifactLock: acceptingArtifactLocker{},
 	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
@@ -630,6 +850,11 @@ func TestRollbackRejectedWhenReleaseDoesNotAllowIt(t *testing.T) {
 	service, err := New(Options{
 		Repository: repository,
 		Verifier:   acceptingVerifier{},
+		Artifacts: acceptingArtifactVerifier{
+			sizeBytes: validReleaseInput().SizeBytes,
+			sha256:    validReleaseInput().SHA256,
+		},
+		ArtifactLock: acceptingArtifactLocker{},
 	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
@@ -683,6 +908,11 @@ func TestRecordEventIsIdempotentAndRejectsDeviceMismatch(t *testing.T) {
 	service, err := New(Options{
 		Repository: repository,
 		Verifier:   acceptingVerifier{},
+		Artifacts: acceptingArtifactVerifier{
+			sizeBytes: validReleaseInput().SizeBytes,
+			sha256:    validReleaseInput().SHA256,
+		},
+		ArtifactLock: acceptingArtifactLocker{},
 	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
@@ -742,6 +972,11 @@ func TestPublishReleaseRequiresTrustedSignature(t *testing.T) {
 	service, err := New(Options{
 		Repository: repository,
 		Verifier:   rejectingVerifier{},
+		Artifacts: acceptingArtifactVerifier{
+			sizeBytes: validReleaseInput().SizeBytes,
+			sha256:    validReleaseInput().SHA256,
+		},
+		ArtifactLock: acceptingArtifactLocker{},
 	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
@@ -760,6 +995,113 @@ func TestPublishReleaseRequiresTrustedSignature(t *testing.T) {
 	}
 }
 
+func TestPublishReleaseFailsClosedWhenArtifactVerificationFails(t *testing.T) {
+	testCases := []struct {
+		name string
+		err  error
+		want error
+	}{
+		{
+			name: "missing artifact",
+			err:  domain.ErrArtifactMissing,
+			want: domain.ErrArtifactMissing,
+		},
+		{
+			name: "mismatched artifact",
+			err:  domain.ErrArtifactMismatch,
+			want: domain.ErrArtifactMismatch,
+		},
+		{
+			name: "download store unavailable",
+			err:  errors.New("volume not mounted"),
+			want: domain.ErrArtifactUnavailable,
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			input := validReleaseInput()
+			repository := newFakeRepository()
+			preparer, err := New(Options{
+				Repository: repository,
+				Verifier:   acceptingVerifier{},
+			})
+			if err != nil {
+				t.Fatalf("create preparer: %v", err)
+			}
+			release, err := preparer.CreateReleaseDraft(context.Background(), input)
+			if err != nil {
+				t.Fatalf("create draft: %v", err)
+			}
+
+			publisher, err := New(Options{
+				Repository: repository,
+				Verifier:   acceptingVerifier{},
+				Artifacts: acceptingArtifactVerifier{
+					err: testCase.err,
+				},
+			})
+			if err != nil {
+				t.Fatalf("create publisher: %v", err)
+			}
+			_, err = publisher.PublishRelease(
+				context.Background(),
+				release.ID,
+				"admin-1",
+				release.RecordVersion,
+			)
+			if !errors.Is(err, testCase.want) {
+				t.Fatalf("publish error = %v, want %v", err, testCase.want)
+			}
+			stored, err := repository.GetRelease(context.Background(), release.ID)
+			if err != nil {
+				t.Fatalf("reload release: %v", err)
+			}
+			if stored.Status != domain.ReleaseStatusDraft {
+				t.Fatalf("release status = %s, want draft", stored.Status)
+			}
+		})
+	}
+}
+
+func TestPublishReleaseRejectsArtifactSizeOrDigestMismatch(t *testing.T) {
+	for _, verified := range []acceptingArtifactVerifier{
+		{sizeBytes: 999, sha256: validReleaseInput().SHA256},
+		{sizeBytes: 1024, sha256: strings.Repeat("b", 64)},
+	} {
+		repository := newFakeRepository()
+		preparer, err := New(Options{
+			Repository: repository,
+			Verifier:   acceptingVerifier{},
+		})
+		if err != nil {
+			t.Fatalf("create preparer: %v", err)
+		}
+		release, err := preparer.CreateReleaseDraft(
+			context.Background(),
+			validReleaseInput(),
+		)
+		if err != nil {
+			t.Fatalf("create draft: %v", err)
+		}
+		publisher, err := New(Options{
+			Repository: repository,
+			Verifier:   acceptingVerifier{},
+			Artifacts:  verified,
+		})
+		if err != nil {
+			t.Fatalf("create publisher: %v", err)
+		}
+		if _, err := publisher.PublishRelease(
+			context.Background(),
+			release.ID,
+			"admin-1",
+			release.RecordVersion,
+		); !errors.Is(err, domain.ErrArtifactMismatch) {
+			t.Fatalf("expected artifact mismatch, got %v", err)
+		}
+	}
+}
+
 func TestCurrentDeviceUpdateReturnsActiveDeployment(t *testing.T) {
 	repository := newFakeRepository()
 	repository.device = &domain.DeviceContext{
@@ -770,6 +1112,11 @@ func TestCurrentDeviceUpdateReturnsActiveDeployment(t *testing.T) {
 	service, err := New(Options{
 		Repository: repository,
 		Verifier:   acceptingVerifier{},
+		Artifacts: acceptingArtifactVerifier{
+			sizeBytes: validReleaseInput().SizeBytes,
+			sha256:    validReleaseInput().SHA256,
+		},
+		ArtifactLock: acceptingArtifactLocker{},
 	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
@@ -819,6 +1166,11 @@ func TestRollbackDeploymentRequiresAllowedRelease(t *testing.T) {
 	service, err := New(Options{
 		Repository: repository,
 		Verifier:   acceptingVerifier{},
+		Artifacts: acceptingArtifactVerifier{
+			sizeBytes: validReleaseInput().SizeBytes,
+			sha256:    validReleaseInput().SHA256,
+		},
+		ArtifactLock: acceptingArtifactLocker{},
 	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
@@ -863,7 +1215,7 @@ type rejectingVerifier struct{}
 func (rejectingVerifier) Verify(
 	string,
 	string,
-	string,
+	[]byte,
 	string,
 ) error {
 	return domain.ErrSignatureInvalid
@@ -902,6 +1254,11 @@ func TestRollbackDeploymentRejectsNonPublishedTargetRelease(t *testing.T) {
 	service, err := New(Options{
 		Repository: repository,
 		Verifier:   acceptingVerifier{},
+		Artifacts: acceptingArtifactVerifier{
+			sizeBytes: validReleaseInput().SizeBytes,
+			sha256:    validReleaseInput().SHA256,
+		},
+		ArtifactLock: acceptingArtifactLocker{},
 	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)

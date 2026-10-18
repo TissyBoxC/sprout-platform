@@ -10,6 +10,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/domain"
 	otaservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/service"
+	"github.com/google/uuid"
 )
 
 // DeviceSessionVerifier resolves the owning device id for a device session.
@@ -45,24 +46,26 @@ func newOTAHandler(
 }
 
 type otaReleaseMutation struct {
-	FirmwareVersion    string `json:"firmware_version"`
-	HardwareRevision   string `json:"hardware_revision"`
-	Channel            string `json:"channel"`
-	ArtifactKey        string `json:"artifact_key"`
-	ArtifactURL        string `json:"artifact_url"`
-	SHA256             string `json:"sha256"`
-	SizeBytes          int64  `json:"size_bytes"`
-	SignatureKeyID     string `json:"signature_key_id"`
-	SignatureAlgorithm string `json:"signature_algorithm"`
-	Signature          string `json:"signature"`
-	RollbackAllowed    bool   `json:"rollback_allowed"`
-	Mandatory          bool   `json:"mandatory"`
-	MinSourceVersion   string `json:"min_source_version"`
-	ReleaseNotes       string `json:"release_notes"`
-	TargetType         string `json:"target_type"`
-	TargetID           string `json:"target_id"`
-	CanaryPercent      int    `json:"canary_percent"`
-	ExpectedVersion    int64  `json:"expected_version"`
+	ReleaseID               string `json:"release_id"`
+	FirmwareVersion         string `json:"firmware_version"`
+	HardwareRevision        string `json:"hardware_revision"`
+	Channel                 string `json:"channel"`
+	ArtifactKey             string `json:"artifact_key"`
+	ArtifactURL             string `json:"artifact_url"`
+	SHA256                  string `json:"sha256"`
+	SizeBytes               int64  `json:"size_bytes"`
+	SignatureKeyID          string `json:"signature_key_id"`
+	SignatureAlgorithm      string `json:"signature_algorithm"`
+	SignaturePayloadVersion string `json:"signature_payload_version"`
+	Signature               string `json:"signature"`
+	RollbackAllowed         bool   `json:"rollback_allowed"`
+	Mandatory               bool   `json:"mandatory"`
+	MinSourceVersion        string `json:"min_source_version"`
+	ReleaseNotes            string `json:"release_notes"`
+	TargetType              string `json:"target_type"`
+	TargetID                string `json:"target_id"`
+	CanaryPercent           int    `json:"canary_percent"`
+	ExpectedVersion         int64  `json:"expected_version"`
 }
 
 type otaDeviceEventRequest struct {
@@ -553,6 +556,16 @@ func (handler otaHandler) createAdminRelease(
 		)
 		return
 	}
+	if err := validateOTAReleaseMutation(payload); err != nil {
+		writeError(
+			response,
+			request,
+			http.StatusBadRequest,
+			"invalid_request",
+			"请检查更新内容和签名格式",
+		)
+		return
+	}
 	accountID, ok := authenticatedAccountID(request)
 	if !ok {
 		writeError(
@@ -621,6 +634,16 @@ func (handler otaHandler) updateAdminRelease(
 			http.StatusBadRequest,
 			"invalid_request",
 			"请检查更新内容",
+		)
+		return
+	}
+	if err := validateOTAReleaseMutation(payload); err != nil {
+		writeError(
+			response,
+			request,
+			http.StatusBadRequest,
+			"invalid_request",
+			"请检查更新内容和签名格式",
 		)
 		return
 	}
@@ -1042,57 +1065,59 @@ func (handler otaHandler) writeDeviceUpdate(
 
 func otaDeviceReleaseResponse(release domain.DeviceRelease) map[string]any {
 	response := map[string]any{
-		"schema_version":      "1.0.0",
-		"release_id":          release.ReleaseID,
-		"firmware_version":    release.Version,
-		"channel":             release.Channel,
-		"hardware_revision":   release.HardwareRevision,
-		"min_source_version":  release.MinSourceVersion,
-		"artifact_url":        release.ArtifactURL,
-		"artifact_key":        release.ArtifactKey,
-		"sha256":              release.SHA256,
-		"size_bytes":          release.SizeBytes,
-		"signature_key_id":    release.SignatureKeyID,
-		"signature_algorithm": release.SignatureAlgorithm,
-		"signature":           release.Signature,
-		"rollback_allowed":    release.RollbackAllowed,
-		"mandatory":           release.Mandatory,
-		"release_notes":       release.ReleaseNotes,
-		"status":              release.Status,
+		"schema_version":            domain.OTAReleaseSchemaVersion,
+		"release_id":                release.ReleaseID,
+		"firmware_version":          release.Version,
+		"channel":                   release.Channel,
+		"hardware_revision":         release.HardwareRevision,
+		"min_source_version":        release.MinSourceVersion,
+		"artifact_url":              release.ArtifactURL,
+		"artifact_key":              release.ArtifactKey,
+		"sha256":                    release.SHA256,
+		"size_bytes":                release.SizeBytes,
+		"signature_key_id":          release.SignatureKeyID,
+		"signature_algorithm":       release.SignatureAlgorithm,
+		"signature_payload_version": domain.OTAReleaseSignaturePayloadVersion,
+		"signature":                 release.Signature,
+		"rollback_allowed":          release.RollbackAllowed,
+		"mandatory":                 release.Mandatory,
+		"release_notes":             release.ReleaseNotes,
+		"status":                    release.Status,
 	}
 	if release.PublishedAt != nil {
-		response["published_at"] = *release.PublishedAt
+		response["published_at"] = release.PublishedAt.UTC().Format(time.RFC3339)
 	}
 	return response
 }
 
 func otaReleaseResponse(release domain.Release) map[string]any {
 	response := map[string]any{
-		"schema_version":      "1.0.0",
-		"release_id":          release.ID,
-		"id":                  release.ID,
-		"firmware_version":    release.Version,
-		"channel":             release.Channel,
-		"hardware_revision":   release.HardwareRevision,
-		"min_source_version":  release.MinSourceVersion,
-		"artifact_url":        release.ArtifactURL,
-		"artifact_key":        release.ArtifactKey,
-		"sha256":              release.SHA256,
-		"size_bytes":          release.SizeBytes,
-		"signature_key_id":    release.SignatureKeyID,
-		"signature_algorithm": release.SignatureAlgorithm,
-		"signature":           release.Signature,
-		"signature_status":    release.SignatureStatus,
-		"rollback_allowed":    release.RollbackAllowed,
-		"mandatory":           release.Mandatory,
-		"release_notes":       release.ReleaseNotes,
-		"status":              release.Status,
-		"target_type":         release.Target.Scope,
-		"target_id":           release.Target.DeviceID,
-		"canary_percent":      release.Target.CanaryPercent,
-		"record_version":      release.RecordVersion,
-		"created_at":          release.CreatedAt,
-		"updated_at":          release.UpdatedAt,
+		"schema_version":            domain.OTAReleaseSchemaVersion,
+		"release_id":                release.ID,
+		"id":                        release.ID,
+		"firmware_version":          release.Version,
+		"channel":                   release.Channel,
+		"hardware_revision":         release.HardwareRevision,
+		"min_source_version":        release.MinSourceVersion,
+		"artifact_url":              release.ArtifactURL,
+		"artifact_key":              release.ArtifactKey,
+		"sha256":                    release.SHA256,
+		"size_bytes":                release.SizeBytes,
+		"signature_key_id":          release.SignatureKeyID,
+		"signature_algorithm":       release.SignatureAlgorithm,
+		"signature_payload_version": domain.OTAReleaseSignaturePayloadVersion,
+		"signature":                 release.Signature,
+		"signature_status":          release.SignatureStatus,
+		"rollback_allowed":          release.RollbackAllowed,
+		"mandatory":                 release.Mandatory,
+		"release_notes":             release.ReleaseNotes,
+		"status":                    release.Status,
+		"target_type":               release.Target.Scope,
+		"target_id":                 release.Target.DeviceID,
+		"canary_percent":            release.Target.CanaryPercent,
+		"record_version":            release.RecordVersion,
+		"created_at":                release.CreatedAt,
+		"updated_at":                release.UpdatedAt,
 	}
 	if release.Target.GroupID != "" {
 		response["target_id"] = release.Target.GroupID
@@ -1133,6 +1158,30 @@ func (handler otaHandler) writeError(
 			http.StatusUnprocessableEntity,
 			"invalid_release",
 			"请检查更新内容和签名",
+		)
+	case errors.Is(err, domain.ErrArtifactMissing):
+		writeError(
+			response,
+			request,
+			http.StatusUnprocessableEntity,
+			"artifact_missing",
+			"共享下载目录中没有与更新信息匹配的固件文件",
+		)
+	case errors.Is(err, domain.ErrArtifactMismatch):
+		writeError(
+			response,
+			request,
+			http.StatusUnprocessableEntity,
+			"artifact_mismatch",
+			"固件文件大小或校验值与更新信息不一致",
+		)
+	case errors.Is(err, domain.ErrArtifactUnavailable):
+		writeError(
+			response,
+			request,
+			http.StatusServiceUnavailable,
+			"artifact_unavailable",
+			"暂时无法核验固件文件，请稍后重试",
 		)
 	case errors.Is(err, domain.ErrSignatureKeyUnknown):
 		writeError(
@@ -1248,6 +1297,7 @@ func releaseInputFromMutation(
 		target.CanaryPercent = 0
 	}
 	return domain.ReleaseInput{
+		ID:                 strings.TrimSpace(payload.ReleaseID),
 		Version:            payload.FirmwareVersion,
 		Channel:            domain.Channel(payload.Channel),
 		HardwareRevision:   payload.HardwareRevision,
@@ -1266,6 +1316,21 @@ func releaseInputFromMutation(
 		ActorID:            actorID,
 		ExpectedVersion:    expectedVersion,
 	}
+}
+
+func validateOTAReleaseMutation(payload otaReleaseMutation) error {
+	if payload.SignaturePayloadVersion != domain.OTAReleaseSignaturePayloadVersion {
+		return domain.ErrInvalidRelease
+	}
+	if payload.ReleaseID == "" {
+		return domain.ErrInvalidRelease
+	}
+	parsed, err := uuid.Parse(strings.TrimSpace(payload.ReleaseID))
+	if err != nil || parsed == uuid.Nil ||
+		parsed.String() != strings.TrimSpace(payload.ReleaseID) {
+		return domain.ErrInvalidRelease
+	}
+	return nil
 }
 
 func adminReleaseFilter(request *http.Request) (domain.ReleaseFilter, error) {

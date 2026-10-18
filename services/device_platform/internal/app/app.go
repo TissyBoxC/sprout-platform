@@ -337,6 +337,10 @@ func Run() error {
 	ota, err := otaService.New(otaService.Options{
 		Repository: otaRepository.NewPostgresRepository(databaseStore.Pool()),
 		Verifier:   firmwareSignatureVerifier,
+		Artifacts: otaArtifactVerifier{
+			store: releaseStore,
+		},
+		ArtifactLock: releaseStore,
 	})
 	if err != nil {
 		return fmt.Errorf("create OTA service: %w", err)

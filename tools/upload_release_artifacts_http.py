@@ -160,7 +160,7 @@ def upload_artifact(
             "platform": platform,
             "kind": kind,
             "filename": file_name,
-            "overwrite": "true",
+            "overwrite": "false",
         },
         source,
     )

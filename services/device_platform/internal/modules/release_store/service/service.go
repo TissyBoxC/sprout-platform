@@ -38,7 +38,13 @@ var (
 const (
 	inventoryReadAttempts = 3
 	inventoryDigestLimit  = 256
+	immutableIndexPath    = ".release-immutability.json"
 )
+
+type immutableIndex struct {
+	SchemaVersion int      `json:"schema_version"`
+	Paths         []string `json:"paths"`
+}
 
 type cachedInventoryDigest struct {
 	info   os.FileInfo
@@ -50,6 +56,7 @@ type Service struct {
 	root                *os.Root
 	rootDir             string
 	publicBaseURL       string
+	immutablePaths      map[string]struct{}
 	clock               clock.Clock
 	inventoryRetryDelay time.Duration
 	inventoryOpen       func(string) (*os.File, error)
@@ -73,6 +80,13 @@ type ArtifactLookup struct {
 	Platform    string
 	DownloadURL string
 	SHA256      string
+}
+
+// ArtifactVerification is the exact on-disk projection used before an OTA
+// release can be published.
+type ArtifactVerification struct {
+	SizeBytes int64
+	SHA256    string
 }
 
 // Options contains download-store dependencies.
@@ -108,16 +122,59 @@ func New(options Options) (*Service, error) {
 	if timeSource == nil {
 		timeSource = clock.SystemClock{}
 	}
-	return &Service{
+	service := &Service{
 		root:                root,
 		rootDir:             absoluteRoot,
 		publicBaseURL:       strings.TrimRight(strings.TrimSpace(options.PublicBaseURL), "/"),
+		immutablePaths:      make(map[string]struct{}),
 		clock:               timeSource,
 		inventoryRetryDelay: 15 * time.Millisecond,
 		inventoryOpen:       root.Open,
 		inventoryStat:       root.Stat,
 		inventoryDigests:    make(map[string]cachedInventoryDigest),
-	}, nil
+	}
+	if err := service.loadImmutableIndex(); err != nil {
+		_ = root.Close()
+		return nil, err
+	}
+	return service, nil
+}
+
+func (s *Service) loadImmutableIndex() error {
+	payload, err := s.root.ReadFile(immutableIndexPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read release immutability index: %w", err)
+	}
+	var index immutableIndex
+	if err := json.Unmarshal(payload, &index); err != nil {
+		return fmt.Errorf("decode release immutability index: %w", err)
+	}
+	if index.SchemaVersion != 1 {
+		return errors.New("unsupported release immutability index schema")
+	}
+	for _, relativePath := range index.Paths {
+		normalized, err := NormalizeFilePath(relativePath)
+		if err != nil {
+			return fmt.Errorf("invalid immutable release path: %w", err)
+		}
+		s.immutablePaths[normalized] = struct{}{}
+	}
+	return nil
+}
+
+func (s *Service) persistImmutableIndex() error {
+	paths := make([]string, 0, len(s.immutablePaths))
+	for relativePath := range s.immutablePaths {
+		paths = append(paths, relativePath)
+	}
+	sort.Strings(paths)
+	return s.writeJSONAtomic(immutableIndexPath, immutableIndex{
+		SchemaVersion: 1,
+		Paths:         paths,
+	})
 }
 
 // Close releases the root handle.
@@ -140,7 +197,9 @@ func (s *Service) Inventory(ctx context.Context) (domain.Inventory, error) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if !info.Mode().IsRegular() || isTemporaryUploadFile(relativePath) {
+		if !info.Mode().IsRegular() ||
+			isTemporaryUploadFile(relativePath) ||
+			relativePath == immutableIndexPath {
 			return nil
 		}
 		file, ok, err := s.readInventoryFile(ctx, relativePath, info)
@@ -511,6 +570,47 @@ func (s *Service) FindArtifact(
 	return nil, domain.ErrArtifactNotFound
 }
 
+// ReadArtifact opens exactly one file below the safe root and returns its
+// authoritative size and SHA-256. Callers compare these values to signed
+// metadata before publication.
+func (s *Service) ReadArtifact(
+	ctx context.Context,
+	artifactKey string,
+) (*ArtifactVerification, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	normalized, err := NormalizeRelativePath(artifactKey)
+	if err != nil || normalized != artifactKey {
+		return nil, domain.ErrPathInvalid
+	}
+	file, err := s.root.Open(normalized)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, domain.ErrFileNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("open release artifact: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat release artifact: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, domain.ErrFileNotFound
+	}
+	hasher := sha256.New()
+	written, err := io.Copy(hasher, file)
+	if err != nil {
+		return nil, fmt.Errorf("hash release artifact: %w", err)
+	}
+	digest := hex.EncodeToString(hasher.Sum(nil))
+	return &ArtifactVerification{
+		SizeBytes: written,
+		SHA256:    digest,
+	}, nil
+}
+
 // UploadFile stores one manually uploaded file.
 //
 // The caller passes a single reader so the handler can enforce the HTTP body
@@ -526,6 +626,9 @@ func (s *Service) UploadFile(
 	relativePath, err := resolveUploadPath(input)
 	if err != nil {
 		return domain.File{}, err
+	}
+	if s.isImmutable(relativePath) {
+		return domain.File{}, domain.ErrFileImmutable
 	}
 	parent := path.Dir(relativePath)
 	if parent != "." {
@@ -597,6 +700,9 @@ func (s *Service) DeleteFile(ctx context.Context, relativePath string) error {
 	if err != nil {
 		return err
 	}
+	if s.isImmutable(normalized) {
+		return domain.ErrFileImmutable
+	}
 	info, err := s.root.Stat(normalized)
 	if errors.Is(err, os.ErrNotExist) {
 		return domain.ErrFileNotFound
@@ -623,6 +729,36 @@ func (s *Service) DeleteFile(ctx context.Context, relativePath string) error {
 		parent = path.Dir(parent)
 	}
 	return nil
+}
+
+// MarkPublishedArtifact protects the exact canonical file signed by an OTA
+// manifest from the normal overwrite and delete paths.
+func (s *Service) MarkPublishedArtifact(relativePath string) error {
+	normalized, err := NormalizeFilePath(relativePath)
+	if err != nil {
+		return err
+	}
+	if _, err := s.ReadArtifact(context.Background(), normalized); err != nil {
+		return err
+	}
+	s.inventoryDigestMu.Lock()
+	defer s.inventoryDigestMu.Unlock()
+	if _, exists := s.immutablePaths[normalized]; exists {
+		return nil
+	}
+	s.immutablePaths[normalized] = struct{}{}
+	if err := s.persistImmutableIndex(); err != nil {
+		delete(s.immutablePaths, normalized)
+		return err
+	}
+	return nil
+}
+
+func (s *Service) isImmutable(relativePath string) bool {
+	s.inventoryDigestMu.Lock()
+	defer s.inventoryDigestMu.Unlock()
+	_, immutable := s.immutablePaths[relativePath]
+	return immutable
 }
 
 // RefreshIndex regenerates one release manifest and the global index.

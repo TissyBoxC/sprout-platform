@@ -113,6 +113,7 @@ export interface OtaDeploymentListResult {
 }
 
 export interface CreateOtaReleaseInput {
+  releaseId: string
   firmwareVersion: string
   hardwareRevision: string
   channel: OtaReleaseChannel
@@ -122,6 +123,7 @@ export interface CreateOtaReleaseInput {
   sizeBytes: number
   signatureKeyId: string
   signatureAlgorithm: OtaSignatureAlgorithm
+  signaturePayloadVersion: '2'
   signature: string
   rollbackAllowed: boolean
   minSourceVersion: string
@@ -298,6 +300,7 @@ export function createAdminOtaClient(
 
 function toCreatePayload(input: CreateOtaReleaseInput): Record<string, unknown> {
   return {
+    release_id: input.releaseId.trim(),
     firmware_version: input.firmwareVersion.trim(),
     hardware_revision: input.hardwareRevision.trim(),
     channel: input.channel,
@@ -307,6 +310,7 @@ function toCreatePayload(input: CreateOtaReleaseInput): Record<string, unknown> 
     size_bytes: nonNegativeInteger(input.sizeBytes, 0),
     signature_key_id: input.signatureKeyId.trim(),
     signature_algorithm: input.signatureAlgorithm,
+    signature_payload_version: input.signaturePayloadVersion,
     signature: input.signature.trim(),
     rollback_allowed: input.rollbackAllowed,
     min_source_version: input.minSourceVersion.trim(),
@@ -320,6 +324,7 @@ function toCreatePayload(input: CreateOtaReleaseInput): Record<string, unknown> 
 function toUpdatePayload(input: UpdateOtaReleaseInput): Record<string, unknown> {
   return {
     ...toCreatePayload(input),
+    release_id: input.releaseId.trim(),
     expected_version: positiveInteger(input.expectedVersion, 1),
   }
 }

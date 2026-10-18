@@ -87,6 +87,12 @@ path requires `VOICE_GATEWAY_DATABASE_DSN`; the realtime WebSocket path
 requires `VOICE_GATEWAY_WS_ENABLED=true` and a strong
 `VOICE_GATEWAY_WS_TOKEN_SECRET`.
 
+Browser WebSocket clients must list their exact origin in
+`VOICE_GATEWAY_WS_ALLOWED_ORIGINS` (comma-separated). Device firmware and
+native clients that do not send an `Origin` header remain supported because
+they authenticate with a device token before the upgrade. Any browser request
+with an unlisted origin is rejected.
+
 ## Device Token Revocation
 
 The gateway rejects device tokens with a missing or blank `token_id`. When a

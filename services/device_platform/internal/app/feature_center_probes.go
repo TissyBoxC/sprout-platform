@@ -33,12 +33,11 @@ func (placeholderHealthProbe) HealthProbeReady() bool {
 	return false
 }
 
-// nonzeroRowProbe treats an unprotected table read as the health signal for a
-// feature. It returns degraded rather than unavailable when the table is empty,
-// because "no rows yet" is a valid early-lifecycle state and never a failure.
-// A missing table or a failed connection reports unavailable so the console
-// never shows a healthy capability backed by a broken schema.
-func nonzeroRowProbe(
+// schemaReadinessProbe verifies that a feature's authoritative storage is
+// deployed and queryable. It intentionally does not claim that the feature is
+// healthy just because one row exists: an empty table is the normal first-run
+// state, while a missing table or failed query is unavailable.
+func schemaReadinessProbe(
 	pool *pgxpool.Pool,
 	query string,
 ) featureCenterService.HealthProbe {
@@ -50,14 +49,16 @@ func nonzeroRowProbe(
 			var marker int
 			err := pool.QueryRow(ctx, query).Scan(&marker)
 			if errors.Is(err, pgx.ErrNoRows) {
-				// The table exists but has no rows yet: the capability is
-				// deployed and reachable, just not populated.
+				// The schema and query are valid, but there is no runtime
+				// evidence yet that the capability works.
 				return featureCenterDomain.HealthDegraded, nil
 			}
 			if err != nil {
 				return featureCenterDomain.HealthUnavailable, nil
 			}
-			return featureCenterDomain.HealthHealthy, nil
+			// A successful read proves deployment, not functional health.
+			// Only a capability-specific probe may report healthy.
+			return featureCenterDomain.HealthDegraded, nil
 		},
 	)
 }

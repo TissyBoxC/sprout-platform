@@ -100,6 +100,9 @@ func (handler *Handler) Export(
 		writeServiceError(response, request, err)
 		return
 	}
+	response.Header().Set("Cache-Control", "no-store")
+	response.Header().Set("Pragma", "no-cache")
+	response.Header().Set("Vary", "Authorization")
 	writeSuccess(response, request, http.StatusOK, export)
 }
 

@@ -51,12 +51,16 @@ type SessionConfig struct {
 	SegmentQueueDepth    int
 	PreRollFrames        int
 	SegmentHandler       func(AudioSegment)
-	IdleTimeout          time.Duration
-	MaxDuration          time.Duration
-	MaxSegmentLength     time.Duration
-	MinimumSpeechMS      int
-	CodecFactory         func() (codec.Codec, error)
-	DetectorFactory      func() vad.Detector
+	// FrameObserver receives the post-decode, post-preprocess, post-VAD result
+	// for each accepted frame. The transport uses it to gate acoustic barge-in;
+	// it is called synchronously after the session mutex is released.
+	FrameObserver    func(FrameObservation)
+	IdleTimeout      time.Duration
+	MaxDuration      time.Duration
+	MaxSegmentLength time.Duration
+	MinimumSpeechMS  int
+	CodecFactory     func() (codec.Codec, error)
+	DetectorFactory  func() vad.Detector
 	// PreprocessFactory builds the per-session echo cancellation, noise
 	// suppression, and gain calibration chain. It is optional so a profile
 	// without extra CPU still gets the codec and VAD path.
@@ -81,6 +85,12 @@ type AudioSegment struct {
 	SequenceEnd     uint32
 	CapturedAt      time.Time
 	PCM             []int16
+}
+
+// FrameObservation describes the transport-level result of one accepted frame
+// after decoding, preprocessing, and VAD. It never carries PCM.
+type FrameObservation struct {
+	Speech bool
 }
 
 // SessionStats is a point-in-time diagnostic view of one conversation.
@@ -130,6 +140,7 @@ type Session struct {
 	segmentQueueDepth   int
 	preRollFrames       int
 	segmentHandler      func(AudioSegment)
+	frameObserver       func(FrameObservation)
 	idleTimeout         time.Duration
 	maxDuration         time.Duration
 	maxSegmentLength    time.Duration
@@ -217,6 +228,7 @@ func NewSession(config SessionConfig) (*Session, error) {
 		segmentQueueDepth:   config.SegmentQueueDepth,
 		preRollFrames:       config.PreRollFrames,
 		segmentHandler:      config.SegmentHandler,
+		frameObserver:       config.FrameObserver,
 		idleTimeout:         config.IdleTimeout,
 		maxDuration:         config.MaxDuration,
 		maxSegmentLength:    config.MaxSegmentLength,
@@ -356,23 +368,35 @@ func (s *Session) KeepAlive() {
 // of dropping child speech. It returns a context error when the session ends
 // while waiting for the consumer.
 func (s *Session) AcceptFrame(ctx context.Context, audioFrame frame.Frame) error {
+	_, err := s.AcceptFrameObserved(ctx, audioFrame)
+	return err
+}
+
+// AcceptFrameObserved is AcceptFrame with one post-VAD observation for the
+// transport. It is used to gate acoustic barge-in after corrupt packets and
+// synthetic or environmental noise have been rejected.
+func (s *Session) AcceptFrameObserved(
+	ctx context.Context,
+	audioFrame frame.Frame,
+) (FrameObservation, error) {
+	observation := FrameObservation{}
 	if s == nil {
-		return ErrSessionClosed
+		return observation, ErrSessionClosed
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := audioFrame.Validate(); err != nil {
-		return fmt.Errorf("validate audio frame: %w", err)
+		return observation, fmt.Errorf("validate audio frame: %w", err)
 	}
 	if audioFrame.SchemaVersion != s.schemaVersion ||
 		audioFrame.DeviceID != s.deviceID ||
 		audioFrame.StreamID != s.streamID {
-		return ErrSessionIdentity
+		return observation, ErrSessionIdentity
 	}
 	select {
 	case <-s.ctx.Done():
-		return s.Err()
+		return observation, s.Err()
 	default:
 	}
 
@@ -383,11 +407,11 @@ func (s *Session) AcceptFrame(ctx context.Context, audioFrame frame.Frame) error
 		case audioFrame.Sequence == s.lastSequence:
 			s.duplicateFrames++
 			s.mu.Unlock()
-			return buffer.ErrDuplicateFrame
+			return observation, buffer.ErrDuplicateFrame
 		case !isNewerSequence(audioFrame.Sequence, s.lastSequence):
 			s.outOfOrderFrames++
 			s.mu.Unlock()
-			return ErrOutOfOrderFrame
+			return observation, ErrOutOfOrderFrame
 		}
 	}
 
@@ -395,11 +419,11 @@ func (s *Session) AcceptFrame(ctx context.Context, audioFrame frame.Frame) error
 	decodedSamples, err := s.codec.DecodePacket(audioFrame.Payload, pcm)
 	if err != nil {
 		s.mu.Unlock()
-		return fmt.Errorf("decode audio frame: %w", err)
+		return observation, fmt.Errorf("decode audio frame: %w", err)
 	}
 	if decodedSamples <= 0 || decodedSamples > len(pcm) {
 		s.mu.Unlock()
-		return fmt.Errorf("decode audio frame: invalid sample count %d", decodedSamples)
+		return observation, fmt.Errorf("decode audio frame: invalid sample count %d", decodedSamples)
 	}
 	pcm = pcm[:decodedSamples]
 
@@ -412,14 +436,14 @@ func (s *Session) AcceptFrame(ctx context.Context, audioFrame frame.Frame) error
 		}
 		if _, processErr := s.processor.Process(pcm, reference); processErr != nil {
 			s.mu.Unlock()
-			return fmt.Errorf("preprocess audio frame: %w", processErr)
+			return observation, fmt.Errorf("preprocess audio frame: %w", processErr)
 		}
 		s.updatePreprocessQualityLocked()
 	}
 
 	if err := s.buffer.Push(audioFrame); err != nil {
 		s.mu.Unlock()
-		return fmt.Errorf("buffer audio frame: %w", err)
+		return observation, fmt.Errorf("buffer audio frame: %w", err)
 	}
 	s.hasSequence = true
 	s.lastSequence = audioFrame.Sequence
@@ -428,18 +452,22 @@ func (s *Session) AcceptFrame(ctx context.Context, audioFrame frame.Frame) error
 	s.advanceListeningLocked()
 
 	isSpeech := s.detector.IsSpeech(int16Bytes(pcm))
+	observation.Speech = isSpeech
 	s.updateDetectorQualityLocked()
 	s.metricsAt = time.Now().UTC()
 	segment, hasSegment, err := s.consumeSpeechLocked(audioFrame, pcm, isSpeech)
 	if err != nil {
 		s.mu.Unlock()
-		return err
+		return observation, err
 	}
 	s.mu.Unlock()
-	if hasSegment {
-		return s.emitSegment(ctx, segment)
+	if s.frameObserver != nil {
+		s.frameObserver(observation)
 	}
-	return nil
+	if hasSegment {
+		return observation, s.emitSegment(ctx, segment)
+	}
+	return observation, nil
 }
 
 // NextSegment returns the next completed utterance.

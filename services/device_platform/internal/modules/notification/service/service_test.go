@@ -22,6 +22,7 @@ type memoryRepository struct {
 	deliveries    []*domain.Delivery
 	devices       map[string]string // deviceID -> parentAccountID
 	healthErr     error
+	updateErr     error
 }
 
 func newMemoryRepository() *memoryRepository {
@@ -298,6 +299,9 @@ func (m *memoryRepository) UpdateDeliveryStatus(
 	failureCode string,
 	_ time.Time,
 ) error {
+	if m.updateErr != nil {
+		return m.updateErr
+	}
 	for _, delivery := range m.deliveries {
 		if delivery.NotificationID == notificationID &&
 			delivery.ParentAccountID == parentAccountID &&
@@ -590,6 +594,67 @@ func TestSendFamilyMessageDegradesWhenDeviceUnavailable(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected the device delivery to be marked failed")
+	}
+}
+
+func TestSendFamilyMessageFailsWhenFallbackStatusCannotPersist(t *testing.T) {
+	repo := newMemoryRepository()
+	repo.updateErr = errors.New("database unavailable")
+	commander := &fakeCommander{err: errors.New("device offline")}
+	service := newTestService(t, repo, commander)
+
+	_, err := service.SendFamilyMessage(
+		context.Background(),
+		testParentID,
+		domain.GuardianMessageInput{
+			DeviceID:     testDeviceID,
+			Body:         "晚安",
+			SendToDevice: true,
+		},
+	)
+	if !errors.Is(err, repo.updateErr) {
+		t.Fatalf("err = %v, want persistence error", err)
+	}
+}
+
+type failingAudit struct{ err error }
+
+func (audit failingAudit) RecordAudit(
+	context.Context,
+	string,
+	string,
+	string,
+	map[string]any,
+) error {
+	return audit.err
+}
+
+func TestNotificationMutationFailsWhenAuditCannotPersist(t *testing.T) {
+	repo := newMemoryRepository()
+	auditErr := errors.New("audit unavailable")
+	service, err := New(Options{
+		Repository: repo,
+		Commander:  &fakeCommander{},
+		Audit:      failingAudit{err: auditErr},
+		Clock:      fixedClock{now: time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	_, err = service.CreateAdministratorNotice(
+		context.Background(),
+		"",
+		domain.AdministratorInput{
+			Category:        domain.CategorySystemAnnouncement,
+			Title:           "通知",
+			Body:            "内容",
+			Audience:        domain.AudienceParent,
+			Channels:        []string{domain.ChannelInApp},
+			ParentAccountID: testParentID,
+		},
+	)
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("err = %v, want audit error", err)
 	}
 }
 

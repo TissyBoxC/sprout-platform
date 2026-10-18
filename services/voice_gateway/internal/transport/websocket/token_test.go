@@ -30,6 +30,23 @@ func TestVerifyDeviceTokenAcceptsIssuedToken(t *testing.T) {
 	}
 }
 
+func TestVerifyDeviceTokenRejectsSecondUse(t *testing.T) {
+	verifier, err := NewHMACDeviceTokenVerifier(testTokenSecret, nil)
+	if err != nil {
+		t.Fatalf("NewHMACDeviceTokenVerifier() error = %v", err)
+	}
+	token, err := verifier.IssueDeviceToken("device_a", "single_use_token", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("IssueDeviceToken() error = %v", err)
+	}
+	if _, err := verifier.VerifyDeviceToken(token); err != nil {
+		t.Fatalf("first VerifyDeviceToken() error = %v", err)
+	}
+	if _, err := verifier.VerifyDeviceToken(token); err == nil {
+		t.Fatal("second VerifyDeviceToken() accepted a consumed token")
+	}
+}
+
 func TestVerifyDeviceTokenRejectsExpiredToken(t *testing.T) {
 	now := time.Now().UTC()
 	verifier, err := NewHMACDeviceTokenVerifier(testTokenSecret, func() time.Time { return now })

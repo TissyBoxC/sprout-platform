@@ -20,6 +20,14 @@ type permissionFakeRepository struct {
 	account *authdomain.ParentAccount
 }
 
+func (repository *permissionFakeRepository) GetActiveSessionByID(
+	_ context.Context,
+	_ string,
+	_ string,
+) (*authdomain.Session, error) {
+	return &authdomain.Session{}, nil
+}
+
 func (repository *permissionFakeRepository) GetParentAccountByID(
 	_ context.Context,
 	accountID string,
@@ -227,6 +235,25 @@ func newPermissionMiddleware(
 	return newPermissionMiddlewareWithAudit(t, account, nil)
 }
 
+func TestRequireAuthenticationRejectsDisabledAccount(t *testing.T) {
+	handler, token := newPermissionMiddleware(t, &authdomain.ParentAccount{
+		ID:     "parent-disabled",
+		Role:   authdomain.RoleParent,
+		Status: "disabled",
+	})
+	request := authenticatedRequest(token)
+	recorder := httptest.NewRecorder()
+	handler.requireAuthentication(func(
+		response http.ResponseWriter,
+		_ *http.Request,
+	) {
+		t.Fatal("disabled account must not reach the protected handler")
+	})(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", recorder.Code)
+	}
+}
+
 func newPermissionMiddlewareWithAudit(
 	t *testing.T,
 	account *authdomain.ParentAccount,
@@ -248,6 +275,7 @@ func newPermissionMiddlewareWithAudit(
 	}
 	token, err := issuer.Issue(security.TokenClaims{
 		Subject:   account.ID,
+		SessionID: "test-session",
 		TokenID:   "test-token",
 		IssuedAt:  time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Minute),
@@ -255,7 +283,11 @@ func newPermissionMiddlewareWithAudit(
 	if err != nil {
 		t.Fatalf("issue token: %v", err)
 	}
-	return authHandler{service: service, audit: audit}, token
+	return authHandler{
+		service: service,
+		audit:   audit,
+		limiter: authRateLimiter{store: permittedRateLimitStore{}},
+	}, token
 }
 
 func authenticatedRequest(token string) *http.Request {

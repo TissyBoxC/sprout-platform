@@ -27,6 +27,8 @@ var (
 	ErrInvalidArgument = errors.New("invalid local command argument")
 	// ErrDuplicatePhrase reports two commands sharing a trigger phrase.
 	ErrDuplicatePhrase = errors.New("duplicate local command phrase")
+	// ErrRepositoryUnavailable reports a missing persistence dependency.
+	ErrRepositoryUnavailable = errors.New("local command repository is unavailable")
 )
 
 // Approved local command actions.

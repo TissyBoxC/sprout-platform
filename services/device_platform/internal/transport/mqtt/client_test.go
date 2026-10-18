@@ -46,6 +46,8 @@ type stubPahoClient struct {
 	subHandler paho.MessageHandler
 	subErr     error
 	subscribed bool
+	unsubTopic string
+	unsubCalls int
 }
 
 func (client *stubPahoClient) Connect() paho.Token { return newStubToken(nil) }
@@ -77,6 +79,14 @@ func (client *stubPahoClient) Subscribe(
 	client.subQoS = qos
 	client.subHandler = callback
 	return newStubToken(client.subErr)
+}
+
+func (client *stubPahoClient) Unsubscribe(topics ...string) paho.Token {
+	client.unsubCalls++
+	if len(topics) > 0 {
+		client.unsubTopic = topics[0]
+	}
+	return newStubToken(nil)
 }
 
 func sampleCommand() *runtimedomain.Command {
@@ -316,9 +326,12 @@ func TestSubscribeCommandAcksDispatchesValidAck(t *testing.T) {
 	client := &Client{client: stub}
 	handler := &stubAckHandler{}
 
-	if err := client.SubscribeCommandAcks(context.Background(), handler); err != nil {
-		t.Fatalf("SubscribeCommandAcks() error = %v", err)
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	subscriptionDone := make(chan error, 1)
+	go func() {
+		subscriptionDone <- client.SubscribeCommandAcks(ctx, handler)
+	}()
+	waitFor(t, func() bool { return stub.subscribed })
 	if !stub.subscribed {
 		t.Fatal("expected the client to subscribe")
 	}
@@ -354,6 +367,19 @@ func TestSubscribeCommandAcksDispatchesValidAck(t *testing.T) {
 	if ack.Payload.Status != "acknowledged" {
 		t.Fatalf("unexpected status: %q", ack.Payload.Status)
 	}
+	cancel()
+	select {
+	case err := <-subscriptionDone:
+		if err != nil {
+			t.Fatalf("subscription setup error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("subscription setup did not return")
+	}
+	waitFor(t, func() bool { return stub.unsubCalls == 1 })
+	if stub.unsubTopic != commandAckTopic {
+		t.Fatalf("unexpected unsubscribe topic: %q", stub.unsubTopic)
+	}
 }
 
 func TestSubscribeCommandAcksDropsInvalidMessages(t *testing.T) {
@@ -362,9 +388,12 @@ func TestSubscribeCommandAcksDropsInvalidMessages(t *testing.T) {
 	client := &Client{client: stub}
 	handler := &stubAckHandler{}
 
-	if err := client.SubscribeCommandAcks(context.Background(), handler); err != nil {
-		t.Fatalf("SubscribeCommandAcks() error = %v", err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := client.SubscribeCommandAcks(ctx, handler); err != nil {
+		t.Fatalf("subscribe: %v", err)
 	}
+	waitFor(t, func() bool { return stub.subscribed })
 
 	tests := []struct {
 		name   string
@@ -508,6 +537,50 @@ func TestSubscribeCommandAcksDropsInvalidMessages(t *testing.T) {
 	if calls != 0 {
 		t.Fatalf("expected invalid messages to be dropped, got %d dispatches", calls)
 	}
+}
+
+func TestSubscribeCommandAcksReturnsAfterSubscriptionStarts(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := &Client{client: &stubPahoClient{connected: true}}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- client.SubscribeCommandAcks(ctx, &stubAckHandler{})
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("SubscribeCommandAcks() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SubscribeCommandAcks blocked instead of returning after subscribing")
+	}
+}
+
+func TestSubscribeCommandAcksCancellationStopsWithoutCallbackPanic(t *testing.T) {
+	t.Parallel()
+	stub := &stubPahoClient{connected: true}
+	client := &Client{client: stub}
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := client.SubscribeCommandAcks(ctx, &stubAckHandler{}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	payload, err := json.Marshal(validCommandAckFixture())
+	if err != nil {
+		t.Fatalf("marshal ack: %v", err)
+	}
+	cancel()
+	waitFor(t, func() bool { return stub.unsubCalls == 1 })
+	// Paho may already be dispatching a callback while Unsubscribe is in
+	// flight. It must be safe for that callback to observe cancellation.
+	stub.subHandler(nil, stubMessage{
+		topic:   "sprout/v1/devices/device_test_001/commands/ack",
+		payload: payload,
+	})
+	waitFor(t, func() bool { return client.acks == nil })
 }
 
 func waitFor(t *testing.T, condition func() bool) {

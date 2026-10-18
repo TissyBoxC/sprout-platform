@@ -191,6 +191,9 @@ func upsertBinding(
 		binding.UpdatedAt,
 	)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return domain.ErrDeviceBound
+		}
 		return fmt.Errorf("upsert device binding: %w", err)
 	}
 	return nil
@@ -820,4 +823,9 @@ func withTransaction(
 		return fmt.Errorf("commit device binding transaction: %w", err)
 	}
 	return nil
+}
+
+func isUniqueViolation(err error) bool {
+	var postgresError *pgconn.PgError
+	return errors.As(err, &postgresError) && postgresError.Code == "23505"
 }

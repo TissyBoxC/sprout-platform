@@ -119,6 +119,21 @@ func (failingSink) SendAudio([]byte, uint64) error {
 	return errors.New("sink failed")
 }
 
+type epochAdvancingSink struct {
+	epoch atomic.Uint64
+	sent  atomic.Int32
+}
+
+func (sink *epochAdvancingSink) SendAudio([]byte, uint64) error {
+	sink.sent.Add(1)
+	sink.epoch.Add(1)
+	return nil
+}
+
+func (sink *epochAdvancingSink) CurrentTurnEpoch() uint64 {
+	return sink.epoch.Load()
+}
+
 func testPCMBytes(value int16) []byte {
 	data := make([]byte, frame.SamplesPerFrame*2)
 	for index := 0; index < frame.SamplesPerFrame; index++ {
@@ -354,6 +369,74 @@ func TestSchedulerSinkFailureStopsWithoutSpinning(t *testing.T) {
 	}
 	if calls := encoder.calls.Load(); calls != 1 {
 		t.Fatalf("expected one encode attempt, got %d", calls)
+	}
+}
+
+func TestSchedulerDoesNotReportFrameRejectedBySink(t *testing.T) {
+	scheduler, err := newScheduler(failingSink{}, func() (frameEncoder, error) {
+		return &countingEncoder{}, nil
+	}, 100, 100)
+	if err != nil {
+		t.Fatalf("newScheduler() error = %v", err)
+	}
+	defer scheduler.Close()
+
+	reported := make(chan struct{}, 1)
+	item := newSchedulerTestItem("item_rejected", PriorityConversation, true)
+	item.OnPlayed = func([]int16) {
+		select {
+		case reported <- struct{}{}:
+		default:
+		}
+	}
+	if err := scheduler.Enqueue(item); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	select {
+	case <-reported:
+		t.Fatal("OnPlayed fired for a frame the transport rejected")
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestSchedulerDoesNotReportFrameCanceledDuringSend(t *testing.T) {
+	sink := &epochAdvancingSink{}
+	scheduler, err := newScheduler(sink, func() (frameEncoder, error) {
+		return &countingEncoder{}, nil
+	}, 100, 100)
+	if err != nil {
+		t.Fatalf("newScheduler() error = %v", err)
+	}
+	defer scheduler.Close()
+
+	reported := make(chan struct{}, 1)
+	item := newSchedulerTestItem("item_canceled_in_flight", PriorityConversation, true)
+	item.TurnEpoch = 1
+	item.OnPlayed = func([]int16) {
+		select {
+		case reported <- struct{}{}:
+		default:
+		}
+	}
+	if err := scheduler.Enqueue(item); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	deadline := time.After(time.Second)
+	for sink.sent.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("scheduler did not send the frame")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	// The SendAudio call advances the epoch, which models a barge-in winning
+	// while the encoded frame was crossing the transport.
+	select {
+	case <-reported:
+		t.Fatal("OnPlayed fired although a barge-in raced the transport write")
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 

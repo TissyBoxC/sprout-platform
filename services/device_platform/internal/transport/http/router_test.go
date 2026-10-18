@@ -1788,7 +1788,10 @@ func decodeEnvelope(t *testing.T, recorder *httptest.ResponseRecorder) testEnvel
 }
 
 func newTestRouterOptions() RouterOptions {
-	return RouterOptions{Logger: newTestLogger()}
+	return RouterOptions{
+		Logger:      newTestLogger(),
+		RedisClient: permittedRateLimitStore{},
+	}
 }
 
 // recordingAudit captures the audit events a handler writes so tests can

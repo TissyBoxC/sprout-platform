@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -97,15 +98,20 @@ type ServerConfig struct {
 	OnContinuityExpired func(sessionID string)
 	OnSegmentReady      func(segment session.AudioSegment)
 	OnBackpressure      func(deviceID string, dropped uint64)
+	// AllowedOrigins is the exact Origin allowlist for browser WebSocket
+	// clients. Native clients without an Origin header remain supported.
+	AllowedOrigins []string
 	// TokenRevoker invalidates the authenticated session token when this
-	// connection closes. Production uses the HMAC verifier's revocation list;
-	// test and legacy verifiers may leave it nil.
+	// connection closes. Production uses the HMAC verifier's in-process
+	// revocation list. This list is authoritative only for a single gateway
+	// replica; multi-replica deployments must use sticky sessions or shared
+	// revocation before enabling more than one process.
 	TokenRevoker func(identity DeviceIdentity)
 	// SegmentHandler, when set, owns the conversation pipeline. It receives each
 	// completed utterance plus a sink that streams synthesized reply audio back
 	// to the device over this connection. Invocations for one connection are
 	// serialised, so the handler may keep per-session state.
-	SegmentHandler func(segment session.AudioSegment, sink AudioSink)
+	SegmentHandler func(ctx context.Context, segment session.AudioSegment, sink AudioSink)
 	// onPlaybackScheduler observes the per-connection scheduler once it is
 	// created. Test-only seam; production leaves it nil.
 	onPlaybackScheduler func(*playback.Scheduler)
@@ -190,7 +196,7 @@ func NewServer(config ServerConfig, logger *slog.Logger) (*Server, error) {
 			HandshakeTimeout: config.WriteTimeout,
 			ReadBufferSize:   defaultReadLimitBytes,
 			WriteBufferSize:  defaultWriteQueueDepth * frame.MaxPayloadBytes,
-			CheckOrigin:      func(*http.Request) bool { return true },
+			CheckOrigin:      originChecker(config.AllowedOrigins),
 		},
 	}, nil
 }
@@ -262,8 +268,14 @@ type ServerStats struct {
 }
 
 func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIdentity) {
-	connectionContext, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	connectionContext, cancelContext := context.WithCancelCause(context.Background())
+	var cancelOnce sync.Once
+	cancel := func(cause error) {
+		cancelOnce.Do(func() {
+			cancelContext(cause)
+		})
+	}
+	defer cancel(errors.New("websocket connection closed"))
 	defer connection.Close()
 	defer func() {
 		if s.config.OnDeviceDisconnected != nil {
@@ -434,6 +446,9 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 					}
 				}
 			},
+			FrameObserver: func(observation session.FrameObservation) {
+				sink.observeAcceptedFrame(getSession(), observation)
+			},
 		})
 	}
 	attachSession := func(voiceSession *session.Session) {
@@ -497,6 +512,15 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 			sink.notifyState(voiceSession, string(session.StateListening))
 		}
 		sink.turnMu.Unlock()
+	}
+	sink.onAcceptedFrame = func(voiceSession *session.Session, observation session.FrameObservation) {
+		if !observation.Speech {
+			return
+		}
+		if getSession() != voiceSession || voiceSession.State() != session.StateSpeaking {
+			return
+		}
+		scheduleBargeIn(voiceSession)
 	}
 	go s.consumeSegments(connectionContext, segmentQueue, segmentDone, sink)
 	heartbeatDone := make(chan struct{})
@@ -773,19 +797,17 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 				}
 				sink.notifyState(voiceSession, string(session.StateListening))
 			}
-			if voiceSession.State() == session.StateSpeaking {
-				scheduleBargeIn(voiceSession)
-			}
-			if err := voiceSession.AcceptFrame(connectionContext, frame.New(
+			_, acceptErr := voiceSession.AcceptFrameObserved(connectionContext, frame.New(
 				fmt.Sprintf("%s_%d", voiceSession.ID(), envelope.Sequence),
 				identity.DeviceID,
 				voiceSession.StreamID(),
 				envelope.Sequence,
 				envelope.CapturedAt,
 				envelope.Payload,
-			)); err != nil {
-				errorCode := mapSessionError(err)
-				if errors.Is(err, buffer.ErrDuplicateFrame) {
+			))
+			if acceptErr != nil {
+				errorCode := mapSessionError(acceptErr)
+				if errors.Is(acceptErr, buffer.ErrDuplicateFrame) {
 					// A reconnect can replay the last packet. It is already in
 					// the stream window, so acknowledge nothing and keep the
 					// session alive instead of disconnecting healthy audio.
@@ -793,9 +815,9 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 				}
 				s.stats.malformedFrames.Add(1)
 				s.sendError(writer, voiceSession, errorCode, "音频数据未受理", false)
-				if errors.Is(err, session.ErrSessionClosed) ||
-					errors.Is(err, session.ErrSessionIdleTimeout) ||
-					errors.Is(err, session.ErrSessionDurationLimit) {
+				if errors.Is(acceptErr, session.ErrSessionClosed) ||
+					errors.Is(acceptErr, session.ErrSessionIdleTimeout) ||
+					errors.Is(acceptErr, session.ErrSessionDurationLimit) {
 					// The device is still connected, so tell it the session fell
 					// idle before the reader tears the connection down.
 					sink.notifyState(voiceSession, string(session.StateIdle))
@@ -804,6 +826,10 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 				}
 				continue
 			}
+			// Acoustic barge-in is handled once by the session FrameObserver
+			// installed above, after decode, preprocessing, and VAD. Keeping a
+			// second direct call here would schedule the same interruption
+			// twice when a speech frame arrives while the reply is speaking.
 		default:
 			s.stats.malformedFrames.Add(1)
 			s.sendError(writer, getSession(), errorCodeInvalidControl, "不支持的数据类型", false)
@@ -814,6 +840,9 @@ closed:
 	_ = writer.Close()
 	close(heartbeatDone)
 	close(segmentDone)
+	// Stop provider work and the segment consumer before releasing the
+	// connection-scoped session and playback resources.
+	cancel(errors.New("websocket connection closed"))
 	if voiceSession := getSession(); voiceSession != nil {
 		cause := voiceSession.Err()
 		s.config.Manager.Remove(voiceSession.ID())
@@ -843,7 +872,10 @@ func (s *Server) consumeSegments(
 			return
 		case <-done:
 			return
-		case segment := <-segments:
+		case segment, ok := <-segments:
+			if !ok {
+				return
+			}
 			if s.config.SegmentHandler != nil {
 				observer, _ := sink.(turnObserver)
 				if observer != nil {
@@ -852,7 +884,7 @@ func (s *Server) consumeSegments(
 				handlerDone := make(chan struct{})
 				go func(segment session.AudioSegment) {
 					defer close(handlerDone)
-					s.config.SegmentHandler(segment, sink)
+					s.config.SegmentHandler(ctx, segment, sink)
 				}(segment)
 				select {
 				case <-handlerDone:
@@ -971,14 +1003,15 @@ func (s *Server) watchAuthorization(
 // device applies backpressure to the conversation handler instead of growing
 // unbounded memory.
 type connectionAudioSink struct {
-	writer      *connectionWriter
-	scheduler   *playback.Scheduler
-	sessionID   func() string
-	session     func() *session.Session
-	notifyState func(*session.Session, string)
-	onTurnStart func(session.AudioSegment)
-	onTurnEnd   func(session.AudioSegment)
-	sequence    atomic.Uint32
+	writer          *connectionWriter
+	scheduler       *playback.Scheduler
+	sessionID       func() string
+	session         func() *session.Session
+	onAcceptedFrame func(*session.Session, session.FrameObservation)
+	notifyState     func(*session.Session, string)
+	onTurnStart     func(session.AudioSegment)
+	onTurnEnd       func(session.AudioSegment)
+	sequence        atomic.Uint32
 	// turnMu orders reply enqueues against a barge-in clear so a canceled turn
 	// cannot slip a frame in just after playback was dropped.
 	turnMu sync.Mutex
@@ -990,6 +1023,16 @@ type connectionAudioSink struct {
 	// Epoch zero is reserved for untagged audio (for example safety
 	// announcements), so a tagged reply turn starts at one.
 	turnEpoch atomic.Uint64
+}
+
+func (sink *connectionAudioSink) observeAcceptedFrame(
+	voiceSession *session.Session,
+	observation session.FrameObservation,
+) {
+	if sink == nil || sink.onAcceptedFrame == nil {
+		return
+	}
+	sink.onAcceptedFrame(voiceSession, observation)
 }
 
 // EnqueueAudio queues one PCM frame on this connection's playback scheduler.
@@ -1073,6 +1116,14 @@ func (sink *connectionAudioSink) SendAudio(payload []byte, turnEpoch uint64) err
 		messageType: websocket.BinaryMessage,
 		payload:     encoded,
 	})
+}
+
+// CurrentTurnEpoch exposes the barge-in generation to the playback scheduler.
+func (sink *connectionAudioSink) CurrentTurnEpoch() uint64 {
+	if sink == nil {
+		return 0
+	}
+	return sink.turnEpoch.Load()
 }
 
 func (sink *connectionAudioSink) currentSession() *session.Session {
@@ -1224,21 +1275,37 @@ func (writer *connectionWriter) write(message outboundMessage) error {
 	return writer.connection.WriteMessage(message.messageType, message.payload)
 }
 
-// rateLimiter enforces a token bucket over control frames, audio frames, and
-// bytes. It is owned by one connection read loop and therefore needs no lock.
+// rateLimiter enforces independent token buckets over request count and bytes.
+// It is owned by one connection read loop and therefore needs no lock.
 type rateLimiter struct {
 	maxFramesPerSecond int
 	maxBytesPerSecond  int
-	windowStartedAt    time.Time
-	frames             int
-	bytes              int
+	now                func() time.Time
+	lastRefill         time.Time
+	frameTokens        float64
+	byteTokens         float64
 }
 
 func newRateLimiter(maxFramesPerSecond int, maxBytesPerSecond int) *rateLimiter {
+	return newRateLimiterWithClock(maxFramesPerSecond, maxBytesPerSecond, time.Now)
+}
+
+func newRateLimiterWithClock(
+	maxFramesPerSecond int,
+	maxBytesPerSecond int,
+	now func() time.Time,
+) *rateLimiter {
+	if now == nil {
+		now = time.Now
+	}
+	current := now()
 	return &rateLimiter{
 		maxFramesPerSecond: maxFramesPerSecond,
 		maxBytesPerSecond:  maxBytesPerSecond,
-		windowStartedAt:    time.Now(),
+		now:                now,
+		lastRefill:         current,
+		frameTokens:        float64(maxFramesPerSecond),
+		byteTokens:         float64(maxBytesPerSecond),
 	}
 }
 
@@ -1251,21 +1318,37 @@ func (limiter *rateLimiter) allowAudio(bytes int) bool {
 }
 
 func (limiter *rateLimiter) allow(bytes int) bool {
-	now := time.Now()
-	if now.Sub(limiter.windowStartedAt) >= time.Second {
-		limiter.windowStartedAt = now
-		limiter.frames = 0
-		limiter.bytes = 0
-	}
-	if limiter.frames >= limiter.maxFramesPerSecond {
+	if limiter == nil || limiter.maxFramesPerSecond <= 0 || limiter.maxBytesPerSecond <= 0 {
 		return false
 	}
-	if limiter.bytes+bytes > limiter.maxBytesPerSecond {
+	now := limiter.now()
+	if now.Before(limiter.lastRefill) {
+		// A wall-clock rollback must not mint an unbounded new burst.
+		limiter.lastRefill = now
+	}
+	elapsed := now.Sub(limiter.lastRefill).Seconds()
+	limiter.lastRefill = now
+	limiter.frameTokens = minFloat(
+		float64(limiter.maxFramesPerSecond),
+		limiter.frameTokens+elapsed*float64(limiter.maxFramesPerSecond),
+	)
+	limiter.byteTokens = minFloat(
+		float64(limiter.maxBytesPerSecond),
+		limiter.byteTokens+elapsed*float64(limiter.maxBytesPerSecond),
+	)
+	if limiter.frameTokens < 1 || limiter.byteTokens < float64(bytes) {
 		return false
 	}
-	limiter.frames++
-	limiter.bytes += bytes
+	limiter.frameTokens--
+	limiter.byteTokens -= float64(bytes)
 	return true
+}
+
+func minFloat(left float64, right float64) float64 {
+	if left < right {
+		return left
+	}
+	return right
 }
 
 func normalizeServerConfig(config ServerConfig) ServerConfig {
@@ -1303,6 +1386,30 @@ func normalizeServerConfig(config ServerConfig) ServerConfig {
 		config.ContinuityWindow = defaultContinuityWindow
 	}
 	return config
+}
+
+func originChecker(allowedOrigins []string) func(*http.Request) bool {
+	allowed := make(map[string]struct{}, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		trimmed := strings.TrimSuffix(strings.TrimSpace(origin), "/")
+		if trimmed == "" {
+			continue
+		}
+		allowed[trimmed] = struct{}{}
+	}
+	return func(request *http.Request) bool {
+		// Device firmware and native applications do not send Origin. They are
+		// authenticated with a bearer device token before the upgrade.
+		origin := strings.TrimSuffix(strings.TrimSpace(request.Header.Get("Origin")), "/")
+		if origin == "" {
+			return true
+		}
+		if len(allowed) == 0 {
+			return false
+		}
+		_, ok := allowed[origin]
+		return ok
+	}
 }
 
 func mapSessionError(err error) string {

@@ -26,6 +26,12 @@ type frameEncoder interface {
 	EncodePCM(pcm []int16, destination []byte) (int, error)
 }
 
+// turnEpochSource lets a transport expose the current barge-in epoch to the
+// scheduler. It is optional; queue-only tests and other sinks do not need it.
+type turnEpochSource interface {
+	CurrentTurnEpoch() uint64
+}
+
 // Scheduler drains one connection's playback queue in the background.
 //
 // Queue items carry little-endian PCM. The scheduler applies mute and volume
@@ -265,8 +271,37 @@ func (s *Scheduler) play(item *Item) error {
 	if err != nil {
 		return err
 	}
+	epochBefore := uint64(0)
+	if source, ok := s.sink.(turnEpochSource); ok {
+		epochBefore = source.CurrentTurnEpoch()
+	}
+	// Encoding runs outside the scheduler lock. A higher-priority item or a
+	// barge-in may have taken the active slot in the meantime; never emit a
+	// frame that no longer owns the slot.
+	if !s.queue.ClaimCurrent(item.ItemID) {
+		return nil
+	}
+	// Send first. AEC reference must advance only for audio the transport
+	// actually accepted. A rejected or stale turn must not leave phantom echo
+	// in the canceller.
+	if err := s.sink.SendAudio(encoded[:written], item.TurnEpoch); err != nil {
+		return err
+	}
+	if item.TurnEpoch != 0 {
+		if source, ok := s.sink.(turnEpochSource); ok &&
+			source.CurrentTurnEpoch() != epochBefore {
+			// A barge-in raced the write. Even if the transport accepted the
+			// bytes, the child has already stopped the turn, so the reference
+			// must not claim this frame as speaker output.
+			s.queue.TakeCurrent(item.ItemID)
+			return nil
+		}
+	}
 	s.mutex.Lock()
-	if s.closed || !s.queue.TakeCurrent(item.ItemID) {
+	if !s.queue.TakeCurrent(item.ItemID) {
+		// Clear won after SendAudio accepted the frame. The device may have
+		// received it, but the cancellable turn no longer owns an active queue
+		// slot, so do not advance AEC reference for a canceled reply.
 		s.mutex.Unlock()
 		return nil
 	}
@@ -274,7 +309,7 @@ func (s *Scheduler) play(item *Item) error {
 		item.OnPlayed(append([]int16(nil), pcm...))
 	}
 	s.mutex.Unlock()
-	return s.sink.SendAudio(encoded[:written], item.TurnEpoch)
+	return nil
 }
 
 func (s *Scheduler) fail(err error) {

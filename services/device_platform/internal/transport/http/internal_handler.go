@@ -40,6 +40,7 @@ func (handler internalHandler) uploadReleaseFile(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
+	setLargeUploadDeadline(response)
 	request.Body = http.MaxBytesReader(
 		response,
 		request.Body,

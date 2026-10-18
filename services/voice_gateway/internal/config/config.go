@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -56,6 +57,10 @@ type WebSocketConfig struct {
 	SegmentQueueDepth int
 	// MaxBytesPerSecond bounds inbound audio bytes per connection.
 	MaxBytesPerSecond int
+	// AllowedOrigins is the exact browser Origin allowlist. Native clients
+	// without Origin remain supported; a browser origin is rejected unless
+	// listed here.
+	AllowedOrigins []string
 	// ReadTimeoutSeconds and WriteTimeoutSeconds drive ping/pong deadlines.
 	ReadTimeoutSeconds int
 	// PongWaitSeconds bounds how long a connection may stay silent.
@@ -75,7 +80,8 @@ type WebSocketConfig struct {
 
 // AudioConfig selects the audio preprocessing and provider adapters.
 type AudioConfig struct {
-	// VadSpeechThreshold is the normalized speech energy threshold.
+	// VadSpeechThreshold is the ratio of frame energy to the adaptive noise
+	// floor. The detector requires a value greater than 1.
 	VadSpeechThreshold float64
 	// VadHangoverFrames keeps a short trailing silence inside one utterance.
 	VadHangoverFrames int
@@ -270,6 +276,7 @@ func Load() (Config, error) {
 			WriteQueueDepth:           envInt("VOICE_GATEWAY_WS_WRITE_QUEUE_DEPTH", 64),
 			SegmentQueueDepth:         envInt("VOICE_GATEWAY_WS_SEGMENT_QUEUE_DEPTH", 4),
 			MaxBytesPerSecond:         envInt("VOICE_GATEWAY_WS_MAX_BYTES_PER_SECOND", 128*1024),
+			AllowedOrigins:            envList("VOICE_GATEWAY_WS_ALLOWED_ORIGINS"),
 			ReadTimeoutSeconds:        envInt("VOICE_GATEWAY_WS_READ_TIMEOUT_SECONDS", 30),
 			PongWaitSeconds:           envInt("VOICE_GATEWAY_WS_PONG_WAIT_SECONDS", 60),
 			PingIntervalSeconds:       envInt("VOICE_GATEWAY_WS_PING_INTERVAL_SECONDS", 25),
@@ -279,13 +286,13 @@ func Load() (Config, error) {
 			SessionMaxDurationSeconds: envInt("VOICE_GATEWAY_WS_SESSION_MAX_DURATION_SECONDS", 900),
 		},
 		Audio: AudioConfig{
-			VadSpeechThreshold:      envFloat("VOICE_GATEWAY_VAD_SPEECH_THRESHOLD", 0.02),
+			VadSpeechThreshold:      envFloatRequired("VOICE_GATEWAY_VAD_SPEECH_THRESHOLD", 2.8),
 			VadHangoverFrames:       envInt("VOICE_GATEWAY_VAD_HANGOVER_FRAMES", 15),
 			VadMinSpeechFrames:      envInt("VOICE_GATEWAY_VAD_MIN_SPEECH_FRAMES", 3),
 			NoiseSuppressionEnabled: envBool("VOICE_GATEWAY_NOISE_SUPPRESSION_ENABLED", true),
 			EchoCancellationEnabled: envBool("VOICE_GATEWAY_ECHO_CANCELLATION_ENABLED", true),
 			GainCalibrationEnabled:  envBool("VOICE_GATEWAY_GAIN_CALIBRATION_ENABLED", true),
-			TargetRmsDbfs:           envFloat("VOICE_GATEWAY_TARGET_RMS_DBFS", -24.0),
+			TargetRmsDbfs:           envFloatRequired("VOICE_GATEWAY_TARGET_RMS_DBFS", -24.0),
 			SegmentQueueDepth:       envInt("VOICE_GATEWAY_SEGMENT_QUEUE_DEPTH", 4),
 			IdleTimeoutSeconds:      envInt("VOICE_GATEWAY_SESSION_IDLE_TIMEOUT_SECONDS", 60),
 			ASRProvider:             strings.ToLower(env("VOICE_GATEWAY_ASR_PROVIDER", "")),
@@ -395,6 +402,18 @@ func Load() (Config, error) {
 	if cfg.Audio.LLMConfig.MaxAttempts < 1 || cfg.Audio.LLMConfig.MaxAttempts > 5 {
 		return Config{}, fmt.Errorf("VOICE_GATEWAY_LLM_MAX_ATTEMPTS must be between 1 and 5")
 	}
+	if math.IsNaN(cfg.Audio.VadSpeechThreshold) ||
+		math.IsInf(cfg.Audio.VadSpeechThreshold, 0) ||
+		cfg.Audio.VadSpeechThreshold < 1.01 ||
+		cfg.Audio.VadSpeechThreshold > 100 {
+		return Config{}, fmt.Errorf("VOICE_GATEWAY_VAD_SPEECH_THRESHOLD must be between 1.01 and 100")
+	}
+	if math.IsNaN(cfg.Audio.TargetRmsDbfs) ||
+		math.IsInf(cfg.Audio.TargetRmsDbfs, 0) ||
+		cfg.Audio.TargetRmsDbfs < -60 ||
+		cfg.Audio.TargetRmsDbfs > -3 {
+		return Config{}, fmt.Errorf("VOICE_GATEWAY_TARGET_RMS_DBFS must be between -60 and -3")
+	}
 	if cfg.Vision.Enabled && strings.TrimSpace(cfg.Vision.Model) == "" {
 		return Config{}, fmt.Errorf("VOICE_GATEWAY_VISION_MODEL must be set when vision is enabled")
 	}
@@ -445,8 +464,43 @@ func envFloat(key string, fallback float64) float64 {
 		return fallback
 	}
 	parsed, err := strconv.ParseFloat(value, 64)
-	if err != nil {
+	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
 		return fallback
 	}
 	return parsed
+}
+
+func envFloatRequired(key string, fallback float64) float64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+		// Returning NaN makes the range check in Load fail closed instead of
+		// silently replacing an operator's invalid float with a default.
+		return math.NaN()
+	}
+	return parsed
+}
+
+func envList(key string) []string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return nil
+	}
+	unique := make(map[string]struct{})
+	items := make([]string, 0)
+	for _, raw := range strings.Split(value, ",") {
+		item := strings.TrimSuffix(strings.TrimSpace(raw), "/")
+		if item == "" {
+			continue
+		}
+		if _, exists := unique[item]; exists {
+			continue
+		}
+		unique[item] = struct{}{}
+		items = append(items, item)
+	}
+	return items
 }

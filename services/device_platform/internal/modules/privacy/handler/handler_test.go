@@ -112,6 +112,31 @@ func TestRequestDeletionRequiresExactConfirmation(t *testing.T) {
 	}
 }
 
+func TestExportDisablesCaching(t *testing.T) {
+	handler := New(&stubService{})
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/privacy/export",
+		nil,
+	)
+	recorder := httptest.NewRecorder()
+
+	handler.Export(recorder, request, "parent-1")
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", got)
+	}
+	if got := recorder.Header().Get("Pragma"); got != "no-cache" {
+		t.Fatalf("Pragma = %q, want no-cache", got)
+	}
+	if got := recorder.Header().Get("Vary"); got != "Authorization" {
+		t.Fatalf("Vary = %q, want Authorization", got)
+	}
+}
+
 func TestRequestDeletionAcceptsExplicitConfirmation(t *testing.T) {
 	service := &stubService{}
 	handler := New(service)

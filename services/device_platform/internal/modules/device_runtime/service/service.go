@@ -532,14 +532,16 @@ func (s *Service) AcknowledgeCommand(
 		return err
 	}
 	if s.acknowledgementSink != nil {
-		// Notification bookkeeping is secondary to the command result. A
-		// transient notification-store failure must not make the device retry
-		// an already acknowledged command.
-		_ = s.acknowledgementSink.MarkDeliveryDeliveredByCommand(
+		if err := s.acknowledgementSink.MarkDeliveryDeliveredByCommand(
 			ctx,
 			commandID,
 			deviceID,
-		)
+		); err != nil {
+			// The command result is already durable. Surface the bookkeeping
+			// failure so the MQTT worker records it, while a device retry stays
+			// idempotent and cannot roll back the command.
+			return err
+		}
 	}
 	return nil
 }
@@ -594,11 +596,13 @@ func (s *Service) AcknowledgeCommandFromDevice(
 		return err
 	}
 	if s.acknowledgementSink != nil {
-		_ = s.acknowledgementSink.MarkDeliveryDeliveredByCommand(
+		if err := s.acknowledgementSink.MarkDeliveryDeliveredByCommand(
 			ctx,
 			commandID,
 			deviceID,
-		)
+		); err != nil {
+			return err
+		}
 	}
 	return nil
 }

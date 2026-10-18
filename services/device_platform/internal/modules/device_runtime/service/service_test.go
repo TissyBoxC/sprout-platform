@@ -487,7 +487,7 @@ func TestCommandAcknowledgementNotifiesDeliverySink(t *testing.T) {
 	}
 }
 
-func TestCommandAcknowledgementIgnoresSecondarySinkFailure(t *testing.T) {
+func TestCommandAcknowledgementSurfacesSinkFailure(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
 	repository := newMemoryRepository()
@@ -514,15 +514,16 @@ func TestCommandAcknowledgementIgnoresSecondarySinkFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create command: %v", err)
 	}
-	if err := service.AcknowledgeCommand(
+	err = service.AcknowledgeCommand(
 		context.Background(),
 		"session",
 		"device_test_001",
 		command.ID,
 		domain.CommandStatusAcknowledged,
 		"ok",
-	); err != nil {
-		t.Fatalf("acknowledge command should ignore sink failure, got %v", err)
+	)
+	if err == nil {
+		t.Fatal("expected sink failure to be surfaced")
 	}
 	if repository.commands[command.ID].Status != domain.CommandStatusAcknowledged {
 		t.Fatal("expected the command to remain acknowledged")

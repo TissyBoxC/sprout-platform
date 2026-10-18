@@ -496,6 +496,10 @@ func (s *Service) loadOrCreateProviderAccount(
 	if defaultsErr != nil {
 		return nil, providerModelCatalog{}, defaultsErr
 	}
+	providerPassword, err := randomProviderPassword()
+	if err != nil {
+		return nil, providerModelCatalog{}, err
+	}
 	providerAccount, err = s.provider.CreateAccount(
 		ctx,
 		domain.ProviderAccount{
@@ -507,7 +511,7 @@ func (s *Service) loadOrCreateProviderAccount(
 			ConcurrencyLimit:     defaultConcurrency,
 			AllowedModels:        allowedModels,
 		},
-		randomProviderPassword(),
+		providerPassword,
 	)
 	if err != nil && errors.Is(err, domain.ErrProviderRejected) {
 		recovered, recoverErr := s.provider.GetAccount(ctx, providerAccountID)
@@ -1063,12 +1067,10 @@ func controlledEmail(parentEmail string, parentAccountID string) string {
 	return "parent." + compact + "@ai.sprout.local"
 }
 
-func randomProviderPassword() string {
+func randomProviderPassword() (string, error) {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
-		// The caller will surface the provider failure; this path cannot safely
-		// continue because a weak provider password would be created.
-		panic("AI provider password source unavailable")
+		return "", fmt.Errorf("generate AI provider password: %w", err)
 	}
-	return "sp-" + hex.EncodeToString(bytes)
+	return "sp-" + hex.EncodeToString(bytes), nil
 }

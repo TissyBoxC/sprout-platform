@@ -82,6 +82,28 @@ func TestHigherPriorityInterruptsAndResumes(t *testing.T) {
 	}
 }
 
+func TestClaimCurrentDetectsPreemption(t *testing.T) {
+	queue, err := NewQueue(50, 100)
+	if err != nil {
+		t.Fatalf("create queue: %v", err)
+	}
+	if err := queue.Enqueue(newTestItem("item_conversation", PriorityConversation, true)); err != nil {
+		t.Fatalf("enqueue conversation: %v", err)
+	}
+	if _, ok := queue.Next(); !ok {
+		t.Fatal("expected conversation to start playing")
+	}
+	if !queue.ClaimCurrent("item_conversation") {
+		t.Fatal("active item should be claimable")
+	}
+	if err := queue.Enqueue(newTestItem("item_prompt", PriorityPrompt, true)); err != nil {
+		t.Fatalf("enqueue prompt: %v", err)
+	}
+	if queue.ClaimCurrent("item_conversation") {
+		t.Fatal("preempted item must no longer be claimable")
+	}
+}
+
 func TestSafetyItemCannotBeInterrupted(t *testing.T) {
 	queue, err := NewQueue(50, 100)
 	if err != nil {

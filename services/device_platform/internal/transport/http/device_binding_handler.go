@@ -396,6 +396,8 @@ func writeDeviceBindingError(
 		writeError(response, request, http.StatusConflict, "token_used", "这个绑定码已经使用，请在设备上重新生成")
 	case errors.Is(err, bindingdomain.ErrDeviceNotFound):
 		writeError(response, request, http.StatusNotFound, "device_not_found", "没有找到这台设备")
+	case errors.Is(err, bindingdomain.ErrDeviceBound):
+		writeError(response, request, http.StatusConflict, "device_already_bound", "这台设备已经绑定，请先在原账号中解绑")
 	case errors.Is(err, bindingdomain.ErrDeviceDisabled):
 		writeError(response, request, http.StatusForbidden, "device_disabled", "这台设备当前无法连接")
 	case errors.Is(err, bindingdomain.ErrRegistrationTokenNotFound):

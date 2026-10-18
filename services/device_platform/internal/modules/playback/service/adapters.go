@@ -21,7 +21,7 @@ func (reader BindingDeviceReader) FamilyDeviceIDs(
 	familyID string,
 ) ([]string, error) {
 	if reader.Service == nil {
-		return nil, nil
+		return nil, errors.New("device binding service is unavailable")
 	}
 	bindings, err := reader.Service.List(ctx, familyID)
 	if err != nil {
@@ -47,7 +47,7 @@ func (reader ContentPackageReader) IsPublished(
 	packageID string,
 ) (bool, error) {
 	if reader.Repository == nil {
-		return true, nil
+		return false, errors.New("content repository is unavailable")
 	}
 	_, err := reader.Repository.PublishedDownload(ctx, packageID)
 	if errors.Is(err, contentdomain.ErrPackageNotFound) {

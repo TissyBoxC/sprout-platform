@@ -229,6 +229,53 @@ func TestLoadReadsWebsiteSocketLimits(t *testing.T) {
 	}
 }
 
+func TestLoadReadsAllowedOriginsAndDeduplicates(t *testing.T) {
+	t.Setenv("VOICE_GATEWAY_WS_ALLOWED_ORIGINS", " https://admin.example.com/ ,https://app.example.com,https://admin.example.com")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	want := []string{"https://admin.example.com", "https://app.example.com"}
+	if len(cfg.WebSocket.AllowedOrigins) != len(want) {
+		t.Fatalf("allowed origins = %v, want %v", cfg.WebSocket.AllowedOrigins, want)
+	}
+	for index := range want {
+		if cfg.WebSocket.AllowedOrigins[index] != want[index] {
+			t.Fatalf("allowed origins = %v, want %v", cfg.WebSocket.AllowedOrigins, want)
+		}
+	}
+}
+
+func TestLoadRejectsNonFiniteAndInvalidAudioFloats(t *testing.T) {
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.Audio.VadSpeechThreshold != 2.8 {
+		t.Fatalf("VAD threshold = %v, want 2.8", cfg.Audio.VadSpeechThreshold)
+	}
+
+	testCases := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{name: "vad nan", key: "VOICE_GATEWAY_VAD_SPEECH_THRESHOLD", value: "NaN"},
+		{name: "vad infinity", key: "VOICE_GATEWAY_VAD_SPEECH_THRESHOLD", value: "+Inf"},
+		{name: "vad below ratio", key: "VOICE_GATEWAY_VAD_SPEECH_THRESHOLD", value: "0.02"},
+		{name: "target rms nan", key: "VOICE_GATEWAY_TARGET_RMS_DBFS", value: "NaN"},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Setenv(testCase.key, testCase.value)
+			if _, loadErr := Load(); loadErr == nil {
+				t.Fatalf("expected %s to be rejected", testCase.value)
+			}
+		})
+	}
+}
+
 func TestContinuityWindowDefaultsAndBounds(t *testing.T) {
 	cfg, err := Load()
 	if err != nil {

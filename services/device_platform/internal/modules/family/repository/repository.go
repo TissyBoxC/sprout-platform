@@ -38,6 +38,12 @@ type Repository interface {
 		invitationID string,
 		status string,
 	) error
+	AcceptInvitation(
+		ctx context.Context,
+		member domain.Member,
+		familyID string,
+		invitationID string,
+	) error
 }
 
 // PostgresRepository is the PostgreSQL-backed family repository.
@@ -353,6 +359,58 @@ func (r *PostgresRepository) UpdateInvitationState(
 	}
 	if tag.RowsAffected() == 0 {
 		return domain.ErrInvitationState
+	}
+	return nil
+}
+
+// AcceptInvitation consumes a pending invitation and creates its membership in
+// one transaction. A concurrent or repeated acceptance observes
+// ErrInvitationState and writes no membership.
+func (r *PostgresRepository) AcceptInvitation(
+	ctx context.Context,
+	member domain.Member,
+	familyID string,
+	invitationID string,
+) error {
+	transaction, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin accept family invitation: %w", err)
+	}
+	defer func() {
+		_ = transaction.Rollback(ctx)
+	}()
+
+	tag, err := transaction.Exec(ctx, `
+		UPDATE family_invitations
+		SET status = 'accepted',
+		    accepted_at = NOW()
+		WHERE family_id = $1 AND id = $2 AND status = 'pending'
+	`, familyID, invitationID)
+	if err != nil {
+		return fmt.Errorf("consume family invitation: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrInvitationState
+	}
+	if _, err := transaction.Exec(ctx, `
+		INSERT INTO family_members (
+			id, family_id, user_id, role, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6)
+	`,
+		member.ID,
+		member.FamilyID,
+		member.UserID,
+		member.Role,
+		member.CreatedAt,
+		member.UpdatedAt,
+	); err != nil {
+		if isUniqueViolation(err) {
+			return domain.ErrMemberExists
+		}
+		return fmt.Errorf("insert accepted family member: %w", err)
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return fmt.Errorf("commit accepted family invitation: %w", err)
 	}
 	return nil
 }

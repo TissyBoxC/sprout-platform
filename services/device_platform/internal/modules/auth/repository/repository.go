@@ -36,9 +36,15 @@ type Repository interface {
 		ctx context.Context,
 		refreshTokenHash string,
 	) (*domain.Session, error)
+	GetActiveSessionByID(
+		ctx context.Context,
+		sessionID string,
+		parentAccountID string,
+	) (*domain.Session, error)
 	RotateSession(
 		ctx context.Context,
 		sessionID string,
+		currentRefreshTokenHash string,
 		refreshTokenHash string,
 		expiresAt time.Time,
 	) error
@@ -513,22 +519,67 @@ func (r *PostgresRepository) GetSessionByRefreshTokenHash(
 	return &session, nil
 }
 
+// GetActiveSessionByID loads an unrevoked, unexpired session for access-token
+// validation. The account id is part of the predicate so a token cannot pair
+// one account's subject with another account's session id.
+func (r *PostgresRepository) GetActiveSessionByID(
+	ctx context.Context,
+	sessionID string,
+	parentAccountID string,
+) (*domain.Session, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT
+			id,
+			parent_account_id,
+			refresh_token_hash,
+			expires_at,
+			revoked_at,
+			created_at,
+			last_used_at
+		FROM auth_sessions
+		WHERE id = $1
+		  AND parent_account_id = $2
+		  AND revoked_at IS NULL
+		  AND expires_at > NOW()
+	`, sessionID, parentAccountID)
+
+	var session domain.Session
+	err := row.Scan(
+		&session.ID,
+		&session.ParentAccountID,
+		&session.RefreshTokenHash,
+		&session.ExpiresAt,
+		&session.RevokedAt,
+		&session.CreatedAt,
+		&session.LastUsedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrSessionNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get active auth session: %w", err)
+	}
+	return &session, nil
+}
+
 // RotateSession replaces the refresh hash and expiry after a successful
 // refresh. The WHERE clause makes replay of a consumed token fail.
 func (r *PostgresRepository) RotateSession(
 	ctx context.Context,
 	sessionID string,
+	currentRefreshTokenHash string,
 	refreshTokenHash string,
 	expiresAt time.Time,
 ) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE auth_sessions
-		SET refresh_token_hash = $2,
-		    expires_at = $3,
+		SET refresh_token_hash = $3,
+		    expires_at = $4,
 		    last_used_at = NOW()
 		WHERE id = $1
+		  AND refresh_token_hash = $2
 		  AND revoked_at IS NULL
-	`, sessionID, refreshTokenHash, expiresAt)
+	`, sessionID, currentRefreshTokenHash, refreshTokenHash, expiresAt)
 	if err != nil {
 		return fmt.Errorf("rotate auth session: %w", err)
 	}

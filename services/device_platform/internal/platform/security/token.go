@@ -20,6 +20,7 @@ var (
 // TokenClaims contains the signed identity and lifetime of an access token.
 type TokenClaims struct {
 	Subject   string
+	SessionID string
 	TokenID   string
 	IssuedAt  time.Time
 	ExpiresAt time.Time
@@ -33,8 +34,9 @@ type TokenIssuer interface {
 
 // HMACTokenIssuer implements compact, dependency-free HS256 JWTs.
 //
-// The standard claims are intentionally limited to sub, iat, exp, and jti so
-// every consumer can verify the token without sharing an application schema.
+// Access tokens bind to a server-side session through sid. The session row is
+// the revocation authority, so logout and password reset invalidate access
+// tokens immediately instead of waiting for their short expiry.
 type HMACTokenIssuer struct {
 	secret []byte
 }
@@ -55,6 +57,9 @@ func (i *HMACTokenIssuer) Issue(claims TokenClaims) (string, error) {
 	if strings.TrimSpace(claims.Subject) == "" || strings.TrimSpace(claims.TokenID) == "" {
 		return "", errors.New("token subject and id are required")
 	}
+	if strings.TrimSpace(claims.SessionID) == "" {
+		return "", errors.New("token session id is required")
+	}
 	if claims.IssuedAt.IsZero() {
 		claims.IssuedAt = time.Now().UTC()
 	}
@@ -71,6 +76,7 @@ func (i *HMACTokenIssuer) Issue(claims TokenClaims) (string, error) {
 	}
 	payload, err := json.Marshal(map[string]any{
 		"sub": claims.Subject,
+		"sid": claims.SessionID,
 		"jti": claims.TokenID,
 		"iat": claims.IssuedAt.Unix(),
 		"exp": claims.ExpiresAt.Unix(),
@@ -108,6 +114,7 @@ func (i *HMACTokenIssuer) Verify(token string) (TokenClaims, error) {
 	}
 	var rawClaims struct {
 		Subject   string `json:"sub"`
+		SessionID string `json:"sid"`
 		TokenID   string `json:"jti"`
 		IssuedAt  int64  `json:"iat"`
 		ExpiresAt int64  `json:"exp"`
@@ -115,7 +122,8 @@ func (i *HMACTokenIssuer) Verify(token string) (TokenClaims, error) {
 	if err := json.Unmarshal(payload, &rawClaims); err != nil {
 		return TokenClaims{}, ErrInvalidToken
 	}
-	if rawClaims.Subject == "" || rawClaims.TokenID == "" || rawClaims.IssuedAt <= 0 ||
+	if rawClaims.Subject == "" || rawClaims.SessionID == "" ||
+		rawClaims.TokenID == "" || rawClaims.IssuedAt <= 0 ||
 		rawClaims.ExpiresAt <= 0 {
 		return TokenClaims{}, ErrInvalidToken
 	}
@@ -126,6 +134,7 @@ func (i *HMACTokenIssuer) Verify(token string) (TokenClaims, error) {
 	}
 	return TokenClaims{
 		Subject:   rawClaims.Subject,
+		SessionID: rawClaims.SessionID,
 		TokenID:   rawClaims.TokenID,
 		IssuedAt:  issuedAt,
 		ExpiresAt: expiresAt,

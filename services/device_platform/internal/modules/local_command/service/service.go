@@ -55,7 +55,7 @@ func (s *Service) List(
 	familyID string,
 ) (CommandSet, error) {
 	if s.repository == nil {
-		return CommandSet{}, nil
+		return CommandSet{}, domain.ErrRepositoryUnavailable
 	}
 	commands, err := s.repository.ListCommands(ctx, familyID)
 	if err != nil {
@@ -75,7 +75,7 @@ func (s *Service) Replace(
 	inputs []domain.CommandInput,
 ) (CommandSet, error) {
 	if s.repository == nil {
-		return CommandSet{}, nil
+		return CommandSet{}, domain.ErrRepositoryUnavailable
 	}
 	if len(inputs) > domain.MaxCommands {
 		return CommandSet{}, domain.ErrInvalidCommand
@@ -122,7 +122,7 @@ func (s *Service) Delete(
 	commandID string,
 ) (int, error) {
 	if s.repository == nil {
-		return 0, nil
+		return 0, domain.ErrRepositoryUnavailable
 	}
 	return s.repository.DeleteCommand(ctx, familyID, commandID)
 }

@@ -440,7 +440,14 @@ func (s *Service) CreateAdministratorNotice(
 	if err := s.persist(ctx, notification, recipients); err != nil {
 		return nil, err
 	}
-	s.recordAudit(ctx, actorAccountID, notification, "notification.create")
+	if err := s.recordAudit(
+		ctx,
+		actorAccountID,
+		notification,
+		"notification.create",
+	); err != nil {
+		return nil, err
+	}
 	return s.adminItem(ctx, notification)
 }
 
@@ -526,22 +533,33 @@ func (s *Service) SendFamilyMessage(
 			); err != nil {
 				return nil, err
 			}
-		} else if commandErr != nil {
-			// The inbox entry is still valid; a device that is offline or has
-			// no command channel simply reads it in the application instead.
-			_ = s.repository.UpdateDeliveryStatus(
+		} else {
+			failureCode := "device_unavailable"
+			if commandErr == nil {
+				failureCode = "command_not_created"
+			}
+			if err := s.repository.UpdateDeliveryStatus(
 				ctx,
 				notification.ID,
 				parentAccountID,
 				domain.ChannelDevice,
 				domain.DeliveryStatusFailed,
-				"device_unavailable",
+				failureCode,
 				s.timeSource.Now().UTC(),
-			)
+			); err != nil {
+				return nil, err
+			}
 		}
 	}
 
-	s.recordAudit(ctx, parentAccountID, notification, "notification.family_message")
+	if err := s.recordAudit(
+		ctx,
+		parentAccountID,
+		notification,
+		"notification.family_message",
+	); err != nil {
+		return nil, err
+	}
 	return &domain.InboxItem{
 		ID:          notification.ID,
 		Category:    notification.Category,
@@ -670,8 +688,13 @@ func (s *Service) AdminDelete(
 		}
 		return err
 	}
-	s.auditAction(ctx, actorAccountID, notificationID, "notification.delete", nil)
-	return nil
+	return s.auditAction(
+		ctx,
+		actorAccountID,
+		notificationID,
+		"notification.delete",
+		nil,
+	)
 }
 
 // AdminStats returns the operator counters.
@@ -868,8 +891,8 @@ func (s *Service) recordAudit(
 	actorAccountID string,
 	notification *domain.Notification,
 	action string,
-) {
-	s.auditAction(ctx, actorAccountID, notification.ID, action, map[string]any{
+) error {
+	return s.auditAction(ctx, actorAccountID, notification.ID, action, map[string]any{
 		"category": notification.Category,
 		"audience": notification.Audience,
 		"channels": notification.Channels,
@@ -882,11 +905,17 @@ func (s *Service) auditAction(
 	targetID string,
 	action string,
 	detail map[string]any,
-) {
+) error {
 	if s.audit == nil {
-		return
+		return nil
 	}
-	_ = s.audit.RecordAudit(ctx, actorAccountID, targetID, action, detail)
+	return s.audit.RecordAudit(
+		ctx,
+		actorAccountID,
+		targetID,
+		action,
+		detail,
+	)
 }
 
 func defaultFamilyMessageTitle(body string) (string, error) {

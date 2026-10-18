@@ -11,6 +11,9 @@ import (
 type memoryRepository struct {
 	tasks   map[string]domain.Task
 	results map[string]domain.Result
+	// completionAttempts counts CompleteTask calls so tests can prove a
+	// rejected task never reaches the result write.
+	completionAttempts int
 }
 
 func newMemoryRepository() *memoryRepository {
@@ -43,12 +46,16 @@ func (repository *memoryRepository) GetTask(
 func (repository *memoryRepository) UpdateTaskStatus(
 	_ context.Context,
 	taskID string,
+	deviceID string,
 	status domain.TaskStatus,
 	failureCode string,
 	timestamp time.Time,
 ) error {
 	task, exists := repository.tasks[taskID]
 	if !exists {
+		return domain.ErrTaskNotFound
+	}
+	if task.DeviceID != deviceID {
 		return domain.ErrTaskNotFound
 	}
 	if task.Status != domain.TaskStatusPending &&
@@ -88,10 +95,28 @@ func (repository *memoryRepository) ExpireStaleTasks(
 	return 0, nil
 }
 
-func (repository *memoryRepository) SaveResult(
+func (repository *memoryRepository) CompleteTask(
 	_ context.Context,
 	result *domain.Result,
+	frameWidth int,
+	frameHeight int,
+	frameBytes int,
 ) error {
+	repository.completionAttempts++
+	task, exists := repository.tasks[result.TaskID]
+	if !exists || task.DeviceID != result.DeviceID {
+		return domain.ErrTaskNotFound
+	}
+	if task.Status != domain.TaskStatusPending &&
+		task.Status != domain.TaskStatusDispatched {
+		return domain.ErrTaskNotPending
+	}
+	task.Status = domain.TaskStatusCompleted
+	task.FrameWidth = frameWidth
+	task.FrameHeight = frameHeight
+	task.FrameBytes = frameBytes
+	task.CompletedAt = &result.CreatedAt
+	repository.tasks[result.TaskID] = task
 	repository.results[result.TaskID] = *result
 	return nil
 }
@@ -244,6 +269,7 @@ func TestCompleteTaskStoresBoundedResult(t *testing.T) {
 	result, err := service.CompleteTask(
 		context.Background(),
 		task.ID,
+		"sprout_device_001",
 		320,
 		240,
 		2048,
@@ -289,6 +315,7 @@ func TestCompleteTaskRejectsTooManyLabels(t *testing.T) {
 	_, err = service.CompleteTask(
 		context.Background(),
 		task.ID,
+		"sprout_device_001",
 		320,
 		240,
 		2048,
@@ -322,7 +349,11 @@ func TestMarkDispatchedFailsWhenConsentRevoked(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 	consent.granted = false
-	_, err = service.MarkDispatched(context.Background(), task.ID)
+	_, err = service.MarkDispatched(
+		context.Background(),
+		task.ID,
+		"sprout_device_001",
+	)
 	if err != domain.ErrPrivacyNotGranted {
 		t.Fatalf("expected consent error, got %v", err)
 	}
@@ -349,7 +380,11 @@ func (consent *mutableConsent) ImageUploadConsentForDevice(
 
 func TestCapabilityReportsConsent(t *testing.T) {
 	service, _ := newTestService(t, false, true)
-	state, err := service.Capability(context.Background(), "sprout_device_001")
+	state, err := service.Capability(
+		context.Background(),
+		"parent-001",
+		"sprout_device_001",
+	)
 	if err != nil {
 		t.Fatalf("capability: %v", err)
 	}
@@ -358,6 +393,50 @@ func TestCapabilityReportsConsent(t *testing.T) {
 	}
 	if state.RetentionHours != int(domain.ResultRetention.Hours()) {
 		t.Fatalf("unexpected retention hours: %d", state.RetentionHours)
+	}
+}
+
+func TestCapabilityDeniesUnownedDevice(t *testing.T) {
+	repository := newMemoryRepository()
+	service, err := New(Options{
+		Repository:    repository,
+		ConsentReader: stubConsent{granted: true},
+		DeviceReader:  stubDeviceReader{owned: false},
+	})
+	if err != nil {
+		t.Fatalf("new vision service: %v", err)
+	}
+	_, err = service.Capability(
+		context.Background(),
+		"parent-001",
+		"sprout_device_001",
+	)
+	if err != domain.ErrInvalidTask {
+		t.Fatalf("expected ownership denial, got %v", err)
+	}
+}
+
+func TestCancelTaskDeniesUnownedDevice(t *testing.T) {
+	repository := newMemoryRepository()
+	service, err := New(Options{
+		Repository:    repository,
+		ConsentReader: stubConsent{granted: true},
+		DeviceReader:  stubDeviceReader{owned: false},
+	})
+	if err != nil {
+		t.Fatalf("new vision service: %v", err)
+	}
+	repository.tasks["task-1"] = domain.Task{
+		ID:       "task-1",
+		DeviceID: "sprout_device_001",
+		Status:   domain.TaskStatusPending,
+	}
+	_, err = service.CancelTask(context.Background(), "parent-001", "task-1")
+	if err != domain.ErrInvalidTask {
+		t.Fatalf("expected ownership denial, got %v", err)
+	}
+	if repository.tasks["task-1"].Status != domain.TaskStatusPending {
+		t.Fatal("unowned task must remain unchanged")
 	}
 }
 
@@ -433,5 +512,93 @@ func TestListPendingTasksForDeviceReturnsOnlyPending(t *testing.T) {
 	}
 	if len(tasks) != 1 || tasks[0].ID != "task-pending" {
 		t.Fatalf("expected only the pending task, got %+v", tasks)
+	}
+}
+
+func TestCompleteTaskRejectsDifferentDeviceWithoutWritingResult(t *testing.T) {
+	service, repository := newTestService(t, true, true)
+	task, err := service.CreateTask(
+		context.Background(),
+		"parent-001",
+		"sprout_device_001",
+		domain.TaskTypeObjectRecognition,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	_, err = service.CompleteTask(
+		context.Background(),
+		task.ID,
+		"sprout_device_002",
+		320,
+		240,
+		2048,
+		nil,
+		"",
+	)
+	if err != domain.ErrTaskNotFound {
+		t.Fatalf("expected task not found, got %v", err)
+	}
+	if repository.completionAttempts != 0 {
+		t.Fatal("cross-device completion reached the repository write")
+	}
+	if len(repository.results) != 0 {
+		t.Fatal("cross-device completion persisted a result")
+	}
+	if repository.tasks[task.ID].Status != domain.TaskStatusPending {
+		t.Fatal("cross-device completion changed the task status")
+	}
+}
+
+func TestMarkDispatchedRejectsDifferentDevice(t *testing.T) {
+	service, repository := newTestService(t, true, true)
+	task, err := service.CreateTask(
+		context.Background(),
+		"parent-001",
+		"sprout_device_001",
+		domain.TaskTypeCapture,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if _, err := service.MarkDispatched(
+		context.Background(),
+		task.ID,
+		"sprout_device_002",
+	); err != domain.ErrTaskNotFound {
+		t.Fatalf("expected task not found, got %v", err)
+	}
+	if repository.tasks[task.ID].Status != domain.TaskStatusPending {
+		t.Fatal("cross-device acknowledgement changed the task status")
+	}
+}
+
+func TestFailTaskRejectsDifferentDevice(t *testing.T) {
+	service, repository := newTestService(t, true, true)
+	task, err := service.CreateTask(
+		context.Background(),
+		"parent-001",
+		"sprout_device_001",
+		domain.TaskTypeCapture,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if _, err := service.FailTask(
+		context.Background(),
+		task.ID,
+		"sprout_device_002",
+		domain.FailureCaptureFailed,
+	); err != domain.ErrTaskNotFound {
+		t.Fatalf("expected task not found, got %v", err)
+	}
+	if repository.tasks[task.ID].Status != domain.TaskStatusPending {
+		t.Fatal("cross-device failure changed the task status")
 	}
 }

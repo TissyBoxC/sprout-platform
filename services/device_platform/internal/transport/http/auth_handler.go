@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -16,6 +17,7 @@ import (
 type authHandler struct {
 	service *authservice.Service
 	audit   auditRecorder
+	limiter authRateLimiter
 }
 
 type registerRequest struct {
@@ -70,6 +72,14 @@ func (handler authHandler) register(response http.ResponseWriter, request *http.
 		writeError(response, request, http.StatusBadRequest, "invalid_request", "请检查填写的内容")
 		return
 	}
+	if err := handler.limiter.register(
+		request.Context(),
+		request,
+		payload.Phone,
+	); err != nil {
+		writeRateLimitError(response, request, err)
+		return
+	}
 	account, pair, summary, err := handler.service.Register(request.Context(), authdomain.RegisterInput{
 		Phone:                  payload.Phone,
 		PhoneVerificationCode:  payload.PhoneVerificationCode,
@@ -90,6 +100,14 @@ func (handler authHandler) login(response http.ResponseWriter, request *http.Req
 	var payload loginRequest
 	if err := decodeJSON(request, &payload); err != nil {
 		writeError(response, request, http.StatusBadRequest, "invalid_request", "请检查填写的内容")
+		return
+	}
+	if err := handler.limiter.login(
+		request.Context(),
+		request,
+		payload.Identifier,
+	); err != nil {
+		writeRateLimitError(response, request, err)
 		return
 	}
 	account, pair, summary, err := handler.service.Login(request.Context(), authdomain.LoginInput{
@@ -114,6 +132,14 @@ func (handler authHandler) sendPhoneVerification(
 		writeError(response, request, http.StatusBadRequest, "invalid_request", "请检查填写的内容")
 		return
 	}
+	if err := handler.limiter.sms(
+		request.Context(),
+		request,
+		payload.Phone,
+	); err != nil {
+		writeRateLimitError(response, request, err)
+		return
+	}
 	if err := handler.service.SendPhoneVerificationCode(
 		request.Context(),
 		payload.Phone,
@@ -136,6 +162,14 @@ func (handler authHandler) startAdminLogin(
 	var payload adminLoginRequest
 	if err := decodeJSON(request, &payload); err != nil {
 		writeError(response, request, http.StatusBadRequest, "invalid_request", "请检查填写的内容")
+		return
+	}
+	if err := handler.limiter.adminLogin(
+		request.Context(),
+		request,
+		payload.Email,
+	); err != nil {
+		writeRateLimitError(response, request, err)
 		return
 	}
 	challengeToken, account, err := handler.service.StartAdminLogin(
@@ -175,6 +209,14 @@ func (handler authHandler) completeAdminLogin(
 	var payload adminMFALoginRequest
 	if err := decodeJSON(request, &payload); err != nil {
 		writeError(response, request, http.StatusBadRequest, "invalid_request", "请检查填写的内容")
+		return
+	}
+	if err := handler.limiter.mfa(
+		request.Context(),
+		request,
+		payload.ChallengeToken,
+	); err != nil {
+		writeRateLimitError(response, request, err)
 		return
 	}
 	account, pair, err := handler.service.CompleteAdminLogin(
@@ -256,6 +298,14 @@ func (handler authHandler) refresh(response http.ResponseWriter, request *http.R
 		writeError(response, request, http.StatusBadRequest, "invalid_request", "请检查填写的内容")
 		return
 	}
+	if err := handler.limiter.refresh(
+		request.Context(),
+		request,
+		payload.RefreshToken,
+	); err != nil {
+		writeRateLimitError(response, request, err)
+		return
+	}
 	pair, err := handler.service.Refresh(request.Context(), payload.RefreshToken)
 	if err != nil {
 		writeAuthServiceError(response, request, err)
@@ -327,7 +377,7 @@ func (handler authHandler) requireAuthentication(
 			writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 			return
 		}
-		accountID, err := handler.service.VerifyAccessToken(token)
+		accountID, err := handler.service.VerifyAccessToken(request.Context(), token)
 		if err != nil {
 			handler.recordAuthDenied(request, "", "auth.denied", "invalid_token")
 			writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
@@ -645,10 +695,47 @@ func writeAuthServiceError(
 	}
 }
 
+func writeRateLimitError(
+	response http.ResponseWriter,
+	request *http.Request,
+	err error,
+) {
+	if errors.Is(err, errRateLimited) {
+		response.Header().Set("Retry-After", "60")
+		writeError(
+			response,
+			request,
+			http.StatusTooManyRequests,
+			"too_many_attempts",
+			"尝试次数过多，请稍后再试",
+		)
+		return
+	}
+	// Authentication limits fail closed when Redis is unavailable. Exposing a
+	// service-unavailable response is safer than silently removing brute-force
+	// protection during an outage.
+	writeError(
+		response,
+		request,
+		http.StatusServiceUnavailable,
+		"service_unavailable",
+		"服务暂时不可用，请稍后重试",
+	)
+}
+
 func decodeJSON(request *http.Request, destination any) error {
-	decoder := json.NewDecoder(request.Body)
+	const maxJSONBodyBytes = 1 << 20
+	body := http.MaxBytesReader(nil, request.Body, maxJSONBodyBytes)
+	decoder := json.NewDecoder(body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("request body must contain one JSON value")
+		}
 		return err
 	}
 	return nil

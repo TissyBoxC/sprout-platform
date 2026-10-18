@@ -163,6 +163,27 @@ func (r *fakeRepository) UpdateInvitationState(
 	return nil
 }
 
+func (r *fakeRepository) AcceptInvitation(
+	_ context.Context,
+	member domain.Member,
+	familyID string,
+	invitationID string,
+) error {
+	invitation, ok := r.invitations[invitationID]
+	if !ok || invitation.FamilyID != familyID ||
+		invitation.Status != domain.InvitationPending {
+		return domain.ErrInvitationState
+	}
+	if err := r.CreateMember(context.Background(), member); err != nil {
+		return err
+	}
+	invitation.Status = domain.InvitationAccepted
+	now := time.Now().UTC()
+	invitation.AcceptedAt = &now
+	r.invitations[invitationID] = invitation
+	return nil
+}
+
 func newService(t *testing.T, repository *fakeRepository, now time.Time) *Service {
 	t.Helper()
 	service, err := New(Options{

@@ -105,3 +105,10 @@ Desktop.ini
 # Local service configuration
 **/config.local.*
 **/application-local.*
+
+# One-off production diagnostics must use environment-provided credentials.
+tools/ssh_exec.py
+tools/probe_service_versions.py
+tools/read_upgrade_state.py
+apps/admin_web/.codex-live-check.cjs
+admin-services-live.png

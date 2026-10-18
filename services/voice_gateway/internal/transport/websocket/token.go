@@ -27,12 +27,13 @@ type HMACDeviceTokenVerifier struct {
 	// leeway tolerates small clock differences between the platform issuer and
 	// the gateway without widening the accepted validity window materially.
 	leeway time.Duration
-	// revoked maps token identifiers to their signed expiry so a closed
-	// conversation cannot be replayed before the signed token would have
-	// expired anyway. Entries are pruned once their own expiry (plus leeway)
-	// has passed so the set stays bounded by the number of live tokens. A
-	// zero expiry means "unknown" and is retained, which happens only for
-	// tokens revoked without a parsed payload.
+	// revoked maps consumed or expressly revoked token identifiers to their
+	// signed expiry. Verification atomically claims the identifier before the
+	// upgrade, so concurrent attempts cannot both authenticate with one token.
+	// Entries are pruned once their own expiry (plus leeway) has passed so the
+	// set stays bounded by the number of live tokens. A zero expiry means
+	// "unknown" and is retained, which happens only for tokens revoked without
+	// a parsed payload.
 	//
 	// This is process-local state. A deployment with more than one gateway
 	// replica must move revocation to shared state, such as Redis or the
@@ -91,8 +92,8 @@ func (v *HMACDeviceTokenVerifier) VerifyDeviceToken(token string) (DeviceIdentit
 	if err != nil {
 		return DeviceIdentity{}, err
 	}
-	if v.isRevoked(payload.TokenID) {
-		return DeviceIdentity{}, &AuthError{Reason: "device token has been revoked"}
+	if err := v.claim(payload); err != nil {
+		return DeviceIdentity{}, err
 	}
 	return DeviceIdentity{
 		DeviceID:  payload.DeviceID,
@@ -146,16 +147,23 @@ func (v *HMACDeviceTokenVerifier) RevokeIdentity(identity DeviceIdentity) {
 	v.revoke(identity.TokenID, identity.ExpiresAt)
 }
 
-func (v *HMACDeviceTokenVerifier) isRevoked(tokenID string) bool {
-	tokenID = strings.TrimSpace(tokenID)
+// claim atomically converts an accepted token into a consumed token. This
+// closes the pre-upgrade replay window: two simultaneous Handlers cannot both
+// verify the same token before either connection revokes it on close.
+func (v *HMACDeviceTokenVerifier) claim(payload deviceTokenPayload) error {
+	tokenID := strings.TrimSpace(payload.TokenID)
 	if tokenID == "" {
-		return false
+		return &AuthError{Reason: "device token id is missing"}
 	}
+	tokenID = strings.TrimSpace(tokenID)
 	v.revokedMutex.Lock()
 	defer v.revokedMutex.Unlock()
 	v.pruneLocked(v.now().UTC())
-	_, revoked := v.revoked[tokenID]
-	return revoked
+	if _, consumed := v.revoked[tokenID]; consumed {
+		return &AuthError{Reason: "device token has already been used"}
+	}
+	v.revoked[tokenID] = time.Unix(payload.ExpiresAt, 0).UTC()
+	return nil
 }
 
 // pruneLocked drops revocations whose token has expired (its own signed expiry

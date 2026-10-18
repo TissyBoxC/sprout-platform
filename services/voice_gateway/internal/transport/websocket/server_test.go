@@ -352,7 +352,7 @@ func TestWakeCreatedSessionRunsTurn(t *testing.T) {
 		DetectorFactory: func() vad.Detector {
 			return &scriptedWebSocketDetector{values: []bool{true, true, false}}
 		},
-		SegmentHandler: func(segment session.AudioSegment, sink AudioSink) {
+		SegmentHandler: func(_ context.Context, segment session.AudioSegment, sink AudioSink) {
 			turnSeen <- segment
 			pcm := make([]int16, frame.SamplesPerFrame)
 			_ = sink.EnqueueAudio("wake_turn_reply", playback.PriorityConversation, pcm, true, nil)
@@ -581,8 +581,17 @@ func TestDisconnectRevokesAuthenticatedToken(t *testing.T) {
 	defer httpServer.Close()
 
 	connection := dialAuthenticated(t, httpServer.URL, token)
-	if _, err := verifier.VerifyDeviceToken(token); err != nil {
-		t.Fatalf("token should be valid while connected: %v", err)
+	header := http.Header{}
+	header.Set("Authorization", "Bearer "+token)
+	second, response, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(httpServer.URL, "http")+"/voice",
+		header,
+	)
+	if second != nil {
+		_ = second.Close()
+	}
+	if err == nil || response == nil || response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("consumed token opened a second connection: response=%#v err=%v", response, err)
 	}
 	_ = connection.Close()
 
@@ -1289,7 +1298,7 @@ func TestContinuousSecondTurnAfterFirstCompletes(t *testing.T) {
 				true, true, false,
 			}}
 		},
-		SegmentHandler: func(segment session.AudioSegment, sink AudioSink) {
+		SegmentHandler: func(_ context.Context, segment session.AudioSegment, sink AudioSink) {
 			turnCount <- struct{}{}
 			// Two frames per reply ensure the session only re-arms after the
 			// whole turn is enqueued, not after the first frame becomes audible.
@@ -1376,7 +1385,7 @@ func TestBargeInStateTransition(t *testing.T) {
 			default:
 			}
 		},
-		SegmentHandler: func(segment session.AudioSegment, sink AudioSink) {
+		SegmentHandler: func(_ context.Context, segment session.AudioSegment, sink AudioSink) {
 			// Hold the turn in speaking so the test can deliver a barge-in frame
 			// deterministically. The safety item proves Clear(false) preserves
 			// non-interruptible announcements.
@@ -1427,9 +1436,9 @@ func TestBargeInStateTransition(t *testing.T) {
 	}
 	waitFor(t, time.Second, func() bool { return scheduler.Snapshot().Pending == 4 })
 
-	// New device audio while speaking is barge-in: it must clear conversation
-	// playback, keep the non-interruptible safety frame, and return to
-	// listening without an explicit cancel.
+	// New speech detected after decoding, preprocessing, and VAD is barge-in:
+	// it must clear conversation playback, keep the non-interruptible safety
+	// frame, and return to listening without an explicit cancel.
 	if err := connection.WriteMessage(websocket.BinaryMessage, makeAudioEnvelope(t, "session_barge", 4)); err != nil {
 		t.Fatalf("write barge-in audio: %v", err)
 	}
@@ -1451,6 +1460,198 @@ func TestBargeInStateTransition(t *testing.T) {
 	close(releaseHandler)
 }
 
+func TestAcousticBargeInSchedulesOneInterruption(t *testing.T) {
+	manager := session.NewManager(session.ManagerConfig{
+		MaxSessions:          8,
+		MaxSessionsPerDevice: 2,
+	})
+	defer manager.CloseAll()
+	releaseHandler := make(chan struct{})
+	server, err := NewServer(ServerConfig{
+		Manager:  manager,
+		Verifier: testTokenVerifier{},
+		DetectorFactory: func() vad.Detector {
+			// The first utterance opens a turn; the next decoded speech frame
+			// while the reply is speaking is the single barge-in trigger.
+			return &scriptedWebSocketDetector{values: []bool{true, true, false, true}}
+		},
+		SegmentHandler: func(
+			_ context.Context,
+			_ session.AudioSegment,
+			sink AudioSink,
+		) {
+			reply := make([]int16, frame.SamplesPerFrame)
+			_ = sink.EnqueueAudio(
+				"single_barge_reply",
+				playback.PriorityConversation,
+				reply,
+				true,
+				nil,
+			)
+			<-releaseHandler
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("create websocket server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, "valid-token")
+	defer connection.Close()
+	writeControl(t, connection, sessionStartFrame(
+		"session_single_barge",
+		"device_alpha",
+	))
+	_ = readControl(t, connection)
+	_ = readControl(t, connection)
+	writeCompletedUtterance(t, connection, "session_single_barge", 1)
+	_ = waitForControl(t, connection, func(control ControlFrame) bool {
+		return control.Type == controlTypeSessionState &&
+			control.State == string(session.StateSpeaking)
+	})
+
+	if err := connection.WriteMessage(
+		websocket.BinaryMessage,
+		makeAudioEnvelope(t, "session_single_barge", 4),
+	); err != nil {
+		t.Fatalf("write barge-in frame: %v", err)
+	}
+	listening := waitForControl(t, connection, func(control ControlFrame) bool {
+		return control.Type == controlTypeSessionState &&
+			control.State == string(session.StateListening)
+	})
+	if listening.State != string(session.StateListening) {
+		t.Fatalf("unexpected barge-in state: %+v", listening)
+	}
+
+	// A duplicate schedule would transition the session again or emit a
+	// second state frame. Give both paths time to run, then assert the
+	// session remains usable and no extra state frame was queued.
+	time.Sleep(25 * time.Millisecond)
+	active, ok := manager.Get("session_single_barge")
+	if !ok {
+		t.Fatal("session disappeared after barge-in")
+	}
+	if active.State() != session.StateListening {
+		t.Fatalf(
+			"duplicate barge-in corrupted state: %s",
+			active.State(),
+		)
+	}
+	close(releaseHandler)
+}
+
+func TestAcousticBargeInRequiresSpeechDetection(t *testing.T) {
+	manager := session.NewManager(session.ManagerConfig{MaxSessions: 8, MaxSessionsPerDevice: 2})
+	defer manager.CloseAll()
+	releaseHandler := make(chan struct{})
+	server, err := NewServer(ServerConfig{
+		Manager:  manager,
+		Verifier: testTokenVerifier{},
+		DetectorFactory: func() vad.Detector {
+			// The utterance contains speech; the next frame, while speaking,
+			// is classified as silence and must not interrupt playback.
+			return &scriptedWebSocketDetector{values: []bool{true, true, false, false}}
+		},
+		SegmentHandler: func(_ context.Context, _ session.AudioSegment, sink AudioSink) {
+			reply := make([]int16, frame.SamplesPerFrame)
+			_ = sink.EnqueueAudio("silence_barge_reply", playback.PriorityConversation, reply, true, nil)
+			<-releaseHandler
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("create websocket server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, "valid-token")
+	defer connection.Close()
+	writeControl(t, connection, sessionStartFrame("session_silence_barge", "device_alpha"))
+	_ = readControl(t, connection)
+	_ = readControl(t, connection)
+	writeCompletedUtterance(t, connection, "session_silence_barge", 1)
+	_ = waitForControl(t, connection, func(control ControlFrame) bool {
+		return control.Type == controlTypeSessionState &&
+			control.State == string(session.StateSpeaking)
+	})
+
+	if err := connection.WriteMessage(
+		websocket.BinaryMessage,
+		makeAudioEnvelope(t, "session_silence_barge", 4),
+	); err != nil {
+		t.Fatalf("write silent frame: %v", err)
+	}
+	active, ok := manager.Get("session_silence_barge")
+	if !ok {
+		t.Fatal("session disappeared after silent frame")
+	}
+	if active.State() != session.StateSpeaking {
+		t.Fatalf("silent frame interrupted TTS: state=%s", active.State())
+	}
+	close(releaseHandler)
+}
+
+func TestCorruptOpusDoesNotBargeIn(t *testing.T) {
+	manager := session.NewManager(session.ManagerConfig{MaxSessions: 8, MaxSessionsPerDevice: 2})
+	defer manager.CloseAll()
+	releaseHandler := make(chan struct{})
+	server, err := NewServer(ServerConfig{
+		Manager:  manager,
+		Verifier: testTokenVerifier{},
+		DetectorFactory: func() vad.Detector {
+			return &scriptedWebSocketDetector{values: []bool{true, true, false}}
+		},
+		SegmentHandler: func(_ context.Context, _ session.AudioSegment, sink AudioSink) {
+			reply := make([]int16, frame.SamplesPerFrame)
+			_ = sink.EnqueueAudio("corrupt_barge_reply", playback.PriorityConversation, reply, true, nil)
+			<-releaseHandler
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("create websocket server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, "valid-token")
+	defer connection.Close()
+	writeControl(t, connection, sessionStartFrame("session_corrupt_barge", "device_alpha"))
+	_ = readControl(t, connection)
+	_ = readControl(t, connection)
+	writeCompletedUtterance(t, connection, "session_corrupt_barge", 1)
+	_ = waitForControl(t, connection, func(control ControlFrame) bool {
+		return control.Type == controlTypeSessionState &&
+			control.State == string(session.StateSpeaking)
+	})
+
+	corrupt, err := EncodeAudioEnvelope(AudioEnvelope{
+		SessionID:  "session_corrupt_barge",
+		Sequence:   4,
+		CapturedAt: time.Now().UTC(),
+		Payload:    []byte{0xff, 0xff, 0xff, 0xff},
+	})
+	if err != nil {
+		t.Fatalf("encode corrupt envelope: %v", err)
+	}
+	if err := connection.WriteMessage(websocket.BinaryMessage, corrupt); err != nil {
+		t.Fatalf("write corrupt frame: %v", err)
+	}
+	errorFrame := readControl(t, connection)
+	if errorFrame.Type != controlTypeError {
+		t.Fatalf("expected audio rejection error, got %+v", errorFrame)
+	}
+	active, ok := manager.Get("session_corrupt_barge")
+	if !ok {
+		t.Fatal("session disappeared after corrupt Opus")
+	}
+	if active.State() != session.StateSpeaking {
+		t.Fatalf("corrupt Opus interrupted TTS: state=%v", active.State())
+	}
+	close(releaseHandler)
+}
+
 func TestExplicitBargeInIsIdempotent(t *testing.T) {
 	manager := session.NewManager(session.ManagerConfig{MaxSessions: 8, MaxSessionsPerDevice: 2})
 	defer manager.CloseAll()
@@ -1461,7 +1662,7 @@ func TestExplicitBargeInIsIdempotent(t *testing.T) {
 		DetectorFactory: func() vad.Detector {
 			return &scriptedWebSocketDetector{values: []bool{true, true, false}}
 		},
-		SegmentHandler: func(segment session.AudioSegment, sink AudioSink) {
+		SegmentHandler: func(_ context.Context, segment session.AudioSegment, sink AudioSink) {
 			reply := make([]int16, frame.SamplesPerFrame)
 			_ = sink.EnqueueAudio("explicit_barge_reply", playback.PriorityConversation, reply, true, nil)
 			<-releaseHandler
@@ -1696,5 +1897,134 @@ func TestContextCancellationDoesNotLeak(t *testing.T) {
 	cancel()
 	if !errors.Is(ctx.Err(), context.Canceled) {
 		t.Fatal("context cancellation contract changed")
+	}
+}
+
+func TestRateLimiterUsesContinuousTokenBucket(t *testing.T) {
+	current := time.Unix(0, 0)
+	limiter := newRateLimiterWithClock(2, 100, func() time.Time {
+		return current
+	})
+	if !limiter.allowAudio(50) || !limiter.allowAudio(50) {
+		t.Fatal("initial bucket should allow two frames")
+	}
+	if limiter.allowAudio(1) {
+		t.Fatal("empty frame bucket must reject a third frame")
+	}
+	current = current.Add(500 * time.Millisecond)
+	if limiter.allowAudio(100) {
+		t.Fatal("half a refill period must not admit a full byte bucket")
+	}
+	current = current.Add(500 * time.Millisecond)
+	if !limiter.allowAudio(50) {
+		t.Fatal("one refill period should restore one frame")
+	}
+}
+
+func TestCheckOriginAllowsNativeAndConfiguredBrowser(t *testing.T) {
+	check := originChecker([]string{"https://admin.example.com/"})
+	tests := []struct {
+		name   string
+		origin string
+		want   bool
+	}{
+		{name: "native no origin", origin: "", want: true},
+		{name: "exact allowed", origin: "https://admin.example.com", want: true},
+		{name: "normalized allowed", origin: "https://admin.example.com/", want: true},
+		{name: "denied", origin: "https://evil.example.com", want: false},
+		{name: "polyglot", origin: "https://admin.example.com.evil.example", want: false},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/v1/voice", nil)
+			if testCase.origin != "" {
+				request.Header.Set("Origin", testCase.origin)
+			}
+			if got := check(request); got != testCase.want {
+				t.Fatalf("origin %q allowed=%v, want %v", testCase.origin, got, testCase.want)
+			}
+		})
+	}
+}
+
+func TestServerHeaderRejectsUnlistedBrowserOrigin(t *testing.T) {
+	manager := session.NewManager(session.ManagerConfig{MaxSessions: 8, MaxSessionsPerDevice: 2})
+	defer manager.CloseAll()
+	server, err := NewServer(ServerConfig{
+		Manager:        manager,
+		Verifier:       testTokenVerifier{},
+		AllowedOrigins: []string{"https://admin.example.com"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("create websocket server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	header := http.Header{}
+	header.Set("Authorization", "Bearer valid-token")
+	header.Set("Origin", "https://evil.example.com")
+	connection, response, dialErr := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(httpServer.URL, "http")+"/voice",
+		header,
+	)
+	if connection != nil {
+		_ = connection.Close()
+	}
+	if dialErr == nil {
+		t.Fatal("unlisted browser origin must be rejected")
+	}
+	if response == nil || response.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403, got %#v", response)
+	}
+}
+
+func TestConnectionCloseCancelsProviderHandler(t *testing.T) {
+	manager := session.NewManager(session.ManagerConfig{MaxSessions: 8, MaxSessionsPerDevice: 2})
+	defer manager.CloseAll()
+	handlerStarted := make(chan struct{}, 1)
+	handlerContextErr := make(chan error, 1)
+	server, err := NewServer(ServerConfig{
+		Manager:  manager,
+		Verifier: testTokenVerifier{},
+		DetectorFactory: func() vad.Detector {
+			return &scriptedWebSocketDetector{values: []bool{true, true, false}}
+		},
+		SegmentHandler: func(ctx context.Context, _ session.AudioSegment, _ AudioSink) {
+			select {
+			case handlerStarted <- struct{}{}:
+			default:
+			}
+			<-ctx.Done()
+			handlerContextErr <- ctx.Err()
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("create websocket server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	connection := dialAuthenticated(t, httpServer.URL, "valid-token")
+	writeControl(t, connection, sessionStartFrame("session_cancel", "device_alpha"))
+	_ = readControl(t, connection)
+	_ = readControl(t, connection)
+	writeCompletedUtterance(t, connection, "session_cancel", 1)
+
+	select {
+	case <-handlerStarted:
+	case <-time.After(time.Second):
+		t.Fatal("provider handler did not start")
+	}
+	if err := connection.Close(); err != nil {
+		t.Fatalf("close connection: %v", err)
+	}
+	select {
+	case contextErr := <-handlerContextErr:
+		if !errors.Is(contextErr, context.Canceled) {
+			t.Fatalf("provider context error = %v, want context.Canceled", contextErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider handler was not canceled after connection close")
 	}
 }

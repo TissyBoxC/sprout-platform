@@ -212,7 +212,7 @@ func (s *Service) assertDeviceOwned(
 	deviceID string,
 ) error {
 	if s.deviceReader == nil {
-		return nil
+		return errors.New("playback device ownership reader is unavailable")
 	}
 	deviceIDs, err := s.deviceReader.FamilyDeviceIDs(ctx, familyID)
 	if err != nil {
@@ -231,7 +231,7 @@ func (s *Service) assertPackagePublished(
 	packageID string,
 ) error {
 	if s.packageReader == nil {
-		return nil
+		return errors.New("playback package reader is unavailable")
 	}
 	published, err := s.packageReader.IsPublished(ctx, packageID)
 	if err != nil {

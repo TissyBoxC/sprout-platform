@@ -24,10 +24,15 @@ type deviceVisionService interface {
 		deviceID string,
 		limit int,
 	) ([]domain.Task, error)
-	MarkDispatched(ctx context.Context, taskID string) (*domain.Task, error)
+	MarkDispatched(
+		ctx context.Context,
+		taskID string,
+		deviceID string,
+	) (*domain.Task, error)
 	CompleteTask(
 		ctx context.Context,
 		taskID string,
+		deviceID string,
 		width int,
 		height int,
 		byteSize int,
@@ -37,6 +42,7 @@ type deviceVisionService interface {
 	FailTask(
 		ctx context.Context,
 		taskID string,
+		deviceID string,
 		failureCode string,
 	) (*domain.Task, error)
 }
@@ -110,12 +116,14 @@ func (handler deviceVisionHandler) acknowledgeTask(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	if _, _, ok := handler.verifyDevice(response, request); !ok {
+	deviceID, _, ok := handler.verifyDevice(response, request)
+	if !ok {
 		return
 	}
 	task, err := handler.service.MarkDispatched(
 		request.Context(),
 		strings.TrimSpace(request.PathValue("task_id")),
+		deviceID,
 	)
 	if err != nil {
 		writeDeviceVisionError(response, request, err)
@@ -131,7 +139,8 @@ func (handler deviceVisionHandler) reportResult(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	if _, _, ok := handler.verifyDevice(response, request); !ok {
+	deviceID, _, ok := handler.verifyDevice(response, request)
+	if !ok {
 		return
 	}
 	var payload visionResultRequest
@@ -149,6 +158,7 @@ func (handler deviceVisionHandler) reportResult(
 	result, err := handler.service.CompleteTask(
 		request.Context(),
 		strings.TrimSpace(payload.TaskID),
+		deviceID,
 		payload.Width,
 		payload.Height,
 		payload.ByteSize,
@@ -168,7 +178,8 @@ func (handler deviceVisionHandler) reportStatus(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	if _, _, ok := handler.verifyDevice(response, request); !ok {
+	deviceID, _, ok := handler.verifyDevice(response, request)
+	if !ok {
 		return
 	}
 	var payload visionTaskStatusRequest
@@ -183,6 +194,7 @@ func (handler deviceVisionHandler) reportStatus(
 	task, err := handler.service.FailTask(
 		request.Context(),
 		strings.TrimSpace(request.PathValue("task_id")),
+		deviceID,
 		payload.FailureCode,
 	)
 	if err != nil {

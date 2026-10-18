@@ -1025,7 +1025,7 @@ func TestRecordAuditDropsSensitiveFields(t *testing.T) {
 		"admin.family.password.reset",
 		map[string]any{
 			"scope":           "credential",
-			"password":        "wangjiahao2",
+			"password":        "not-a-real-password",
 			"provider_token":  "sk-secret",
 			"request_payload": map[string]any{"phone": "13800000000"},
 			"balance_usd":     10.0,

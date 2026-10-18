@@ -420,3 +420,30 @@ func TestCompleteDefaultsToPlayedAndRejectsBadOutcome(t *testing.T) {
 		t.Fatalf("outcome = %q, want played", completed.Outcome)
 	}
 }
+
+func TestCreateFailsClosedWithoutOwnershipAndPackageReaders(t *testing.T) {
+	for name, options := range map[string]Options{
+		"device reader": {
+			Repository:    &memoryRepository{},
+			PackageReader: stubPackageReader{published: map[string]bool{"lesson_story": true}},
+		},
+		"package reader": {
+			Repository:   &memoryRepository{},
+			DeviceReader: stubDeviceReader{deviceIDs: []string{"device-1"}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			service, err := New(options)
+			if err != nil {
+				t.Fatalf("new service: %v", err)
+			}
+			_, err = service.Create(context.Background(), "family-1", domain.RequestInput{
+				DeviceID:  "device-1",
+				PackageID: "lesson_story",
+			})
+			if err == nil {
+				t.Fatal("Create() succeeded without a required reader")
+			}
+		})
+	}
+}

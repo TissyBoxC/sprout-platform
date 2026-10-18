@@ -101,8 +101,8 @@ type ChildAccountProvisioner interface {
 // PhoneVerifier sends and validates guardian mobile verification codes.
 //
 // The local verifier is enabled only through an explicit development setting.
-// It accepts an empty code or 000000 while SMS delivery is not configured, but
-// keeps the send/verify contract ready for a real provider.
+// It accepts the fixed 000000 development code while SMS delivery is not
+// configured; an empty code never bypasses verification.
 type PhoneVerifier interface {
 	SendVerificationCode(ctx context.Context, phone string, purpose string) error
 	VerifyCode(ctx context.Context, phone string, purpose string, code string) error
@@ -242,6 +242,7 @@ func (s *Service) Register(
 	if err := validateRegistration(input); err != nil {
 		return nil, nil, nil, err
 	}
+	input.Phone = normalizePhone(input.Phone)
 	if policy.PhoneVerificationRequired {
 		if err := s.verifyPhoneCode(
 			ctx,
@@ -652,12 +653,13 @@ func (s *Service) Refresh(
 	if err := s.repository.RotateSession(
 		ctx,
 		session.ID,
+		hashRefreshToken(refreshToken),
 		hashRefreshToken(newRefreshToken),
 		expiresAt,
 	); err != nil {
 		return nil, err
 	}
-	accessToken, err := s.issueAccessToken(account.ID)
+	accessToken, err := s.issueAccessToken(account.ID, session.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -708,10 +710,24 @@ func (s *Service) GetAccount(
 }
 
 // VerifyAccessToken returns the subject for a valid bearer access token.
-func (s *Service) VerifyAccessToken(accessToken string) (string, error) {
+func (s *Service) VerifyAccessToken(ctx context.Context, accessToken string) (string, error) {
 	claims, err := s.tokenIssuer.Verify(accessToken)
 	if err != nil {
 		return "", err
+	}
+	if _, err := s.repository.GetActiveSessionByID(
+		ctx,
+		claims.SessionID,
+		claims.Subject,
+	); err != nil {
+		return "", domain.ErrSessionNotFound
+	}
+	account, err := s.repository.GetParentAccountByID(ctx, claims.Subject)
+	if err != nil {
+		return "", err
+	}
+	if account.Status != accountStatusActive {
+		return "", domain.ErrAccountDisabled
 	}
 	return claims.Subject, nil
 }
@@ -720,17 +736,18 @@ func (s *Service) issueSession(
 	ctx context.Context,
 	parentAccountID string,
 ) (*domain.TokenPair, error) {
-	accessToken, err := s.issueAccessToken(parentAccountID)
-	if err != nil {
-		return nil, err
-	}
 	refreshToken, err := randomToken()
 	if err != nil {
 		return nil, fmt.Errorf("generate refresh token: %w", err)
 	}
 	now := s.timeSource.Now().UTC()
+	sessionID := uuid.NewString()
+	accessToken, err := s.issueAccessToken(parentAccountID, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	session := &domain.Session{
-		ID:               uuid.NewString(),
+		ID:               sessionID,
 		ParentAccountID:  parentAccountID,
 		RefreshTokenHash: hashRefreshToken(refreshToken),
 		ExpiresAt:        now.Add(s.refreshTTL),
@@ -747,10 +764,14 @@ func (s *Service) issueSession(
 	}, nil
 }
 
-func (s *Service) issueAccessToken(parentAccountID string) (string, error) {
+func (s *Service) issueAccessToken(
+	parentAccountID string,
+	sessionID string,
+) (string, error) {
 	now := s.timeSource.Now().UTC()
 	return s.tokenIssuer.Issue(security.TokenClaims{
 		Subject:   parentAccountID,
+		SessionID: sessionID,
 		TokenID:   uuid.NewString(),
 		IssuedAt:  now,
 		ExpiresAt: now.Add(s.accessTTL),
@@ -914,17 +935,15 @@ func (v *LocalPhoneVerifier) SendVerificationCode(
 	})
 }
 
-// VerifyCode accepts the development bypass while preserving real validation.
+// VerifyCode accepts only the explicit development code. An empty value is an
+// invalid verification attempt and must never bypass the SMS gate.
 func (v *LocalPhoneVerifier) VerifyCode(
 	ctx context.Context,
 	phone string,
 	purpose string,
 	code string,
 ) error {
-	if strings.TrimSpace(code) == "" {
-		return nil
-	}
-	if code != "000000" {
+	if strings.TrimSpace(code) != "000000" {
 		return domain.ErrInvalidVerification
 	}
 	return nil

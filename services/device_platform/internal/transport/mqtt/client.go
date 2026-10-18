@@ -10,6 +10,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	paho "github.com/eclipse/paho.mqtt.golang"
@@ -21,7 +23,9 @@ import (
 
 // Client owns the MQTT connection used by device-control handlers.
 type Client struct {
+	mu     sync.Mutex
 	client pahoClient
+	acks   *commandAckSubscription
 }
 
 // contractIdentifierPattern mirrors the shared identifier definition in
@@ -56,6 +60,7 @@ type pahoClient interface {
 		qos byte,
 		callback paho.MessageHandler,
 	) paho.Token
+	Unsubscribe(topics ...string) paho.Token
 }
 
 // Open connects to the broker with mutual TLS and verifies the connection
@@ -128,6 +133,14 @@ func loadTLSConfig(cfg config.MQTTConfig) (*tls.Config, error) {
 func (c *Client) Close() {
 	if c == nil || c.client == nil {
 		return
+	}
+	c.mu.Lock()
+	subscription := c.acks
+	c.acks = nil
+	c.mu.Unlock()
+	if subscription != nil {
+		subscription.cancel()
+		<-subscription.done
 	}
 	c.client.Disconnect(250)
 }
@@ -388,8 +401,62 @@ func (c *Client) SubscribeCommandAcks(
 	if handler == nil {
 		return fmt.Errorf("subscribe command acks: handler is required")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c.mu.Lock()
+	if c.acks != nil {
+		c.mu.Unlock()
+		return fmt.Errorf("subscribe command acks: subscription already active")
+	}
+	c.mu.Unlock()
+
+	subscriptionContext, stopSubscription := context.WithCancel(ctx)
+
+	ackQueue := make(chan commandAckDelivery, 256)
+	var droppedAcks atomic.Uint64
+	var handlerFailures atomic.Uint64
+	workerCount := 4
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for index := 0; index < workerCount; index++ {
+		go func() {
+			defer workers.Done()
+			for {
+				select {
+				case <-subscriptionContext.Done():
+					return
+				case delivery, ok := <-ackQueue:
+					if !ok {
+						return
+					}
+					if err := handler.HandleCommandAck(
+						subscriptionContext,
+						delivery.DeviceID,
+						delivery.Ack,
+					); err != nil {
+						// The durable command row and HTTP recovery path
+						// remain authoritative. Count the failure instead of
+						// silently discarding it; the next poll can retry.
+						handlerFailures.Add(1)
+					}
+				}
+			}
+		}()
+	}
+	stopWorkers := func() {
+		stopSubscription()
+		workers.Wait()
+	}
+	subscriptionFailed := true
+	defer func() {
+		if subscriptionFailed {
+			stopWorkers()
+		}
+	}()
+
 	token := c.client.Subscribe(
-		"sprout/v1/devices/+/commands/ack",
+		commandAckTopic,
 		1,
 		func(_ paho.Client, message paho.Message) {
 			deviceID, ok := DeviceIDFromAckTopic(message.Topic())
@@ -403,22 +470,102 @@ func (c *Client) SubscribeCommandAcks(
 			if !validCommandAckEnvelope(ack, deviceID) {
 				return
 			}
-			// The paho callback must not block its ordered dispatch goroutine,
-			// so persistence runs separately. The handler is safe for
-			// concurrent use; the durable command row plus the device HTTP
-			// poll remain the recovery path if persistence fails here.
-			go func() {
-				_ = handler.HandleCommandAck(ctx, deviceID, ack)
-			}()
+			if subscriptionContext.Err() != nil {
+				return
+			}
+			select {
+			case <-subscriptionContext.Done():
+				return
+			case ackQueue <- commandAckDelivery{
+				DeviceID: deviceID,
+				Ack:      ack,
+			}:
+			default:
+				// A bounded queue applies backpressure without spawning one
+				// goroutine per message. The durable command row and device
+				// HTTP poll remain the recovery path for a dropped ack.
+				droppedAcks.Add(1)
+			}
 		},
 	)
 	select {
-	case <-ctx.Done():
-		return fmt.Errorf("subscribe command acks: %w", ctx.Err())
+	case <-subscriptionContext.Done():
+		return fmt.Errorf(
+			"subscribe command acks: %w (dropped=%d handler_failures=%d)",
+			subscriptionContext.Err(),
+			droppedAcks.Load(),
+			handlerFailures.Load(),
+		)
 	case <-tokenDone(token):
 	}
 	if err := token.Error(); err != nil {
-		return fmt.Errorf("subscribe command acks: %w", err)
+		return fmt.Errorf(
+			"subscribe command acks: %w (dropped=%d handler_failures=%d)",
+			err,
+			droppedAcks.Load(),
+			handlerFailures.Load(),
+		)
 	}
+	subscription := &commandAckSubscription{
+		cancel: stopSubscription,
+		done:   make(chan struct{}),
+	}
+	c.mu.Lock()
+	if c.acks != nil {
+		c.mu.Unlock()
+		return fmt.Errorf("subscribe command acks: subscription already active")
+	}
+	c.acks = subscription
+	c.mu.Unlock()
+	// Registration must happen before this flag is cleared. An immediate
+	// cancellation can otherwise run the deferred cleanup first and then leave
+	// a live worker pool without an owner.
+	subscriptionFailed = false
+
+	go c.runCommandAckSubscription(
+		subscriptionContext,
+		stopWorkers,
+		subscription,
+		&droppedAcks,
+		&handlerFailures,
+	)
 	return nil
 }
+
+func (c *Client) runCommandAckSubscription(
+	ctx context.Context,
+	stopWorkers func(),
+	subscription *commandAckSubscription,
+	droppedAcks *atomic.Uint64,
+	handlerFailures *atomic.Uint64,
+) {
+	<-ctx.Done()
+
+	unsubscribe := c.client.Unsubscribe(commandAckTopic)
+	if !unsubscribe.WaitTimeout(5 * time.Second) {
+		// The worker pool still has to stop even if the broker is unreachable.
+		// Paho will finish or discard the token when it reconnects.
+		_ = droppedAcks.Load()
+		_ = handlerFailures.Load()
+	}
+	stopWorkers()
+
+	c.mu.Lock()
+	if c.acks == subscription {
+		c.acks = nil
+	}
+	c.mu.Unlock()
+	close(subscription.done)
+}
+
+type commandAckSubscription struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+type commandAckDelivery struct {
+	DeviceID string
+	Ack      DeviceCommandAck
+}
+
+const commandAckTopic = "sprout/v1/devices/+/commands/ack"

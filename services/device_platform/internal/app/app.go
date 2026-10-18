@@ -336,139 +336,139 @@ func Run() error {
 		return fmt.Errorf("create OTA service: %w", err)
 	}
 	featureCenterHealthProbes := map[string]featureCenterService.HealthProbe{
-		"auth": nonzeroRowProbe(
+		"auth": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM parent_accounts WHERE status = 'active' LIMIT 1",
 		),
-		"parent_account": nonzeroRowProbe(
+		"parent_account": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM parent_accounts WHERE role = 'parent' LIMIT 1",
 		),
-		"child_profile": nonzeroRowProbe(
+		"child_profile": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM child_profiles LIMIT 1",
 		),
-		"parent_policy": nonzeroRowProbe(
+		"parent_policy": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM parent_policies LIMIT 1",
 		),
-		"device_diagnostics": nonzeroRowProbe(
+		"device_diagnostics": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM device_boot_events LIMIT 1",
 		),
-		"content_library": nonzeroRowProbe(
+		"content_library": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM content_package_versions LIMIT 1",
 		),
-		"ui_text": nonzeroRowProbe(
+		"ui_text": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM ui_text_package_versions LIMIT 1",
 		),
-		"usage_report": nonzeroRowProbe(
+		"usage_report": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM device_usage_daily LIMIT 1",
 		),
-		"telemetry": nonzeroRowProbe(
+		"telemetry": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM device_runtime_status LIMIT 1",
 		),
-		"platform_security": nonzeroRowProbe(
+		"platform_security": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM admin_totp_credentials LIMIT 1",
 		),
-		"vision": nonzeroRowProbe(
+		"vision": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM vision_tasks LIMIT 1",
 		),
-		"display": nonzeroRowProbe(
+		"display": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM display_device_status LIMIT 1",
 		),
-		"touch": nonzeroRowProbe(
+		"touch": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM touch_device_status LIMIT 1",
 		),
-		"screen": nonzeroRowProbe(
+		"screen": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM screen_device_status LIMIT 1",
 		),
-		"connectivity": nonzeroRowProbe(
+		"connectivity": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM device_connectivity_status LIMIT 1",
 		),
-		"power": nonzeroRowProbe(
+		"power": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM device_power_status LIMIT 1",
 		),
-		"motion": nonzeroRowProbe(
+		"motion": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM device_motion_status LIMIT 1",
 		),
-		"form_factor": nonzeroRowProbe(
+		"form_factor": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM device_form_factor LIMIT 1",
 		),
-		"video_companion": nonzeroRowProbe(
+		"video_companion": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM video_calls LIMIT 1",
 		),
-		"video_session": nonzeroRowProbe(
+		"video_session": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM device_video_session_status LIMIT 1",
 		),
-		"wearable": nonzeroRowProbe(
+		"wearable": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM wearable_device_status LIMIT 1",
 		),
-		"device_mesh": nonzeroRowProbe(
+		"device_mesh": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM device_groups LIMIT 1",
 		),
-		"bluetooth_audio": nonzeroRowProbe(
+		"bluetooth_audio": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM device_bluetooth_audio_status LIMIT 1",
 		),
-		"learning_visualization": nonzeroRowProbe(
+		"learning_visualization": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM device_learning_visualization_status LIMIT 1",
 		),
-		"image_privacy": nonzeroRowProbe(
+		"image_privacy": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM device_image_privacy_status LIMIT 1",
 		),
-		"english_learning": nonzeroRowProbe(
+		"english_learning": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM english_lessons LIMIT 1",
 		),
-		"alarm_reminder": nonzeroRowProbe(
+		"alarm_reminder": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM alarm_reminders LIMIT 1",
 		),
-		"companionship": nonzeroRowProbe(
+		"companionship": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM companionship_growth_records LIMIT 1",
 		),
-		"local_command": nonzeroRowProbe(
+		"local_command": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM local_commands LIMIT 1",
 		),
-		"offline_content": nonzeroRowProbe(
+		"offline_content": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM content_offline_policy LIMIT 1",
 		),
-		"content_engagement": nonzeroRowProbe(
+		"content_engagement": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM content_favorites LIMIT 1",
 		),
-		"content_theme_pack": nonzeroRowProbe(
+		"content_theme_pack": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM content_theme_packs LIMIT 1",
 		),
-		"playback": nonzeroRowProbe(
+		"playback": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM playback_requests LIMIT 1",
 		),
-		"privacy_lifecycle": nonzeroRowProbe(
+		"privacy_lifecycle": schemaReadinessProbe(
 			databaseStore.Pool(),
 			"SELECT 1 FROM parent_consent_events LIMIT 1",
 		),
@@ -821,6 +821,7 @@ func Run() error {
 		Handler: platformhttp.NewRouter(platformhttp.RouterOptions{
 			Logger:            logger,
 			InternalAPIConfig: cfg.Internal,
+			RedisClient:       redisCache.Client(),
 			ReadinessProbes: []platformhttp.ReadinessProbe{
 				databaseStore.Pool().Ping,
 				func(ctx context.Context) error {
@@ -880,6 +881,10 @@ func Run() error {
 			AuditRecorder:                privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       90 * time.Second,
+		MaxHeaderBytes:    64 << 10,
 	}
 
 	errCh := make(chan error, 1)

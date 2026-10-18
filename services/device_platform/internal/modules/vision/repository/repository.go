@@ -27,6 +27,7 @@ type Repository interface {
 	UpdateTaskStatus(
 		ctx context.Context,
 		taskID string,
+		deviceID string,
 		status domain.TaskStatus,
 		failureCode string,
 		timestamp time.Time,
@@ -37,7 +38,13 @@ type Repository interface {
 		limit int,
 	) ([]domain.Task, error)
 	ExpireStaleTasks(ctx context.Context, now time.Time) (int64, error)
-	SaveResult(ctx context.Context, result *domain.Result) error
+	CompleteTask(
+		ctx context.Context,
+		result *domain.Result,
+		frameWidth int,
+		frameHeight int,
+		frameBytes int,
+	) error
 	GetResult(ctx context.Context, taskID string) (*domain.Result, error)
 	ListResultsByDevice(
 		ctx context.Context,
@@ -150,34 +157,48 @@ func (r *PostgresRepository) GetTask(
 func (r *PostgresRepository) UpdateTaskStatus(
 	ctx context.Context,
 	taskID string,
+	deviceID string,
 	status domain.TaskStatus,
 	failureCode string,
 	timestamp time.Time,
 ) error {
+	if deviceID == "" {
+		return domain.ErrInvalidTask
+	}
 	var command string
 	switch status {
 	case domain.TaskStatusDispatched:
 		command = `
 			UPDATE vision_tasks
 			SET status = $2, dispatched_at = $4
-			WHERE id = $1 AND status = 'pending'
+			WHERE id = $1 AND device_id = $5 AND status = 'pending'
 		`
 	case domain.TaskStatusCompleted:
 		command = `
 			UPDATE vision_tasks
 			SET status = $2, completed_at = $4
-			WHERE id = $1 AND status IN ('pending', 'dispatched')
+			WHERE id = $1 AND device_id = $5
+			  AND status IN ('pending', 'dispatched')
 		`
 	case domain.TaskStatusFailed, domain.TaskStatusCancelled, domain.TaskStatusExpired:
 		command = `
 			UPDATE vision_tasks
 			SET status = $2, failure_code = $3, completed_at = $4
-			WHERE id = $1 AND status IN ('pending', 'dispatched')
+			WHERE id = $1 AND device_id = $5
+			  AND status IN ('pending', 'dispatched')
 		`
 	default:
 		return domain.ErrInvalidTask
 	}
-	tag, err := r.pool.Exec(ctx, command, taskID, status, failureCode, timestamp)
+	tag, err := r.pool.Exec(
+		ctx,
+		command,
+		taskID,
+		status,
+		failureCode,
+		timestamp,
+		deviceID,
+	)
 	if err != nil {
 		return fmt.Errorf("update vision task status: %w", err)
 	}
@@ -252,10 +273,16 @@ func (r *PostgresRepository) ExpireStaleTasks(
 	return tag.RowsAffected(), nil
 }
 
-// SaveResult upserts one bounded recognition result.
-func (r *PostgresRepository) SaveResult(
+// CompleteTask atomically stores one bounded recognition result and marks the
+// matching device-owned task completed. The result cannot be committed for a
+// task that another device has already completed or that this device does not
+// own.
+func (r *PostgresRepository) CompleteTask(
 	ctx context.Context,
 	result *domain.Result,
+	frameWidth int,
+	frameHeight int,
+	frameBytes int,
 ) error {
 	if result == nil {
 		return errors.New("vision result is required")
@@ -264,7 +291,40 @@ func (r *PostgresRepository) SaveResult(
 	if err != nil {
 		return fmt.Errorf("encode vision labels: %w", err)
 	}
-	_, err = r.pool.Exec(ctx, `
+	transaction, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin vision completion: %w", err)
+	}
+	defer func() {
+		_ = transaction.Rollback(ctx)
+	}()
+
+	tag, err := transaction.Exec(ctx, `
+		UPDATE vision_tasks
+		SET status = 'completed',
+		    frame_width = $3,
+		    frame_height = $4,
+		    frame_bytes = $5,
+		    completed_at = $6
+		WHERE id = $1
+		  AND device_id = $2
+		  AND status IN ('pending', 'dispatched')
+	`,
+		result.TaskID,
+		result.DeviceID,
+		frameWidth,
+		frameHeight,
+		frameBytes,
+		result.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("complete vision task: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrTaskNotPending
+	}
+
+	_, err = transaction.Exec(ctx, `
 		INSERT INTO vision_results (
 			task_id, device_id, task_type, labels, summary,
 			created_at, expires_at
@@ -286,6 +346,9 @@ func (r *PostgresRepository) SaveResult(
 	)
 	if err != nil {
 		return fmt.Errorf("save vision result: %w", err)
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return fmt.Errorf("commit vision completion: %w", err)
 	}
 	return nil
 }

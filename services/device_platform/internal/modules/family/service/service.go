@@ -43,6 +43,12 @@ type Repository interface {
 		invitationID string,
 		status string,
 	) error
+	AcceptInvitation(
+		ctx context.Context,
+		member domain.Member,
+		familyID string,
+		invitationID string,
+	) error
 }
 
 // Service owns family membership and invitations.
@@ -289,14 +295,11 @@ func (s *Service) AcceptInvitation(
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if err := s.repository.CreateMember(ctx, member); err != nil {
-		return domain.Member{}, err
-	}
-	if err := s.repository.UpdateInvitationState(
+	if err := s.repository.AcceptInvitation(
 		ctx,
+		member,
 		familyID,
 		invitationID,
-		domain.InvitationAccepted,
 	); err != nil {
 		return domain.Member{}, err
 	}

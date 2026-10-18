@@ -111,6 +111,10 @@ type RouterOptions struct {
 	DeviceMeshService            *devicemeshservice.Service
 	ScreenService                *screenservice.Service
 	AuditRecorder                auditRecorder
+	// RedisClient backs cross-replica authentication rate limits. When nil,
+	// login and verification endpoints fail closed instead of running without
+	// brute-force protection.
+	RedisClient rateLimitStore
 }
 
 // ReadinessProbe checks one runtime dependency before the platform accepts
@@ -183,6 +187,7 @@ func NewRouter(options RouterOptions) http.Handler {
 		authHandler := authHandler{
 			service: options.AuthService,
 			audit:   options.AuditRecorder,
+			limiter: authRateLimiter{store: options.RedisClient},
 		}
 		mux.HandleFunc("POST /api/v1/auth/register", authHandler.register)
 		mux.HandleFunc("POST /api/v1/auth/login", authHandler.login)
@@ -1342,7 +1347,9 @@ func NewRouter(options RouterOptions) http.Handler {
 				visionHandler := visionhandler.New(options.VisionService)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/vision/capability",
-					authHandler.requireAuthentication(visionHandler.GetCapability),
+					authHandler.requireAuthentication(
+						parentScoped(visionHandler.GetCapability),
+					),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/vision/tasks",
@@ -1359,13 +1366,7 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/vision/tasks/{task_id}/cancel",
 					authHandler.requireAuthentication(
-						parentScoped(func(
-							response http.ResponseWriter,
-							request *http.Request,
-							_ string,
-						) {
-							visionHandler.CancelTask(response, request)
-						}),
+						parentScoped(visionHandler.CancelTask),
 					),
 				)
 				mux.HandleFunc(
@@ -2399,7 +2400,7 @@ func NewRouter(options RouterOptions) http.Handler {
 
 	return observability.WithRequestLabels(observability.WithRequestMetadata(
 		observability.WithAccessLog(
-			mux,
+			withGlobalRequestBodyLimit(mux),
 			observability.AccessLogOptions{
 				Logger:      logger,
 				ServiceName: "device-platform",
@@ -2416,6 +2417,33 @@ func guardianDeviceVerifierFromBinding(
 		return nil
 	}
 	return bindingGuardianVerifier{bindingService: bindingService}
+}
+
+const maxStandardRequestBodyBytes = 2 << 20
+
+// withGlobalRequestBodyLimit bounds every route before a handler decodes or
+// streams its request. Large release uploads set their own, larger limit and
+// retain their route-level ReadTimeout override.
+func withGlobalRequestBodyLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if shouldUseLargeRequestBodyLimit(request.URL.Path) {
+			next.ServeHTTP(response, request)
+			return
+		}
+		if request.Body != nil {
+			request.Body = http.MaxBytesReader(
+				response,
+				request.Body,
+				maxStandardRequestBodyBytes,
+			)
+		}
+		next.ServeHTTP(response, request)
+	})
+}
+
+func shouldUseLargeRequestBodyLimit(path string) bool {
+	return strings.EqualFold(path, "/api/v1/release-publication/files") ||
+		strings.EqualFold(path, "/internal/v1/release-files")
 }
 
 // guardianDeviceListerFromBinding exposes the binding-derived resolver as a

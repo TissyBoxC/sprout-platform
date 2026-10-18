@@ -17,6 +17,7 @@ import (
 type Service interface {
 	Capability(
 		ctx context.Context,
+		parentAccountID string,
 		deviceID string,
 	) (*domain.CapabilityState, error)
 	CreateTask(
@@ -43,7 +44,11 @@ type Service interface {
 		parentAccountID string,
 		taskID string,
 	) (*domain.Result, error)
-	CancelTask(ctx context.Context, taskID string) (*domain.Task, error)
+	CancelTask(
+		ctx context.Context,
+		parentAccountID string,
+		taskID string,
+	) (*domain.Task, error)
 	AdminStats(
 		ctx context.Context,
 		windowDays int,
@@ -69,9 +74,14 @@ type createTaskRequest struct {
 func (handler *Handler) GetCapability(
 	response http.ResponseWriter,
 	request *http.Request,
+	accountID string,
 ) {
+	if strings.TrimSpace(accountID) == "" {
+		httpapi.WriteError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录", false)
+		return
+	}
 	deviceID := strings.TrimSpace(request.PathValue("device_id"))
-	state, err := handler.service.Capability(request.Context(), deviceID)
+	state, err := handler.service.Capability(request.Context(), accountID, deviceID)
 	if err != nil {
 		writeVisionError(response, request, err)
 		return
@@ -139,9 +149,14 @@ func (handler *Handler) ListTasks(
 func (handler *Handler) CancelTask(
 	response http.ResponseWriter,
 	request *http.Request,
+	accountID string,
 ) {
+	if strings.TrimSpace(accountID) == "" {
+		httpapi.WriteError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录", false)
+		return
+	}
 	taskID := strings.TrimSpace(request.PathValue("task_id"))
-	task, err := handler.service.CancelTask(request.Context(), taskID)
+	task, err := handler.service.CancelTask(request.Context(), accountID, taskID)
 	if err != nil {
 		writeVisionError(response, request, err)
 		return

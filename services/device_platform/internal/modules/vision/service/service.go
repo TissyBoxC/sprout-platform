@@ -71,11 +71,15 @@ func New(options Options) (*Service, error) {
 // device. A missing consent reader is treated as no consent, never as consent.
 func (s *Service) Capability(
 	ctx context.Context,
+	parentAccountID string,
 	deviceID string,
 ) (*domain.CapabilityState, error) {
 	deviceID = strings.TrimSpace(deviceID)
 	if !deviceIDPattern.MatchString(deviceID) {
 		return nil, domain.ErrInvalidTask
+	}
+	if err := s.requireOwnership(ctx, parentAccountID, deviceID); err != nil {
+		return nil, err
 	}
 	granted := false
 	if s.consentReader != nil {
@@ -144,10 +148,18 @@ func (s *Service) CreateTask(
 func (s *Service) MarkDispatched(
 	ctx context.Context,
 	taskID string,
+	deviceID string,
 ) (*domain.Task, error) {
+	deviceID = strings.TrimSpace(deviceID)
+	if !deviceIDPattern.MatchString(deviceID) {
+		return nil, domain.ErrInvalidTask
+	}
 	task, err := s.repository.GetTask(ctx, strings.TrimSpace(taskID))
 	if err != nil {
 		return nil, err
+	}
+	if task.DeviceID != deviceID {
+		return nil, domain.ErrTaskNotFound
 	}
 	if task.Status != domain.TaskStatusPending {
 		return nil, domain.ErrTaskNotPending
@@ -156,6 +168,7 @@ func (s *Service) MarkDispatched(
 		_ = s.repository.UpdateTaskStatus(
 			ctx,
 			task.ID,
+			deviceID,
 			domain.TaskStatusFailed,
 			domain.FailureConsentRevoked,
 			s.timeSource.Now().UTC(),
@@ -165,6 +178,7 @@ func (s *Service) MarkDispatched(
 	if err := s.repository.UpdateTaskStatus(
 		ctx,
 		task.ID,
+		deviceID,
 		domain.TaskStatusDispatched,
 		"",
 		s.timeSource.Now().UTC(),
@@ -178,6 +192,7 @@ func (s *Service) MarkDispatched(
 func (s *Service) CompleteTask(
 	ctx context.Context,
 	taskID string,
+	deviceID string,
 	width int,
 	height int,
 	byteSize int,
@@ -185,9 +200,16 @@ func (s *Service) CompleteTask(
 	summary string,
 ) (*domain.Result, error) {
 	taskID = strings.TrimSpace(taskID)
+	deviceID = strings.TrimSpace(deviceID)
+	if !deviceIDPattern.MatchString(deviceID) {
+		return nil, domain.ErrInvalidTask
+	}
 	task, err := s.repository.GetTask(ctx, taskID)
 	if err != nil {
 		return nil, err
+	}
+	if task.DeviceID != deviceID {
+		return nil, domain.ErrTaskNotFound
 	}
 	if task.Status != domain.TaskStatusPending &&
 		task.Status != domain.TaskStatusDispatched {
@@ -217,15 +239,12 @@ func (s *Service) CompleteTask(
 		CreatedAt: now,
 		ExpiresAt: now.Add(domain.ResultRetention),
 	}
-	if err := s.repository.SaveResult(ctx, result); err != nil {
-		return nil, err
-	}
-	if err := s.repository.UpdateTaskStatus(
+	if err := s.repository.CompleteTask(
 		ctx,
-		task.ID,
-		domain.TaskStatusCompleted,
-		"",
-		now,
+		result,
+		width,
+		height,
+		byteSize,
 	); err != nil {
 		return nil, err
 	}
@@ -236,16 +255,20 @@ func (s *Service) CompleteTask(
 func (s *Service) FailTask(
 	ctx context.Context,
 	taskID string,
+	deviceID string,
 	failureCode string,
 ) (*domain.Task, error) {
 	taskID = strings.TrimSpace(taskID)
+	deviceID = strings.TrimSpace(deviceID)
 	failureCode = strings.TrimSpace(failureCode)
-	if !failureCodeIsValid(failureCode) {
+	if !deviceIDPattern.MatchString(deviceID) ||
+		!failureCodeIsValid(failureCode) {
 		return nil, domain.ErrInvalidTask
 	}
 	if err := s.repository.UpdateTaskStatus(
 		ctx,
 		taskID,
+		deviceID,
 		domain.TaskStatusFailed,
 		failureCode,
 		s.timeSource.Now().UTC(),
@@ -258,12 +281,21 @@ func (s *Service) FailTask(
 // CancelTask cancels a pending or dispatched task.
 func (s *Service) CancelTask(
 	ctx context.Context,
+	parentAccountID string,
 	taskID string,
 ) (*domain.Task, error) {
 	taskID = strings.TrimSpace(taskID)
+	task, err := s.repository.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireOwnership(ctx, parentAccountID, task.DeviceID); err != nil {
+		return nil, err
+	}
 	if err := s.repository.UpdateTaskStatus(
 		ctx,
 		taskID,
+		task.DeviceID,
 		domain.TaskStatusCancelled,
 		"",
 		s.timeSource.Now().UTC(),

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/domain"
 )
@@ -46,6 +47,7 @@ func (handler adminHandler) uploadReleaseFile(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
+	setLargeUploadDeadline(response)
 	request.Body = http.MaxBytesReader(
 		response,
 		request.Body,
@@ -100,6 +102,16 @@ func (handler adminHandler) uploadReleaseFile(
 	writeSuccess(response, request, http.StatusCreated, map[string]any{
 		"file": uploaded,
 	})
+}
+
+const largeReleaseUploadTimeout = 30 * time.Minute
+
+// setLargeUploadDeadline widens only the release-upload connection deadline.
+// The process-wide ReadTimeout stays short for ordinary API traffic.
+func setLargeUploadDeadline(response http.ResponseWriter) {
+	controller := http.NewResponseController(response)
+	_ = controller.SetReadDeadline(time.Now().Add(largeReleaseUploadTimeout))
+	_ = controller.SetWriteDeadline(time.Now().Add(largeReleaseUploadTimeout))
 }
 
 func (handler adminHandler) deleteReleaseFile(

@@ -239,6 +239,7 @@ func buildRealtimeTransport(
 		WriteTimeout:        seconds(cfg.WebSocket.WriteTimeoutSeconds),
 		MaxFramesPerSecond:  cfg.WebSocket.MaxFramesPerSecond,
 		MaxBytesPerSecond:   cfg.WebSocket.MaxBytesPerSecond,
+		AllowedOrigins:      cfg.WebSocket.AllowedOrigins,
 		SessionTTL:          seconds(cfg.WebSocket.SessionTokenTTLSeconds),
 		ContinuityWindow:    seconds(cfg.WebSocket.ContinuityWindowSeconds),
 		Manager:             manager,
@@ -262,11 +263,11 @@ func buildRealtimeTransport(
 		OnSessionClosed: func(sessionID string, cause error) {
 			runner.ClearSession(sessionID)
 		},
-		SegmentHandler: func(segment session.AudioSegment, sink websocket.AudioSink) {
+		SegmentHandler: func(ctx context.Context, segment session.AudioSegment, sink websocket.AudioSink) {
 			// The conversation handler runs per completed utterance; a provider
 			// failure ends that turn only and is logged without child content.
 			if turnErr := runner.TurnWithCategory(
-				context.Background(),
+				ctx,
 				segment.SessionID,
 				segment.DeviceID,
 				segment.ContentCategory,

@@ -297,6 +297,69 @@ func TestCreateParentSkipsSMSButKeepsGuardianRoleAndPasswordRules(t *testing.T) 
 	}
 }
 
+func TestLocalPhoneVerifierRejectsEmptyCode(t *testing.T) {
+	verifier := NewLocalPhoneVerifier(&memoryRepository{}, nil)
+	err := verifier.VerifyCode(
+		context.Background(),
+		"13800000000",
+		"register",
+		" ",
+	)
+	if !errors.Is(err, domain.ErrInvalidVerification) {
+		t.Fatalf("empty code error = %v, want ErrInvalidVerification", err)
+	}
+}
+
+func TestVerifyAccessTokenRejectsRevokedSession(t *testing.T) {
+	repository := &memoryRepository{}
+	service, err := New(Options{
+		Repository:    repository,
+		TokenIssuer:   mustTokenIssuer(t),
+		PhoneVerifier: noOpPhoneVerifier{},
+		AccessTTL:     time.Minute,
+		RefreshTTL:    time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("create authentication service: %v", err)
+	}
+	account, pair, _, err := service.Register(
+		context.Background(),
+		domain.RegisterInput{
+			Phone:                  "13800138000",
+			PhoneVerificationCode:  "000000",
+			Password:               "sprout123",
+			GuardianConsentVersion: defaultConsent,
+		},
+	)
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if accountID, verifyErr := service.VerifyAccessToken(
+		context.Background(),
+		pair.AccessToken,
+	); verifyErr != nil || accountID != account.ID {
+		t.Fatalf("active token verification = %q, %v", accountID, verifyErr)
+	}
+
+	var sessionID string
+	for id := range repository.sessions {
+		sessionID = id
+		break
+	}
+	if sessionID == "" {
+		t.Fatal("registration did not persist a session")
+	}
+	if err := repository.RevokeSession(context.Background(), sessionID); err != nil {
+		t.Fatalf("revoke session: %v", err)
+	}
+	if _, err := service.VerifyAccessToken(
+		context.Background(),
+		pair.AccessToken,
+	); !errors.Is(err, domain.ErrSessionNotFound) {
+		t.Fatalf("revoked access token error = %v, want ErrSessionNotFound", err)
+	}
+}
+
 func TestBindEmailAcceptsAnEmailAsAnAlternateLoginIdentifier(t *testing.T) {
 	account := &domain.ParentAccount{
 		ID:           "parent-001",
@@ -343,6 +406,8 @@ func TestBindEmailAcceptsAnEmailAsAnAlternateLoginIdentifier(t *testing.T) {
 type memoryRepository struct {
 	account             *domain.ParentAccount
 	passwordHashUpdates int
+	sessions            map[string]*domain.Session
+	revokedSessions     map[string]bool
 }
 
 func (r *memoryRepository) CreateParentAccount(
@@ -505,9 +570,29 @@ func (r *memoryRepository) UpdateAdminPermissions(
 
 func (r *memoryRepository) CreateSession(
 	_ context.Context,
-	_ *domain.Session,
+	session *domain.Session,
 ) error {
+	if r.sessions == nil {
+		r.sessions = make(map[string]*domain.Session)
+	}
+	copy := *session
+	r.sessions[session.ID] = &copy
 	return nil
+}
+
+func (r *memoryRepository) GetActiveSessionByID(
+	_ context.Context,
+	sessionID string,
+	parentAccountID string,
+) (*domain.Session, error) {
+	session, ok := r.sessions[sessionID]
+	if !ok || r.revokedSessions[sessionID] ||
+		session.ParentAccountID != parentAccountID ||
+		!session.ExpiresAt.After(time.Now().UTC()) {
+		return nil, domain.ErrSessionNotFound
+	}
+	copy := *session
+	return &copy, nil
 }
 
 func (r *memoryRepository) GetSessionByRefreshTokenHash(
@@ -521,12 +606,17 @@ func (r *memoryRepository) RotateSession(
 	_ context.Context,
 	_ string,
 	_ string,
+	_ string,
 	_ time.Time,
 ) error {
 	return nil
 }
 
-func (r *memoryRepository) RevokeSession(_ context.Context, _ string) error {
+func (r *memoryRepository) RevokeSession(_ context.Context, sessionID string) error {
+	if r.revokedSessions == nil {
+		r.revokedSessions = make(map[string]bool)
+	}
+	r.revokedSessions[sessionID] = true
 	return nil
 }
 

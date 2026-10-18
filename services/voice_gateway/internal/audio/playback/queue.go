@@ -165,6 +165,18 @@ func (q *Queue) Next() (*Item, bool) {
 	return next, true
 }
 
+// ClaimCurrent keeps an encoded item in the active slot until SendAudio has
+// succeeded. It returns false when preemption, clear, or mute removed or
+// requeued the item while it was being encoded.
+func (q *Queue) ClaimCurrent(itemID string) bool {
+	if q == nil || itemID == "" {
+		return false
+	}
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	return q.nowPlaying != nil && q.nowPlaying.ItemID == itemID
+}
+
 // TakeCurrent removes one item from the active slot if it is still current.
 //
 // A preemption, clear, or mute may have requeued or dropped the item while it

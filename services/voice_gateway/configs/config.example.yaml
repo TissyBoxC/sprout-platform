@@ -34,5 +34,8 @@ websocket:
   # Keep the realtime endpoint disabled until the device token verifier is set.
   enabled: false
   path: "/v1/voice"
+  # Exact browser origins, comma-separated in VOICE_GATEWAY_WS_ALLOWED_ORIGINS.
+  # Requests without Origin remain valid for authenticated firmware/native clients.
+  allowed_origins: []
   # Keep a completed conversation reusable for this short follow-up window.
   continuity_window_seconds: 60

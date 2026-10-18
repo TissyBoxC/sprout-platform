@@ -148,3 +148,28 @@ func TestDeletePropagatesNotFound(t *testing.T) {
 		t.Fatalf("err = %v, want ErrCommandNotFound", err)
 	}
 }
+
+func TestMissingRepositoryNeverReportsSuccess(t *testing.T) {
+	service := New(Options{})
+
+	if _, err := service.List(
+		context.Background(),
+		"family-1",
+	); !errors.Is(err, domain.ErrRepositoryUnavailable) {
+		t.Fatalf("list err = %v, want ErrRepositoryUnavailable", err)
+	}
+	if _, err := service.Replace(
+		context.Background(),
+		"family-1",
+		nil,
+	); !errors.Is(err, domain.ErrRepositoryUnavailable) {
+		t.Fatalf("replace err = %v, want ErrRepositoryUnavailable", err)
+	}
+	if _, err := service.Delete(
+		context.Background(),
+		"family-1",
+		"cmd_play",
+	); !errors.Is(err, domain.ErrRepositoryUnavailable) {
+		t.Fatalf("delete err = %v, want ErrRepositoryUnavailable", err)
+	}
+}

@@ -65,6 +65,16 @@ const sourceFilterOptions: Array<{ value: NotificationSource | 'all'; label: str
 ]
 
 const hasStats = computed(() => store.stats !== null)
+const hasActiveFilters = computed(
+  () =>
+    store.filters.category !== 'all' ||
+    store.filters.audience !== 'all' ||
+    store.filters.source !== 'all' ||
+    store.filters.query.trim() !== '',
+)
+const isCurrentPageEmpty = computed(
+  () => !store.hasNotifications && store.filters.page > 1,
+)
 const selectedFamilyName = computed(
   () =>
     store.families.find(
@@ -349,7 +359,10 @@ function formatTime(value: string): string {
       <button type="button" class="ghost-button" @click="resetFilters">重置</button>
     </section>
 
-    <div v-if="store.isLoading && !store.hasNotifications" class="state-panel">
+    <div
+      v-if="store.isLoading && !store.hasLoadedPage"
+      class="state-panel"
+    >
       <span class="state-spinner" aria-hidden="true"></span>
       正在读取通知…
     </div>
@@ -363,17 +376,76 @@ function formatTime(value: string): string {
       <button type="button" class="text-button" @click="reloadNotifications">重新加载</button>
     </div>
 
-    <div v-else-if="!store.hasNotifications" class="state-panel empty-state">
-      <span class="state-icon" aria-hidden="true">☆</span>
-      <div>
-        <strong>还没有发布任何通知</strong>
-        <p>发布第一条公告后，家长端的消息列表会同步显示。</p>
-      </div>
-      <button type="button" class="primary-button" @click="openComposer">发布通知</button>
-    </div>
-
     <template v-else>
-      <section class="list-card">
+      <section v-if="!store.hasNotifications" class="state-panel empty-state">
+        <span class="state-icon" aria-hidden="true">☆</span>
+        <div>
+          <strong>
+            {{
+              store.isCurrentPageOutOfRange
+                ? '这一页没有通知'
+                : isCurrentPageEmpty
+                  ? '这一页没有通知'
+                  : hasActiveFilters
+                    ? '没有符合当前条件的通知'
+                    : '还没有发布任何通知'
+            }}
+          </strong>
+          <p>
+            {{
+              store.isCurrentPageOutOfRange
+                ? '列表刚刚发生变化，可以返回上一页继续查看。'
+                : isCurrentPageEmpty
+                  ? '这一页暂时没有内容，可以返回上一页、重新加载或清除筛选。'
+                  : hasActiveFilters
+                    ? '清除筛选后可以查看其他通知。'
+                    : '发布第一条公告后，家长端的消息列表会同步显示。'
+            }}
+          </p>
+        </div>
+        <button
+          v-if="store.isCurrentPageOutOfRange || isCurrentPageEmpty"
+          type="button"
+          class="ghost-button"
+          :disabled="store.isLoading"
+          @click="store.goToPage(store.filters.page - 1)"
+        >
+          返回上一页
+        </button>
+        <button
+          v-if="hasActiveFilters"
+          type="button"
+          class="ghost-button"
+          :disabled="store.isLoading"
+          @click="resetFilters"
+        >
+          清除筛选
+        </button>
+        <button
+          v-if="isCurrentPageEmpty || store.isCurrentPageOutOfRange"
+          type="button"
+          class="ghost-button"
+          :disabled="store.isLoading"
+          @click="reloadNotifications"
+        >
+          重新加载
+        </button>
+        <button
+          v-else-if="
+            !store.isCurrentPageOutOfRange &&
+            !isCurrentPageEmpty &&
+            store.filters.page === 1
+          "
+          type="button"
+          class="primary-button"
+          :disabled="store.isLoading"
+          @click="openComposer"
+        >
+          发布通知
+        </button>
+      </section>
+
+      <section v-else class="list-card">
         <div class="table-scroll">
           <table>
             <thead>
@@ -428,28 +500,29 @@ function formatTime(value: string): string {
             </tbody>
           </table>
         </div>
-        <div class="pagination">
-          <span>共 {{ store.total }} 条 · 第 {{ store.filters.page }} / {{ store.totalPages }} 页</span>
-          <div>
-            <button
-              type="button"
-              class="ghost-button"
-              :disabled="!store.canGoPrevious"
-              @click="store.goToPage(store.filters.page - 1)"
-            >
-              上一页
-            </button>
-            <button
-              type="button"
-              class="ghost-button"
-              :disabled="!store.canGoNext"
-              @click="store.goToPage(store.filters.page + 1)"
-            >
-              下一页
-            </button>
-          </div>
-        </div>
       </section>
+
+      <div class="pagination" aria-label="通知分页">
+        <span>共 {{ store.total }} 条 · 第 {{ store.filters.page }} / {{ Math.max(store.totalPages, 1) }} 页</span>
+        <div>
+          <button
+            type="button"
+            class="ghost-button"
+            :disabled="store.isLoading || !store.canGoPrevious"
+            @click="store.goToPage(store.filters.page - 1)"
+          >
+            上一页
+          </button>
+          <button
+            type="button"
+            class="ghost-button"
+            :disabled="store.isLoading || !store.canGoNext"
+            @click="store.goToPage(store.filters.page + 1)"
+          >
+            下一页
+          </button>
+        </div>
+      </div>
     </template>
 
     <Transition name="fade">

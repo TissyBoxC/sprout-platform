@@ -97,14 +97,24 @@ export interface UpdateFeatureConfigInput {
   expectedVersion: number
 }
 
+export interface FeatureCenterMutationNotice {
+  code: string
+  message: string
+}
+
+export interface FeatureCenterMutationResult {
+  feature: FeatureCenterFeature
+  notice: FeatureCenterMutationNotice | null
+}
+
 export interface AdminFeatureCenterClient {
   listFeatures(): Promise<FeatureCenterFeature[]>
   getFeature(featureId: string): Promise<FeatureCenterFeature>
   updateFeatureConfig(
     featureId: string,
     input: UpdateFeatureConfigInput,
-  ): Promise<FeatureCenterFeature>
-  checkFeatureHealth(featureId: string): Promise<FeatureCenterFeature>
+  ): Promise<FeatureCenterMutationResult>
+  checkFeatureHealth(featureId: string): Promise<FeatureCenterMutationResult>
 }
 
 export const FEATURE_CENTER_VERSION_CONFLICT_CODES = [
@@ -152,7 +162,7 @@ export function createAdminFeatureCenterClient(
     async updateFeatureConfig(
       featureId: string,
       input: UpdateFeatureConfigInput,
-    ): Promise<FeatureCenterFeature> {
+    ): Promise<FeatureCenterMutationResult> {
       const response = await httpClient.put(
         `${basePath}/${encodeURIComponent(featureId.trim())}/config`,
         {
@@ -160,24 +170,16 @@ export function createAdminFeatureCenterClient(
           expected_version: input.expectedVersion,
         },
       )
-      const payload = recordValue(response.data?.data)
-      const feature = toNullableFeature(payload.feature ?? payload)
-      if (feature === null) {
-        throw new Error('missing feature')
-      }
-      return feature
+      return parseMutationResult(response.data?.data)
     },
 
-    async checkFeatureHealth(featureId: string): Promise<FeatureCenterFeature> {
+    async checkFeatureHealth(
+      featureId: string,
+    ): Promise<FeatureCenterMutationResult> {
       const response = await httpClient.post(
         `${basePath}/${encodeURIComponent(featureId.trim())}/health-check`,
       )
-      const payload = recordValue(response.data?.data)
-      const feature = toNullableFeature(payload.feature ?? payload)
-      if (feature === null) {
-        throw new Error('missing feature')
-      }
-      return feature
+      return parseMutationResult(response.data?.data)
     },
   }
 }
@@ -224,6 +226,26 @@ function parseFeatureList(value: unknown): FeatureCenterFeature[] {
     const feature = toNullableFeature(item)
     return feature === null ? [] : [feature]
   })
+}
+
+function parseMutationResult(value: unknown): FeatureCenterMutationResult {
+  const payload = recordValue(value)
+  const feature = toNullableFeature(payload.feature ?? payload)
+  if (feature === null) {
+    throw new Error('missing feature')
+  }
+  const rawNotice = recordValue(payload.notice)
+  const code = stringValue(rawNotice.code).trim()
+  return {
+    feature,
+    notice:
+      code === ''
+        ? null
+        : {
+            code,
+            message: stringValue(rawNotice.message).trim(),
+          },
+  }
 }
 
 function toNullableFeature(value: unknown): FeatureCenterFeature | null {

@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 import { mapApiError, type ApiError } from '@/api/apiError'
 import {
@@ -106,6 +106,19 @@ export interface AdminFamilyAiUsage {
   models: AdminFamilyAiUsageModel[]
 }
 
+export interface AdminFamilyPagination {
+  page: number
+  pageSize: number
+  pendingPageSize: number | null
+  total: number
+  totalPages: number
+  hasPrevious: boolean
+  hasMore: boolean
+}
+
+const DEFAULT_PAGE_SIZE = 20
+const MAX_PAGE_SIZE = 100
+
 // 管理端以家长账号为主，AI 服务、资料与设备都归属于该账号。
 export const useFamilyAccountStore = defineStore('admin-families', () => {
   const httpClient = createHttpClient()
@@ -114,10 +127,10 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   const modelOptions = ref<AIModelOption[]>([])
   const devicesByFamily = ref<Record<string, AdminFamilyDevice[]>>({})
   const deviceErrorsByFamily = ref<Record<string, ApiError | null>>({})
-  const deviceLoadingFamilyId = ref('')
+  const deviceLoadingCounts = ref<Record<string, number>>({})
   const aiUsageByFamily = ref<Record<string, AdminFamilyAiUsage>>({})
   const aiUsageErrorsByFamily = ref<Record<string, ApiError | null>>({})
-  const aiUsageLoadingFamilyId = ref('')
+  const aiUsageLoadingCounts = ref<Record<string, number>>({})
   const isLoading = ref(false)
   const isLoadingModels = ref(false)
   const isSubmitting = ref(false)
@@ -127,14 +140,48 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   const error = ref<ApiError | null>(null)
   const modelError = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  const pagination = ref<AdminFamilyPagination>({
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
+    pendingPageSize: null,
+    total: 0,
+    totalPages: 0,
+    hasPrevious: false,
+    hasMore: false,
+  })
+  let familiesRequestSequence = 0
+  let familiesLoadingSequence = 0
+  let activeFamiliesLoadingRequests = 0
+  let modelsRequestSequence = 0
+  let modelsLoadingSequence = 0
+  let activeModelsLoadingRequests = 0
+  const deviceRequestSequences = new Map<string, number>()
+  const deviceLoadingSequences = new Map<string, number>()
+  const aiUsageRequestSequences = new Map<string, number>()
+  const aiUsageLoadingSequences = new Map<string, number>()
+  const pageStart = computed(() =>
+    pagination.value.total === 0
+      ? 0
+      : (pagination.value.page - 1) * pagination.value.pageSize + 1,
+  )
+  const pageEnd = computed(() =>
+    Math.min(
+      pagination.value.page * pagination.value.pageSize,
+      pagination.value.total,
+    ),
+  )
 
-  async function load(): Promise<void> {
-    isLoading.value = true
+  async function load(page = pagination.value.page): Promise<void> {
+    const familiesLoadSequence = beginFamiliesLoading()
     error.value = null
-    isLoadingModels.value = true
+    const modelsLoadSequence = beginModelsLoading()
     modelError.value = null
-    await Promise.all([loadFamilies(true), loadModels()])
-    isLoading.value = false
+    try {
+      await Promise.all([loadFamilies(page, true), loadModels()])
+    } finally {
+      finishFamiliesLoading(familiesLoadSequence)
+      finishModelsLoading(modelsLoadSequence)
+    }
   }
 
   async function create(input: CreateAdminFamilyInput): Promise<boolean> {
@@ -149,7 +196,7 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
         child_nickname: input.childNickname.trim(),
         child_birthday: input.childBirthday,
       })
-      const refreshError = await loadFamilies(false)
+      const refreshError = await loadFamilies(1, false)
       const aiAccount = toAiAccountFromResponse(response.data?.data)
       if (refreshError !== null) {
         lastMessage.value = '家长账号已创建，列表暂时没有更新，请重新加载。'
@@ -184,7 +231,7 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
       if (responseAccount !== null) {
         replaceAiAccount(parentAccountId, responseAccount)
       }
-      const refreshError = await loadFamilies(false)
+      const refreshError = await loadFamilies(pagination.value.page, false)
       return { succeeded: true, error: null, refreshError }
     } catch (caught: unknown) {
       return { succeeded: false, error: mapApiError(caught), refreshError: null }
@@ -218,7 +265,7 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
       if (responseAccount !== null) {
         replaceAiAccountByProviderId(input.providerAccountId, responseAccount)
       }
-      const refreshError = await loadFamilies(false)
+      const refreshError = await loadFamilies(pagination.value.page, false)
       return { succeeded: true, error: null, refreshError }
     } catch (caught: unknown) {
       return { succeeded: false, error: mapApiError(caught), refreshError: null }
@@ -242,7 +289,7 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
           child_birthday: input.childBirthday,
         },
       )
-      const refreshError = await loadFamilies(false)
+      const refreshError = await loadFamilies(pagination.value.page, false)
       return { succeeded: true, error: null, refreshError }
     } catch (caught: unknown) {
       return { succeeded: false, error: mapApiError(caught), refreshError: null }
@@ -261,7 +308,7 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
         `/api/v1/admin/families/${encodeURIComponent(parentAccountId)}/password`,
         { password },
       )
-      const refreshError = await loadFamilies(false)
+      const refreshError = await loadFamilies(pagination.value.page, false)
       return { succeeded: true, error: null, refreshError }
     } catch (caught: unknown) {
       return { succeeded: false, error: mapApiError(caught), refreshError: null }
@@ -273,7 +320,13 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   async function loadFamilyDevices(
     parentAccountId: string,
   ): Promise<ApiError | null> {
-    deviceLoadingFamilyId.value = parentAccountId
+    const sequence = (deviceRequestSequences.get(parentAccountId) ?? 0) + 1
+    deviceRequestSequences.set(parentAccountId, sequence)
+    const loadingSequence = advanceLoadingSequence(
+      deviceLoadingSequences,
+      parentAccountId,
+    )
+    updateCount(deviceLoadingCounts, parentAccountId, 1)
     setDeviceError(parentAccountId, null)
     try {
       const response = await httpClient.get(
@@ -285,18 +338,25 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
             .map(toFamilyDevice)
             .filter((device): device is AdminFamilyDevice => device !== null)
         : []
+      if (deviceRequestSequences.get(parentAccountId) !== sequence) {
+        return null
+      }
       devicesByFamily.value = {
         ...devicesByFamily.value,
         [parentAccountId]: devices,
       }
+      setDeviceError(parentAccountId, null)
       return null
     } catch (caught: unknown) {
       const mapped = mapApiError(caught)
-      setDeviceError(parentAccountId, mapped)
-      return mapped
+      if (deviceRequestSequences.get(parentAccountId) === sequence) {
+        setDeviceError(parentAccountId, mapped)
+        return mapped
+      }
+      return null
     } finally {
-      if (deviceLoadingFamilyId.value === parentAccountId) {
-        deviceLoadingFamilyId.value = ''
+      if (deviceLoadingSequences.get(parentAccountId) === loadingSequence) {
+        resetCount(deviceLoadingCounts, parentAccountId)
       }
     }
   }
@@ -304,60 +364,219 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   async function loadFamilyAIUsage(
     parentAccountId: string,
   ): Promise<ApiError | null> {
-    aiUsageLoadingFamilyId.value = parentAccountId
+    const sequence = (aiUsageRequestSequences.get(parentAccountId) ?? 0) + 1
+    aiUsageRequestSequences.set(parentAccountId, sequence)
+    const loadingSequence = advanceLoadingSequence(
+      aiUsageLoadingSequences,
+      parentAccountId,
+    )
+    updateCount(aiUsageLoadingCounts, parentAccountId, 1)
     setAIUsageError(parentAccountId, null)
     try {
       const response = await httpClient.get(
         `/api/v1/admin/families/${encodeURIComponent(parentAccountId)}/ai-usage`,
       )
       const usage = toAiUsage(response.data?.data)
+      if (aiUsageRequestSequences.get(parentAccountId) !== sequence) {
+        return null
+      }
       if (usage !== null) {
         aiUsageByFamily.value = {
           ...aiUsageByFamily.value,
           [parentAccountId]: usage,
         }
       }
+      setAIUsageError(parentAccountId, null)
       return null
     } catch (caught: unknown) {
       const mapped = mapApiError(caught)
-      setAIUsageError(parentAccountId, mapped)
-      return mapped
+      if (aiUsageRequestSequences.get(parentAccountId) === sequence) {
+        setAIUsageError(parentAccountId, mapped)
+        return mapped
+      }
+      return null
     } finally {
-      if (aiUsageLoadingFamilyId.value === parentAccountId) {
-        aiUsageLoadingFamilyId.value = ''
+      if (aiUsageLoadingSequences.get(parentAccountId) === loadingSequence) {
+        resetCount(aiUsageLoadingCounts, parentAccountId)
       }
     }
   }
 
-  async function loadFamilies(reportError: boolean): Promise<ApiError | null> {
-    if (reportError) {
-      error.value = null
-    }
+  async function loadFamilies(
+    page: number,
+    reportError: boolean,
+  ): Promise<ApiError | null> {
+    return loadFamiliesWithPageSize(page, reportError, pagination.value.pageSize)
+  }
+
+  async function loadFamiliesWithPageSize(
+    page: number,
+    reportError: boolean,
+    pageSize: number,
+  ): Promise<ApiError | null> {
+    const requestedPage = Math.max(1, Math.trunc(page))
+    const requestedPageSize = clampPageSize(pageSize)
+    const sequence = ++familiesRequestSequence
     try {
-      const response = await httpClient.get('/api/v1/admin/families')
+      const response = await httpClient.get('/api/v1/admin/families', {
+        params: {
+          page: requestedPage,
+          page_size: requestedPageSize,
+        },
+      })
+      if (sequence !== familiesRequestSequence) {
+        return null
+      }
       const payload = response.data?.data ?? {}
       const records =
         payload.accounts ?? payload.families ?? payload.parent_accounts ?? []
       families.value = Array.isArray(records) ? records.map(toFamily) : []
+      pagination.value = toPagination(
+        payload.pagination,
+        requestedPage,
+        requestedPageSize,
+        families.value.length,
+      )
+      if (
+        families.value.length === 0 &&
+        pagination.value.total > 0 &&
+        requestedPage > pagination.value.totalPages
+      ) {
+        const lastPage = Math.max(1, pagination.value.totalPages)
+        pagination.value = { ...pagination.value, page: lastPage }
+        return loadFamiliesWithPageSize(lastPage, reportError, requestedPageSize)
+      }
+      error.value = null
       return null
     } catch (caught: unknown) {
       const mapped = mapApiError(caught)
-      if (reportError) {
+      if (sequence === familiesRequestSequence && reportError) {
         error.value = mapped
       }
-      return mapped
+      return sequence === familiesRequestSequence ? mapped : null
+    }
+  }
+
+  async function goToPage(page: number): Promise<void> {
+    const nextPage = Math.max(1, Math.trunc(page))
+    if (
+      nextPage === pagination.value.page ||
+      (pagination.value.totalPages > 0 &&
+        nextPage > pagination.value.totalPages)
+    ) {
+      return
+    }
+    if (isLoading.value) {
+      return
+    }
+    const loadSequence = beginFamiliesLoading()
+    error.value = null
+    try {
+      await loadFamilies(nextPage, true)
+    } finally {
+      finishFamiliesLoading(loadSequence)
+    }
+  }
+
+  async function setPageSize(pageSize: number): Promise<void> {
+    if (isLoading.value) {
+      return
+    }
+    const nextPageSize = clampPageSize(pageSize)
+    setPendingPageSize(nextPageSize)
+    const loadSequence = beginFamiliesLoading()
+    error.value = null
+    try {
+      const succeeded = await loadFamiliesWithPageSize(1, true, nextPageSize)
+      if (succeeded !== null) {
+        error.value = succeeded
+      }
+    } finally {
+      clearPendingPageSize()
+      finishFamiliesLoading(loadSequence)
+    }
+  }
+
+  async function retryCurrentPage(): Promise<void> {
+    if (isLoading.value) {
+      return
+    }
+    const loadSequence = beginFamiliesLoading()
+    error.value = null
+    try {
+      await loadFamilies(pagination.value.page, true)
+    } finally {
+      finishFamiliesLoading(loadSequence)
     }
   }
 
   async function loadModels(): Promise<void> {
-    isLoadingModels.value = true
+    const loadSequence = beginModelsLoading()
+    const sequence = ++modelsRequestSequence
     try {
-      modelOptions.value = await operationsClient.loadAIModels()
-      modelError.value = null
+      const models = await operationsClient.loadAIModels()
+      if (sequence === modelsRequestSequence) {
+        modelOptions.value = models
+        modelError.value = null
+      }
     } catch (caught: unknown) {
-      modelError.value = mapApiError(caught)
+      if (sequence === modelsRequestSequence) {
+        modelError.value = mapApiError(caught)
+      }
     } finally {
+      finishModelsLoading(loadSequence)
+    }
+  }
+
+  function beginFamiliesLoading(): number {
+    const loadSequence = ++familiesLoadingSequence
+    activeFamiliesLoadingRequests += 1
+    isLoading.value = true
+    return loadSequence
+  }
+
+  function finishFamiliesLoading(loadSequence: number): void {
+    if (loadSequence !== familiesLoadingSequence) {
+      return
+    }
+    activeFamiliesLoadingRequests = Math.max(
+      0,
+      activeFamiliesLoadingRequests - 1,
+    )
+    if (activeFamiliesLoadingRequests === 0) {
+      isLoading.value = false
+    }
+  }
+
+  function beginModelsLoading(): number {
+    const loadSequence = ++modelsLoadingSequence
+    modelsRequestSequence += 1
+    activeModelsLoadingRequests += 1
+    isLoadingModels.value = true
+    return loadSequence
+  }
+
+  function finishModelsLoading(loadSequence: number): void {
+    if (loadSequence !== modelsLoadingSequence) {
+      return
+    }
+    activeModelsLoadingRequests = Math.max(0, activeModelsLoadingRequests - 1)
+    if (activeModelsLoadingRequests === 0) {
       isLoadingModels.value = false
+    }
+  }
+
+  function setPendingPageSize(pageSize: number): void {
+    pagination.value = {
+      ...pagination.value,
+      pendingPageSize: pageSize,
+    }
+  }
+
+  function clearPendingPageSize(): void {
+    pagination.value = {
+      ...pagination.value,
+      pendingPageSize: null,
     }
   }
 
@@ -420,7 +639,7 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   }
 
   function isFamilyDevicesLoading(parentAccountId: string): boolean {
-    return deviceLoadingFamilyId.value === parentAccountId
+    return (deviceLoadingCounts.value[parentAccountId] ?? 0) > 0
   }
 
   function setAIUsageError(
@@ -442,7 +661,7 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   }
 
   function isFamilyAIUsageLoading(parentAccountId: string): boolean {
-    return aiUsageLoadingFamilyId.value === parentAccountId
+    return (aiUsageLoadingCounts.value[parentAccountId] ?? 0) > 0
   }
 
   return {
@@ -468,12 +687,59 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
     loadModels,
     modelError,
     modelOptions,
+    pageEnd,
+    pageStart,
+    pagination,
     resetParentPassword,
+    retryCurrentPage,
     retryAiAccount,
+    setPageSize,
+    goToPage,
     updateAiAccount,
     updateParentProfile,
   }
 })
+
+function toPagination(
+  value: unknown,
+  fallbackPage: number,
+  fallbackPageSize: number,
+  recordCount: number,
+): AdminFamilyPagination {
+  const record = isRecord(value) ? value : {}
+  const total = nonNegativeInteger(record.total, recordCount)
+  const pageSize = clampPageSize(
+    positiveInteger(record.page_size ?? record.pageSize, fallbackPageSize),
+  )
+  const totalPages = nonNegativeInteger(
+    record.total_pages ?? record.totalPages,
+    total === 0 ? 0 : Math.ceil(total / pageSize),
+  )
+  const page = positiveInteger(record.page, fallbackPage)
+  return {
+    page,
+    pageSize,
+    pendingPageSize: null,
+    total,
+    totalPages,
+    hasPrevious: page > 1,
+    hasMore: record.has_more === true || (totalPages > 0 && page < totalPages),
+  }
+}
+
+function clampPageSize(value: number): number {
+  return Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(value)))
+}
+
+function positiveInteger(value: unknown, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function nonNegativeInteger(value: unknown, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback
+}
 
 function toFamily(value: Record<string, unknown>): AdminFamily {
   const aiAccountValue =
@@ -681,4 +947,40 @@ function modelList(value: unknown, fallback: string[] = []): string[] {
   return Array.isArray(value)
     ? value.map(String).filter((item) => item.length > 0)
     : fallback
+}
+
+function updateCount(
+  counts: { value: Record<string, number> },
+  key: string,
+  delta: number,
+): void {
+  const nextCount = Math.max(0, (counts.value[key] ?? 0) + delta)
+  const next = { ...counts.value }
+  if (nextCount === 0) {
+    delete next[key]
+  } else {
+    next[key] = nextCount
+  }
+  counts.value = next
+}
+
+function resetCount(
+  counts: { value: Record<string, number> },
+  key: string,
+): void {
+  if (!(key in counts.value)) {
+    return
+  }
+  const next = { ...counts.value }
+  delete next[key]
+  counts.value = next
+}
+
+function advanceLoadingSequence(
+  sequences: Map<string, number>,
+  key: string,
+): number {
+  const next = (sequences.get(key) ?? 0) + 1
+  sequences.set(key, next)
+  return next
 }

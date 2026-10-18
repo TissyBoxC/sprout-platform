@@ -8,6 +8,7 @@ import {
   type FeatureCenterFeature,
   type FeatureConfigField,
   type FeatureConfigValue,
+  type FeatureCenterMutationResult,
   type UpdateFeatureConfigInput,
 } from '@/api/adminFeatureCenter'
 import { mapApiError, type ApiError } from '@/api/apiError'
@@ -73,6 +74,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
   const detailError = ref<ApiError | null>(null)
   const conflictMessage = ref('')
   const lastMessage = ref('')
+  const partialSuccessMessage = ref('')
   let detailRequestGeneration = 0
 
   const categories = computed(() => {
@@ -238,6 +240,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
     const hadUnsavedChanges = isDirty.value
     isRefreshing.value = true
     lastMessage.value = ''
+    partialSuccessMessage.value = ''
     try {
       const succeeded = await load({ preserveSelectedDraft: true })
       if (succeeded) {
@@ -273,6 +276,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
     detailError.value = null
     conflictMessage.value = ''
     lastMessage.value = ''
+    partialSuccessMessage.value = ''
     isDetailReady.value = false
     isDetailLoading.value = true
     try {
@@ -364,11 +368,17 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
     detailError.value = null
     conflictMessage.value = ''
     lastMessage.value = ''
+    partialSuccessMessage.value = ''
     try {
-      const updated = await client.updateFeatureConfig(feature.id, input)
-      upsertFeature(updated)
-      applyFeatureToEditor(updated)
-      lastMessage.value = `${updated.name || feature.name} 的配置已保存。`
+      const result = await client.updateFeatureConfig(feature.id, input)
+      applyMutationResult(result)
+      if (result.notice === null) {
+        lastMessage.value = `${result.feature.name || feature.name} 的配置已保存。`
+      } else {
+        partialSuccessMessage.value =
+          result.notice.message ||
+          '配置已经保存，但安全记录没有完成。请联系管理员核对。'
+      }
       return { succeeded: true, conflicted: false, error: null }
     } catch (caught: unknown) {
       if (isFeatureCenterVersionConflict(caught)) {
@@ -394,18 +404,25 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
     error.value = null
     conflictMessage.value = ''
     lastMessage.value = ''
+    partialSuccessMessage.value = ''
     try {
-      const updated = await client.checkFeatureHealth(normalizedId)
-      upsertFeature(updated)
+      const result = await client.checkFeatureHealth(normalizedId)
+      applyMutationResult(result)
       if (selectedFeature.value?.id === normalizedId) {
         selectedFeature.value = {
           ...selectedFeature.value,
-          health: updated.health,
-          updatedAt: updated.updatedAt,
+          health: result.feature.health,
+          updatedAt: result.feature.updatedAt,
         }
       }
       const feature = features.value.find((item) => item.id === normalizedId)
-      lastMessage.value = `${feature?.name ?? '功能'} 的健康状态已更新。`
+      if (result.notice === null) {
+        lastMessage.value = `${feature?.name ?? '功能'} 的健康状态已更新。`
+      } else {
+        partialSuccessMessage.value =
+          result.notice.message ||
+          '健康状态已经更新，但安全记录没有完成。请联系管理员核对。'
+      }
       return true
     } catch (caught: unknown) {
       error.value = mapApiError(caught)
@@ -419,6 +436,12 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
     error.value = null
     detailError.value = null
     lastMessage.value = ''
+    partialSuccessMessage.value = ''
+  }
+
+  function applyMutationResult(result: FeatureCenterMutationResult): void {
+    upsertFeature(result.feature)
+    applyFeatureToEditor(result.feature)
   }
 
   function applyFeatureToEditor(feature: FeatureCenterFeature): void {
@@ -450,6 +473,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
     isDetailReady.value = false
     detailError.value = null
     conflictMessage.value = ''
+    partialSuccessMessage.value = ''
   }
 
   return {
@@ -479,6 +503,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
     isSaving,
     lastMessage,
     load,
+    partialSuccessMessage,
     refresh,
     save,
     secretDrafts,

@@ -209,7 +209,9 @@ function blockedTotal(report: UsageReportDay): number {
             <strong>{{ store.reportError.message }}</strong>
             <p>使用报告暂时无法读取，可以重新尝试。</p>
           </div>
-          <button type="button" class="text-button" @click="store.loadReports">重新加载</button>
+          <button type="button" class="text-button" @click="store.loadReports()">
+            重新加载
+          </button>
         </div>
 
         <template v-else>

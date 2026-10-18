@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import {
-  canonicalArtifactRelativePath,
   type DownloadArtifactKind,
   type DownloadArtifactPlatform,
   type DownloadFile,
@@ -16,7 +15,6 @@ import {
 
 const store = useDownloadFilesStore()
 const isUploadOpen = ref(false)
-const isOverwriteOpen = ref(false)
 const pendingDelete = ref<DownloadFile | null>(null)
 const uploadForm = reactive({
   file: null as File | null,
@@ -24,17 +22,11 @@ const uploadForm = reactive({
   version: '',
   kind: 'client' as DownloadArtifactKind,
   platform: 'android' as DownloadArtifactPlatform,
+  releaseNotes: '',
 })
 
 const versionArtifactRows = computed(() => store.versionArtifacts)
-const uploadTargetPath = computed(() =>
-  canonicalArtifactRelativePath({
-    version: uploadForm.version,
-    kind: uploadForm.kind,
-    platform: uploadForm.platform,
-    filename: uploadForm.filename,
-  }),
-)
+const uploadTargetPath = computed(() => store.previewUploadPath(uploadForm))
 const uploadTargetDirectory = computed(() => {
   const segments = uploadTargetPath.value.split('/')
   segments.pop()
@@ -45,22 +37,61 @@ const allVersionsRegistered = computed(
     store.versionArtifacts.length > 0 &&
     store.versionArtifacts.every((group) => group.artifacts.every((file) => file.isIndexed)),
 )
+const uploadConflictMessage = ref('')
+const isCheckingUploadConflict = ref(false)
+let conflictCheckSequence = 0
 
 onMounted(async () => {
   await store.load()
 })
 
+watch(
+  () => [
+    uploadForm.version,
+    uploadForm.kind,
+    uploadForm.platform,
+    uploadForm.filename,
+  ],
+  () => {
+    void refreshUploadConflict()
+  },
+)
+
+const hasPendingUploadCompletion = computed(() => {
+  const state = store.uploadState
+  if (state.uploadedFilePath === '') {
+    return false
+  }
+  if (
+    state.registrationState === 'failed' ||
+    state.registrationState === 'skipped' ||
+    state.registrationState === 'notes_missing'
+  ) {
+    return true
+  }
+  return (
+    state.registrationState === 'registered' &&
+    (state.indexState !== 'refreshed' || state.listState !== 'refreshed')
+  )
+})
+
 function openUpload(): void {
-  store.clearMessages()
+  if (!hasPendingUploadCompletion.value) {
+    store.clearMessages()
+  } else {
+    restorePendingUploadForm()
+  }
   isUploadOpen.value = true
 }
 
 function closeUpload(): void {
-  if (store.uploadState.isUploading) {
+  if (store.uploadState.isUploading || store.uploadState.isRegistering) {
+    return
+  }
+  if (hasPendingUploadCompletion.value) {
     return
   }
   isUploadOpen.value = false
-  isOverwriteOpen.value = false
   resetUploadForm()
 }
 
@@ -80,41 +111,126 @@ async function submitUpload(): Promise<void> {
   if (uploadForm.file === null || !uploadForm.filename.trim()) {
     return
   }
-  if (hasUploadConflict() && !isOverwriteOpen.value) {
-    isOverwriteOpen.value = true
+  if (store.uploadState.isUploading || store.uploadState.isRegistering) {
     return
   }
-  await performUpload(isOverwriteOpen.value)
+  await refreshUploadConflict()
+  if (uploadConflictMessage.value) {
+    return
+  }
+  if (isCheckingUploadConflict.value) {
+    return
+  }
+  await performUpload()
 }
 
-async function performUpload(overwrite: boolean): Promise<void> {
+async function refreshUploadConflict(): Promise<void> {
+  const requestSequence = ++conflictCheckSequence
+  if (!uploadForm.version.trim() || !uploadForm.filename.trim()) {
+    uploadConflictMessage.value = ''
+    isCheckingUploadConflict.value = false
+    return
+  }
+  isCheckingUploadConflict.value = true
+  try {
+    const conflict = await store.checkUploadConflict({
+      file: uploadForm.file ?? new File([], uploadForm.filename),
+      filename: uploadForm.filename,
+      version: uploadForm.version,
+      kind: uploadForm.kind,
+      platform: uploadForm.platform,
+      overwrite: false,
+      releaseNotes: uploadForm.releaseNotes,
+    })
+    if (requestSequence !== conflictCheckSequence) {
+      return
+    }
+    uploadConflictMessage.value = conflict?.message ?? ''
+  } catch {
+    if (requestSequence !== conflictCheckSequence) {
+      return
+    }
+    uploadConflictMessage.value = ''
+  } finally {
+    if (requestSequence === conflictCheckSequence) {
+      isCheckingUploadConflict.value = false
+    }
+  }
+}
+
+async function performUpload(): Promise<void> {
   if (uploadForm.file === null) {
     return
   }
-  const succeeded = await store.upload({
+  const result = await store.upload({
     file: uploadForm.file,
     filename: uploadForm.filename,
     version: uploadForm.version,
     kind: uploadForm.kind,
     platform: uploadForm.platform,
-    overwrite,
+    overwrite: false,
+    releaseNotes: uploadForm.releaseNotes,
   })
-  if (succeeded) {
+  if (uploadFlowCompleted(result)) {
     isUploadOpen.value = false
-    isOverwriteOpen.value = false
     resetUploadForm()
   }
 }
 
-function hasUploadConflict(): boolean {
-  if (!uploadForm.version.trim() || !uploadForm.filename.trim()) {
-    return false
+async function retryUploadCompletion(): Promise<void> {
+  if (store.uploadState.isUploading || store.uploadState.isRegistering) {
+    return
   }
-  return store.files.some((file) => file.relativePath === uploadTargetPath.value)
+  if (uploadForm.releaseNotes.trim() !== '') {
+    store.applyReleaseNotes(uploadForm.releaseNotes)
+  }
+  const result = await store.retryUploadCompletion()
+  if (uploadFlowCompleted(result)) {
+    isUploadOpen.value = false
+    resetUploadForm()
+  }
 }
 
-async function confirmOverwrite(): Promise<void> {
-  await performUpload(true)
+async function handleUploadReviewAction(): Promise<void> {
+  const action = store.uploadReview.action
+  if (action === 'retry_registration') {
+    await retryUploadCompletion()
+    return
+  }
+  if (action === 'refresh_index') {
+    await store.refreshUploadedIndex()
+    closeUploadAfterCompletion()
+    return
+  }
+  if (action === 'reload_files') {
+    await store.reloadFiles()
+    closeUploadAfterCompletion()
+  }
+}
+
+function uploadFlowCompleted(result: {
+  uploaded: boolean
+  registered: boolean
+  indexRefreshed: boolean
+  listRefreshed: boolean
+}): boolean {
+  return (
+    result.uploaded &&
+    result.registered &&
+    result.indexRefreshed &&
+    result.listRefreshed
+  )
+}
+
+function closeUploadAfterCompletion(): void {
+  if (
+    store.uploadState.registrationState === 'registered' &&
+    store.uploadState.indexState === 'refreshed' &&
+    store.uploadState.listState === 'refreshed'
+  ) {
+    isUploadOpen.value = false
+    resetUploadForm()
+  }
 }
 
 async function confirmDelete(): Promise<void> {
@@ -133,6 +249,26 @@ function resetUploadForm(): void {
   uploadForm.version = ''
   uploadForm.kind = 'client'
   uploadForm.platform = 'android'
+  uploadForm.releaseNotes = ''
+  conflictCheckSequence += 1
+  uploadConflictMessage.value = ''
+  isCheckingUploadConflict.value = false
+}
+
+function restorePendingUploadForm(): void {
+  const pending = store.pendingUploadMetadata()
+  if (pending === null) {
+    return
+  }
+  if (uploadForm.file === null) {
+    uploadForm.filename = pending.filename
+  }
+  uploadForm.version = pending.version
+  uploadForm.kind = pending.kind
+  uploadForm.platform = pending.platform
+  if (uploadForm.releaseNotes.trim() === '') {
+    uploadForm.releaseNotes = pending.releaseNotes
+  }
 }
 
 function onDirectoryChange(event: Event): void {
@@ -230,12 +366,29 @@ function sha256Summary(value: string): string {
         <button
           type="button"
           class="secondary"
-          :disabled="store.isLoading || store.isRefreshingIndex"
+          :disabled="
+            store.isLoading ||
+            store.isRefreshingIndex ||
+            store.uploadState.isUploading ||
+            store.uploadState.isRegistering
+          "
           @click="store.refreshIndex"
         >
           {{ store.isRefreshingIndex ? '正在刷新索引…' : '刷新发布索引' }}
         </button>
-        <button type="button" class="primary" @click="openUpload">上传文件</button>
+        <button
+          type="button"
+          class="primary"
+          :disabled="
+            store.isLoading ||
+            store.isRefreshingIndex ||
+            store.uploadState.isUploading ||
+            store.uploadState.isRegistering
+          "
+          @click="openUpload"
+        >
+          上传文件
+        </button>
       </div>
     </header>
 
@@ -254,8 +407,8 @@ function sha256Summary(value: string): string {
           {{ store.indexStatus.pendingFileCount }} 个。最近刷新：
           {{ formatTime(store.indexStatus.refreshedAt) }}
         </p>
-        <p v-if="store.indexStatus.errorMessage" class="banner-error">
-          {{ store.indexStatus.errorMessage }}
+            <p v-if="store.indexStatus.errorCode" class="banner-error">
+              发布索引暂时无法读取。请刷新索引；如果仍然失败，请稍后再试。
         </p>
       </div>
       <RouterLink to="/releases">前往内容发布</RouterLink>
@@ -447,7 +600,15 @@ function sha256Summary(value: string): string {
     </section>
 
     <Transition name="modal">
-      <div v-if="isUploadOpen" class="dialog-backdrop" @click.self="closeUpload">
+      <div
+        v-if="isUploadOpen"
+        class="dialog-backdrop"
+        @click.self="
+          !store.uploadState.isUploading && !store.uploadState.isRegistering
+            ? closeUpload()
+            : undefined
+        "
+      >
         <form
           class="dialog"
           role="dialog"
@@ -458,7 +619,7 @@ function sha256Summary(value: string): string {
           <p class="eyebrow">上传文件</p>
           <h2 id="download-upload-title">上传到下载服务器</h2>
           <p class="dialog-hint">
-            上传完成后会自动刷新发布索引。目录按版本、平台和文件类型生成，文件会被发布流程直接找到。
+            上传完成后会登记为待发布版本并刷新发布索引。请先填写本次更新的中文说明，确认后再发布。
           </p>
           <div class="field-grid">
             <label class="span-two file-picker">
@@ -504,30 +665,158 @@ function sha256Summary(value: string): string {
                 <option value="all">全部平台</option>
               </select>
             </label>
+            <label class="span-two">
+              <span>更新说明</span>
+              <textarea
+                v-model.trim="uploadForm.releaseNotes"
+                rows="4"
+                maxlength="4000"
+                required
+                aria-describedby="release-notes-hint"
+                placeholder="写下这个版本相较上一版的改动，发布后家长会看到"
+              ></textarea>
+            </label>
           </div>
 
-          <div v-if="store.uploadState.isUploading || store.uploadState.error" class="upload-status">
+          <p v-if="uploadConflictMessage" class="inline-error" role="alert">
+            {{ uploadConflictMessage }}
+          </p>
+          <p
+            v-else-if="!uploadForm.releaseNotes"
+            id="release-notes-hint"
+            class="inline-hint"
+          >
+            更新说明填写后，文件会自动登记为待发布版本；缺失说明时不会生成无法补充的草稿。
+          </p>
+
+          <div
+            v-if="
+              store.uploadState.isUploading ||
+              store.uploadState.isRegistering ||
+              store.uploadState.error
+            "
+            class="upload-status"
+          >
             <div>
               <strong>{{ store.uploadState.fileName || '文件' }}</strong>
-              <span>{{ store.uploadState.progress }}%</span>
+              <span>
+                {{
+                  store.uploadState.isRegistering
+                    ? '正在登记版本'
+                    : store.uploadState.isUploading
+                      ? `${store.uploadState.progress}%`
+                      : '上传已完成'
+                }}
+              </span>
             </div>
             <progress :value="store.uploadState.progress" max="100"></progress>
+            <ol class="upload-stages" aria-label="上传处理进度">
+              <li :class="store.uploadStages.upload">
+                文件上传
+              </li>
+              <li :class="store.uploadStages.registration">
+                版本登记
+              </li>
+              <li :class="store.uploadStages.index">
+                发布索引
+              </li>
+              <li :class="store.uploadStages.list">
+                文件列表
+              </li>
+            </ol>
+            <small v-if="store.uploadState.uploadedFilePath" class="upload-path">
+              {{ store.uploadState.uploadedFilePath }}
+            </small>
+            <small v-if="store.uploadReview.summary" class="upload-review">
+              {{ store.uploadReview.summary }}
+            </small>
             <small v-if="store.uploadState.error" class="upload-error">
               {{ store.uploadState.error }}
             </small>
+            <small
+              v-if="
+                store.uploadStage === 'registration_required' &&
+                store.uploadState.uploadedFilePath
+              "
+              class="inline-hint"
+            >
+              请在下方补填更新说明后再次提交登记；文件已经保存在下载服务器，
+              不需要重新上传。
+            </small>
+            <div
+              v-if="
+                store.uploadReview.actionLabel &&
+                store.uploadReview.action !== 'manage_release'
+              "
+              class="upload-actions"
+            >
+              <button
+                type="button"
+                class="secondary"
+                :disabled="
+                  store.uploadState.isUploading ||
+                  store.uploadState.isRegistering ||
+                  store.isRefreshingIndex ||
+                  store.isLoading ||
+                  (store.uploadReview.action === 'retry_registration' &&
+                    uploadForm.releaseNotes.trim() === '')
+                "
+                @click="handleUploadReviewAction"
+              >
+                {{ store.uploadReview.actionLabel }}
+              </button>
+            </div>
+            <div
+              v-else-if="
+                store.uploadReview.canManageRelease ||
+                store.uploadStage === 'registered'
+              "
+              class="upload-actions"
+            >
+              <RouterLink class="review-link" to="/releases">
+                前往内容发布
+              </RouterLink>
+            </div>
           </div>
 
           <div class="dialog-actions">
+            <p
+              v-if="hasPendingUploadCompletion"
+              class="pending-completion-hint"
+            >
+              文件已经上传，请先完成登记、索引同步和列表刷新，再关闭窗口。
+            </p>
             <button
               type="button"
               class="secondary"
-              :disabled="store.uploadState.isUploading"
+              :disabled="
+                store.uploadState.isUploading ||
+                store.uploadState.isRegistering ||
+                hasPendingUploadCompletion
+              "
               @click="closeUpload"
             >
               取消
             </button>
-            <button type="submit" class="primary" :disabled="store.uploadState.isUploading">
-              {{ store.uploadState.isUploading ? '正在上传…' : '上传并刷新索引' }}
+            <button
+              type="submit"
+              class="primary"
+              :disabled="
+                store.uploadState.isUploading ||
+                store.uploadState.isRegistering ||
+                store.isLoading ||
+                store.isRefreshingIndex ||
+                Boolean(uploadConflictMessage) ||
+                !uploadForm.releaseNotes
+              "
+            >
+              {{
+                store.uploadState.isUploading
+                  ? '正在上传…'
+                  : store.uploadState.isRegistering
+                    ? '正在登记版本…'
+                    : '上传并登记版本'
+              }}
             </button>
           </div>
           <p class="upload-target-hint">
@@ -563,37 +852,6 @@ function sha256Summary(value: string): string {
       </div>
     </Transition>
 
-    <Transition name="modal">
-      <div
-        v-if="isOverwriteOpen"
-        class="dialog-backdrop"
-        @click.self="isOverwriteOpen = false"
-      >
-        <section
-          class="dialog confirm-dialog"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="download-overwrite-title"
-        >
-          <p class="eyebrow">替换文件</p>
-          <h2 id="download-overwrite-title">替换 {{ uploadForm.filename }}？</h2>
-          <p>下载服务器上已经有同名文件，替换后原文件会被覆盖，版本记录需要重新刷新索引。</p>
-          <div class="dialog-actions">
-            <button type="button" class="secondary" @click="isOverwriteOpen = false">
-              取消
-            </button>
-            <button
-              type="button"
-              class="primary"
-              :disabled="store.uploadState.isUploading"
-              @click="confirmOverwrite"
-            >
-              {{ store.uploadState.isUploading ? '正在替换…' : '替换文件' }}
-            </button>
-          </div>
-        </section>
-      </div>
-    </Transition>
   </section>
 </template>
 
@@ -639,8 +897,17 @@ h1 {
 .dialog-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.pending-completion-hint {
+  flex: 1 1 260px;
+  margin: 0;
+  color: #a12b4a;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 button {
@@ -877,6 +1144,25 @@ input[readonly] {
   background: #fff2f5;
   color: #7b5263;
   cursor: default;
+}
+
+.dialog textarea {
+  width: 100%;
+  min-height: 104px;
+  padding: 11px 13px;
+  border: 1px solid #f0bdcb;
+  border-radius: 14px;
+  background: #fff8fa;
+  color: #4a2e3b;
+  font: inherit;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.dialog textarea:focus {
+  border-color: #d94f83;
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(217 79 131 / 12%);
 }
 
 .text-button {
@@ -1194,6 +1480,104 @@ code {
   justify-content: space-between;
   gap: 12px;
   color: var(--sprout-text);
+}
+
+.upload-path {
+  color: var(--sprout-text-muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.upload-review {
+  color: var(--sprout-text);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.upload-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.upload-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.upload-stages li {
+  padding: 4px 9px;
+  border: 1px solid #f0bdcb;
+  border-radius: 999px;
+  background: #fff7fa;
+  color: #7b5263;
+  font-size: 12px;
+}
+
+.upload-stages li.done {
+  border-color: #bfe3cb;
+  background: #f2fbf5;
+  color: #1d6b3f;
+}
+
+.upload-stages li.pending {
+  border-color: #f3d18e;
+  background: #fffaf0;
+  color: #755600;
+}
+
+.upload-stages li.failed,
+.upload-stages li.conflict {
+  border-color: #efb4c5;
+  background: #fff5f8;
+  color: #a12b4a;
+}
+
+.upload-stages li.blocked {
+  opacity: 0.68;
+}
+
+.review-link {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  padding: 0 16px;
+  border: 1px solid #d94f83;
+  border-radius: var(--sprout-radius-control);
+  background: #d94f83;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.review-link:hover {
+  background: #c94175;
+}
+
+.inline-error,
+.inline-hint {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 13px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.inline-error {
+  border: 1px solid #efb4c5;
+  background: #fff5f8;
+  color: #a12b4a;
+}
+
+.inline-hint {
+  border: 1px solid #f7d9e2;
+  background: #fffbfc;
+  color: var(--sprout-text-muted);
 }
 
 progress {

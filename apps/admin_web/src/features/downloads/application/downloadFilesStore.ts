@@ -2,9 +2,11 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 import {
+  canonicalArtifactRelativePath,
   createAdminDownloadFilesClient,
   type AdminDownloadFilesClient,
   type DownloadArtifactKind,
+  type DownloadArtifactPathInput,
   type DownloadArtifactPlatform,
   type DownloadFile,
   type DownloadFileUpload,
@@ -25,9 +27,54 @@ export interface DownloadFileFilters {
 
 export interface DownloadFileUploadState {
   isUploading: boolean
+  isRegistering: boolean
   progress: number
   fileName: string
+  uploadedFilePath: string
+  registrationState:
+    | 'idle'
+    | 'registered'
+    | 'failed'
+    | 'skipped'
+    | 'notes_missing'
+    | 'conflict'
+  indexState: 'idle' | 'refreshed' | 'failed'
+  listState: 'idle' | 'refreshed' | 'failed'
+  canRetryRegistration: boolean
   error: string
+}
+
+export interface DownloadFileUploadReview {
+  summary: string
+  actionLabel: string
+  action:
+    | 'retry_registration'
+    | 'refresh_index'
+    | 'reload_files'
+    | 'manage_release'
+    | 'none'
+  canManageRelease: boolean
+}
+
+export type DownloadUploadStage =
+  | 'uploading'
+  | 'registering'
+  | 'registration_failed'
+  | 'registration_required'
+  | 'registered'
+  | 'conflict'
+
+export interface DownloadUploadStageState {
+  upload: 'idle' | 'pending' | 'done' | 'failed'
+  registration:
+    | 'idle'
+    | 'pending'
+    | 'done'
+    | 'failed'
+    | 'blocked'
+    | 'conflict'
+  index: 'idle' | 'pending' | 'done' | 'failed' | 'blocked'
+  list: 'idle' | 'pending' | 'done' | 'failed' | 'blocked'
 }
 
 export const emptyDownloadIndexStatus: DownloadIndexStatus = {
@@ -35,7 +82,29 @@ export const emptyDownloadIndexStatus: DownloadIndexStatus = {
   refreshedAt: '',
   indexedFileCount: 0,
   pendingFileCount: 0,
+  errorCode: '',
   errorMessage: '',
+}
+
+export interface DownloadUploadResult {
+  uploaded: boolean
+  registered: boolean
+  indexRefreshed: boolean
+  listRefreshed: boolean
+  uploadedFile: DownloadFile | null
+  error: ApiError | null
+}
+
+export interface PendingUploadMetadata {
+  filename: string
+  version: string
+  kind: DownloadArtifactKind
+  platform: DownloadArtifactPlatform
+  releaseNotes: string
+}
+
+export interface UploadConflict {
+  message: string
 }
 
 /// Owns the download-server inventory, filters, upload progress, and the
@@ -57,12 +126,24 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
   const deletingPaths = ref<string[]>([])
   const uploadState = ref<DownloadFileUploadState>({
     isUploading: false,
+    isRegistering: false,
     progress: 0,
     fileName: '',
+    uploadedFilePath: '',
+    registrationState: 'idle',
+    indexState: 'idle',
+    listState: 'idle',
+    canRetryRegistration: false,
     error: '',
   })
   const error = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  let pendingUpload: { input: DownloadFileUpload; file: DownloadFile } | null = null
+  let completionSequence = 0
+  let filesRequestSequence = 0
+  let activeFilesRequests = 0
+  let conflictCheckInput: string | null = null
+  let conflictCheckResult: UploadConflict | null = null
 
   const directories = computed(() => {
     const values = new Set<string>()
@@ -73,6 +154,15 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
     }
     return [...values].sort((left, right) => left.localeCompare(right))
   })
+  const uploadReview = computed<DownloadFileUploadReview>(() =>
+    buildUploadReview(uploadState.value),
+  )
+  const uploadStages = computed<DownloadUploadStageState>(() =>
+    buildUploadStages(uploadState.value),
+  )
+  const uploadStage = computed<DownloadUploadStage>(() =>
+    currentUploadStage(uploadState.value),
+  )
 
   const versions = computed(() => {
     const values = new Set<string>()
@@ -136,57 +226,383 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
   })
 
   async function load(): Promise<void> {
+    const requestSequence = ++filesRequestSequence
+    activeFilesRequests += 1
     isLoading.value = true
     error.value = null
     try {
       const [loadedFiles, loadedIndexStatus] = await Promise.all([
         client.loadFiles(),
-        client.loadIndexStatus().catch(() => ({ ...emptyDownloadIndexStatus })),
+        client.loadIndexStatus().catch((caught: unknown) => ({
+          ...emptyDownloadIndexStatus,
+          errorCode: indexErrorCode(caught),
+        })),
       ])
-      files.value = loadedFiles
-      indexStatus.value = loadedIndexStatus
+      if (requestSequence === filesRequestSequence) {
+        files.value = loadedFiles
+        indexStatus.value = loadedIndexStatus
+      }
     } catch (caught: unknown) {
-      error.value = mapApiError(caught)
+      if (requestSequence === filesRequestSequence) {
+        error.value = mapApiError(caught)
+      }
     } finally {
-      isLoading.value = false
+      activeFilesRequests = Math.max(0, activeFilesRequests - 1)
+      if (activeFilesRequests === 0) {
+        isLoading.value = false
+      }
     }
   }
 
-  async function upload(input: DownloadFileUpload): Promise<boolean> {
+  async function upload(input: DownloadFileUpload): Promise<DownloadUploadResult> {
+    if (
+      uploadState.value.isUploading ||
+      uploadState.value.isRegistering ||
+      isRefreshingIndex.value
+    ) {
+      return cancelledUploadResult()
+    }
     uploadState.value = {
       isUploading: true,
+      isRegistering: false,
       progress: 0,
       fileName: input.filename,
+      uploadedFilePath: '',
+      registrationState: 'idle',
+      indexState: 'idle',
+      listState: 'idle',
+      canRetryRegistration: false,
       error: '',
     }
     error.value = null
     lastMessage.value = ''
+    const requestSequence = ++completionSequence
+    pendingUpload = null
     try {
+      const existingConflict = await existingReleaseConflict(input)
+      if (requestSequence !== completionSequence) {
+        return cancelledUploadResult()
+      }
+      if (existingConflict !== null) {
+        uploadState.value = {
+          ...uploadState.value,
+          isUploading: false,
+          registrationState: 'conflict',
+          error: existingConflict.message,
+        }
+        error.value = existingConflict
+        return {
+          uploaded: false,
+          registered: false,
+          indexRefreshed: false,
+          listRefreshed: false,
+          uploadedFile: null,
+          error: existingConflict,
+        }
+      }
       const uploadedFile = await client.uploadFile(input, (progress) => {
-        uploadState.value = { ...uploadState.value, progress }
+        if (requestSequence === completionSequence) {
+          uploadState.value = { ...uploadState.value, progress }
+        }
       })
-      uploadState.value = { ...uploadState.value, progress: 100 }
-      const registration = await registerDraftRelease(uploadedFile)
-      await refreshIndex()
-      await reloadFiles()
-      lastMessage.value =
-        registration === 'registered'
-          ? `${input.filename} 已上传，并登记为待发布版本。`
-          : registration === 'already_registered'
-            ? `${input.filename} 已上传，版本记录已经存在。`
-            : `${input.filename} 已上传，请在内容发布中确认版本信息。`
-      return true
+      if (requestSequence !== completionSequence) {
+        return cancelledUploadResult()
+      }
+      uploadState.value = {
+        ...uploadState.value,
+        isUploading: false,
+        progress: 100,
+        fileName: uploadedFile.name,
+        uploadedFilePath: uploadedFile.relativePath,
+      }
+      pendingUpload = { input, file: uploadedFile }
+      return await completeUploadCompletion(uploadedFile, input, requestSequence)
     } catch (caught: unknown) {
       const mappedError = mapApiError(caught)
+      if (requestSequence !== completionSequence) {
+        return cancelledUploadResult()
+      }
+      if (pendingUpload !== null) {
+        uploadState.value = {
+          ...uploadState.value,
+          isUploading: false,
+          isRegistering: false,
+          registrationState: 'failed',
+          canRetryRegistration: true,
+          error: `文件已经上传，但后续处理失败：${mappedError.message}`,
+        }
+        error.value = mappedError
+        return {
+          uploaded: true,
+          registered: false,
+          indexRefreshed: false,
+          listRefreshed: false,
+          uploadedFile: pendingUpload.file,
+          error: mappedError,
+        }
+      }
       uploadState.value = {
         ...uploadState.value,
         isUploading: false,
         error: mappedError.message,
       }
       error.value = mappedError
-      return false
+      return {
+        uploaded: false,
+        registered: false,
+        indexRefreshed: false,
+        listRefreshed: false,
+        uploadedFile: null,
+        error: mappedError,
+      }
     } finally {
-      uploadState.value = { ...uploadState.value, isUploading: false }
+      if (requestSequence === completionSequence) {
+        uploadState.value = { ...uploadState.value, isUploading: false }
+      }
+    }
+  }
+
+  async function retryUploadCompletion(): Promise<DownloadUploadResult> {
+    if (uploadState.value.isUploading || uploadState.value.isRegistering) {
+      return cancelledUploadResult()
+    }
+    const pending = pendingUpload
+    if (pending === null) {
+      const mappedError: ApiError = {
+        kind: 'unexpected',
+        message: '没有可以继续处理的文件，请重新选择文件上传。',
+        retryable: false,
+      }
+      uploadState.value = { ...uploadState.value, error: mappedError.message }
+      return {
+        uploaded: false,
+        registered: false,
+        indexRefreshed: false,
+        listRefreshed: false,
+        uploadedFile: null,
+        error: mappedError,
+      }
+    }
+    return completeUploadCompletion(pending.file, pending.input)
+  }
+
+  async function checkUploadConflict(
+    input: DownloadFileUpload,
+  ): Promise<UploadConflict | null> {
+    const inputKey = uploadConflictKey(input)
+    if (inputKey === conflictCheckInput) {
+      return conflictCheckResult
+    }
+    const version = input.version.trim()
+    const targetPath = fileUploadRelativePath(input)
+    if (files.value.some((file) => file.relativePath === targetPath)) {
+      conflictCheckInput = inputKey
+      conflictCheckResult = {
+        message:
+          '这个文件路径已经存在。为避免已校验文件被替换，请提高版本号或更换文件名。',
+      }
+      return conflictCheckResult
+    }
+    if (version === '') {
+      conflictCheckInput = inputKey
+      conflictCheckResult = null
+      return null
+    }
+    const conflict = await findRegisteredRelease(
+      version,
+      input.kind,
+      input.platform,
+      true,
+    )
+    conflictCheckInput = inputKey
+    conflictCheckResult = conflict
+      ? {
+        message:
+          '这个版本已经登记过，不能再用新文件覆盖。请提高版本号后重新上传。',
+      }
+      : null
+    return conflictCheckResult
+  }
+
+  /// Returns the exact path the download server will use for an upload so the
+  /// form can show the destination before any file is sent.
+  function previewUploadPath(input: DownloadArtifactPathInput): string {
+    return fileUploadRelativePath(input)
+  }
+
+  async function completeUploadCompletion(
+    uploadedFile: DownloadFile,
+    input: DownloadFileUpload,
+    requestSequence = ++completionSequence,
+  ): Promise<DownloadUploadResult> {
+    uploadState.value = {
+      ...uploadState.value,
+      isRegistering: true,
+      error: '',
+    }
+    error.value = null
+    lastMessage.value = ''
+    let registration: 'registered' | 'skipped' | 'conflict' | 'notes_missing'
+    try {
+      registration = await registerDraftRelease(
+        uploadedFile,
+        input.releaseNotes ?? '',
+      )
+    } catch (caught: unknown) {
+      const mappedError = mapApiError(caught)
+      if (requestSequence !== completionSequence) {
+        return incompleteUploadResult(uploadedFile)
+      }
+      uploadState.value = {
+        ...uploadState.value,
+        isRegistering: false,
+        registrationState: 'failed',
+        canRetryRegistration: true,
+        error: `文件已经上传，但版本登记失败：${mappedError.message}`,
+      }
+      error.value = mappedError
+      return {
+        uploaded: true,
+        registered: false,
+        indexRefreshed: false,
+        listRefreshed: false,
+        uploadedFile,
+        error: mappedError,
+      }
+    }
+    if (requestSequence !== completionSequence) {
+      return incompleteUploadResult(uploadedFile)
+    }
+
+    uploadState.value = {
+      ...uploadState.value,
+      isRegistering: false,
+      registrationState: registration,
+      canRetryRegistration: false,
+    }
+
+    if (registration === 'conflict') {
+      const mappedError: ApiError = {
+        kind: 'validation',
+        message:
+          '这个版本、类型和平台已经登记过，不能再用新文件覆盖，请提高版本号后重新上传。',
+        retryable: false,
+      }
+      uploadState.value = { ...uploadState.value, error: mappedError.message }
+      error.value = mappedError
+      return {
+        uploaded: true,
+        registered: false,
+        indexRefreshed: false,
+        listRefreshed: false,
+        uploadedFile,
+        error: mappedError,
+      }
+    }
+    if (registration === 'skipped' || registration === 'notes_missing') {
+      const mappedError: ApiError = {
+        kind: 'validation',
+        message:
+          '文件已经上传，但版本登记所需的信息不完整，请补充更新说明后重试登记。',
+        retryable: false,
+      }
+      uploadState.value = { ...uploadState.value, error: mappedError.message }
+      error.value = mappedError
+      return {
+        uploaded: true,
+        registered: false,
+        indexRefreshed: false,
+        listRefreshed: false,
+        uploadedFile,
+        error: mappedError,
+      }
+    }
+
+    const registered = registration === 'registered'
+    const indexRefreshed = await refreshIndexAfterUpload(requestSequence)
+    const listRefreshed = await reloadFilesAfterUpload(requestSequence)
+    if (requestSequence !== completionSequence) {
+      return incompleteUploadResult(uploadedFile)
+    }
+    if (registered) {
+      lastMessage.value = `${input.filename} 已上传，并登记为待发布版本。`
+    }
+    return {
+      uploaded: true,
+      registered,
+      indexRefreshed,
+      listRefreshed,
+      uploadedFile,
+      error: null,
+    }
+  }
+
+  async function refreshIndexAfterUpload(requestSequence: number): Promise<boolean> {
+    if (requestSequence === completionSequence) {
+      uploadState.value = {
+        ...uploadState.value,
+        indexState: 'idle',
+      }
+    }
+    try {
+      const nextStatus = await client.refreshIndex()
+      if (requestSequence !== completionSequence) {
+        return false
+      }
+      indexStatus.value = nextStatus
+      uploadState.value = {
+        ...uploadState.value,
+        indexState: 'refreshed',
+        error:
+          uploadState.value.registrationState === 'skipped' ||
+          uploadState.value.registrationState === 'notes_missing'
+            ? '文件已经上传并更新索引，但还没有登记为待发布版本。'
+            : '',
+      }
+      return true
+    } catch (caught: unknown) {
+      const mappedError = mapApiError(caught)
+      if (requestSequence !== completionSequence) {
+        return false
+      }
+      uploadState.value = {
+        ...uploadState.value,
+        indexState: 'failed',
+        error: `版本已经登记，但发布索引刷新失败：${mappedError.message}。可以重新刷新索引。`,
+      }
+      return false
+    }
+  }
+
+  async function reloadFilesAfterUpload(requestSequence: number): Promise<boolean> {
+    if (requestSequence === completionSequence) {
+      uploadState.value = {
+        ...uploadState.value,
+        listState: 'idle',
+      }
+    }
+    try {
+      const nextFiles = await client.loadFiles()
+      if (requestSequence !== completionSequence) {
+        return false
+      }
+      files.value = nextFiles
+      uploadState.value = {
+        ...uploadState.value,
+        listState: 'refreshed',
+      }
+      return true
+    } catch (caught: unknown) {
+      const mappedError = mapApiError(caught)
+      if (requestSequence !== completionSequence) {
+        return false
+      }
+      uploadState.value = {
+        ...uploadState.value,
+        listState: 'failed',
+        error: `版本已经完成，但文件列表刷新失败：${mappedError.message}。可以重新读取文件。`,
+      }
+      return false
     }
   }
 
@@ -195,7 +611,8 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
   /// "publish" action decide whether clients may receive it.
   async function registerDraftRelease(
     file: DownloadFile,
-  ): Promise<'registered' | 'already_registered' | 'skipped'> {
+    releaseNotes: string,
+  ): Promise<'registered' | 'skipped' | 'conflict' | 'notes_missing'> {
     if (
       !file.version ||
       !file.sha256 ||
@@ -207,19 +624,29 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
     }
     const existing = await findRegisteredRelease(file.version, file.kind, file.platform)
     if (existing) {
-      return 'already_registered'
+      return 'conflict'
     }
-    await httpClient.post('/api/v1/admin/releases', {
-      version: file.version,
-      channel: 'stable',
-      kind: file.kind,
-      platform: file.platform,
-      download_url: downloadUrlForFile(file),
-      sha256: file.sha256,
-      release_notes: '',
-      is_mandatory: false,
-      min_supported_version: '',
-    })
+    if (releaseNotes.trim() === '') {
+      return 'notes_missing'
+    }
+    try {
+      await httpClient.post('/api/v1/admin/releases', {
+        version: file.version,
+        channel: 'stable',
+        kind: file.kind,
+        platform: file.platform,
+        download_url: downloadUrlForFile(file),
+        sha256: file.sha256,
+        release_notes: releaseNotes.trim(),
+        is_mandatory: false,
+        min_supported_version: '',
+      })
+    } catch (caught: unknown) {
+      if (releaseAlreadyExists(caught)) {
+        return 'conflict'
+      }
+      throw caught
+    }
     return 'registered'
   }
 
@@ -227,20 +654,65 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
     version: string,
     kind: DownloadArtifactKind,
     platform: DownloadArtifactPlatform,
+    matchVersionOnly = false,
   ): Promise<boolean> {
-    const response = await httpClient.get('/api/v1/admin/releases')
-    const records = response.data?.data?.releases
-    if (!Array.isArray(records)) {
-      return false
+    const pageSize = 100
+    for (let page = 1; ; page += 1) {
+      const response = await httpClient.get('/api/v1/admin/releases', {
+        params: { page, page_size: pageSize },
+      })
+      const payload = recordValue(response.data?.data)
+      const records = Array.isArray(payload.releases) ? payload.releases : []
+      const matched = records.some((item: unknown) => {
+        const record = recordValue(item)
+        return (
+          stringValue(record.version) === version &&
+          (matchVersionOnly ||
+            (stringValue(record.kind) === kind &&
+              stringValue(record.platform) === platform))
+        )
+      })
+      if (matched) {
+        return true
+      }
+      const pagination = recordValue(payload.pagination)
+      const totalPages = Number(pagination.total_pages)
+      const hasNextPage =
+        pagination.has_more === true ||
+        (Number.isInteger(totalPages) && page < totalPages)
+      if (!hasNextPage || records.length === 0) {
+        return false
+      }
     }
-    return records.some((item: unknown) => {
-      const record = recordValue(item)
-      return (
-        stringValue(record.version) === version &&
-        stringValue(record.kind) === kind &&
-        stringValue(record.platform) === platform
+  }
+
+  async function existingReleaseConflict(
+    input: DownloadFileUpload,
+  ): Promise<ApiError | null> {
+    const version = input.version.trim()
+    if (
+      version === '' ||
+      input.kind === 'unknown' ||
+      input.platform === 'unknown'
+    ) {
+      return null
+    }
+    if (
+      await findRegisteredRelease(
+        version,
+        input.kind,
+        input.platform,
+        true,
       )
-    })
+    ) {
+      return {
+        kind: 'validation',
+        message:
+          '这个版本已经登记过，不能再用新文件覆盖。请提高版本号后重新上传。',
+        retryable: false,
+      }
+    }
+    return null
   }
 
   function downloadUrlForFile(file: DownloadFile): string {
@@ -272,6 +744,9 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
   }
 
   async function refreshIndex(): Promise<boolean> {
+    if (isRefreshingIndex.value) {
+      return false
+    }
     isRefreshingIndex.value = true
     error.value = null
     lastMessage.value = ''
@@ -291,10 +766,75 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
   }
 
   async function reloadFiles(): Promise<void> {
+    if (isLoading.value) {
+      return
+    }
+    const requestSequence = ++filesRequestSequence
+    activeFilesRequests += 1
+    isLoading.value = true
     try {
-      files.value = await client.loadFiles()
+      const nextFiles = await client.loadFiles()
+      if (requestSequence !== filesRequestSequence) {
+        return
+      }
+      files.value = nextFiles
+      if (uploadState.value.listState === 'failed') {
+        uploadState.value = {
+          ...uploadState.value,
+          listState: 'refreshed',
+        }
+      }
+      error.value = null
     } catch (caught: unknown) {
-      error.value = mapApiError(caught)
+      const mapped = mapApiError(caught)
+      if (requestSequence !== filesRequestSequence) {
+        return
+      }
+      error.value = mapped
+      if (uploadState.value.listState === 'failed') {
+        uploadState.value = {
+          ...uploadState.value,
+          error: `文件列表仍然没有刷新：${mapped.message}。可以重新读取文件。`,
+        }
+      }
+    } finally {
+      activeFilesRequests = Math.max(0, activeFilesRequests - 1)
+      if (activeFilesRequests === 0) {
+        isLoading.value = false
+      }
+    }
+  }
+
+  async function refreshUploadedIndex(): Promise<boolean> {
+    if (
+      uploadState.value.registrationState !== 'registered' ||
+      uploadState.value.indexState !== 'failed'
+    ) {
+      return refreshIndex()
+    }
+    const requestSequence = completionSequence
+    isRefreshingIndex.value = true
+    try {
+      const refreshed = await refreshIndexAfterUpload(requestSequence)
+      if (!refreshed || requestSequence !== completionSequence) {
+        return false
+      }
+      await reloadFilesAfterUpload(requestSequence)
+      if (requestSequence === completionSequence) {
+        lastMessage.value = `${uploadState.value.fileName} 已登记，发布索引也已刷新。`
+        uploadState.value = { ...uploadState.value, error: '' }
+        error.value = null
+      }
+      return refreshed
+    } finally {
+      isRefreshingIndex.value = false
+    }
+  }
+
+  function clearUploadError(): void {
+    uploadState.value = { ...uploadState.value, error: '' }
+    if (error.value?.kind !== 'unexpected') {
+      error.value = null
     }
   }
 
@@ -311,13 +851,63 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
   }
 
   function clearMessages(): void {
+    if (!uploadState.value.isUploading && !uploadState.value.isRegistering) {
+      ++completionSequence
+    }
     error.value = null
     lastMessage.value = ''
+    uploadState.value = {
+      isUploading: false,
+      isRegistering: false,
+      progress: 0,
+      fileName: '',
+      uploadedFilePath: '',
+      registrationState: 'idle',
+      indexState: 'idle',
+      listState: 'idle',
+      canRetryRegistration: false,
+      error: '',
+    }
+    if (!uploadState.value.isUploading && !uploadState.value.isRegistering) {
+      pendingUpload = null
+      conflictCheckInput = null
+      conflictCheckResult = null
+    }
+  }
+
+  function applyReleaseNotes(releaseNotes: string): void {
+    if (pendingUpload === null) {
+      return
+    }
+    pendingUpload = {
+      ...pendingUpload,
+      input: {
+        ...pendingUpload.input,
+        releaseNotes,
+      },
+    }
     uploadState.value = { ...uploadState.value, error: '' }
+    error.value = null
+  }
+
+  function pendingUploadMetadata(): PendingUploadMetadata | null {
+    if (pendingUpload === null) {
+      return null
+    }
+    return {
+      filename: pendingUpload.input.filename,
+      version: pendingUpload.input.version,
+      kind: pendingUpload.input.kind,
+      platform: pendingUpload.input.platform,
+      releaseNotes: pendingUpload.input.releaseNotes ?? '',
+    }
   }
 
   return {
+    applyReleaseNotes,
+    checkUploadConflict,
     clearMessages,
+    clearUploadError,
     deletingPaths,
     directories,
     error,
@@ -329,15 +919,22 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
     isRefreshingIndex,
     isDeleting,
     lastMessage,
+    pendingUploadMetadata,
     pendingFileCount,
+    previewUploadPath,
     reloadFiles,
     refreshIndex,
+    refreshUploadedIndex,
     remove,
+    retryUploadCompletion,
     resetFilters,
     setFilters,
     totalSizeBytes,
     upload,
     uploadState,
+    uploadStage,
+    uploadStages,
+    uploadReview,
     versionArtifacts,
     versions,
     visibleFiles,
@@ -376,4 +973,223 @@ function recordValue(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
+}
+
+function fileUploadRelativePath(input: DownloadArtifactPathInput): string {
+  return canonicalArtifactRelativePath({
+    version: input.version,
+    channel: input.channel,
+    kind: input.kind,
+    platform: input.platform,
+    filename: input.filename,
+  })
+}
+
+function uploadConflictKey(input: DownloadFileUpload): string {
+  return [
+    input.version.trim(),
+    input.kind,
+    input.platform,
+    input.filename.trim(),
+  ].join('\u0000')
+}
+
+function indexErrorCode(caught: unknown): string {
+  void caught
+  return 'download_index_unavailable'
+}
+
+function incompleteUploadResult(
+  uploadedFile: DownloadFile | null = null,
+): DownloadUploadResult {
+  return {
+    uploaded: uploadedFile !== null,
+    registered: false,
+    indexRefreshed: false,
+    listRefreshed: false,
+    uploadedFile,
+    error: null,
+  }
+}
+
+function cancelledUploadResult(): DownloadUploadResult {
+  return {
+    uploaded: false,
+    registered: false,
+    indexRefreshed: false,
+    listRefreshed: false,
+    uploadedFile: null,
+    error: null,
+  }
+}
+
+function releaseAlreadyExists(caught: unknown): boolean {
+  if (typeof caught !== 'object' || caught === null || !('response' in caught)) {
+    return false
+  }
+  const response = caught.response
+  if (typeof response !== 'object' || response === null || !('data' in response)) {
+    return false
+  }
+  const data = response.data
+  if (typeof data !== 'object' || data === null || !('error' in data)) {
+    return false
+  }
+  const error = data.error
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'release_exists'
+  )
+}
+
+export function buildUploadReview(
+  state: DownloadFileUploadState,
+): DownloadFileUploadReview {
+  if (state.isUploading) {
+    return {
+      summary: `正在上传 ${state.progress}%`,
+      actionLabel: '',
+      action: 'none',
+      canManageRelease: false,
+    }
+  }
+  if (state.isRegistering) {
+    return {
+      summary: '文件已上传，正在登记版本。',
+      actionLabel: '',
+      action: 'none',
+      canManageRelease: false,
+    }
+  }
+  if (
+    state.indexState === 'failed' &&
+    (state.registrationState === 'registered' ||
+      state.registrationState === 'idle')
+  ) {
+    return {
+      summary: '版本已经登记，但发布索引同步失败。',
+      actionLabel: '重试刷新索引',
+      action: 'refresh_index',
+      canManageRelease: false,
+    }
+  }
+  if (state.registrationState === 'failed') {
+    return {
+      summary: '文件已上传，但版本登记失败。文件不会丢失，可以重试登记。',
+      actionLabel: '重试登记版本',
+      action: 'retry_registration',
+      canManageRelease: false,
+    }
+  }
+  if (state.registrationState === 'conflict') {
+    return {
+      summary: '文件已上传，但这个版本已经存在。请提高版本号后重新上传。',
+      actionLabel: '前往版本管理',
+      action: 'manage_release',
+      canManageRelease: true,
+    }
+  }
+  if (
+    state.registrationState === 'skipped' ||
+    state.registrationState === 'notes_missing' ||
+    state.canRetryRegistration
+  ) {
+    return {
+      summary: '文件已上传，但缺少可发布信息，尚未登记版本。',
+      actionLabel: '补全并重试登记',
+      action: 'retry_registration',
+      canManageRelease: false,
+    }
+  }
+  if (state.listState === 'failed') {
+    return {
+      summary: '版本和索引已经完成，但文件列表刷新失败。',
+      actionLabel: '重新读取文件',
+      action: 'reload_files',
+      canManageRelease: false,
+    }
+  }
+  if (state.registrationState === 'registered') {
+    return {
+      summary: '文件已上传并登记为待发布版本，可以直接前往内容发布。',
+      actionLabel: '',
+      action: 'manage_release',
+      canManageRelease: true,
+    }
+  }
+  return {
+    summary: '',
+    actionLabel: '',
+    action: 'none',
+    canManageRelease: false,
+  }
+}
+
+export function buildUploadStages(
+  state: DownloadFileUploadState,
+): DownloadUploadStageState {
+  const upload: DownloadUploadStageState['upload'] = state.isUploading
+    ? 'pending'
+    : state.uploadedFilePath
+      ? 'done'
+      : state.error
+        ? 'failed'
+        : 'idle'
+  const registration: DownloadUploadStageState['registration'] =
+    state.isRegistering
+      ? 'pending'
+      : state.registrationState === 'registered'
+        ? 'done'
+        : state.registrationState === 'conflict'
+          ? 'conflict'
+          : state.registrationState === 'failed'
+            ? 'failed'
+            : state.registrationState === 'skipped' ||
+                state.registrationState === 'notes_missing'
+              ? 'blocked'
+              : upload === 'done'
+                ? 'pending'
+                : 'idle'
+  const registrationDone = registration === 'done'
+  const index: DownloadUploadStageState['index'] = !registrationDone
+    ? 'blocked'
+    : state.indexState === 'refreshed'
+      ? 'done'
+      : state.indexState === 'failed'
+        ? 'failed'
+        : 'pending'
+  const list: DownloadUploadStageState['list'] = !registrationDone
+    ? 'blocked'
+    : state.listState === 'refreshed'
+      ? 'done'
+      : state.listState === 'failed'
+        ? 'failed'
+        : 'pending'
+  return { upload, registration, index, list }
+}
+
+export function currentUploadStage(
+  state: DownloadFileUploadState,
+): DownloadUploadStage {
+  if (state.isUploading) {
+    return 'uploading'
+  }
+  if (state.isRegistering) {
+    return 'registering'
+  }
+  if (state.registrationState === 'conflict') {
+    return 'conflict'
+  }
+  if (state.registrationState === 'failed') {
+    return 'registration_failed'
+  }
+  if (
+    state.registrationState === 'skipped' ||
+    state.registrationState === 'notes_missing'
+  ) {
+    return 'registration_required'
+  }
+  return state.registrationState === 'registered' ? 'registered' : 'uploading'
 }

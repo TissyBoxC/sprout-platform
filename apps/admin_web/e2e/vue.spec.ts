@@ -1881,10 +1881,11 @@ test('lists download files and manages uploads, deletion, and the release index'
   await uploadDialog.getByLabel('版本号').fill('0.12.3')
   await uploadDialog.getByLabel('文件类型').selectOption('resource')
   await uploadDialog.getByLabel('适用平台').selectOption('all')
+  await uploadDialog.getByLabel('更新说明').fill('新增离线故事与发音练习。')
   await expect(uploadDialog.getByLabel('目标目录')).toHaveValue(
     '0.12.3/stable/all/resource',
   )
-  await uploadDialog.getByRole('button', { name: '上传并刷新索引' }).click()
+  await uploadDialog.getByRole('button', { name: '上传并登记版本' }).click()
 
   await expect(
     page.getByText('learning-pack-0.12.3.zip 已上传，并登记为待发布版本。'),
@@ -1895,6 +1896,7 @@ test('lists download files and manages uploads, deletion, and the release index'
   expect(releasePayloads).toHaveLength(1)
   expect(releasePayloads[0]).toContain('"kind":"resource"')
   expect(releasePayloads[0]).toContain('"platform":"all"')
+  expect(releasePayloads[0]).toContain('"release_notes":"新增离线故事与发音练习。"')
   expect(refreshRequests).toBeGreaterThan(0)
   await expect(page.locator('table tbody tr')).toHaveCount(3)
 

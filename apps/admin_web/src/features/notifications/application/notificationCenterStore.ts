@@ -16,6 +16,7 @@ import {
 import { createHttpClient } from '@/api/httpClient'
 import {
   parseParentAccountOptions,
+  parentAccountPageHasMore,
   type ParentAccountOption,
 } from '@/features/child/domain/childProfile'
 
@@ -53,6 +54,8 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
   const total = ref(0)
   const totalPages = ref(1)
   const isLoading = ref(false)
+  const hasLoadedPage = ref(false)
+  const isCurrentPageOutOfRange = ref(false)
   const isLoadingFamilies = ref(false)
   const isSubmitting = ref(false)
   const deletingId = ref('')
@@ -61,39 +64,70 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
   const familiesError = ref<ApiError | null>(null)
   const lastMessage = ref('')
   let pageRequestGeneration = 0
+  let activePageRequests = 0
   let statsRequestGeneration = 0
   let familiesRequestGeneration = 0
 
   const hasNotifications = computed(() => notifications.value.length > 0)
   const canGoPrevious = computed(() => filters.value.page > 1)
   const canGoNext = computed(() => filters.value.page < totalPages.value)
+  const hasActiveFilters = computed(
+    () =>
+      filters.value.category !== 'all' ||
+      filters.value.audience !== 'all' ||
+      filters.value.source !== 'all' ||
+      filters.value.query.trim() !== '',
+  )
 
   async function load(): Promise<void> {
-    const requestGeneration = ++pageRequestGeneration
-    isLoading.value = true
-    error.value = null
-    await Promise.all([loadPage(requestGeneration), loadStats()])
-    if (requestGeneration === pageRequestGeneration) {
-      isLoading.value = false
-    }
+    await Promise.all([loadPage(), loadStats()])
   }
 
-  async function loadPage(requestGeneration = ++pageRequestGeneration): Promise<void> {
+  async function loadPage(): Promise<void> {
+    const requestGeneration = ++pageRequestGeneration
+    const requestFilters = { ...filters.value }
+    activePageRequests += 1
+    isLoading.value = true
     error.value = null
     try {
-      const result = await client.loadNotifications(filters.value)
+      const result = await client.loadNotifications(requestFilters)
       if (requestGeneration !== pageRequestGeneration) {
         return
       }
       notifications.value = result.items
       total.value = result.total
       totalPages.value = result.totalPages
+      isCurrentPageOutOfRange.value =
+        result.items.length === 0 &&
+        result.total > 0 &&
+        requestFilters.page > Math.max(1, result.totalPages)
+      if (
+        result.items.length === 0 &&
+        result.total > 0 &&
+        requestFilters.page > result.totalPages
+      ) {
+        const lastPage = Math.max(1, result.totalPages)
+        filters.value = { ...filters.value, page: lastPage }
+        await loadPage()
+        return
+      }
+      hasLoadedPage.value = true
     } catch (caught: unknown) {
       if (requestGeneration === pageRequestGeneration) {
         error.value = mapApiError(caught)
         notifications.value = []
         total.value = 0
         totalPages.value = 1
+        isCurrentPageOutOfRange.value = false
+        hasLoadedPage.value = true
+      }
+    } finally {
+      // Only the newest request owns the visible loading state. An older
+      // request may finish after a fast filter change, but it must not keep the
+      // page locked when the newest request has already completed.
+      activePageRequests = Math.max(0, activePageRequests - 1)
+      if (activePageRequests === 0) {
+        isLoading.value = false
       }
     }
   }
@@ -122,9 +156,19 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
     isLoadingFamilies.value = true
     familiesError.value = null
     try {
-      const response = await httpClient.get('/api/v1/admin/families')
+      const options: ParentAccountOption[] = []
+      for (let page = 1; ; page += 1) {
+        const response = await httpClient.get('/api/v1/admin/families', {
+          params: { page, page_size: 100 },
+        })
+        const payload = response.data?.data
+        options.push(...parseParentAccountOptions(payload))
+        if (!parentAccountPageHasMore(payload)) {
+          break
+        }
+      }
       if (requestGeneration === familiesRequestGeneration) {
-        families.value = parseParentAccountOptions(response.data?.data)
+        families.value = options
       }
     } catch (caught: unknown) {
       if (requestGeneration === familiesRequestGeneration) {
@@ -144,7 +188,13 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
   }
 
   async function goToPage(page: number): Promise<void> {
-    const bounded = Math.min(Math.max(1, page), Math.max(1, totalPages.value))
+    if (isLoading.value) {
+      return
+    }
+    const bounded = Math.min(Math.max(1, Math.trunc(page)), Math.max(1, totalPages.value))
+    if (bounded === filters.value.page) {
+      return
+    }
     filters.value = { ...filters.value, page: bounded }
     await loadPage()
   }
@@ -173,7 +223,7 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
     try {
       await client.deleteNotification(notificationId)
       lastMessage.value = '通知已删除。'
-      await load()
+      await loadAfterDelete()
       return true
     } catch (caught: unknown) {
       error.value = mapApiError(caught)
@@ -181,6 +231,17 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
     } finally {
       deletingId.value = ''
     }
+  }
+
+  async function loadAfterDelete(): Promise<void> {
+    const nextPage =
+      notifications.value.length === 1 && filters.value.page > 1
+        ? filters.value.page - 1
+        : filters.value.page
+    if (nextPage !== filters.value.page) {
+      filters.value = { ...filters.value, page: nextPage }
+    }
+    await Promise.all([loadPage(), loadStats()])
   }
 
   return {
@@ -193,7 +254,10 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
     familiesError,
     filters,
     goToPage,
+    hasLoadedPage,
+    hasActiveFilters,
     hasNotifications,
+    isCurrentPageOutOfRange,
     isLoading,
     isLoadingFamilies,
     isSubmitting,

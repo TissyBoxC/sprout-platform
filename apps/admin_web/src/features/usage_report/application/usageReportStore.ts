@@ -9,6 +9,7 @@ import { mapApiError, type ApiError } from '@/api/apiError'
 import { createHttpClient } from '@/api/httpClient'
 import {
   parseParentAccountOptions,
+  parentAccountPageHasMore,
   type ParentAccountOption,
 } from '@/features/child/domain/childProfile'
 
@@ -28,6 +29,8 @@ export const useUsageReportStore = defineStore('admin-usage-reports', () => {
   const error = ref<ApiError | null>(null)
   const reportError = ref<ApiError | null>(null)
   const lastLoadedAt = ref('')
+  let reportRequestSequence = 0
+  let familiesRequestSequence = 0
 
   const selectedFamily = computed(
     () =>
@@ -111,11 +114,25 @@ export const useUsageReportStore = defineStore('admin-usage-reports', () => {
   })
 
   async function loadFamilies(): Promise<void> {
+    const requestSequence = ++familiesRequestSequence
     isLoadingFamilies.value = true
     error.value = null
     try {
-      const response = await httpClient.get('/api/v1/admin/families')
-      families.value = parseParentAccountOptions(response.data?.data)
+      const options: ParentAccountOption[] = []
+      for (let page = 1; ; page += 1) {
+        const response = await httpClient.get('/api/v1/admin/families', {
+          params: { page, page_size: 100 },
+        })
+        const payload = response.data?.data
+        options.push(...parseParentAccountOptions(payload))
+        if (!parentAccountPageHasMore(payload)) {
+          break
+        }
+      }
+      if (requestSequence !== familiesRequestSequence) {
+        return
+      }
+      families.value = options
       const firstFamily = families.value[0]
       if (firstFamily === undefined) {
         selectedParentAccountId.value = ''
@@ -129,13 +146,20 @@ export const useUsageReportStore = defineStore('admin-usage-reports', () => {
       ) {
         selectedParentAccountId.value = firstFamily.parentAccountId
       }
-      await loadReports()
+      await loadReports({
+        parentAccountId: selectedParentAccountId.value,
+        days: selectedDays.value,
+      })
     } catch (caught: unknown) {
-      error.value = mapApiError(caught)
-      families.value = []
-      reports.value = []
+      if (requestSequence === familiesRequestSequence) {
+        error.value = mapApiError(caught)
+        families.value = []
+        reports.value = []
+      }
     } finally {
-      isLoadingFamilies.value = false
+      if (requestSequence === familiesRequestSequence) {
+        isLoadingFamilies.value = false
+      }
     }
   }
 
@@ -147,32 +171,54 @@ export const useUsageReportStore = defineStore('admin-usage-reports', () => {
       return
     }
     selectedParentAccountId.value = parentAccountId
-    await loadReports()
+    reportError.value = null
+    await loadReports({
+      parentAccountId,
+      days: selectedDays.value,
+    })
   }
 
   async function setDays(days: UsageReportRange): Promise<void> {
     selectedDays.value = days
-    await loadReports()
+    if (!selectedParentAccountId.value) {
+      return
+    }
+    reportError.value = null
+    await loadReports({
+      parentAccountId: selectedParentAccountId.value,
+      days,
+    })
   }
 
-  async function loadReports(): Promise<void> {
-    if (!selectedParentAccountId.value) {
+  async function loadReports(request?: {
+    parentAccountId?: string
+    days?: UsageReportRange
+  }): Promise<void> {
+    const parentAccountId = request?.parentAccountId ?? selectedParentAccountId.value
+    const days = request?.days ?? selectedDays.value
+    if (!parentAccountId) {
       reports.value = []
       return
     }
+    const sequence = ++reportRequestSequence
     isLoadingReports.value = true
     reportError.value = null
     try {
-      reports.value = await client.loadUsageReports(
-        selectedParentAccountId.value,
-        selectedDays.value,
-      )
+      const nextReports = await client.loadUsageReports(parentAccountId, days)
+      if (sequence !== reportRequestSequence) {
+        return
+      }
+      reports.value = nextReports
       lastLoadedAt.value = new Date().toISOString()
     } catch (caught: unknown) {
-      reportError.value = mapApiError(caught)
-      reports.value = []
+      if (sequence === reportRequestSequence) {
+        reportError.value = mapApiError(caught)
+        reports.value = []
+      }
     } finally {
-      isLoadingReports.value = false
+      if (sequence === reportRequestSequence) {
+        isLoadingReports.value = false
+      }
     }
   }
 

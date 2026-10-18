@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 
 import {
   useReleaseStore,
@@ -11,6 +11,7 @@ const store = useReleaseStore()
 const isCreateOpen = ref(false)
 const pendingDelete = ref<AdminRelease | null>(null)
 const pendingPublish = ref<AdminRelease | null>(null)
+const pendingNotesRecovery = ref<AdminRelease | null>(null)
 const createForm = reactive<CreateReleaseInput>({
   version: store.adminBuildVersion,
   channel: 'stable',
@@ -22,12 +23,21 @@ const createForm = reactive<CreateReleaseInput>({
   isMandatory: false,
   minimumSupportedVersion: '',
 })
+const isBusy = computed(
+  () =>
+    store.isLoading ||
+    store.isSubmitting ||
+    store.isResolvingArtifact,
+)
 
 onMounted(() => {
   void store.load()
 })
 
 function openCreate(): void {
+  if (isBusy.value) {
+    return
+  }
   isCreateOpen.value = true
   store.lastMessage = ''
   if (!createForm.version) {
@@ -35,7 +45,17 @@ function openCreate(): void {
   }
 }
 
+function startPublish(release: AdminRelease): void {
+  if (isBusy.value || release.status !== 'draft') {
+    return
+  }
+  pendingPublish.value = release
+}
+
 async function resolveArtifact(): Promise<void> {
+  if (isBusy.value) {
+    return
+  }
   const artifactInput = await store.resolveArtifact({
     version: createForm.version,
     kind: createForm.kind,
@@ -52,12 +72,22 @@ async function resolveArtifact(): Promise<void> {
 }
 
 async function createRelease(): Promise<void> {
+  if (isBusy.value) {
+    return
+  }
   const succeeded = await store.create(createForm)
   if (!succeeded) {
     return
   }
   resetCreateForm()
   isCreateOpen.value = false
+}
+
+function startNotesRecovery(release: AdminRelease): void {
+  if (isBusy.value || release.status !== 'draft') {
+    return
+  }
+  pendingNotesRecovery.value = release
 }
 
 function resetCreateForm(): void {
@@ -73,7 +103,12 @@ function resetCreateForm(): void {
 }
 
 async function confirmPublish(): Promise<void> {
-  if (pendingPublish.value === null) {
+  if (
+    pendingPublish.value === null ||
+    isBusy.value ||
+    pendingPublish.value.status !== 'draft' ||
+    !pendingPublish.value.releaseNotes.trim()
+  ) {
     return
   }
   const succeeded = await store.publish(pendingPublish.value.version)
@@ -83,13 +118,35 @@ async function confirmPublish(): Promise<void> {
 }
 
 async function confirmDelete(): Promise<void> {
-  if (pendingDelete.value === null) {
+  if (pendingDelete.value === null || store.isSubmitting) {
     return
   }
   const succeeded = await store.remove(pendingDelete.value.version)
   if (succeeded) {
     pendingDelete.value = null
   }
+}
+
+async function confirmNotesRecovery(): Promise<void> {
+  const release = pendingNotesRecovery.value
+  if (release === null || store.isSubmitting) {
+    return
+  }
+  const succeeded = await store.remove(release.version)
+  if (!succeeded) {
+    return
+  }
+  pendingNotesRecovery.value = null
+  openCreate()
+  createForm.version = release.version
+  createForm.channel = normalizeChannel(release.channel)
+  createForm.kind = normalizeKind(release.kind)
+  createForm.platform = normalizePlatform(release.platform)
+  createForm.downloadUrl = release.downloadUrl
+  createForm.sha256 = release.sha256
+  createForm.releaseNotes = ''
+  createForm.isMandatory = release.isMandatory
+  createForm.minimumSupportedVersion = release.minimumSupportedVersion
 }
 
 function kindLabel(value: string): string {
@@ -149,6 +206,28 @@ function formatTime(value: string): string {
     minute: '2-digit',
   })
 }
+
+async function changePageSize(event: Event): Promise<void> {
+  const target = event.target
+  if (!(target instanceof HTMLSelectElement)) {
+    return
+  }
+  await store.setPageSize(Number(target.value))
+}
+
+function normalizeChannel(value: string): CreateReleaseInput['channel'] {
+  return value === 'beta' || value === 'canary' ? value : 'stable'
+}
+
+function normalizeKind(value: string): CreateReleaseInput['kind'] {
+  return value === 'client' || value === 'firmware' ? value : 'resource'
+}
+
+function normalizePlatform(value: string): CreateReleaseInput['platform'] {
+  return value === 'ios' || value === 'esp32_s3' || value === 'all'
+    ? value
+    : 'android'
+}
 </script>
 
 <template>
@@ -162,10 +241,12 @@ function formatTime(value: string): string {
         </p>
       </div>
       <div class="header-actions">
-        <button type="button" class="secondary" :disabled="store.isLoading" @click="store.load">
+        <button type="button" class="secondary" :disabled="isBusy" @click="store.load()">
           刷新列表
         </button>
-        <button type="button" class="primary" @click="openCreate">登记新版本</button>
+        <button type="button" class="primary" :disabled="isBusy" @click="openCreate">
+          登记新版本
+        </button>
       </div>
     </header>
 
@@ -177,7 +258,7 @@ function formatTime(value: string): string {
     </Transition>
 
     <Transition name="page" mode="out-in">
-      <div v-if="store.isLoading" key="loading" class="state-panel">
+      <div v-if="store.isLoading && store.pagination.total === 0" key="loading" class="state-panel">
         <span class="state-spinner" aria-hidden="true"></span>
         正在读取更新记录…
       </div>
@@ -187,11 +268,106 @@ function formatTime(value: string): string {
         class="state-panel state-error"
       >
         <p>{{ store.error.message }}</p>
-        <button type="button" class="primary" @click="store.load">重新加载</button>
+        <button
+          type="button"
+          class="primary"
+          :disabled="isBusy"
+          @click="store.retryCurrentPage"
+        >
+          重新加载这一页
+        </button>
       </div>
-      <div v-else-if="store.releases.length === 0" key="empty" class="state-panel">
-        <span class="state-icon" aria-hidden="true">☆</span>
-        <span>还没有更新记录。登记新版本后，会显示在这里。</span>
+      <div v-else-if="store.releases.length === 0" key="empty" class="empty-page">
+        <div class="state-panel">
+          <span class="state-icon" aria-hidden="true">☆</span>
+          <div>
+            <strong>
+              {{
+                store.pagination.page > 1
+                  ? '这一页没有更新记录'
+                  : '还没有更新记录'
+              }}
+            </strong>
+            <p>
+            {{
+              store.pagination.page > 1
+                ? '列表可能刚刚发生变化，请返回上一页、调整每页数量或重新加载。'
+                : '登记新版本后，会显示在这里。'
+            }}
+            </p>
+          </div>
+          <div class="empty-actions">
+            <button
+              v-if="store.pagination.page > 1"
+              type="button"
+              class="secondary"
+              :disabled="isBusy"
+              @click="store.goToPage(store.pagination.page - 1)"
+            >
+              返回上一页
+            </button>
+            <button
+              type="button"
+              class="secondary"
+              :disabled="isBusy"
+              @click="store.retryCurrentPage"
+            >
+              重新加载
+            </button>
+            <button
+              v-if="store.pagination.total === 0"
+              type="button"
+              class="primary"
+              :disabled="isBusy"
+              @click="openCreate"
+            >
+              登记新版本
+            </button>
+          </div>
+        </div>
+        <footer class="pagination pagination-empty">
+          <p>
+            第 {{ store.pageStart }}–{{ store.pageEnd }} 个版本，共
+            {{ store.pagination.total }} 个
+          </p>
+          <div class="pagination-controls">
+            <label>
+              <span>每页</span>
+              <select
+                :value="
+                  store.pagination.pendingPageSize ??
+                  store.pagination.pageSize
+                "
+                :disabled="isBusy"
+                @change="changePageSize"
+              >
+                <option :value="10">10</option>
+                <option :value="20">20</option>
+                <option :value="50">50</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              class="secondary"
+              :disabled="isBusy || !store.pagination.hasPrevious"
+              @click="store.goToPage(store.pagination.page - 1)"
+            >
+              上一页
+            </button>
+            <span>
+              第 {{ store.pagination.page }} /
+              {{ Math.max(store.pagination.totalPages, 1) }} 页
+            </span>
+            <button
+              type="button"
+              class="secondary"
+              :disabled="isBusy || !store.pagination.hasMore"
+              @click="store.goToPage(store.pagination.page + 1)"
+            >
+              下一页
+            </button>
+          </div>
+        </footer>
       </div>
       <div v-else key="table" class="table-shell">
         <table>
@@ -226,17 +402,25 @@ function formatTime(value: string): string {
               <td>
                 <div class="row-actions">
                   <button
-                    v-if="release.status !== 'published'"
+                    v-if="release.status === 'draft' && release.releaseNotes.trim()"
                     type="button"
-                    :disabled="store.isSubmitting"
-                    @click="pendingPublish = release"
+                    :disabled="isBusy"
+                    @click="startPublish(release)"
                   >
                     发布
                   </button>
                   <button
+                    v-if="release.status === 'draft' && !release.releaseNotes.trim()"
+                    type="button"
+                    :disabled="isBusy"
+                    @click="startNotesRecovery(release)"
+                  >
+                    补充更新说明
+                  </button>
+                  <button
                     type="button"
                     class="danger"
-                    :disabled="store.isSubmitting"
+                    :disabled="isBusy"
                     @click="pendingDelete = release"
                   >
                     删除
@@ -246,28 +430,82 @@ function formatTime(value: string): string {
             </tr>
           </tbody>
         </table>
+        <footer class="pagination">
+          <p>
+            第 {{ store.pageStart }}–{{ store.pageEnd }} 个版本，共
+            {{ store.pagination.total }} 个
+          </p>
+          <div class="pagination-controls">
+            <label>
+              <span>每页</span>
+              <select
+                :value="
+                  store.pagination.pendingPageSize ??
+                  store.pagination.pageSize
+                "
+                :disabled="isBusy"
+                @change="changePageSize"
+              >
+                <option :value="10">10</option>
+                <option :value="20">20</option>
+                <option :value="50">50</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              class="secondary"
+              :disabled="isBusy || !store.pagination.hasPrevious"
+              @click="store.goToPage(store.pagination.page - 1)"
+            >
+              上一页
+            </button>
+            <span>
+              第 {{ store.pagination.page }} /
+              {{ Math.max(store.pagination.totalPages, 1) }} 页
+            </span>
+            <button
+              type="button"
+              class="secondary"
+              :disabled="isBusy || !store.pagination.hasMore"
+              @click="store.goToPage(store.pagination.page + 1)"
+            >
+              下一页
+            </button>
+          </div>
+        </footer>
       </div>
     </Transition>
 
     <Transition name="modal">
-      <div v-if="isCreateOpen" class="dialog-backdrop" @click.self="isCreateOpen = false">
-        <form class="dialog" @submit.prevent="createRelease">
-          <h2>登记新版本</h2>
+      <div
+        v-if="isCreateOpen"
+        class="dialog-backdrop"
+        @click.self="!isBusy && (isCreateOpen = false)"
+      >
+        <form
+          class="dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="release-create-title"
+          @submit.prevent="createRelease"
+        >
+          <h2 id="release-create-title">登记新版本</h2>
           <p class="dialog-hint">
             版本号默认使用当前发布版本。更新文件会自动查找并填入，确认无误后再发布。
           </p>
-          <div class="artifact-toolbar">
-            <button
-              type="button"
-              class="secondary"
-              :disabled="store.isResolvingArtifact || !createForm.version"
-              @click="resolveArtifact"
-            >
-              {{ store.isResolvingArtifact ? '正在查找…' : '自动查找更新文件' }}
-            </button>
-            <span>按照版本、更新类型和适用平台查找。</span>
-          </div>
-          <div class="field-grid">
+          <fieldset class="form-fieldset" :disabled="store.isSubmitting || store.isResolvingArtifact">
+            <div class="artifact-toolbar">
+              <button
+                type="button"
+                class="secondary"
+                :disabled="store.isResolvingArtifact || !createForm.version"
+                @click="resolveArtifact"
+              >
+                {{ store.isResolvingArtifact ? '正在查找…' : '自动查找更新文件' }}
+              </button>
+              <span>按照版本、更新类型和适用平台查找。</span>
+            </div>
+            <div class="field-grid">
             <label>
               <span>版本号</span>
               <input v-model.trim="createForm.version" type="text" required placeholder="例如 0.8.0" />
@@ -332,17 +570,29 @@ function formatTime(value: string): string {
                 placeholder="说明这次更新解决什么问题、带来哪些变化"
               ></textarea>
             </label>
-          </div>
-          <label class="mandatory-row">
-            <input v-model="createForm.isMandatory" type="checkbox" />
-            <span>
-              <strong>此版本必须升级</strong>
-              <small>家长打开应用时会看到升级提醒，暂不能跳过。</small>
-            </span>
-          </label>
+            </div>
+            <label class="mandatory-row">
+              <input v-model="createForm.isMandatory" type="checkbox" />
+              <span>
+                <strong>此版本必须升级</strong>
+                <small>家长打开应用时会看到升级提醒，暂不能跳过。</small>
+              </span>
+            </label>
+          </fieldset>
           <div class="dialog-actions">
-            <button type="button" class="secondary" @click="isCreateOpen = false">取消</button>
-            <button type="submit" class="primary" :disabled="store.isSubmitting">
+            <button
+              type="button"
+              class="secondary"
+              :disabled="store.isSubmitting || store.isResolvingArtifact"
+              @click="isCreateOpen = false"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              class="primary"
+              :disabled="store.isSubmitting || store.isResolvingArtifact"
+            >
               {{ store.isSubmitting ? '正在登记…' : '登记版本' }}
             </button>
           </div>
@@ -351,19 +601,36 @@ function formatTime(value: string): string {
     </Transition>
 
     <Transition name="modal">
-      <div v-if="pendingPublish" class="dialog-backdrop" @click.self="pendingPublish = null">
+      <div
+        v-if="pendingPublish"
+        class="dialog-backdrop"
+        @click.self="!store.isSubmitting && (pendingPublish = null)"
+      >
         <section class="dialog confirm-dialog">
           <h2>发布这个版本？</h2>
           <p>
             发布后，使用 {{ channelLabel(pendingPublish.channel) }} 的用户会收到
             {{ pendingPublish.version }} 的更新提示。
           </p>
+          <p v-if="pendingPublish.releaseNotes.trim()" class="publish-notes">
+            {{ pendingPublish.releaseNotes }}
+          </p>
+          <p v-if="!pendingPublish.releaseNotes.trim()" class="publish-warning">
+            当前记录没有更新说明。平台不支持在登记后直接编辑草稿，请删除这条记录，重新登记时填写说明后再发布。
+          </p>
           <div class="dialog-actions">
-            <button type="button" class="secondary" @click="pendingPublish = null">取消</button>
+            <button
+              type="button"
+              class="secondary"
+              :disabled="store.isSubmitting"
+              @click="pendingPublish = null"
+            >
+              取消
+            </button>
             <button
               type="button"
               class="primary"
-              :disabled="store.isSubmitting"
+              :disabled="store.isSubmitting || !pendingPublish.releaseNotes.trim()"
               @click="confirmPublish"
             >
               {{ store.isSubmitting ? '正在发布…' : '确认发布' }}
@@ -374,14 +641,68 @@ function formatTime(value: string): string {
     </Transition>
 
     <Transition name="modal">
-      <div v-if="pendingDelete" class="dialog-backdrop" @click.self="pendingDelete = null">
+      <div
+        v-if="pendingNotesRecovery"
+        class="dialog-backdrop"
+        @click.self="!store.isSubmitting && (pendingNotesRecovery = null)"
+      >
+        <section
+          class="dialog confirm-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="release-notes-recovery-title"
+        >
+          <h2 id="release-notes-recovery-title">
+            补充版本 {{ pendingNotesRecovery.version }} 的更新说明
+          </h2>
+          <p class="publish-warning">
+            这条待发布记录没有更新说明，当前版本服务不支持直接编辑草稿。
+          </p>
+          <p>
+            可以删除这条待发布记录，再打开登记表单。版本、类型、平台、下载地址和校验值会保留，只需要补写更新说明后重新登记。
+          </p>
+          <div class="dialog-actions">
+            <button
+              type="button"
+              class="secondary"
+              :disabled="store.isSubmitting"
+              @click="pendingNotesRecovery = null"
+            >
+              暂不处理
+            </button>
+            <button
+              type="button"
+              class="danger-button"
+              :disabled="store.isSubmitting"
+              @click="confirmNotesRecovery"
+            >
+              {{ store.isSubmitting ? '正在准备…' : '删除并重新登记' }}
+            </button>
+          </div>
+        </section>
+      </div>
+    </Transition>
+
+    <Transition name="modal">
+      <div
+        v-if="pendingDelete"
+        class="dialog-backdrop"
+        @click.self="!store.isSubmitting && (pendingDelete = null)"
+      >
         <section class="dialog confirm-dialog">
           <h2>删除这个版本？</h2>
           <p>
             删除后，版本 {{ pendingDelete.version }} 的记录将无法恢复。已经安装该版本的用户不受影响。
           </p>
           <div class="dialog-actions">
-            <button type="button" class="secondary" @click="pendingDelete = null">取消</button>
+            <button
+              type="button"
+              class="secondary"
+              :disabled="store.isSubmitting"
+              @click="pendingDelete = null"
+            >
+              取消
+            </button>
             <button
               type="button"
               class="danger-button"
@@ -490,12 +811,87 @@ button:disabled {
   box-shadow: 0 10px 28px rgb(194 91 128 / 6%);
 }
 
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-top: 1px solid #f7d9e2;
+  background: #fffbfc;
+}
+
+.empty-page {
+  overflow: hidden;
+  border: 1px solid var(--sprout-outline);
+  border-radius: var(--sprout-radius-card);
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgb(194 91 128 / 6%);
+}
+
+.empty-page .state-panel {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.pagination p,
+.pagination span {
+  margin: 0;
+  color: #6b4f5a;
+  font-size: 13px;
+}
+
+.pagination-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.pagination-controls label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #6b4f5a;
+  font-size: 13px;
+}
+
+.pagination-controls select {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid #f0bdcb;
+  border-radius: var(--sprout-radius-control);
+  background: #ffffff;
+  color: #4a2e3b;
+}
+
 .state-error {
   flex-direction: column;
 }
 
 .state-error p {
   margin: 0;
+}
+
+.state-panel > div {
+  text-align: left;
+}
+
+.state-panel strong {
+  color: #4a2e3b;
+}
+
+.state-panel p {
+  margin: 6px 0 0;
+  color: #6b4f5a;
 }
 
 .state-error button {
@@ -680,6 +1076,15 @@ tbody tr:hover {
   gap: 16px;
 }
 
+.form-fieldset {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
 .field-grid label {
   display: grid;
   gap: 7px;
@@ -770,6 +1175,22 @@ textarea:focus {
   line-height: 1.65;
 }
 
+.publish-notes {
+  padding: 12px 14px;
+  border: 1px solid #f7d9e2;
+  border-radius: 16px;
+  background: #fffbfc;
+  white-space: pre-wrap;
+}
+
+.publish-warning {
+  padding: 12px 14px;
+  border: 1px solid #efb4c5;
+  border-radius: 16px;
+  background: #fff5f8;
+  color: #a12b4a !important;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -787,6 +1208,17 @@ textarea:focus {
 
   table {
     min-width: 1080px;
+  }
+}
+
+@media (max-width: 720px) {
+  .pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pagination-controls {
+    justify-content: space-between;
   }
 }
 

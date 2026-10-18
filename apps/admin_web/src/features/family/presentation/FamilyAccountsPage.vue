@@ -86,15 +86,24 @@ onMounted(() => {
 })
 
 function openCreate(): void {
+  if (store.isLoading || store.isSubmitting) {
+    return
+  }
   isCreateOpen.value = true
   store.lastMessage = ''
 }
 
 function closeCreate(): void {
+  if (store.isSubmitting) {
+    return
+  }
   isCreateOpen.value = false
 }
 
 async function createFamily(): Promise<void> {
+  if (store.isSubmitting) {
+    return
+  }
   const succeeded = await store.create(createForm)
   if (!succeeded) {
     return
@@ -112,6 +121,9 @@ function resetCreateForm(): void {
 }
 
 async function openFamily(family: AdminFamily): Promise<void> {
+  if (store.isLoading || store.isSubmitting) {
+    return
+  }
   selectedFamilyId.value = family.parentAccountId
   Object.assign(profileForm, {
     displayName: family.parentDisplayName,
@@ -182,6 +194,15 @@ async function saveAiAccount(): Promise<void> {
 }
 
 function openPasswordReset(): void {
+  if (
+    store.isResettingPassword ||
+    store.isUpdatingProfile ||
+    store.isUpdatingAiAccount ||
+    store.isSubmitting ||
+    store.isLoading
+  ) {
+    return
+  }
   isPasswordResetOpen.value = true
   passwordForm.password = ''
   passwordForm.confirmation = ''
@@ -189,6 +210,9 @@ function openPasswordReset(): void {
 }
 
 function closePasswordReset(): void {
+  if (store.isResettingPassword) {
+    return
+  }
   isPasswordResetOpen.value = false
   passwordForm.password = ''
   passwordForm.confirmation = ''
@@ -196,6 +220,9 @@ function closePasswordReset(): void {
 
 async function resetPassword(): Promise<void> {
   if (selectedFamily.value === null) {
+    return
+  }
+  if (store.isResettingPassword) {
     return
   }
   if (passwordForm.password.length < 8) {
@@ -233,6 +260,9 @@ async function retryAiAccount(): Promise<void> {
   if (selectedFamily.value === null) {
     return
   }
+  if (store.isSubmitting || store.isUpdatingAiAccount) {
+    return
+  }
   const result = await store.retryAiAccount(selectedFamily.value.parentAccountId)
   handleMutationResult('ai', result, '家长 AI 服务已准备完成。')
 }
@@ -249,6 +279,18 @@ async function reloadAIUsage(): Promise<void> {
     return
   }
   await store.loadFamilyAIUsage(selectedFamily.value.parentAccountId)
+}
+
+async function changePageSize(event: Event): Promise<void> {
+  const target = event.target
+  if (!(target instanceof HTMLSelectElement)) {
+    return
+  }
+  if (store.isLoading || store.isSubmitting) {
+    target.value = String(store.pagination.pageSize)
+    return
+  }
+  await store.setPageSize(Number(target.value))
 }
 
 function toggleModel(model: AIModelOption): void {
@@ -500,11 +542,16 @@ function emptySectionFeedback(): {
           type="button"
           class="secondary"
           :disabled="store.isLoading"
-          @click="store.load"
+          @click="store.load()"
         >
           重新加载
         </button>
-        <button type="button" class="primary" @click="openCreate">
+        <button
+          type="button"
+          class="primary"
+          :disabled="store.isLoading || store.isSubmitting"
+          @click="openCreate"
+        >
           新建家长账号
         </button>
       </div>
@@ -522,13 +569,112 @@ function emptySectionFeedback(): {
     </Transition>
 
     <Transition name="page" mode="out-in">
-      <div v-if="store.isLoading" key="loading" class="state-panel">
+      <div
+        v-if="store.isLoading && store.families.length === 0"
+        key="loading"
+        class="state-panel"
+      >
         <span class="state-spinner" aria-hidden="true"></span>
         正在读取家长账号…
       </div>
+      <div
+        v-else-if="store.families.length === 0 && store.error"
+        key="error"
+        class="state-panel state-error"
+      >
+        <p>{{ store.error.message }}</p>
+        <button type="button" class="primary" @click="store.retryCurrentPage">
+          重新加载这一页
+        </button>
+      </div>
       <div v-else-if="store.families.length === 0" key="empty" class="state-panel">
         <span class="state-icon" aria-hidden="true">☆</span>
-        <span>还没有家长账号。新建后，家长可以直接登录应用使用。</span>
+        <div>
+          <strong>
+            {{
+              store.pagination.page > 1
+                ? '这一页没有家长账号'
+                : '还没有家长账号'
+            }}
+          </strong>
+          <p>
+          {{
+            store.pagination.page > 1
+              ? '列表可能刚刚发生变化，请返回上一页或重新加载。'
+              : '新建后，家长可以直接登录应用使用。'
+          }}
+          </p>
+        </div>
+        <div class="empty-actions">
+          <button
+            v-if="store.pagination.page > 1"
+            type="button"
+            class="secondary"
+            :disabled="store.isLoading || store.isSubmitting"
+            @click="store.goToPage(store.pagination.page - 1)"
+          >
+            返回上一页
+          </button>
+          <button
+            type="button"
+            class="secondary"
+            :disabled="store.isLoading || store.isSubmitting"
+            @click="store.retryCurrentPage"
+          >
+            重新加载
+          </button>
+        </div>
+        <footer class="pagination pagination-empty">
+          <p>
+            第 {{ store.pageStart }}–{{ store.pageEnd }} 个账号，共
+            {{ store.pagination.total }} 个
+          </p>
+          <div class="pagination-controls">
+            <label>
+              <span>每页</span>
+              <select
+                :value="
+                  store.pagination.pendingPageSize ??
+                  store.pagination.pageSize
+                "
+                :disabled="store.isLoading || store.isSubmitting"
+                @change="changePageSize"
+              >
+                <option :value="10">10</option>
+                <option :value="20">20</option>
+                <option :value="50">50</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              class="secondary"
+              :disabled="
+                store.isLoading ||
+                store.isSubmitting ||
+                !store.pagination.hasPrevious
+              "
+              @click="store.goToPage(store.pagination.page - 1)"
+            >
+              上一页
+            </button>
+            <span>
+              第 {{ store.pagination.page }} /
+              {{ Math.max(store.pagination.totalPages, 1) }} 页
+            </span>
+            <button
+              type="button"
+              class="secondary"
+              :disabled="
+                store.isLoading ||
+                store.isSubmitting ||
+                !store.pagination.hasMore
+              "
+              @click="store.goToPage(store.pagination.page + 1)"
+            >
+              下一页
+            </button>
+          </div>
+        </footer>
       </div>
       <div v-else key="table" class="table-shell">
         <table>
@@ -592,6 +738,7 @@ function emptySectionFeedback(): {
                 <button
                   type="button"
                   class="link-button"
+                  :disabled="store.isLoading || store.isSubmitting"
                   @click="openFamily(family)"
                 >
                   查看设备
@@ -600,6 +747,7 @@ function emptySectionFeedback(): {
               <td>
                 <button
                   type="button"
+                  :disabled="store.isLoading || store.isSubmitting"
                   @click="openFamily(family)"
                 >
                   管理
@@ -608,11 +756,66 @@ function emptySectionFeedback(): {
             </tr>
           </tbody>
         </table>
+        <footer class="pagination">
+          <p>
+            第 {{ store.pageStart }}–{{ store.pageEnd }} 个账号，共
+            {{ store.pagination.total }} 个
+          </p>
+          <div class="pagination-controls">
+            <label>
+              <span>每页</span>
+              <select
+                :value="
+                  store.pagination.pendingPageSize ??
+                  store.pagination.pageSize
+                "
+                :disabled="store.isLoading || store.isSubmitting"
+                @change="changePageSize"
+              >
+                <option :value="10">10</option>
+                <option :value="20">20</option>
+                <option :value="50">50</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              class="secondary"
+              :disabled="
+                store.isLoading ||
+                store.isSubmitting ||
+                !store.pagination.hasPrevious
+              "
+              @click="store.goToPage(store.pagination.page - 1)"
+            >
+              上一页
+            </button>
+            <span>
+              第 {{ store.pagination.page }} /
+              {{ Math.max(store.pagination.totalPages, 1) }} 页
+            </span>
+            <button
+              type="button"
+              class="secondary"
+              :disabled="
+                store.isLoading ||
+                store.isSubmitting ||
+                !store.pagination.hasMore
+              "
+              @click="store.goToPage(store.pagination.page + 1)"
+            >
+              下一页
+            </button>
+          </div>
+        </footer>
       </div>
     </Transition>
 
     <Transition name="modal">
-      <div v-if="isCreateOpen" class="dialog-backdrop" @click.self="closeCreate">
+      <div
+        v-if="isCreateOpen"
+        class="dialog-backdrop"
+        @click.self="closeCreate"
+      >
         <form
           class="dialog"
           role="dialog"
@@ -657,10 +860,19 @@ function emptySectionFeedback(): {
             <input v-model="createForm.childBirthday" type="date" />
           </label>
           <div class="dialog-actions">
-            <button type="button" class="secondary" @click="closeCreate">
+            <button
+              type="button"
+              class="secondary"
+              :disabled="store.isSubmitting"
+              @click="closeCreate"
+            >
               取消
             </button>
-            <button type="submit" class="primary" :disabled="store.isSubmitting">
+            <button
+              type="submit"
+              class="primary"
+              :disabled="store.isSubmitting || store.isLoading"
+            >
               {{ store.isSubmitting ? '正在创建…' : '创建账号' }}
             </button>
           </div>
@@ -768,7 +980,11 @@ function emptySectionFeedback(): {
                 <button
                   type="button"
                   class="primary"
-                  :disabled="store.isUpdatingProfile"
+                  :disabled="
+                    store.isUpdatingProfile ||
+                    store.isUpdatingAiAccount ||
+                    store.isSubmitting
+                  "
                   @click="saveProfile"
                 >
                   {{ store.isUpdatingProfile ? '正在保存…' : '保存家长资料' }}
@@ -856,7 +1072,7 @@ function emptySectionFeedback(): {
                   </div>
                   <div v-else-if="store.modelError" class="inline-state error">
                     {{ store.modelError.message }}
-                    <button type="button" class="text-button" @click="store.load">
+                    <button type="button" class="text-button" @click="store.load()">
                       重新加载模型
                     </button>
                   </div>
@@ -887,7 +1103,11 @@ function emptySectionFeedback(): {
                   <button
                     type="button"
                     class="primary"
-                    :disabled="store.isUpdatingAiAccount"
+                    :disabled="
+                      store.isUpdatingAiAccount ||
+                      store.isUpdatingProfile ||
+                      store.isSubmitting
+                    "
                     @click="saveAiAccount"
                   >
                     {{
@@ -902,7 +1122,11 @@ function emptySectionFeedback(): {
                 <button
                   type="button"
                   class="primary"
-                  :disabled="store.isSubmitting"
+                  :disabled="
+                    store.isSubmitting ||
+                    store.isUpdatingAiAccount ||
+                    store.isUpdatingProfile
+                  "
                   @click="retryAiAccount"
                 >
                   {{ store.isSubmitting ? '正在开通…' : '重新开通 AI 服务' }}
@@ -1073,7 +1297,17 @@ function emptySectionFeedback(): {
                   <strong>登录密码</strong>
                   <p>家长可以用手机号和密码登录应用。</p>
                 </div>
-                <button type="button" @click="openPasswordReset">
+                <button
+                  type="button"
+                  :disabled="
+                    store.isResettingPassword ||
+                    store.isUpdatingProfile ||
+                    store.isUpdatingAiAccount ||
+                    store.isSubmitting ||
+                    store.isLoading
+                  "
+                  @click="openPasswordReset"
+                >
                   重置密码
                 </button>
               </div>
@@ -1138,13 +1372,23 @@ function emptySectionFeedback(): {
             />
           </label>
           <div class="dialog-actions">
-            <button type="button" class="secondary" @click="closePasswordReset">
+            <button
+              type="button"
+              class="secondary"
+              :disabled="store.isResettingPassword"
+              @click="closePasswordReset"
+            >
               取消
             </button>
             <button
               type="submit"
               class="primary"
-              :disabled="store.isResettingPassword"
+              :disabled="
+                store.isResettingPassword ||
+                store.isUpdatingProfile ||
+                store.isUpdatingAiAccount ||
+                store.isSubmitting
+              "
             >
               {{ store.isResettingPassword ? '正在重置…' : '重置密码' }}
             </button>
@@ -1274,6 +1518,58 @@ button:disabled {
   box-shadow: 0 10px 28px rgb(194 91 128 / 6%);
 }
 
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-top: 1px solid #f7d9e2;
+  background: #fffbfc;
+}
+
+.pagination-empty {
+  width: 100%;
+}
+
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.pagination p,
+.pagination span {
+  margin: 0;
+  color: var(--sprout-text-muted);
+  font-size: 13px;
+}
+
+.pagination-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.pagination-controls label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--sprout-text-muted);
+  font-size: 13px;
+}
+
+.pagination-controls select {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid #f0bdcb;
+  border-radius: var(--sprout-radius-control);
+  background: #ffffff;
+  color: var(--sprout-text);
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -1355,6 +1651,7 @@ tbody tr:hover {
 .state-panel {
   display: flex;
   min-height: 132px;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 12px;
@@ -1829,6 +2126,17 @@ tbody tr:hover {
 
   .form-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pagination-controls {
+    justify-content: space-between;
   }
 }
 

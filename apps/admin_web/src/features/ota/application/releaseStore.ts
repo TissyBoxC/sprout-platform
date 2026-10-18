@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 import { mapApiError, type ApiError } from '@/api/apiError'
 import {
@@ -46,6 +46,19 @@ export interface ReleaseArtifactLookup {
   platform: ReleasePlatform
 }
 
+export interface ReleasePagination {
+  page: number
+  pageSize: number
+  pendingPageSize: number | null
+  total: number
+  totalPages: number
+  hasPrevious: boolean
+  hasMore: boolean
+}
+
+const DEFAULT_PAGE_SIZE = 20
+const MAX_PAGE_SIZE = 100
+
 // 管理端只操作版本清单；文件本身由发布流程上传并校验后再登记。
 export const useReleaseStore = defineStore('admin-releases', () => {
   const httpClient = createHttpClient()
@@ -57,18 +70,209 @@ export const useReleaseStore = defineStore('admin-releases', () => {
   const isSubmitting = ref(false)
   const error = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  const pagination = ref<ReleasePagination>({
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
+    pendingPageSize: null,
+    total: 0,
+    totalPages: 0,
+    hasPrevious: false,
+    hasMore: false,
+  })
+  let requestSequence = 0
+  let loadingSequence = 0
+  let activeLoadingRequests = 0
+  const requestInFlight = ref(false)
+  const pageStart = computed(() =>
+    pagination.value.total === 0
+      ? 0
+      : (pagination.value.page - 1) * pagination.value.pageSize + 1,
+  )
+  const pageEnd = computed(() =>
+    Math.min(
+      pagination.value.page * pagination.value.pageSize,
+      pagination.value.total,
+    ),
+  )
 
-  async function load(): Promise<void> {
-    isLoading.value = true
+  async function load(page = pagination.value.page): Promise<void> {
+    const requestedPage = Math.max(1, Math.trunc(page))
+    if (isLoading.value) {
+      return
+    }
+    const sequence = ++requestSequence
+    const loadSequence = beginLoading()
     error.value = null
     try {
-      const response = await httpClient.get('/api/v1/admin/releases')
-      const records = response.data.data?.releases ?? []
+      const response = await httpClient.get('/api/v1/admin/releases', {
+        params: {
+          page: requestedPage,
+          page_size: pagination.value.pageSize,
+        },
+      })
+      if (sequence !== requestSequence) {
+        return
+      }
+      const payload = response.data.data ?? {}
+      const records = payload.releases ?? []
       releases.value = Array.isArray(records) ? records.map(toRelease) : []
+      pagination.value = toPagination(
+        payload.pagination,
+        requestedPage,
+        pagination.value.pageSize,
+        releases.value.length,
+      )
+      if (
+        releases.value.length === 0 &&
+        pagination.value.total > 0 &&
+        requestedPage > pagination.value.totalPages
+      ) {
+        const lastPage = Math.max(1, pagination.value.totalPages)
+        pagination.value = { ...pagination.value, page: lastPage }
+        const retryResponse = await httpClient.get('/api/v1/admin/releases', {
+          params: {
+            page: lastPage,
+            page_size: pagination.value.pageSize,
+          },
+        })
+        if (sequence !== requestSequence) {
+          return
+        }
+        const retryPayload = retryResponse.data.data ?? {}
+        const retryRecords = retryPayload.releases ?? []
+        releases.value = Array.isArray(retryRecords)
+          ? retryRecords.map(toRelease)
+          : []
+        pagination.value = toPagination(
+          retryPayload.pagination,
+          lastPage,
+          pagination.value.pageSize,
+          releases.value.length,
+        )
+      }
     } catch (caught: unknown) {
-      error.value = mapApiError(caught)
+      if (sequence === requestSequence) {
+        error.value = mapApiError(caught)
+      }
     } finally {
-      isLoading.value = false
+      finishLoading(loadSequence)
+    }
+  }
+
+  async function goToPage(page: number): Promise<void> {
+    const nextPage = Math.max(1, Math.trunc(page))
+    if (isLoading.value) {
+      return
+    }
+    if (
+      nextPage === pagination.value.page ||
+      (pagination.value.totalPages > 0 &&
+        nextPage > pagination.value.totalPages)
+    ) {
+      return
+    }
+    await load(nextPage)
+  }
+
+  async function setPageSize(pageSize: number): Promise<void> {
+    if (isLoading.value) {
+      return
+    }
+    const nextPageSize = clampPageSize(pageSize)
+    setPendingPageSize(nextPageSize)
+    const sequence = ++requestSequence
+    const loadSequence = beginLoading()
+    error.value = null
+    try {
+      const response = await httpClient.get('/api/v1/admin/releases', {
+        params: {
+          page: 1,
+          page_size: nextPageSize,
+        },
+      })
+      if (sequence !== requestSequence) {
+        return
+      }
+      const payload = response.data.data ?? {}
+      const records = payload.releases ?? []
+      releases.value = Array.isArray(records) ? records.map(toRelease) : []
+      pagination.value = toPagination(
+        payload.pagination,
+        1,
+        nextPageSize,
+        releases.value.length,
+      )
+    } catch (caught: unknown) {
+      if (sequence === requestSequence) {
+        error.value = mapApiError(caught)
+      }
+    } finally {
+      clearPendingPageSize()
+      finishLoading(loadSequence)
+    }
+  }
+
+  async function retryCurrentPage(): Promise<void> {
+    if (requestInFlight.value) {
+      return
+    }
+    const requestedPage = Math.max(1, Math.trunc(pagination.value.page))
+    const sequence = ++requestSequence
+    const loadSequence = beginLoading()
+    error.value = null
+    try {
+      const response = await httpClient.get('/api/v1/admin/releases', {
+        params: {
+          page: requestedPage,
+          page_size: pagination.value.pageSize,
+        },
+      })
+      if (sequence !== requestSequence) {
+        return
+      }
+      const payload = response.data.data ?? {}
+      const records = payload.releases ?? []
+      releases.value = Array.isArray(records) ? records.map(toRelease) : []
+      pagination.value = toPagination(
+        payload.pagination,
+        requestedPage,
+        pagination.value.pageSize,
+        releases.value.length,
+      )
+      if (
+        releases.value.length === 0 &&
+        pagination.value.total > 0 &&
+        requestedPage > pagination.value.totalPages
+      ) {
+        const lastPage = Math.max(1, pagination.value.totalPages)
+        pagination.value = { ...pagination.value, page: lastPage }
+        const retryResponse = await httpClient.get('/api/v1/admin/releases', {
+          params: {
+            page: lastPage,
+            page_size: pagination.value.pageSize,
+          },
+        })
+        if (sequence !== requestSequence) {
+          return
+        }
+        const retryPayload = retryResponse.data.data ?? {}
+        const retryRecords = retryPayload.releases ?? []
+        releases.value = Array.isArray(retryRecords)
+          ? retryRecords.map(toRelease)
+          : []
+        pagination.value = toPagination(
+          retryPayload.pagination,
+          lastPage,
+          pagination.value.pageSize,
+          releases.value.length,
+        )
+      }
+    } catch (caught: unknown) {
+      if (sequence === requestSequence) {
+        error.value = mapApiError(caught)
+      }
+    } finally {
+      finishLoading(loadSequence)
     }
   }
 
@@ -88,11 +292,11 @@ export const useReleaseStore = defineStore('admin-releases', () => {
         is_mandatory: input.isMandatory,
         min_supported_version: input.minimumSupportedVersion.trim(),
       })
-      await load()
+      await load(1)
       lastMessage.value = '更新版本已登记。'
       return true
     } catch (caught: unknown) {
-      error.value = mapApiError(caught)
+      error.value = mapReleaseError(caught)
       return false
     } finally {
       isSubmitting.value = false
@@ -146,7 +350,7 @@ export const useReleaseStore = defineStore('admin-releases', () => {
       await httpClient.put(
         `/api/v1/admin/releases/${encodeURIComponent(version)}/publish`,
       )
-      await load()
+      await load(pagination.value.page)
       lastMessage.value = `版本 ${version} 已发布。`
       return true
     } catch (caught: unknown) {
@@ -165,7 +369,11 @@ export const useReleaseStore = defineStore('admin-releases', () => {
       await httpClient.delete(
         `/api/v1/admin/releases/${encodeURIComponent(version)}`,
       )
-      await load()
+      const nextPage =
+        releases.value.length === 1 && pagination.value.page > 1
+          ? pagination.value.page - 1
+          : pagination.value.page
+      await load(nextPage)
       lastMessage.value = `版本 ${version} 已删除。`
       return true
     } catch (caught: unknown) {
@@ -179,18 +387,126 @@ export const useReleaseStore = defineStore('admin-releases', () => {
   return {
     adminBuildVersion: runtimeConfig.adminBuildVersion,
     error,
+    goToPage,
     isLoading,
     isSubmitting,
     isResolvingArtifact,
     lastMessage,
+    pageEnd,
+    pageStart,
+    pagination,
     releases,
     create,
     load,
     publish,
     resolveArtifact,
+    retryCurrentPage,
+    setPageSize,
     remove,
   }
+
+  function beginLoading(): number {
+    const loadSequence = ++loadingSequence
+    activeLoadingRequests += 1
+    requestInFlight.value = true
+    isLoading.value = true
+    return loadSequence
+  }
+
+  function finishLoading(loadSequence: number): void {
+    if (loadSequence !== loadingSequence) {
+      return
+    }
+    activeLoadingRequests = Math.max(0, activeLoadingRequests - 1)
+    if (activeLoadingRequests === 0) {
+      requestInFlight.value = false
+      isLoading.value = false
+    }
+  }
+
+  function setPendingPageSize(pageSize: number): void {
+    pagination.value = {
+      ...pagination.value,
+      pendingPageSize: pageSize,
+    }
+  }
+
+  function clearPendingPageSize(): void {
+    pagination.value = {
+      ...pagination.value,
+      pendingPageSize: null,
+    }
+  }
 })
+
+function toPagination(
+  value: unknown,
+  fallbackPage: number,
+  fallbackPageSize: number,
+  recordCount: number,
+): ReleasePagination {
+  const record = recordValue(value)
+  const total = nonNegativeInteger(
+    record.total,
+    recordCount,
+  )
+  const page = positiveInteger(record.page, fallbackPage)
+  const pageSize = clampPageSize(
+    positiveInteger(record.page_size ?? record.pageSize, fallbackPageSize),
+  )
+  const totalPages = nonNegativeInteger(
+    record.total_pages ?? record.totalPages,
+    total === 0 ? 0 : Math.ceil(total / pageSize),
+  )
+  return {
+    page,
+    pageSize,
+    pendingPageSize: null,
+    total,
+    totalPages,
+    hasPrevious: page > 1,
+    hasMore: record.has_more === true || (totalPages > 0 && page < totalPages),
+  }
+}
+
+function mapReleaseError(caught: unknown): ApiError {
+  if (
+    typeof caught === 'object' &&
+    caught !== null &&
+    'response' in caught &&
+    typeof caught.response === 'object' &&
+    caught.response !== null &&
+    'data' in caught.response &&
+    typeof caught.response.data === 'object' &&
+    caught.response.data !== null &&
+    'error' in caught.response.data &&
+    typeof caught.response.data.error === 'object' &&
+    caught.response.data.error !== null &&
+    'code' in caught.response.data.error &&
+    caught.response.data.error.code === 'release_exists'
+  ) {
+    return {
+      kind: 'validation',
+      message: '这个版本已经登记，请提高版本号后再登记。',
+      retryable: false,
+    }
+  }
+  return mapApiError(caught)
+}
+
+function clampPageSize(value: number): number {
+  return Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(value)))
+}
+
+function positiveInteger(value: unknown, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function nonNegativeInteger(value: unknown, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback
+}
 
 function artifactToCreateInput(
   artifact: ReleaseArtifact,
@@ -248,6 +564,12 @@ function toRelease(value: Record<string, unknown>): AdminRelease {
     publishedAt: stringValue(value.published_at),
     createdAt: stringValue(value.created_at),
   }
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
 }
 
 function stringValue(value: unknown, fallback = ''): string {

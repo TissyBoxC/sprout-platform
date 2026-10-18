@@ -171,6 +171,15 @@ function plannedReason(feature: FeatureCenterFeature): string {
       </p>
     </Transition>
     <Transition name="toast">
+      <p
+        v-if="store.partialSuccessMessage"
+        class="notice warning"
+        role="alert"
+      >
+        {{ store.partialSuccessMessage }}
+      </p>
+    </Transition>
+    <Transition name="toast">
       <p v-if="store.error || store.detailError" class="notice error" role="alert">
         {{ store.error?.message || store.detailError?.message }}
         <button
@@ -613,6 +622,12 @@ button.compact {
 }
 
 .notice.conflict {
+  border: 1px solid #f3d18e;
+  background: #fffaf0;
+  color: #6b4f2a;
+}
+
+.notice.warning {
   border: 1px solid #f3d18e;
   background: #fffaf0;
   color: #6b4f2a;

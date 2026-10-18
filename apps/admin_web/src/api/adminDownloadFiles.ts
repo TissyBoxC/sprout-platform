@@ -49,6 +49,7 @@ export interface DownloadFileUpload {
   platform: DownloadArtifactPlatform
   channel?: string
   overwrite?: boolean
+  releaseNotes?: string
 }
 
 export interface DownloadIndexStatus {
@@ -56,6 +57,7 @@ export interface DownloadIndexStatus {
   refreshedAt: string
   indexedFileCount: number
   pendingFileCount: number
+  errorCode: string
   errorMessage: string
 }
 
@@ -269,6 +271,7 @@ function toNullableDownloadFile(value: unknown): DownloadFile | null {
 
 function toIndexStatus(value: unknown): DownloadIndexStatus {
   const record = recordValue(value)
+  const hasBackendError = stringValue(record.error_message ?? record.errorMessage).trim() !== ''
   const refreshedAt = stringValue(
     record.refreshed_at ?? record.refreshedAt ?? record.generated_at ?? record.generatedAt,
   )
@@ -281,7 +284,10 @@ function toIndexStatus(value: unknown): DownloadIndexStatus {
     pendingFileCount: numberValue(
       record.pending_file_count ?? record.pendingFileCount ?? record.pending_count,
     ),
-    errorMessage: stringValue(record.error_message ?? record.errorMessage),
+    errorCode: hasBackendError ? 'download_index_unavailable' : '',
+    errorMessage: hasBackendError
+      ? '发布索引同步失败，请刷新索引或稍后重试。'
+      : '',
   }
 }
 

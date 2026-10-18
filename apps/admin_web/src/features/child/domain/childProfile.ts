@@ -50,6 +50,10 @@ export function parseParentAccountOptions(payload: unknown): ParentAccountOption
     .filter((option): option is ParentAccountOption => option !== null)
 }
 
+export function parentAccountPageHasMore(payload: unknown): boolean {
+  return recordValue(recordValue(payload).pagination).has_more === true
+}
+
 export function parseChildProfiles(payload: unknown): ChildProfile[] {
   const record = recordValue(payload)
   return arrayValue(record.children)

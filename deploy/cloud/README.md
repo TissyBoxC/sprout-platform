@@ -80,17 +80,11 @@ openssl rand -hex 32   # 分别生成数据库、Redis、令牌和加密密钥
 每个密钥生成一次后立即写入 `.env`。不要使用同一个值填充多个字段，
 `SPROUT_MFA_CREDENTIAL_KEY` 必须与 `SPROUT_AI_CREDENTIAL_KEY` 不同。
 
-`SPROUT_SUB2API_API_KEY` 不能凭空生成。它必须与 `sprout_sub2api.api_keys`
-中一条 active 记录一致。导出数据库后可用以下命令查询，并把输出填入
-`.env`：
-
-```bash
-docker exec -i <postgres-container> psql -U sprout -d sprout_sub2api \
-  -Atc "SELECT key FROM api_keys WHERE status = 'active' ORDER BY id LIMIT 1;"
-```
-
-不要直接复用本地 `voice_gateway` 容器环境变量中的值；当前本地环境已出现
-数据库记录与容器变量不一致的情况。迁移时必须以数据库查询结果为准。
+云端不再把 Sub2API 的全局凭据交给 `voice_gateway`。语音和视觉模型调用
+统一使用 `SPROUT_INTERNAL_SERVICE_TOKEN` 访问 `device_platform` 的内部
+执行接口；同一个内部令牌还用于 `device_platform` 调用 Sub2API 的内部接口。
+它必须与平台和 Sub2API 的服务间令牌一致，且只存在于 Compose 内部网络。
+上游模型密钥由 `device_platform` 加密保管并在执行代理内注入。
 
 ### 2.4 生成 MQTT 证书
 
@@ -474,11 +468,32 @@ SECURITY_URL_ALLOWLIST_UPSTREAM_HOSTS=sub.unsee.you,api.openai.com,api.anthropic
 
 修改后必须重建 Sub2API 容器，环境变量不会在运行中的容器内自动刷新。
 
+### 语音与视觉模型执行
+
+`voice_gateway` 不接收 Sub2API 或上游模型的长期 API Key。每次语音对话或
+视觉推理按以下顺序执行：
+
+1. `voice_gateway` 使用内部服务令牌向 `device_platform` 申请一次性执行
+   票证，票证限定设备、会话、模型和使用场景（`voice` 或 `vision`）。
+2. `voice_gateway` 将保持 OpenAI Chat Completions 格式的请求提交到
+   `/internal/v1/ai-execution`，并在查询参数中携带一次性票证。
+3. `device_platform` 校验并原子消费票证，解密该家长账号的上游凭据后，
+   在平台侧添加真实 `Authorization`，再把请求转发给 Sub2API。
+
+对应配置只允许出现在内部网络：
+
+| 变量 | 作用 | 生产建议 |
+| --- | --- | --- |
+| `VOICE_GATEWAY_DEVICE_PLATFORM_BASE_URL` | 平台内部执行地址 | Compose 固定为 `http://device_platform:8081` |
+| `VOICE_GATEWAY_DEVICE_PLATFORM_SERVICE_TOKEN` | 调用内部执行接口的服务令牌 | 复用随机的 `SPROUT_INTERNAL_SERVICE_TOKEN` |
+
+不要把内部服务令牌写入前端、设备固件、公网反向代理头或日志。语音网关
+启用真实模型路径时，缺失或弱于 32 字符的服务令牌会让启动直接失败。
+
 ### Sub2API
 
 | 变量 | 作用 | 生产建议 |
 | --- | --- | --- |
-| `SPROUT_SUB2API_API_KEY` | voice_gateway 调用 AI 网关的密钥 | 必须与数据库中的 active key 一致 |
 | `SPROUT_SUB2API_ADMIN_EMAIL` | Sub2API 初始化管理员邮箱 | 使用真实可用邮箱 |
 | `SPROUT_SUB2API_ADMIN_PASSWORD` | Sub2API 管理员密码 | 强随机密码 |
 | `SPROUT_SUB2API_JWT_SECRET` | Sub2API 会话签名密钥 | 32 位以上随机值 |

@@ -58,7 +58,6 @@ SPROUT_DEVICE_PLATFORM_UID
 SPROUT_DEVICE_PLATFORM_GID
 SPROUT_SERVICE_VERSION_STATE_UID
 SPROUT_SERVICE_VERSION_STATE_GID
-SPROUT_SUB2API_API_KEY
 SPROUT_SUB2API_ADMIN_EMAIL
 SPROUT_SUB2API_ADMIN_PASSWORD
 SPROUT_SUB2API_JWT_SECRET
@@ -73,6 +72,20 @@ SPROUT_DOWNLOAD_PUBLIC_BASE_URL
 for key in $required_keys; do
   require_value "$key"
 done
+
+require_http_url() {
+  key="$1"
+  value="$2"
+  scheme="$3"
+  case "$value" in
+    "$scheme"://?*)
+      ;;
+    *)
+      echo "Invalid cloud environment: $key must be an absolute $scheme URL." >&2
+      validation_failed=1
+      ;;
+  esac
+}
 
 require_numeric_id() {
   key="$1"
@@ -118,6 +131,48 @@ if [ -n "$admin_email" ] && ! printf '%s' "$admin_email" | grep -Eq '^[^@[:space
   echo "Invalid cloud environment: SPROUT_SUB2API_ADMIN_EMAIL must be a valid email address." >&2
   validation_failed=1
 fi
+
+case "$(printf '%s' "$(read_value SPROUT_VOICE_GATEWAY_WS_ENABLED)" | tr '[:upper:]' '[:lower:]')" in
+  false|0|"")
+    ;;
+  true|1)
+    for key in \
+      SPROUT_VOICE_GATEWAY_PUBLIC_WS_URL \
+      SPROUT_VOICE_GATEWAY_WS_TOKEN_SECRET \
+      SPROUT_VOICE_GATEWAY_ASR_PROVIDER \
+      SPROUT_VOICE_GATEWAY_TTS_PROVIDER \
+      SPROUT_VOICE_GATEWAY_LLM_MODEL; do
+      require_value "$key"
+    done
+
+    public_ws_url="$(read_value SPROUT_VOICE_GATEWAY_PUBLIC_WS_URL)"
+    if [ -n "$public_ws_url" ]; then
+      require_http_url SPROUT_VOICE_GATEWAY_PUBLIC_WS_URL "$public_ws_url" wss
+    fi
+
+    ws_token_secret="$(read_value SPROUT_VOICE_GATEWAY_WS_TOKEN_SECRET)"
+    if [ -n "$ws_token_secret" ] && [ "${#ws_token_secret}" -lt 32 ]; then
+      echo "Invalid cloud environment: SPROUT_VOICE_GATEWAY_WS_TOKEN_SECRET must contain at least 32 characters." >&2
+      validation_failed=1
+    fi
+
+    continuity_window="$(read_value SPROUT_VOICE_GATEWAY_WS_CONTINUITY_WINDOW_SECONDS)"
+    if [ -z "$continuity_window" ]; then
+      echo "Invalid cloud environment: SPROUT_VOICE_GATEWAY_WS_CONTINUITY_WINDOW_SECONDS is missing or empty." >&2
+      validation_failed=1
+    elif ! printf '%s' "$continuity_window" | grep -Eq '^[0-9]{1,3}$'; then
+      echo "Invalid cloud environment: SPROUT_VOICE_GATEWAY_WS_CONTINUITY_WINDOW_SECONDS must be numeric." >&2
+      validation_failed=1
+    elif [ "$continuity_window" -lt 5 ] || [ "$continuity_window" -gt 600 ]; then
+      echo "Invalid cloud environment: SPROUT_VOICE_GATEWAY_WS_CONTINUITY_WINDOW_SECONDS must be between 5 and 600." >&2
+      validation_failed=1
+    fi
+    ;;
+  *)
+    echo "Invalid cloud environment: SPROUT_VOICE_GATEWAY_WS_ENABLED must be true or false." >&2
+    validation_failed=1
+    ;;
+esac
 
 if [ "$validation_failed" -ne 0 ]; then
   exit 1

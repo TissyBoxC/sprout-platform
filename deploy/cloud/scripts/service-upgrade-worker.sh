@@ -264,7 +264,6 @@ write_result_snapshot() {
       SPROUT_MFA_CREDENTIAL_KEY \
       SPROUT_SUB2API_JWT_SECRET \
       SPROUT_SUB2API_TOTP_ENCRYPTION_KEY \
-      SPROUT_SUB2API_API_KEY \
       GITHUB_TOKEN; do
       secret_value="${!secret_name:-}"
       if [ -n "$secret_value" ]; then

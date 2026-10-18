@@ -218,8 +218,8 @@ services:
       VOICE_GATEWAY_HTTP_PORT: "8082"
       VOICE_GATEWAY_REDIS_ADDRESS: "redis:6379"
       VOICE_GATEWAY_REDIS_PASSWORD: ${SPROUT_REDIS_PASSWORD}
-      VOICE_GATEWAY_SUB2API_BASE_URL: "http://sub2api:8080"
-      VOICE_GATEWAY_SUB2API_API_KEY: ${SPROUT_SUB2API_API_KEY}
+      VOICE_GATEWAY_DEVICE_PLATFORM_BASE_URL: "http://device_platform:8081"
+      VOICE_GATEWAY_DEVICE_PLATFORM_SERVICE_TOKEN: ${SPROUT_INTERNAL_SERVICE_TOKEN}
       VOICE_GATEWAY_DATABASE_DSN: "postgres://${SPROUT_POSTGRES_USER}:${SPROUT_POSTGRES_PASSWORD}@postgres:5432/${SPROUT_DEVICE_PLATFORM_DATABASE_NAME}?sslmode=disable"
       VOICE_GATEWAY_WS_ENABLED: ${SPROUT_VOICE_GATEWAY_WS_ENABLED:-false}
       VOICE_GATEWAY_WS_PATH: ${SPROUT_VOICE_GATEWAY_WS_PATH:-/v1/voice}
@@ -235,13 +235,13 @@ services:
       VOICE_GATEWAY_TTS_MODEL: ${SPROUT_VOICE_GATEWAY_TTS_MODEL:-}
       VOICE_GATEWAY_TTS_VOICE: ${SPROUT_VOICE_GATEWAY_TTS_VOICE:-}
       VOICE_GATEWAY_LLM_PROVIDER: ${SPROUT_VOICE_GATEWAY_LLM_PROVIDER:-sub2api}
-      VOICE_GATEWAY_LLM_BASE_URL: "http://sub2api:8080"
-      VOICE_GATEWAY_LLM_API_KEY: ${SPROUT_SUB2API_API_KEY}
       VOICE_GATEWAY_LLM_MODEL: ${SPROUT_VOICE_GATEWAY_LLM_MODEL:-}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      device_platform:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://127.0.0.1:8082/readyz"]

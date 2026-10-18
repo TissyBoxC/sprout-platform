@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
+import { resetAdminSessionStores } from '@/app/sessionBoundary'
 import { createHttpClient } from '@/api/httpClient'
 import { SessionStorageAuthSessionStore } from '@/api/authSession'
 import { mapApiError, type ApiError } from '@/api/apiError'
@@ -143,6 +144,7 @@ export const useAuthStore = defineStore('admin-auth', () => {
       // Local sign-out still succeeds when the network is unavailable.
     } finally {
       sessionStore.clearSession()
+      resetAdminSessionStores()
       account.value = null
       mfaChallengeToken.value = null
     }

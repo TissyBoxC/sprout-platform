@@ -28,6 +28,7 @@ async function useAdminSession(page: Page): Promise<void> {
             email: 'admin@sprout.local',
             display_name: '管理员',
             role: 'admin',
+            admin_permissions: ['content.read'],
           },
         },
       }),
@@ -157,8 +158,8 @@ test('lists remote ui text versions with status', async ({ page }) => {
 
   await expect(page.getByRole('heading', { name: '界面文案管理' })).toBeVisible()
   await expect(page.getByText('home_welcome').first()).toBeVisible()
-  await expect(page.getByText('待审核')).toBeVisible()
-  await expect(page.getByText('已发布')).toBeVisible()
+  await expect(page.getByRole('table').getByText('待审核')).toBeVisible()
+  await expect(page.getByRole('table').getByText('已发布')).toBeVisible()
 })
 
 test('creates a draft with entries', async ({ page }) => {
@@ -168,9 +169,9 @@ test('creates a draft with entries', async ({ page }) => {
   await page.goto('/ui-text')
   await page.getByRole('button', { name: '新建文案草稿' }).click()
 
-  await page.getByLabel('文案标识').fill('home_welcome')
+  await page.getByRole('textbox', { name: '文案标识' }).fill('home_welcome')
   await page.getByLabel('键名').fill('home.title')
-  await page.getByLabel('文案').fill('欢迎回家')
+  await page.getByRole('textbox', { name: '文案', exact: true }).fill('欢迎回家')
   await page.getByRole('button', { name: '创建草稿' }).click()
 
   await expect.poll(() => createPayloads.length).toBe(1)

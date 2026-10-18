@@ -873,7 +873,7 @@ function deploymentProgress(deployment: OtaDeployment): number {
                 v-model.trim="releaseForm.signature"
                 rows="3"
                 required
-                placeholder="发布前平台会使用对应的公钥验证这段 detached signature"
+                placeholder="发布前填写与固件对应的签名内容"
               ></textarea>
             </label>
             <label class="span-two">

@@ -85,6 +85,8 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
   const statisticsDegraded = ref(false)
   const error = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  let releaseRequestGeneration = 0
+  let deploymentRequestGeneration = 0
 
   const pageCount = computed(() =>
     releasesTotal.value <= 0
@@ -142,20 +144,37 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
     if (!normalizedReleaseId) {
       return
     }
+    const requestGeneration = ++releaseRequestGeneration
+    selectedReleaseId.value = normalizedReleaseId
     isLoadingDetail.value = true
     error.value = null
     try {
       const result = await client.loadRelease(normalizedReleaseId)
+      if (
+        requestGeneration !== releaseRequestGeneration ||
+        selectedReleaseId.value !== normalizedReleaseId
+      ) {
+        return
+      }
       detail.value = result
-      selectedReleaseId.value = normalizedReleaseId
       deploymentStatus.value = 'all'
       deploymentPage.value = 1
       deploymentTotal.value = 0
       await loadDeploymentPage(1)
     } catch (caught: unknown) {
-      error.value = mapApiError(caught)
+      if (
+        requestGeneration === releaseRequestGeneration &&
+        selectedReleaseId.value === normalizedReleaseId
+      ) {
+        error.value = mapApiError(caught)
+      }
     } finally {
-      isLoadingDetail.value = false
+      if (
+        requestGeneration === releaseRequestGeneration &&
+        selectedReleaseId.value === normalizedReleaseId
+      ) {
+        isLoadingDetail.value = false
+      }
     }
   }
 
@@ -170,6 +189,7 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
     if (!releaseId) {
       return
     }
+    const requestGeneration = ++deploymentRequestGeneration
     const nextPage = Math.min(Math.max(1, page), deploymentPageCount.value)
     isLoadingDetail.value = true
     error.value = null
@@ -179,6 +199,12 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
         page: nextPage,
         pageSize: filters.value.pageSize,
       })
+      if (
+        requestGeneration !== deploymentRequestGeneration ||
+        selectedReleaseId.value !== releaseId
+      ) {
+        return
+      }
       if (detail.value !== null) {
         detail.value = {
           ...detail.value,
@@ -189,9 +215,19 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
       deploymentPage.value = result.page
       deploymentTotal.value = result.total
     } catch (caught: unknown) {
-      error.value = mapApiError(caught)
+      if (
+        requestGeneration === deploymentRequestGeneration &&
+        selectedReleaseId.value === releaseId
+      ) {
+        error.value = mapApiError(caught)
+      }
     } finally {
-      isLoadingDetail.value = false
+      if (
+        requestGeneration === deploymentRequestGeneration &&
+        selectedReleaseId.value === releaseId
+      ) {
+        isLoadingDetail.value = false
+      }
     }
   }
 
@@ -308,8 +344,11 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
   }
 
   function closeRelease(): void {
+    releaseRequestGeneration += 1
+    deploymentRequestGeneration += 1
     selectedReleaseId.value = ''
     detail.value = null
+    isLoadingDetail.value = false
     deploymentStatus.value = 'all'
     deploymentPage.value = 1
     deploymentTotal.value = 0

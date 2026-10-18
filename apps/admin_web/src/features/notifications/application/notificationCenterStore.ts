@@ -57,39 +57,60 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
   const isSubmitting = ref(false)
   const deletingId = ref('')
   const error = ref<ApiError | null>(null)
+  const statsError = ref<ApiError | null>(null)
+  const familiesError = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  let pageRequestGeneration = 0
+  let statsRequestGeneration = 0
+  let familiesRequestGeneration = 0
 
   const hasNotifications = computed(() => notifications.value.length > 0)
   const canGoPrevious = computed(() => filters.value.page > 1)
   const canGoNext = computed(() => filters.value.page < totalPages.value)
 
   async function load(): Promise<void> {
+    const requestGeneration = ++pageRequestGeneration
     isLoading.value = true
     error.value = null
-    await Promise.all([loadPage(), loadStats()])
-    isLoading.value = false
+    await Promise.all([loadPage(requestGeneration), loadStats()])
+    if (requestGeneration === pageRequestGeneration) {
+      isLoading.value = false
+    }
   }
 
-  async function loadPage(): Promise<void> {
+  async function loadPage(requestGeneration = ++pageRequestGeneration): Promise<void> {
     error.value = null
     try {
       const result = await client.loadNotifications(filters.value)
+      if (requestGeneration !== pageRequestGeneration) {
+        return
+      }
       notifications.value = result.items
       total.value = result.total
       totalPages.value = result.totalPages
     } catch (caught: unknown) {
-      error.value = mapApiError(caught)
-      notifications.value = []
-      total.value = 0
-      totalPages.value = 1
+      if (requestGeneration === pageRequestGeneration) {
+        error.value = mapApiError(caught)
+        notifications.value = []
+        total.value = 0
+        totalPages.value = 1
+      }
     }
   }
 
   async function loadStats(): Promise<void> {
+    const requestGeneration = ++statsRequestGeneration
+    statsError.value = null
     try {
-      stats.value = await client.loadStats()
-    } catch {
-      stats.value = null
+      const nextStats = await client.loadStats()
+      if (requestGeneration === statsRequestGeneration) {
+        stats.value = nextStats
+        statsError.value = null
+      }
+    } catch (caught: unknown) {
+      if (requestGeneration === statsRequestGeneration) {
+        statsError.value = mapApiError(caught)
+      }
     }
   }
 
@@ -97,14 +118,23 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
     if (families.value.length > 0 || isLoadingFamilies.value) {
       return
     }
+    const requestGeneration = ++familiesRequestGeneration
     isLoadingFamilies.value = true
+    familiesError.value = null
     try {
       const response = await httpClient.get('/api/v1/admin/families')
-      families.value = parseParentAccountOptions(response.data?.data)
-    } catch {
-      families.value = []
+      if (requestGeneration === familiesRequestGeneration) {
+        families.value = parseParentAccountOptions(response.data?.data)
+      }
+    } catch (caught: unknown) {
+      if (requestGeneration === familiesRequestGeneration) {
+        families.value = []
+        familiesError.value = mapApiError(caught)
+      }
     } finally {
-      isLoadingFamilies.value = false
+      if (requestGeneration === familiesRequestGeneration) {
+        isLoadingFamilies.value = false
+      }
     }
   }
 
@@ -160,6 +190,7 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
     deletingId,
     error,
     families,
+    familiesError,
     filters,
     goToPage,
     hasNotifications,
@@ -170,10 +201,12 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
     load,
     loadFamilies,
     loadPage,
+    loadStats,
     notifications,
     remove,
     setFilters,
     stats,
+    statsError,
     total,
     totalPages,
   }

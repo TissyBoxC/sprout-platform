@@ -1,5 +1,6 @@
 import type { AxiosInstance, AxiosRequestConfig } from 'axios'
 
+import { resetAdminSessionStores } from '@/app/sessionBoundary'
 import type { AuthSessionStore } from './authSession'
 
 const sessionEstablishmentPaths = [
@@ -30,7 +31,7 @@ export function createRefreshCoordinator(
 
     const refreshToken = sessionStore.readRefreshToken()
     if (refreshToken === null) {
-      sessionStore.clearSession()
+      clearRejectedSession(sessionStore)
       throw new Error('refresh token is unavailable')
     }
 
@@ -41,7 +42,7 @@ export function createRefreshCoordinator(
       })
       .catch((error: unknown) => {
         if (isDefinitiveRefreshFailure(error)) {
-          sessionStore.clearSession()
+          clearRejectedSession(sessionStore)
         }
         throw error
       })
@@ -50,6 +51,16 @@ export function createRefreshCoordinator(
       })
 
     return pendingRefresh
+  }
+}
+
+function clearRejectedSession(sessionStore: AuthSessionStore): void {
+  sessionStore.clearSession()
+  try {
+    resetAdminSessionStores()
+  } catch {
+    // A feature cleanup failure must not prevent credentials from being
+    // discarded. The next route transition still renders the signed-out UI.
   }
 }
 

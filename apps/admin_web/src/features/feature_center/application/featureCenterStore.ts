@@ -73,6 +73,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
   const detailError = ref<ApiError | null>(null)
   const conflictMessage = ref('')
   const lastMessage = ref('')
+  let detailRequestGeneration = 0
 
   const categories = computed(() => {
     const byId = new Map<string, string>()
@@ -162,7 +163,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
 
   const canCheckHealth = computed(
     () =>
-      authStore.canReadFeatureCenter &&
+      authStore.canManageFeatureCenter &&
       isDetailReady.value &&
       selectedFeature.value !== null &&
       selectedFeature.value.status !== 'planned',
@@ -256,6 +257,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
       return
     }
 
+    const requestGeneration = ++detailRequestGeneration
     selectedFeatureId.value = normalizedId
     const listFeature =
       features.value.find((feature) => feature.id === normalizedId) ?? null
@@ -275,13 +277,32 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
     isDetailLoading.value = true
     try {
       const detail = await client.getFeature(normalizedId)
+      if (
+        requestGeneration !== detailRequestGeneration ||
+        selectedFeatureId.value !== normalizedId
+      ) {
+        return
+      }
       upsertFeature(detail)
+      if (selectedFeatureId.value !== normalizedId) {
+        return
+      }
       applyFeatureToEditor(detail)
       isDetailReady.value = true
     } catch (caught: unknown) {
-      detailError.value = mapApiError(caught)
+      if (
+        requestGeneration === detailRequestGeneration &&
+        selectedFeatureId.value === normalizedId
+      ) {
+        detailError.value = mapApiError(caught)
+      }
     } finally {
-      isDetailLoading.value = false
+      if (
+        requestGeneration === detailRequestGeneration &&
+        selectedFeatureId.value === normalizedId
+      ) {
+        isDetailLoading.value = false
+      }
     }
   }
 
@@ -420,6 +441,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
   }
 
   function clearSelection(): void {
+    detailRequestGeneration += 1
     selectedFeatureId.value = ''
     selectedFeature.value = null
     draftConfig.value = {}

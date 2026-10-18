@@ -311,6 +311,9 @@ export function createAdminRouter() {
       return authStore.isSignedIn ? '/' : true
     }
     if (!authStore.isSignedIn) {
+      if (authStore.error?.retryable === true) {
+        return true
+      }
       return '/login'
     }
     const requiredPermission = to.meta.requiredPermission

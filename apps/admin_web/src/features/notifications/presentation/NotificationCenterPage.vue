@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
 import type {
   AdminNotification,
@@ -18,6 +18,8 @@ const store = useNotificationCenterStore()
 const showComposer = ref(false)
 const pendingDelete = ref<AdminNotification | null>(null)
 const form = reactive<NotificationFormState>(emptyForm())
+const searchText = ref(store.filters.query)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
 
 const categoryOptions: Array<{ value: NotificationCategory; label: string }> = [
   { value: 'system_announcement', label: '系统公告' },
@@ -74,6 +76,13 @@ onMounted(() => {
   void store.load()
 })
 
+onBeforeUnmount(() => {
+  if (searchTimer !== null) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+})
+
 function emptyForm(): NotificationFormState {
   return {
     category: 'system_announcement',
@@ -102,6 +111,11 @@ function closeComposer(): void {
 }
 
 function resetFilters(): void {
+  if (searchTimer !== null) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+  searchText.value = ''
   void store.setFilters({
     category: 'all',
     audience: 'all',
@@ -109,6 +123,21 @@ function resetFilters(): void {
     query: '',
     page: 1,
   })
+}
+
+function updateSearch(value: string): void {
+  searchText.value = value
+  if (searchTimer !== null) {
+    clearTimeout(searchTimer)
+  }
+  searchTimer = setTimeout(() => {
+    searchTimer = null
+    void store.setFilters({ query: value })
+  }, 300)
+}
+
+function reloadNotifications(): void {
+  void store.loadPage()
 }
 
 function toggleChannel(channel: string): void {
@@ -212,7 +241,7 @@ function formatTime(value: string): string {
   }
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) {
-    return value
+    return '时间待确认'
   }
   return date.toLocaleString('zh-CN', {
     month: '2-digit',
@@ -249,6 +278,14 @@ function formatTime(value: string): string {
       </p>
     </Transition>
 
+    <section v-if="store.statsError" class="support-error" role="alert">
+      <div>
+        <strong>通知统计暂时无法读取</strong>
+        <p>{{ store.statsError.message }}</p>
+      </div>
+      <button type="button" class="text-button" @click="store.loadStats">重新读取统计</button>
+    </section>
+
     <section v-if="hasStats && store.stats" class="metric-grid" aria-label="通知概览">
       <article>
         <span>全部通知</span>
@@ -276,10 +313,10 @@ function formatTime(value: string): string {
       <label class="search-field">
         <span class="visually-hidden">搜索通知</span>
         <input
-          :value="store.filters.query"
+          :value="searchText"
           type="search"
           placeholder="搜索标题或内容"
-          @input="store.setFilters({ query: ($event.target as HTMLInputElement).value })"
+          @input="updateSearch(($event.target as HTMLInputElement).value)"
         />
       </label>
       <select
@@ -323,7 +360,7 @@ function formatTime(value: string): string {
         <strong>{{ store.error.message }}</strong>
         <p>通知列表暂时无法读取，可以重新尝试。</p>
       </div>
-      <button type="button" class="text-button" @click="store.loadPage">重新加载</button>
+      <button type="button" class="text-button" @click="reloadNotifications">重新加载</button>
     </div>
 
     <div v-else-if="!store.hasNotifications" class="state-panel empty-state">
@@ -491,6 +528,12 @@ function formatTime(value: string): string {
                 </option>
               </select>
               <small v-if="store.isLoadingFamilies">正在读取家长账号…</small>
+              <small v-else-if="store.familiesError" class="form-hint">
+                {{ store.familiesError.message }}
+                <button type="button" class="inline-retry" @click.stop.prevent="store.loadFamilies">
+                  重新读取家长
+                </button>
+              </small>
               <small v-else-if="store.families.length === 0">还没有家长账号。</small>
             </label>
 
@@ -934,6 +977,39 @@ td small {
   color: #1d6b3f;
 }
 
+.support-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 16px;
+  border: 1px solid #efb4c5;
+  border-radius: var(--sprout-radius-control);
+  background: #fff7fa;
+  color: #8e2948;
+}
+
+.support-error strong {
+  color: #84223f;
+}
+
+.support-error p {
+  margin: 4px 0 0;
+  color: #a53a58;
+  font-size: 13px;
+}
+
+.inline-retry {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #c94175;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1121,7 +1197,8 @@ td small {
   .page-header,
   .filter-bar,
   .pagination,
-  .modal-footer {
+  .modal-footer,
+  .support-error {
     flex-direction: column;
   }
 

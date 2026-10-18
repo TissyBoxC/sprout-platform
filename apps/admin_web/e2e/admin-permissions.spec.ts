@@ -15,6 +15,7 @@ async function useAdminSession(page: Page): Promise<void> {
             email: 'admin@sprout.local',
             display_name: '管理员',
             role: 'admin',
+            admin_permissions: ['admins.read'],
           },
         },
       }),

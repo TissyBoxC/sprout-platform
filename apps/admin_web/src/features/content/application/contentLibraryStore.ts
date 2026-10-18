@@ -61,6 +61,7 @@ export const useContentLibraryStore = defineStore('admin-content-library', () =>
   const selectedPackageId = ref('')
   const selectedPackage = ref<ContentPackage | null>(null)
   const isDetailLoading = ref(false)
+  let packageDetailRequestGeneration = 0
 
   const downloadFiles = ref<DownloadFile[]>([])
   const isLoadingDownloadFiles = ref(false)
@@ -97,21 +98,44 @@ export const useContentLibraryStore = defineStore('admin-content-library', () =>
   }
 
   async function openPackage(packageId: string): Promise<void> {
-    selectedPackageId.value = packageId
+    const normalizedPackageId = packageId.trim()
+    if (normalizedPackageId === '') {
+      return
+    }
+    const requestGeneration = ++packageDetailRequestGeneration
+    selectedPackageId.value = normalizedPackageId
     selectedPackage.value =
-      packages.value.find((item) => item.packageId === packageId) ?? null
+      packages.value.find((item) => item.packageId === normalizedPackageId) ?? null
     isDetailLoading.value = true
     error.value = null
     try {
-      selectedPackage.value = await client.loadPackage(packageId)
+      const packageDetail = await client.loadPackage(normalizedPackageId)
+      if (
+        requestGeneration !== packageDetailRequestGeneration ||
+        selectedPackageId.value !== normalizedPackageId
+      ) {
+        return
+      }
+      selectedPackage.value = packageDetail
     } catch (caught: unknown) {
-      error.value = mapApiError(caught)
+      if (
+        requestGeneration === packageDetailRequestGeneration &&
+        selectedPackageId.value === normalizedPackageId
+      ) {
+        error.value = mapApiError(caught)
+      }
     } finally {
-      isDetailLoading.value = false
+      if (
+        requestGeneration === packageDetailRequestGeneration &&
+        selectedPackageId.value === normalizedPackageId
+      ) {
+        isDetailLoading.value = false
+      }
     }
   }
 
   function closePackage(): void {
+    packageDetailRequestGeneration += 1
     selectedPackageId.value = ''
     selectedPackage.value = null
     isDetailLoading.value = false

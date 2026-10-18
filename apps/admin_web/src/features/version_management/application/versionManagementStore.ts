@@ -43,6 +43,7 @@ export const useVersionManagementStore = defineStore('admin-version-management',
   const error = ref<ApiError | null>(null)
   const lastMessage = ref('')
   const checkWarning = ref('')
+  let operationRequestGeneration = 0
 
   const services = computed(() => snapshot.value?.services ?? [])
   const outdatedServices = computed(() =>
@@ -206,19 +207,30 @@ export const useVersionManagementStore = defineStore('admin-version-management',
   }
 
   async function selectOperation(operationId: string): Promise<void> {
+    const normalizedOperationId = operationId.trim()
+    if (normalizedOperationId === '') {
+      return
+    }
+    const requestGeneration = ++operationRequestGeneration
     error.value = null
     try {
-      const operation = await client.loadServiceVersionOperation(operationId)
+      const operation = await client.loadServiceVersionOperation(normalizedOperationId)
+      if (requestGeneration !== operationRequestGeneration) {
+        return
+      }
       if (operation !== null) {
         upsertOperation(operation)
         selectedOperation.value = operation
       }
     } catch (caught: unknown) {
-      error.value = mapApiError(caught)
+      if (requestGeneration === operationRequestGeneration) {
+        error.value = mapApiError(caught)
+      }
     }
   }
 
   function closeOperation(): void {
+    operationRequestGeneration += 1
     selectedOperation.value = null
   }
 

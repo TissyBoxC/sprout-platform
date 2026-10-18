@@ -180,7 +180,7 @@ function acknowledgementLabel(entry: OfflinePolicyAcknowledgement): string {
       正在读取离线下载策略…
     </div>
 
-    <form v-else class="policy-form" @submit.prevent="submit">
+    <form v-else class="policy-form" novalidate @submit.prevent="submit">
       <div class="toggle-row">
         <label class="switch">
           <input v-model="form.offlineEnabled" type="checkbox" />

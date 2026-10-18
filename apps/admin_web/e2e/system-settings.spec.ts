@@ -15,6 +15,7 @@ async function useAdminSession(page: Page): Promise<void> {
             email: 'admin@sprout.local',
             display_name: '管理员',
             role: 'admin',
+            admin_permissions: ['settings.read', 'settings.manage'],
           },
         },
       }),
@@ -102,5 +103,7 @@ test('allows editing after the settings load succeeds', async ({ page }) => {
   await page.goto('/settings')
 
   await expect(page.getByLabel('默认同时对话数量')).toBeVisible()
-  await expect(page.getByRole('button', { name: '保存系统设置' })).toBeEnabled()
+  await expect(
+    page.locator('header').getByRole('button', { name: '保存系统设置' }),
+  ).toBeEnabled()
 })

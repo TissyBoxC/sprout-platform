@@ -62,3 +62,37 @@ func TestWriteErrorUsesStableCode(t *testing.T) {
 		t.Fatal("authentication failure must not be retryable")
 	}
 }
+
+func TestWriteSuccessWithNoticePreservesDataAndAddsNotice(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/example", nil)
+	recorder := httptest.NewRecorder()
+
+	WriteSuccessWithNotice(
+		recorder,
+		request,
+		http.StatusAccepted,
+		map[string]any{"saved": true},
+		NoticeBody{
+			Code:    "audit_write_failed",
+			Message: "操作已保存，但安全记录没有完成。",
+		},
+	)
+
+	var envelope Envelope
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want accepted", recorder.Code)
+	}
+	if envelope.Error != nil {
+		t.Fatalf("success notice must not be modeled as an error: %+v", envelope.Error)
+	}
+	if envelope.Notice == nil || envelope.Notice.Code != "audit_write_failed" {
+		t.Fatalf("unexpected notice: %+v", envelope.Notice)
+	}
+	data, ok := envelope.Data.(map[string]any)
+	if !ok || data["saved"] != true {
+		t.Fatalf("data shape changed: %#v", envelope.Data)
+	}
+}

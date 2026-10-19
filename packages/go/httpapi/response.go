@@ -17,10 +17,19 @@ const (
 
 // Envelope is the common response shape for successful and failed requests.
 type Envelope struct {
-	SchemaVersion string     `json:"schema_version"`
-	RequestID     string     `json:"request_id"`
-	Data          any        `json:"data"`
-	Error         *ErrorBody `json:"error"`
+	SchemaVersion string      `json:"schema_version"`
+	RequestID     string      `json:"request_id"`
+	Data          any         `json:"data"`
+	Error         *ErrorBody  `json:"error"`
+	Notice        *NoticeBody `json:"notice,omitempty"`
+}
+
+// NoticeBody communicates a completed operation with a non-fatal follow-up
+// required from the operator. It never replaces the machine-readable error
+// contract because the primary operation did succeed.
+type NoticeBody struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 // ErrorBody contains a stable machine-readable code and user-safe message.
@@ -49,6 +58,25 @@ func WriteSuccess(
 		RequestID:     requestID(request),
 		Data:          data,
 		Error:         nil,
+	})
+}
+
+// WriteSuccessWithNotice writes a successful envelope with an operator-facing
+// non-fatal notice. Data keeps its original shape so existing clients can
+// continue reading the completed operation.
+func WriteSuccessWithNotice(
+	response http.ResponseWriter,
+	request *http.Request,
+	status int,
+	data any,
+	notice NoticeBody,
+) {
+	writeEnvelope(response, status, Envelope{
+		SchemaVersion: SchemaVersion,
+		RequestID:     requestID(request),
+		Data:          data,
+		Error:         nil,
+		Notice:        &notice,
 	})
 }
 

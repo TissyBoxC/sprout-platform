@@ -30,6 +30,30 @@
           "$ref": "https://sprout.example/contracts/errors/error_response.schema.json#/$defs/error"
         }
       ]
+    },
+    "notice": {
+      "$ref": "#/$defs/notice"
+    }
+  },
+  "$defs": {
+    "notice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{2,63}$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
     }
   }
 }

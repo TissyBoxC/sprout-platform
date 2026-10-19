@@ -3,12 +3,14 @@
 class ApiResponseEnvelope {
   final dynamic data;
   final ErrorResponseSchema? error;
+  final Notice? notice;
   final String requestId;
   final String schemaVersion;
 
   ApiResponseEnvelope({
     required this.data,
     required this.error,
+    this.notice,
     required this.requestId,
     required this.schemaVersion,
   });
@@ -33,6 +35,13 @@ class Details {
   final String? reason;
 
   Details({this.field, this.reason});
+}
+
+class Notice {
+  final String code;
+  final String message;
+
+  Notice({required this.code, required this.message});
 }
 
 class SchemaVersion {

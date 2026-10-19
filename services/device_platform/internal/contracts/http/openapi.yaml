@@ -11023,6 +11023,24 @@ components:
           oneOf:
             - type: "null"
             - $ref: "#/components/schemas/Error"
+        notice:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/ResponseNotice"
+    ResponseNotice:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          pattern: "^[a-z][a-z0-9_]{2,63}$"
+        message:
+          type: string
+          minLength: 1
+          maxLength: 256
     AIExecutionTicketEnvelope:
       allOf:
         - $ref: "#/components/schemas/ResponseEnvelope"

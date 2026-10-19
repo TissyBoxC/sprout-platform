@@ -9,6 +9,11 @@ import {
   type AIModelOption,
 } from '@/api/adminOperations'
 import { createHttpClient } from '@/api/httpClient'
+import {
+  DEFAULT_GUARDIAN_CONSENT_VERSION,
+  readGuardianConsentVersion,
+  writeGuardianConsentVersion,
+} from '@/features/system/domain/guardianConsentVersion'
 
 export interface SystemSettings {
   defaultBalanceUsd: number
@@ -17,6 +22,7 @@ export interface SystemSettings {
   registrationEnabled: boolean
   smsVerificationEnabled: boolean
   emailLoginEnabled: boolean
+  guardianConsentVersion: string
   minorModeDefaultEnabled: boolean
   outputModerationEnabled: boolean
   crisisInterventionEnabled: boolean
@@ -40,6 +46,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   registrationEnabled: true,
   smsVerificationEnabled: true,
   emailLoginEnabled: true,
+  guardianConsentVersion: DEFAULT_GUARDIAN_CONSENT_VERSION,
   minorModeDefaultEnabled: true,
   outputModerationEnabled: true,
   crisisInterventionEnabled: true,
@@ -81,7 +88,7 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
     integrationNotice.value = ''
     try {
       const response = await httpClient.get('/api/v1/admin/settings')
-      settings.value = toSettings(response.data.data?.settings ?? {})
+      settings.value = systemSettingsFromResponse(response.data.data?.settings ?? {})
       const savedDefaultModels = [...settings.value.defaultModels]
       version.value = numberValue(response.data.data?.version, 0)
       isLoaded.value = true
@@ -109,10 +116,10 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
     lastWarning.value = ''
     try {
       const response = await httpClient.put('/api/v1/admin/settings', {
-        settings: toPayload(settings.value),
+        settings: systemSettingsToPayload(settings.value),
         expected_version: version.value,
       })
-      settings.value = toSettings(response.data.data?.settings ?? {})
+      settings.value = systemSettingsFromResponse(response.data.data?.settings ?? {})
       version.value = numberValue(response.data.data?.version, version.value)
       lastWarning.value = apiNoticeWarning(readApiNotice(response.data))
       lastMessage.value = '系统设置已保存。'
@@ -238,7 +245,7 @@ function fastestAvailableModel(models: AIModelOption[]): AIModelOption | null {
   )
 }
 
-function toSettings(value: Record<string, unknown>): SystemSettings {
+export function systemSettingsFromResponse(value: Record<string, unknown>): SystemSettings {
   const defaults = DEFAULT_SYSTEM_SETTINGS
   const ai = recordValue(value.ai)
   const account = recordValue(value.account)
@@ -257,6 +264,7 @@ function toSettings(value: Record<string, unknown>): SystemSettings {
       defaults.smsVerificationEnabled,
     ),
     emailLoginEnabled: booleanValue(account.email_login_enabled, defaults.emailLoginEnabled),
+    guardianConsentVersion: readGuardianConsentVersion(account),
     minorModeDefaultEnabled: booleanValue(
       safety.minor_mode_default,
       defaults.minorModeDefaultEnabled,
@@ -295,7 +303,7 @@ function toSettings(value: Record<string, unknown>): SystemSettings {
   }
 }
 
-function toPayload(settings: SystemSettings): Record<string, unknown> {
+export function systemSettingsToPayload(settings: SystemSettings): Record<string, unknown> {
   return {
     ai: {
       default_balance_usd: settings.defaultBalanceUsd,
@@ -306,6 +314,7 @@ function toPayload(settings: SystemSettings): Record<string, unknown> {
       registration_enabled: settings.registrationEnabled,
       phone_verification_required: settings.smsVerificationEnabled,
       email_login_enabled: settings.emailLoginEnabled,
+      guardian_consent_version: writeGuardianConsentVersion(settings),
     },
     safety: {
       // 平台不变量：后端会强制写回 true。前端固定发送 true，避免旧页面

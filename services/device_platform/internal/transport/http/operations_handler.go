@@ -70,6 +70,10 @@ func (handler adminHandler) getSettings(
 		writeError(response, request, http.StatusInternalServerError, "service_error", "暂时无法读取系统设置")
 		return
 	}
+	if settings.Account.GuardianConsentVersion == "" {
+		settings.Account.GuardianConsentVersion =
+			operationsdomain.DefaultGuardianConsentVersion
+	}
 	writeSuccess(response, request, http.StatusOK, settingsResponse{
 		Settings: *settings,
 		Version:  version,

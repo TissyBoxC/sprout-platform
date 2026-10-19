@@ -105,6 +105,7 @@ func (r *PostgresRepository) RuntimePolicy(
 		RegistrationEnabled:       settings.Account.RegistrationEnabled,
 		PhoneVerificationRequired: settings.Account.PhoneVerificationRequired,
 		EmailLoginEnabled:         settings.Account.EmailLoginEnabled,
+		GuardianConsentVersion:    settings.Account.GuardianConsentVersion,
 		DefaultBalanceUSD:         settings.AI.DefaultBalanceUSD,
 		DefaultConcurrency:        settings.AI.DefaultConcurrency,
 		DefaultModels:             append([]string(nil), settings.AI.DefaultModels...),
@@ -249,6 +250,10 @@ func (r *PostgresRepository) GetSettings(
 	}
 	settings.ApplyVoiceDefaults()
 	settings.Retention.ApplyUsageReportDefaults()
+	if settings.Account.GuardianConsentVersion == "" {
+		settings.Account.GuardianConsentVersion =
+			domain.DefaultGuardianConsentVersion
+	}
 	return &settings, version, nil
 }
 

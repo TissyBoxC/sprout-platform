@@ -42,6 +42,7 @@ import (
 	motionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
 	notificationhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/handler"
 	notificationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
+	operationsdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/domain"
 	operationsservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/service"
 	otaservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/service"
 	policeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
@@ -199,6 +200,12 @@ func NewRouter(options RouterOptions) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthHandler)
 	mux.HandleFunc("GET /readyz", readyHandler(options.ReadinessProbes))
+	if options.OperationsService != nil {
+		mux.HandleFunc(
+			"GET /api/v1/public/registration-policy",
+			publicRegistrationPolicyHandler(options.OperationsService),
+		)
+	}
 
 	if options.AuthService != nil {
 		authHandler := authHandler{
@@ -254,6 +261,7 @@ func NewRouter(options RouterOptions) http.Handler {
 			childHandler := childHandler{
 				service:       options.ChildService,
 				policyService: options.ParentPolicyService,
+				consentReader: options.OperationsService,
 			}
 			childAuthorizer := options.FamilyService
 			requireChildRead := func(next http.HandlerFunc) http.HandlerFunc {
@@ -3025,6 +3033,56 @@ func runtimeHandler(response http.ResponseWriter, request *http.Request) {
 		"status":           "running",
 		"protocol_version": httpapi.SchemaVersion,
 	})
+}
+
+// publicRegistrationPolicyHandler exposes only the values an unauthenticated
+// registration or child-consent form needs. It never returns AI defaults,
+// retention settings, moderation policy, credentials, or operator metadata.
+func publicRegistrationPolicyHandler(
+	reader interface {
+		RuntimePolicy(ctx context.Context) (*operationsdomain.RuntimePolicy, error)
+	},
+) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		if reader == nil {
+			writeError(
+				response,
+				request,
+				http.StatusServiceUnavailable,
+				"registration_policy_unavailable",
+				"注册信息暂时不可用，请稍后重试",
+			)
+			return
+		}
+		policy, err := reader.RuntimePolicy(request.Context())
+		if err != nil || policy == nil {
+			writeError(
+				response,
+				request,
+				http.StatusServiceUnavailable,
+				"registration_policy_unavailable",
+				"注册信息暂时不可用，请稍后重试",
+			)
+			return
+		}
+		consentVersion := strings.TrimSpace(policy.GuardianConsentVersion)
+		if consentVersion == "" {
+			writeError(
+				response,
+				request,
+				http.StatusServiceUnavailable,
+				"registration_policy_unavailable",
+				"注册信息暂时不可用，请稍后重试",
+			)
+			return
+		}
+		writeSuccess(response, request, http.StatusOK, map[string]any{
+			"registration_enabled":        policy.RegistrationEnabled,
+			"phone_verification_required": policy.PhoneVerificationRequired,
+			"email_login_enabled":         policy.EmailLoginEnabled,
+			"guardian_consent_version":    consentVersion,
+		})
+	}
 }
 
 func requireServiceToken(expectedToken string, next http.Handler) http.Handler {

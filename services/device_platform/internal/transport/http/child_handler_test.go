@@ -3,11 +3,14 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	childdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/domain"
+	operationsdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/domain"
 	policydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/domain"
 )
 
@@ -63,6 +66,135 @@ func (stub *stubPolicyService) UpdateWithVersion(
 		return nil, stub.updateErr
 	}
 	return stub.updatedPolicy, nil
+}
+
+type consentRecordingChildService struct {
+	consentVersion string
+}
+
+func (stub *consentRecordingChildService) Create(
+	_ context.Context,
+	familyID string,
+	input childdomain.ProfileInput,
+	guardianConsentVersion string,
+) (*childdomain.Child, error) {
+	stub.consentVersion = guardianConsentVersion
+	return &childdomain.Child{
+		ID:                     "child_001",
+		FamilyID:               familyID,
+		Nickname:               input.Nickname,
+		GuardianConsentVersion: guardianConsentVersion,
+	}, nil
+}
+
+func (*consentRecordingChildService) List(
+	context.Context,
+	string,
+) ([]childdomain.Child, error) {
+	return nil, nil
+}
+
+func (*consentRecordingChildService) Get(
+	context.Context,
+	string,
+	string,
+) (*childdomain.Child, error) {
+	return nil, nil
+}
+
+func (*consentRecordingChildService) Update(
+	context.Context,
+	string,
+	string,
+	childdomain.ProfileInput,
+) (*childdomain.Child, error) {
+	return nil, nil
+}
+
+func (*consentRecordingChildService) Delete(context.Context, string, string) error {
+	return nil
+}
+
+type staticConsentReader struct {
+	version string
+	err     error
+}
+
+func (reader staticConsentReader) RuntimePolicy(
+	context.Context,
+) (*operationsdomain.RuntimePolicy, error) {
+	if reader.err != nil {
+		return nil, reader.err
+	}
+	return &operationsdomain.RuntimePolicy{
+		GuardianConsentVersion: reader.version,
+	}, nil
+}
+
+func TestCreateChildRecordsOperatorPublishedConsentVersion(t *testing.T) {
+	childService := &consentRecordingChildService{}
+	handler := childHandler{
+		service:       childService,
+		consentReader: staticConsentReader{version: "2026-06"},
+	}
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/children",
+		strings.NewReader(`{
+			"nickname": "小芽",
+			"age_tier": "age_3_4",
+			"interests": ["story"],
+			"content_categories": ["story"],
+			"guardian_consent": true
+		}`),
+	)
+	request = withOwnerFamilyContext(request, "family_001")
+	recorder := httptest.NewRecorder()
+
+	handler.create(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", recorder.Code, recorder.Body.String())
+	}
+	if childService.consentVersion != "2026-06" {
+		t.Fatalf(
+			"recorded consent version = %q, want %q",
+			childService.consentVersion,
+			"2026-06",
+		)
+	}
+}
+
+func TestCreateChildFailsClosedWhenConsentPolicyIsUnavailable(t *testing.T) {
+	childService := &consentRecordingChildService{}
+	handler := childHandler{
+		service: childService,
+		consentReader: staticConsentReader{
+			err: errors.New("settings unavailable"),
+		},
+	}
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/children",
+		strings.NewReader(`{
+			"nickname": "小芽",
+			"age_tier": "age_3_4",
+			"interests": [],
+			"content_categories": [],
+			"guardian_consent": true
+		}`),
+	)
+	request = withOwnerFamilyContext(request, "family_001")
+	recorder := httptest.NewRecorder()
+
+	handler.create(recorder, request)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503: %s", recorder.Code, recorder.Body.String())
+	}
+	if childService.consentVersion != "" {
+		t.Fatal("child profile was created without an authoritative consent version")
+	}
 }
 
 // TestUpdatePolicyReturnsConflictForStaleVersion proves the transport maps a

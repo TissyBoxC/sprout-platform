@@ -127,6 +127,16 @@ class _EmptySecureStore implements SecureStore {
 
 class _FailingAuthApi implements AuthApi {
   @override
+  Future<RegistrationPolicy> registrationPolicy() async {
+    return const RegistrationPolicy(
+      registrationEnabled: true,
+      phoneVerificationRequired: true,
+      emailLoginEnabled: true,
+      guardianConsentVersion: '2026-03',
+    );
+  }
+
+  @override
   Future<AuthResult> login({
     required String identifier,
     required String password,
@@ -223,6 +233,16 @@ class _FailingAuthApi implements AuthApi {
 
 class _InvalidCredentialsAuthApi implements AuthApi {
   @override
+  Future<RegistrationPolicy> registrationPolicy() async {
+    return const RegistrationPolicy(
+      registrationEnabled: true,
+      phoneVerificationRequired: true,
+      emailLoginEnabled: true,
+      guardianConsentVersion: '2026-03',
+    );
+  }
+
+  @override
   Future<AuthResult> login({
     required String identifier,
     required String password,
@@ -318,6 +338,16 @@ class _InvalidCredentialsAuthApi implements AuthApi {
 }
 
 class _FailingRegisterAuthApi implements AuthApi {
+  @override
+  Future<RegistrationPolicy> registrationPolicy() async {
+    return const RegistrationPolicy(
+      registrationEnabled: true,
+      phoneVerificationRequired: true,
+      emailLoginEnabled: true,
+      guardianConsentVersion: '2026-03',
+    );
+  }
+
   @override
   Future<AuthResult> register({
     required String phone,

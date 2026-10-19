@@ -231,11 +231,12 @@ type aiModelResponse struct {
 }
 
 type createParentRequest struct {
-	Phone              string `json:"phone"`
-	Password           string `json:"password"`
-	GuardianFamilyName string `json:"guardian_family_name"`
-	ChildNickname      string `json:"child_nickname"`
-	ChildBirthday      string `json:"child_birthday"`
+	Phone                  string `json:"phone"`
+	Password               string `json:"password"`
+	GuardianFamilyName     string `json:"guardian_family_name"`
+	ChildNickname          string `json:"child_nickname"`
+	ChildBirthday          string `json:"child_birthday"`
+	GuardianConsentVersion string `json:"guardian_consent_version"`
 }
 
 func (handler adminHandler) createParent(
@@ -256,7 +257,7 @@ func (handler adminHandler) createParent(
 			GuardianFamilyName:     payload.GuardianFamilyName,
 			ChildNickname:          payload.ChildNickname,
 			ChildBirthday:          payload.ChildBirthday,
-			GuardianConsentVersion: "2026-01",
+			GuardianConsentVersion: strings.TrimSpace(payload.GuardianConsentVersion),
 		},
 	)
 	if err != nil {

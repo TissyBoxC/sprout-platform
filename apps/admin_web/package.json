@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
-    "test:unit": "tsc --ignoreConfig --module nodenext --moduleResolution nodenext --target es2022 --strict --skipLibCheck --types node --rootDir . --outDir .tmp/unit tests/unit/apiNotice.node-test.ts tests/unit/familyMembershipBoundary.node-test.ts && node --test .tmp/unit/tests/unit/apiNotice.node-test.js .tmp/unit/tests/unit/familyMembershipBoundary.node-test.js",
+    "test:unit": "tsc --ignoreConfig --module nodenext --moduleResolution nodenext --target es2022 --strict --skipLibCheck --types node --rootDir . --outDir .tmp/unit tests/unit/apiNotice.node-test.ts tests/unit/familyMembershipBoundary.node-test.ts tests/unit/systemSettingsConsent.node-test.ts && node --test .tmp/unit/tests/unit/apiNotice.node-test.js .tmp/unit/tests/unit/familyMembershipBoundary.node-test.js .tmp/unit/tests/unit/systemSettingsConsent.node-test.js",
     "test:e2e": "playwright test",
     "build-only": "vite build",
     "type-check": "vue-tsc --build",

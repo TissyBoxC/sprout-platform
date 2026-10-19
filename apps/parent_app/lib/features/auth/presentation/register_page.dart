@@ -6,6 +6,7 @@ import '../../../core/theme/app_motion.dart';
 import '../../../shared/widgets/app_reveal.dart';
 import '../../../app/router/app_router.dart';
 import '../application/auth_controller.dart';
+import '../data/auth_api.dart';
 
 /// Guardian registration screen with an explicit consent requirement.
 class RegisterPage extends ConsumerStatefulWidget {
@@ -29,8 +30,38 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
   bool _hasGuardianConsent = false;
   bool _isSubmitting = false;
   bool _isSendingVerificationCode = false;
+  bool _isLoadingPolicy = true;
+  RegistrationPolicy? _policy;
   String? _errorMessage;
   String? _verificationStatusMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPolicy();
+  }
+
+  Future<void> _loadPolicy() async {
+    try {
+      final policy = await ref.read(authApiProvider).registrationPolicy();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _policy = policy;
+        _isLoadingPolicy = false;
+        _errorMessage = null;
+      });
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoadingPolicy = false;
+        _errorMessage = authErrorMessage(error);
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -304,9 +335,17 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '当前监护人协议版本：$guardianConsentVersion',
+                        '当前监护人协议版本：${_policy?.guardianConsentVersion ?? '正在读取'}',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
+                      if (_policy != null && !_policy!.registrationEnabled)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            '新家长注册当前已暂停，已有账号仍可登录。',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
                       AnimatedSize(
                         duration: AppMotion.standard,
                         curve: AppMotion.enterCurve,
@@ -325,7 +364,10 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                       ),
                       const SizedBox(height: 20),
                       FilledButton(
-                        onPressed: _isSubmitting ? null : _submit,
+                        onPressed:
+                            _isSubmitting || _isLoadingPolicy || _policy == null
+                            ? null
+                            : _submit,
                         child: Text(_isSubmitting ? '正在创建…' : '创建账号'),
                       ),
                     ],
@@ -355,7 +397,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                 Text('监护人说明', style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 12),
                 Text(
-                  '当前版本：$guardianConsentVersion',
+                  '当前版本：${_policy?.guardianConsentVersion ?? '正在读取'}',
                   style: Theme.of(context).textTheme.labelLarge,
                 ),
                 const SizedBox(height: 12),

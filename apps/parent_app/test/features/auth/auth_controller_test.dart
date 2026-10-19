@@ -432,6 +432,16 @@ class _AuthApiStub implements AuthApi {
   int logoutCount = 0;
 
   @override
+  Future<RegistrationPolicy> registrationPolicy() async {
+    return const RegistrationPolicy(
+      registrationEnabled: true,
+      phoneVerificationRequired: true,
+      emailLoginEnabled: true,
+      guardianConsentVersion: '2026-03',
+    );
+  }
+
+  @override
   Future<AuthResult> refresh(String refreshToken) {
     throw UnimplementedError();
   }

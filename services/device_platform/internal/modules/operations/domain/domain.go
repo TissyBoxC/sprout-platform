@@ -209,6 +209,33 @@ type Settings struct {
 	voiceConfigured bool
 }
 
+// DefaultGuardianConsentVersion is the conservative agreement revision used
+// only when an existing settings document predates the configurable field.
+// New clients read the effective revision from public metadata instead of
+// hard-coding it.
+const DefaultGuardianConsentVersion = "2026-01"
+
+// ValidateGuardianConsentVersion keeps public agreement revisions bounded and
+// machine-readable. An invalid operator value fails closed instead of signing
+// consent with an arbitrary string.
+func ValidateGuardianConsentVersion(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if len(value) < 4 || len(value) > 64 || !strings.Contains(value, "-") {
+		return "", ErrInvalidSettings
+	}
+	for _, character := range value {
+		switch {
+		case character >= '0' && character <= '9':
+		case character >= 'a' && character <= 'z':
+		case character >= 'A' && character <= 'Z':
+		case character == '.' || character == '-' || character == '_':
+		default:
+			return "", ErrInvalidSettings
+		}
+	}
+	return value, nil
+}
+
 // DefaultVoiceSettings returns the conservative realtime voice defaults used
 // when a settings document predates the voice section or a client omits it.
 func DefaultVoiceSettings() VoiceSettings {
@@ -275,6 +302,10 @@ type AccountSettings struct {
 	RegistrationEnabled       bool `json:"registration_enabled"`
 	PhoneVerificationRequired bool `json:"phone_verification_required"`
 	EmailLoginEnabled         bool `json:"email_login_enabled"`
+	// GuardianConsentVersion is the revision the public client must present
+	// when a guardian accepts the current agreement. It is public metadata,
+	// never a secret, and is persisted with the rest of the settings document.
+	GuardianConsentVersion string `json:"guardian_consent_version"`
 }
 
 // SafetySettings controls child safety defaults and media retention.
@@ -393,6 +424,7 @@ type RuntimePolicy struct {
 	RegistrationEnabled       bool
 	PhoneVerificationRequired bool
 	EmailLoginEnabled         bool
+	GuardianConsentVersion    string
 	DefaultBalanceUSD         float64
 	DefaultConcurrency        int
 	DefaultModels             []string

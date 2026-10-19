@@ -284,7 +284,7 @@ func (s *Service) Register(
 	input.ChildBirthday = strings.TrimSpace(input.ChildBirthday)
 	input.GuardianConsentVersion = strings.TrimSpace(input.GuardianConsentVersion)
 	if input.GuardianConsentVersion == "" {
-		input.GuardianConsentVersion = defaultConsent
+		input.GuardianConsentVersion = policy.GuardianConsentVersion
 	}
 	if err := validateRegistration(input); err != nil {
 		return nil, nil, nil, err
@@ -1247,6 +1247,7 @@ func (s *Service) registrationPolicy(
 			RegistrationEnabled:       true,
 			PhoneVerificationRequired: true,
 			EmailLoginEnabled:         true,
+			GuardianConsentVersion:    defaultConsent,
 		}, nil
 	}
 	policy, err := s.policyReader.RuntimePolicy(ctx)
@@ -1255,6 +1256,9 @@ func (s *Service) registrationPolicy(
 	}
 	if policy == nil {
 		return nil, domain.ErrRegistrationDisabled
+	}
+	if strings.TrimSpace(policy.GuardianConsentVersion) == "" {
+		policy.GuardianConsentVersion = defaultConsent
 	}
 	return policy, nil
 }

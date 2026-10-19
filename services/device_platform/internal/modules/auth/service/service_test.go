@@ -260,6 +260,51 @@ func TestRegisterCanSkipPhoneVerificationWhenPolicyAllowsIt(t *testing.T) {
 	}
 }
 
+func TestRegisterUsesPublishedGuardianConsentVersion(t *testing.T) {
+	policyVersion := "2026-06"
+	childProvisioner := &memoryChildProvisioner{}
+	service, err := New(Options{
+		Repository:    &memoryRepository{},
+		TokenIssuer:   mustTokenIssuer(t),
+		PhoneVerifier: noOpPhoneVerifier{},
+		PolicyReader: staticPolicyReader{policy: operationsdomain.RuntimePolicy{
+			RegistrationEnabled:       true,
+			PhoneVerificationRequired: false,
+			EmailLoginEnabled:         true,
+			GuardianConsentVersion:    policyVersion,
+		}},
+		ChildProvisioner: childProvisioner,
+		AccessTTL:        time.Minute,
+		RefreshTTL:       time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("create authentication service: %v", err)
+	}
+
+	account, _, _, err := service.Register(context.Background(), domain.RegisterInput{
+		Phone:         "13800138000",
+		Password:      "sprout123",
+		ChildNickname: "小芽",
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if account.GuardianConsentVersion != policyVersion {
+		t.Fatalf(
+			"account consent version = %q, want %q",
+			account.GuardianConsentVersion,
+			policyVersion,
+		)
+	}
+	if childProvisioner.guardianConsentVersion != policyVersion {
+		t.Fatalf(
+			"child consent version = %q, want %q",
+			childProvisioner.guardianConsentVersion,
+			policyVersion,
+		)
+	}
+}
+
 func TestCreateParentSkipsSMSButKeepsGuardianRoleAndPasswordRules(t *testing.T) {
 	repository := &memoryRepository{}
 	service, err := New(Options{
@@ -544,8 +589,9 @@ func (r *memoryRepository) DeleteParentAccount(
 }
 
 type memoryChildProvisioner struct {
-	createdProfiles int
-	fail            bool
+	createdProfiles        int
+	guardianConsentVersion string
+	fail                   bool
 }
 
 func (p *memoryChildProvisioner) SyncRegistrationProfile(
@@ -553,12 +599,13 @@ func (p *memoryChildProvisioner) SyncRegistrationProfile(
 	_ string,
 	_ string,
 	_ string,
-	_ string,
+	guardianConsentVersion string,
 ) (*childdomain.Child, error) {
 	if p.fail {
 		return nil, errors.New("child profile failed")
 	}
 	p.createdProfiles++
+	p.guardianConsentVersion = guardianConsentVersion
 	return &childdomain.Child{}, nil
 }
 

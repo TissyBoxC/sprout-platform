@@ -113,7 +113,8 @@ func validSettings() *domain.Settings {
 			DefaultModels:      []string{"model-a"},
 		},
 		Account: domain.AccountSettings{
-			RegistrationEnabled: true,
+			RegistrationEnabled:    true,
+			GuardianConsentVersion: domain.DefaultGuardianConsentVersion,
 		},
 		Update: domain.UpdateSettings{
 			Channel: domain.ReleaseChannelStable,
@@ -301,6 +302,66 @@ func TestUpdateSettingsForcesMinorModeDefaultOn(t *testing.T) {
 	}
 	if !saved.Safety.MinorModeDefault {
 		t.Fatal("minor mode default was persisted as disabled")
+	}
+}
+
+func TestUpdateSettingsPreservesPublishedGuardianConsentVersion(t *testing.T) {
+	repository := &fakeSettingsRepository{currentVersion: 3}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	settings := validSettings()
+	settings.Account.GuardianConsentVersion = " 2026-06 "
+
+	saved, _, err := service.UpdateSettings(
+		context.Background(),
+		settings,
+		"actor-id",
+		3,
+	)
+	if err != nil {
+		t.Fatalf("update settings: %v", err)
+	}
+	if saved.Account.GuardianConsentVersion != "2026-06" {
+		t.Fatalf(
+			"guardian consent version = %q, want %q",
+			saved.Account.GuardianConsentVersion,
+			"2026-06",
+		)
+	}
+}
+
+func TestUpdateSettingsKeepsStoredConsentVersionForLegacyClients(t *testing.T) {
+	repository := &fakeSettingsRepository{
+		currentVersion: 3,
+		savedSettings: &domain.Settings{
+			Account: domain.AccountSettings{
+				GuardianConsentVersion: "2026-05",
+			},
+		},
+	}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	settings := validSettings()
+	settings.Account.GuardianConsentVersion = ""
+
+	saved, _, err := service.UpdateSettings(
+		context.Background(),
+		settings,
+		"actor-id",
+		3,
+	)
+	if err != nil {
+		t.Fatalf("update settings: %v", err)
+	}
+	if saved.Account.GuardianConsentVersion != "2026-05" {
+		t.Fatalf(
+			"legacy update overwrote consent version with %q",
+			saved.Account.GuardianConsentVersion,
+		)
 	}
 }
 

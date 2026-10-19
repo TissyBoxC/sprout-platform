@@ -28,7 +28,11 @@ func (s *Service) CreateParent(
 	input.ChildBirthday = strings.TrimSpace(input.ChildBirthday)
 	input.GuardianConsentVersion = strings.TrimSpace(input.GuardianConsentVersion)
 	if input.GuardianConsentVersion == "" {
-		input.GuardianConsentVersion = defaultConsent
+		policy, err := s.registrationPolicy(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		input.GuardianConsentVersion = policy.GuardianConsentVersion
 	}
 	if err := validateRegistration(input); err != nil {
 		return nil, nil, err

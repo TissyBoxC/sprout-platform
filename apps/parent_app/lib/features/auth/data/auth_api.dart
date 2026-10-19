@@ -25,6 +25,41 @@ class AuthResult {
   }
 }
 
+/// Public registration policy shared by the sign-up and child-profile forms.
+///
+/// This intentionally contains only the switches needed before authentication
+/// and the current guardian agreement revision. It never includes AI defaults,
+/// moderation internals, retention limits, or operator-only secrets.
+class RegistrationPolicy {
+  const RegistrationPolicy({
+    required this.registrationEnabled,
+    required this.phoneVerificationRequired,
+    required this.emailLoginEnabled,
+    required this.guardianConsentVersion,
+  });
+
+  final bool registrationEnabled;
+  final bool phoneVerificationRequired;
+  final bool emailLoginEnabled;
+  final String guardianConsentVersion;
+
+  factory RegistrationPolicy.fromJson(Map<String, Object?> json) {
+    final consentVersion = _requiredString(
+      json['guardian_consent_version'],
+      'guardian_consent_version',
+    ).trim();
+    if (consentVersion.isEmpty) {
+      throw const FormatException('missing guardian_consent_version');
+    }
+    return RegistrationPolicy(
+      registrationEnabled: json['registration_enabled'] == true,
+      phoneVerificationRequired: json['phone_verification_required'] == true,
+      emailLoginEnabled: json['email_login_enabled'] == true,
+      guardianConsentVersion: consentVersion,
+    );
+  }
+}
+
 /// Daily usage and device summary shown on the guardian home screen.
 class ParentOverview {
   const ParentOverview({
@@ -196,6 +231,16 @@ class AuthApi {
   const AuthApi(this._apiClient);
 
   final ApiClient _apiClient;
+
+  /// Reads only public registration switches and the current guardian
+  /// agreement revision. AI, retention, and moderation policy are deliberately
+  /// absent from the response.
+  Future<RegistrationPolicy> registrationPolicy() async {
+    final response = await _apiClient.get('/api/v1/public/registration-policy');
+    return RegistrationPolicy.fromJson(
+      Map<String, Object?>.from(response['data'] as Map<Object?, Object?>),
+    );
+  }
 
   Future<AuthResult> register({
     required String phone,

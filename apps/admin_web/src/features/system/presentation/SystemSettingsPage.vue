@@ -221,6 +221,21 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
               </span>
               <input v-model="store.settings.emailLoginEnabled" type="checkbox" />
             </label>
+            <label class="consent-version-field">
+              <span>监护人协议版本</span>
+              <input
+                v-model.trim="store.settings.guardianConsentVersion"
+                type="text"
+                minlength="4"
+                maxlength="64"
+                pattern="[0-9A-Za-z._-]*[0-9A-Za-z][0-9A-Za-z._-]*"
+                placeholder="例如 2026-01"
+                required
+              />
+              <small class="field-hint">
+                新账号注册和儿童档案创建会记录这个版本。发布新协议后更新版本，已有授权记录不会被改写。
+              </small>
+            </label>
           </div>
         </section>
 

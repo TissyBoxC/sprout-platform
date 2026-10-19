@@ -917,6 +917,23 @@ paths:
           $ref: "#/components/responses/AuthUnprocessable"
         "500":
           $ref: "#/components/responses/AuthServiceError"
+  /api/v1/public/registration-policy:
+    get:
+      summary: Read public registration and guardian-consent policy metadata
+      security: []
+      responses:
+        "200":
+          description: Registration switches and the current guardian agreement revision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicRegistrationPolicyEnvelope"
+        "503":
+          description: Registration policy is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
   /api/v1/auth/login:
     post:
       summary: Sign a guardian in with phone or email and password
@@ -24064,6 +24081,31 @@ components:
             - audit_write_failed
         message:
           type: string
+    PublicRegistrationPolicyEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - registration_enabled
+                - phone_verification_required
+                - email_login_enabled
+                - guardian_consent_version
+              properties:
+                registration_enabled:
+                  type: boolean
+                phone_verification_required:
+                  type: boolean
+                email_login_enabled:
+                  type: boolean
+                guardian_consent_version:
+                  type: string
+                  minLength: 4
+                  maxLength: 64
+                  pattern: "^[0-9A-Za-z._-]*[0-9A-Za-z][0-9A-Za-z._-]*$"
     FeatureCenterConfigUpdateRequest:
       type: object
       additionalProperties: false
@@ -24114,6 +24156,7 @@ components:
         - registration_enabled
         - phone_verification_required
         - email_login_enabled
+        - guardian_consent_version
       properties:
         registration_enabled:
           type: boolean
@@ -24121,6 +24164,11 @@ components:
           type: boolean
         email_login_enabled:
           type: boolean
+        guardian_consent_version:
+          type: string
+          minLength: 4
+          maxLength: 64
+          pattern: "^[0-9A-Za-z._-]*[0-9A-Za-z][0-9A-Za-z._-]*$"
     AdminSafetySettings:
       type: object
       additionalProperties: false

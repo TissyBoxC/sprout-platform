@@ -65,6 +65,7 @@ test('allows editing after the settings load succeeds', async ({ page }) => {
               registration_enabled: true,
               phone_verification_required: false,
               email_login_enabled: true,
+              guardian_consent_version: '2026-03',
             },
             safety: {
               minor_mode_default: true,
@@ -103,7 +104,78 @@ test('allows editing after the settings load succeeds', async ({ page }) => {
   await page.goto('/settings')
 
   await expect(page.getByLabel('默认同时对话数量')).toBeVisible()
+  await expect(page.getByLabel('监护人协议版本')).toHaveValue('2026-03')
   await expect(
     page.locator('header').getByRole('button', { name: '保存系统设置' }),
   ).toBeEnabled()
+})
+
+test('preserves the published guardian consent revision when saving', async ({ page }) => {
+  await useAdminSession(page)
+  let savedSettings: Record<string, unknown> | null = null
+
+  await page.route('**/api/v1/admin/settings', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            version: 7,
+            settings: {
+              ai: {
+                default_balance_usd: 0,
+                default_concurrency: 1,
+                default_models: [],
+              },
+              account: {
+                registration_enabled: true,
+                phone_verification_required: true,
+                email_login_enabled: true,
+                guardian_consent_version: '2026-05',
+              },
+              safety: {},
+              voice: {},
+              update: {},
+              retention: {},
+            },
+          },
+        }),
+      })
+      return
+    }
+    const payload = route.request().postDataJSON() as {
+      settings: Record<string, unknown>
+      expected_version: number
+    }
+    savedSettings = payload.settings
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          version: 8,
+          settings: payload.settings,
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/ai/**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: {} }),
+    })
+  })
+
+  await page.goto('/settings')
+
+  const versionInput = page.getByLabel('监护人协议版本')
+  await expect(versionInput).toHaveValue('2026-05')
+  await versionInput.fill('2026-06')
+  await page.locator('header').getByRole('button', { name: '保存系统设置' }).click()
+
+  await expect(page.getByText('系统设置已保存。')).toBeVisible()
+  expect(savedSettings).not.toBeNull()
+  expect(
+    (savedSettings as { account?: { guardian_consent_version?: string } }).account
+      ?.guardian_consent_version,
+  ).toBe('2026-06')
 })

@@ -38,11 +38,6 @@ import '../../vision/application/vision_controller.dart';
 import '../../wearable/application/wearable_controller.dart';
 import '../data/auth_api.dart';
 
-// Registration currently has no public consent-metadata endpoint. Keep this
-// value aligned with the server's accepted version, and show the consent
-// details in-app rather than calling the authenticated privacy endpoint.
-const guardianConsentVersion = '2026-01';
-
 /// Immutable authentication state consumed by the router and pages.
 class AuthState {
   const AuthState({
@@ -96,6 +91,7 @@ class AuthState {
 class AuthController extends AsyncNotifier<AuthState> {
   late AuthApi _authApi;
   late SessionManager _sessionManager;
+  RegistrationPolicy? _registrationPolicy;
 
   @override
   Future<AuthState> build() async {
@@ -155,6 +151,7 @@ class AuthController extends AsyncNotifier<AuthState> {
   }) async {
     state = const AsyncLoading();
     final nextState = await AsyncValue.guard(() async {
+      final policy = await _loadRegistrationPolicy();
       final session = await _authApi.register(
         phone: phone,
         phoneVerificationCode: phoneVerificationCode,
@@ -162,7 +159,7 @@ class AuthController extends AsyncNotifier<AuthState> {
         guardianFamilyName: guardianFamilyName,
         childNickname: childNickname,
         childBirthday: childBirthday,
-        guardianConsentVersion: guardianConsentVersion,
+        guardianConsentVersion: policy.guardianConsentVersion,
       );
       await _saveSession(session);
       _resetUserData();
@@ -175,6 +172,18 @@ class AuthController extends AsyncNotifier<AuthState> {
     state = nextState;
     return nextState.hasValue && nextState.value?.isSignedIn == true;
   }
+
+  /// Loads the public agreement revision immediately before registration so a
+  /// long-lived form cannot submit a stale consent version after an operator
+  /// publishes a new agreement. A load failure blocks registration instead of
+  /// signing with a client-side default.
+  Future<RegistrationPolicy> _loadRegistrationPolicy() async {
+    final policy = await _authApi.registrationPolicy();
+    _registrationPolicy = policy;
+    return policy;
+  }
+
+  RegistrationPolicy? get registrationPolicySnapshot => _registrationPolicy;
 
   Future<bool> login({
     required String identifier,

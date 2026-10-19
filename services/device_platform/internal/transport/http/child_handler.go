@@ -8,12 +8,14 @@ import (
 
 	childdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/domain"
 	childservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
+	operationsdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/domain"
 	policydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/domain"
 	policeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
 )
 
-// DefaultGuardianConsentVersion is the consent revision the platform records
-// when a guardian confirms the current notice.
+// DefaultGuardianConsentVersion is retained for explicit test doubles. The
+// production child route resolves the operator-published revision from
+// operations policy before recording consent.
 const DefaultGuardianConsentVersion = "2026-01"
 
 // childService is the guardian-facing child profile surface.
@@ -64,6 +66,9 @@ type policyService interface {
 type childHandler struct {
 	service       childService
 	policyService policyService
+	consentReader interface {
+		RuntimePolicy(ctx context.Context) (*operationsdomain.RuntimePolicy, error)
+	}
 }
 
 type childProfileRequest struct {
@@ -136,6 +141,16 @@ func (handler childHandler) create(
 		writeError(response, request, http.StatusUnprocessableEntity, "guardian_consent_required", "请确认已获得监护人同意")
 		return
 	}
+	consentVersion := DefaultGuardianConsentVersion
+	if handler.consentReader != nil {
+		policy, err := handler.consentReader.RuntimePolicy(request.Context())
+		if err != nil || policy == nil ||
+			strings.TrimSpace(policy.GuardianConsentVersion) == "" {
+			writeError(response, request, http.StatusServiceUnavailable, "consent_unavailable", "监护人协议暂时无法确认，请稍后重试")
+			return
+		}
+		consentVersion = policy.GuardianConsentVersion
+	}
 	child, err := handler.service.Create(
 		request.Context(),
 		familyID,
@@ -145,7 +160,7 @@ func (handler childHandler) create(
 			Interests:         payload.Interests,
 			ContentCategories: payload.ContentCategories,
 		},
-		DefaultGuardianConsentVersion,
+		consentVersion,
 	)
 	if err != nil {
 		writeChildError(response, request, err)

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 )
 
@@ -93,6 +94,33 @@ func TestRetentionApplyUsageReportDefaultsPreservesExplicitValue(t *testing.T) {
 	settings.Retention.ApplyUsageReportDefaults()
 	if settings.Retention.UsageReportDays != 0 {
 		t.Fatalf("explicit zero was overwritten with %d", settings.Retention.UsageReportDays)
+	}
+}
+
+func TestValidateGuardianConsentVersionAcceptsPublishedRevision(t *testing.T) {
+	t.Parallel()
+
+	version, err := ValidateGuardianConsentVersion(" 2026-06 ")
+	if err != nil {
+		t.Fatalf("validate consent version: %v", err)
+	}
+	if version != "2026-06" {
+		t.Fatalf("consent version = %q, want %q", version, "2026-06")
+	}
+}
+
+func TestValidateGuardianConsentVersionRejectsAmbiguousValues(t *testing.T) {
+	t.Parallel()
+
+	for _, value := range []string{"", "20", "2026 06", "2026/06", "协议-2026"} {
+		value := value
+		t.Run(value, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := ValidateGuardianConsentVersion(value); !errors.Is(err, ErrInvalidSettings) {
+				t.Fatalf("ValidateGuardianConsentVersion(%q) error = %v, want ErrInvalidSettings", value, err)
+			}
+		})
 	}
 }
 

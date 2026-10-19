@@ -300,6 +300,21 @@ func (s *Service) UpdateSettings(
 		settings.Retention.ApplyUsageReportDefaults()
 		settings.Retention.SetUsageReportConfigured()
 	}
+	if strings.TrimSpace(settings.Account.GuardianConsentVersion) == "" {
+		// Older console versions do not know this field. Preserve the stored
+		// revision or seed the conservative baseline on the first save.
+		current, _, err := s.repository.GetSettings(ctx)
+		if err != nil && !errors.Is(err, domain.ErrSettingsNotFound) {
+			return nil, 0, err
+		}
+		settings.Account.GuardianConsentVersion =
+			domain.DefaultGuardianConsentVersion
+		if current != nil &&
+			strings.TrimSpace(current.Account.GuardianConsentVersion) != "" {
+			settings.Account.GuardianConsentVersion =
+				current.Account.GuardianConsentVersion
+		}
+	}
 	if err := validateSettings(settings); err != nil {
 		return nil, 0, err
 	}
@@ -459,6 +474,13 @@ func validateSettings(settings *domain.Settings) error {
 	// stored value stays visible for audit, but an API caller must not be able
 	// to disable it through a settings update.
 	settings.Safety.MinorModeDefault = true
+	consentVersion, err := domain.ValidateGuardianConsentVersion(
+		settings.Account.GuardianConsentVersion,
+	)
+	if err != nil {
+		return err
+	}
+	settings.Account.GuardianConsentVersion = consentVersion
 	if settings.AI.DefaultBalanceUSD < 0 ||
 		settings.AI.DefaultConcurrency < 1 ||
 		settings.AI.DefaultConcurrency > 100 {

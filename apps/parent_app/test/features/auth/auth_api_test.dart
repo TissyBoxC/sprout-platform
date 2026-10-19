@@ -4,6 +4,22 @@ import 'package:parent_app/features/auth/data/auth_api.dart';
 
 void main() {
   test(
+    'reads public registration policy with the current consent revision',
+    () async {
+      final client = _RecordingApiClient();
+      final api = AuthApi(client);
+
+      final policy = await api.registrationPolicy();
+
+      expect(client.path, '/api/v1/public/registration-policy');
+      expect(policy.registrationEnabled, isTrue);
+      expect(policy.phoneVerificationRequired, isTrue);
+      expect(policy.emailLoginEnabled, isFalse);
+      expect(policy.guardianConsentVersion, '2026-03');
+    },
+  );
+
+  test(
     'registration sends phone-first guardian and child profile fields',
     () async {
       final client = _RecordingApiClient();
@@ -189,6 +205,16 @@ class _RecordingApiClient implements ApiClient {
           'balance_usd': 9.0,
           'device_count': 2,
           'online_device_count': 1,
+        },
+      };
+    }
+    if (path == '/api/v1/public/registration-policy') {
+      return {
+        'data': {
+          'registration_enabled': true,
+          'phone_verification_required': true,
+          'email_login_enabled': false,
+          'guardian_consent_version': '2026-03',
         },
       };
     }

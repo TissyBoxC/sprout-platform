@@ -2,10 +2,16 @@ package repository
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // purgeExemptTables are tables that intentionally survive an account purge.
@@ -154,5 +160,146 @@ func TestPurgeExpiredRecordsCoversEphemeralTables(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("no expires_at tables were discovered; migration scan is broken")
+	}
+}
+
+type purgeTestDatabase struct {
+	results []pgconn.CommandTag
+	errs    []error
+	args    [][]any
+	calls   int
+}
+
+func (d *purgeTestDatabase) Exec(
+	_ context.Context,
+	_ string,
+	args ...any,
+) (pgconn.CommandTag, error) {
+	d.calls++
+	d.args = append(d.args, append([]any(nil), args...))
+	if len(d.errs) > 0 {
+		err := d.errs[0]
+		d.errs = d.errs[1:]
+		if err != nil {
+			return pgconn.CommandTag{}, err
+		}
+	}
+	if len(d.results) == 0 {
+		return pgconn.NewCommandTag("DELETE 0"), nil
+	}
+	result := d.results[0]
+	d.results = d.results[1:]
+	return result, nil
+}
+
+func (d *purgeTestDatabase) Query(
+	context.Context,
+	string,
+	...any,
+) (pgx.Rows, error) {
+	return nil, errors.New("unexpected query in retention test")
+}
+
+func (d *purgeTestDatabase) QueryRow(
+	context.Context,
+	string,
+	...any,
+) pgx.Row {
+	return purgeFailingRow{err: errors.New("unexpected query row")}
+}
+
+func (d *purgeTestDatabase) Begin(context.Context) (pgx.Tx, error) {
+	return nil, errors.New("unexpected transaction in retention test")
+}
+
+type purgeFailingRow struct {
+	err error
+}
+
+func (row purgeFailingRow) Scan(...any) error {
+	return row.err
+}
+
+func TestPurgeRetainedRecordsOnlyRunsEnabledWindows(t *testing.T) {
+	database := &purgeTestDatabase{
+		results: []pgconn.CommandTag{
+			pgconn.NewCommandTag("DELETE 2"),
+			pgconn.NewCommandTag("DELETE 3"),
+			pgconn.NewCommandTag("DELETE 1"),
+			pgconn.NewCommandTag("DELETE 4"),
+		},
+	}
+	repository := &PostgresRepository{pool: database}
+	imageBefore := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	conversationBefore := time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)
+
+	purge, err := repository.PurgeRetainedRecords(
+		context.Background(),
+		imageBefore,
+		conversationBefore,
+	)
+	if err != nil {
+		t.Fatalf("purge retained records: %v", err)
+	}
+	if purge.VisionResults != 2 ||
+		purge.VisionTasks != 3 ||
+		purge.VideoCalls != 1 ||
+		purge.DeviceVideoCalls != 4 ||
+		purge.Total() != 10 {
+		t.Fatalf("unexpected purge result: %+v", purge)
+	}
+	if database.calls != 4 {
+		t.Fatalf("delete calls = %d, want 4", database.calls)
+	}
+	if len(database.args) != 4 ||
+		!database.args[0][0].(time.Time).Equal(imageBefore) ||
+		!database.args[1][0].(time.Time).Equal(imageBefore) ||
+		!database.args[2][0].(time.Time).Equal(conversationBefore) ||
+		len(database.args[3]) != 0 {
+		t.Fatalf("unexpected retention arguments: %#v", database.args)
+	}
+}
+
+func TestPurgeRetainedRecordsSkipsDisabledWindow(t *testing.T) {
+	database := &purgeTestDatabase{
+		results: []pgconn.CommandTag{pgconn.NewCommandTag("DELETE 1")},
+	}
+	repository := &PostgresRepository{pool: database}
+	imageBefore := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+
+	purge, err := repository.PurgeRetainedRecords(
+		context.Background(),
+		imageBefore,
+		time.Time{},
+	)
+	if err != nil {
+		t.Fatalf("purge retained records: %v", err)
+	}
+	if database.calls != 2 || purge.Total() != 1 {
+		t.Fatalf("calls=%d purge=%+v, want only image statements", database.calls, purge)
+	}
+	for _, args := range database.args {
+		if len(args) != 1 || !args[0].(time.Time).Equal(imageBefore) {
+			t.Fatalf("disabled conversation window received args: %#v", database.args)
+		}
+	}
+}
+
+func TestPurgeRetainedRecordsFailsVisibleWithoutContinuing(t *testing.T) {
+	database := &purgeTestDatabase{
+		results: []pgconn.CommandTag{pgconn.NewCommandTag("DELETE 1")},
+		errs:    []error{nil, errors.New("database unavailable")},
+	}
+	repository := &PostgresRepository{pool: database}
+	_, err := repository.PurgeRetainedRecords(
+		context.Background(),
+		time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC),
+	)
+	if err == nil {
+		t.Fatal("expected the failed delete to be reported")
+	}
+	if database.calls != 2 {
+		t.Fatalf("statements after failure = %d, want 2", database.calls)
 	}
 }

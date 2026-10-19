@@ -55,6 +55,11 @@ type Repository interface {
 		ctx context.Context,
 		now time.Time,
 	) (ExpiredRecordPurge, error)
+	PurgeRetainedRecords(
+		ctx context.Context,
+		imageBefore time.Time,
+		conversationBefore time.Time,
+	) (RetainedRecordPurge, error)
 	PurgeUsageReports(
 		ctx context.Context,
 		before time.Time,
@@ -93,6 +98,24 @@ func (purge ExpiredRecordPurge) Total() int64 {
 		purge.FamilyInvitations
 }
 
+// RetainedRecordPurge reports bounded history removed by the operator's
+// disclosed media and conversation windows. Raw audio is never persisted by
+// the platform, so it intentionally has no deletion counter.
+type RetainedRecordPurge struct {
+	VisionResults    int64 `json:"vision_results"`
+	VisionTasks      int64 `json:"vision_tasks"`
+	VideoCalls       int64 `json:"video_calls"`
+	DeviceVideoCalls int64 `json:"device_video_calls"`
+}
+
+// Total returns the number of retained history rows removed.
+func (purge RetainedRecordPurge) Total() int64 {
+	return purge.VisionResults +
+		purge.VisionTasks +
+		purge.VideoCalls +
+		purge.DeviceVideoCalls
+}
+
 // UsageReportPurge reports how many aggregated usage-ledger rows were removed
 // by the usage-report retention window.
 type UsageReportPurge struct {
@@ -107,7 +130,17 @@ func (purge UsageReportPurge) Total() int64 {
 
 // PostgresRepository is the PostgreSQL-backed privacy repository.
 type PostgresRepository struct {
-	pool *pgxpool.Pool
+	pool privacyDatabase
+}
+
+// privacyDatabase is the narrow SQL surface used by the repository. pgxpool
+// satisfies it in production while tests can use a deterministic transaction
+// double without constructing a live PostgreSQL server.
+type privacyDatabase interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
 // NewPostgresRepository creates a privacy repository.
@@ -849,6 +882,86 @@ func (r *PostgresRepository) PurgeExpiredRecords(
 			)
 		}
 		*statement.dest = tag.RowsAffected()
+	}
+	return purge, nil
+}
+
+// PurgeRetainedRecords applies the operator-configured history windows. Vision
+// results and tasks are image-derived history; video calls are conversation
+// metadata. The statements run independently so one failure remains visible
+// and already completed deletions are not repeated.
+func (r *PostgresRepository) PurgeRetainedRecords(
+	ctx context.Context,
+	imageBefore time.Time,
+	conversationBefore time.Time,
+) (RetainedRecordPurge, error) {
+	var purge RetainedRecordPurge
+	imageStatements := []struct {
+		query string
+		dest  *int64
+		label string
+	}{
+		{
+			query: `DELETE FROM vision_results
+				WHERE created_at < $1`,
+			dest:  &purge.VisionResults,
+			label: "vision results",
+		},
+		{
+			query: `DELETE FROM vision_tasks
+				WHERE created_at < $1`,
+			dest:  &purge.VisionTasks,
+			label: "vision tasks",
+		},
+	}
+	if !imageBefore.IsZero() {
+		for _, statement := range imageStatements {
+			tag, err := r.pool.Exec(ctx, statement.query, imageBefore)
+			if err != nil {
+				return purge, fmt.Errorf(
+					"purge retained %s: %w",
+					statement.label,
+					err,
+				)
+			}
+			*statement.dest = tag.RowsAffected()
+		}
+	}
+	conversationStatements := []struct {
+		query string
+		dest  *int64
+		label string
+	}{
+		{
+			query: `DELETE FROM video_calls
+				WHERE started_at < $1`,
+			dest:  &purge.VideoCalls,
+			label: "video calls",
+		},
+		{
+			query: `DELETE FROM device_video_status
+				WHERE last_call_id IS NOT NULL
+				  AND last_call_id NOT IN (SELECT id FROM video_calls)`,
+			dest:  &purge.DeviceVideoCalls,
+			label: "device video call references",
+		},
+	}
+	if !conversationBefore.IsZero() {
+		for index, statement := range conversationStatements {
+			var args []any
+			if index == 0 {
+				args = []any{conversationBefore}
+			}
+			tag, err := r.pool.Exec(ctx, statement.query, args...)
+			if err != nil {
+				return purge, fmt.Errorf(
+					"purge retained %s: %w",
+					statement.label,
+					err,
+				)
+			}
+			*statement.dest = tag.RowsAffected()
+		}
 	}
 	return purge, nil
 }

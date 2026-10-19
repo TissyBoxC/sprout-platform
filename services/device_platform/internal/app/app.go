@@ -1121,6 +1121,15 @@ func runRetentionWorker(
 					"total", total,
 				)
 			}
+			retainedPurged, err := privacy.PurgeRetainedRecords(ctx)
+			if err != nil {
+				logger.Error("retained history retention worker failed", "error", err)
+			} else if total := retainedPurged.Total(); total > 0 {
+				logger.Info(
+					"retained history retention worker purged old records",
+					"total", total,
+				)
+			}
 		}
 		if vision != nil {
 			expiredTasks, deletedResults, err := vision.PruneExpired(ctx)

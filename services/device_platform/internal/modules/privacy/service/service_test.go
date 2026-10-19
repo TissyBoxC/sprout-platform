@@ -27,6 +27,8 @@ type memoryRepository struct {
 	purged            []string
 	purgedExpiredAt   []time.Time
 	purgedUsageBefore []time.Time
+	purgedImageBefore []time.Time
+	purgedTalkBefore  []time.Time
 	nextDeletionSeq   int
 	readiness         domain.Readiness
 	readinessErr      error
@@ -231,6 +233,16 @@ func (r *memoryRepository) PurgeUsageReports(
 ) (repository.UsageReportPurge, error) {
 	r.purgedUsageBefore = append(r.purgedUsageBefore, before)
 	return repository.UsageReportPurge{}, nil
+}
+
+func (r *memoryRepository) PurgeRetainedRecords(
+	_ context.Context,
+	imageBefore time.Time,
+	conversationBefore time.Time,
+) (repository.RetainedRecordPurge, error) {
+	r.purgedImageBefore = append(r.purgedImageBefore, imageBefore)
+	r.purgedTalkBefore = append(r.purgedTalkBefore, conversationBefore)
+	return repository.RetainedRecordPurge{}, nil
 }
 
 func (r *memoryRepository) AppendAudit(
@@ -1115,6 +1127,104 @@ func TestPurgeExpiredRecordsUsesInjectedClock(t *testing.T) {
 			"purge used %v, want the injected clock %v",
 			repository.purgedExpiredAt[0],
 			testNow(),
+		)
+	}
+}
+
+func TestPurgeRetainedRecordsUsesSeparateImageAndConversationWindows(t *testing.T) {
+	repository := &memoryRepository{}
+	service := newTestService(
+		t,
+		repository,
+		&fakeParentAccounts{},
+		&fakeDevices{},
+		&fakeAIDeletion{},
+		func(options *Options) {
+			options.Retention = &fakeRetention{settings: &operationsdomain.Settings{
+				Retention: operationsdomain.RetentionSettings{
+					AudioDays:        0,
+					ImageDays:        7,
+					ConversationDays: 14,
+				},
+			}}
+		},
+	)
+	result, err := service.PurgeRetainedRecords(context.Background())
+	if err != nil {
+		t.Fatalf("purge retained records: %v", err)
+	}
+	if result.Total() != 0 {
+		t.Fatalf("unexpected retained purge result: %+v", result)
+	}
+	if len(repository.purgedImageBefore) != 1 ||
+		len(repository.purgedTalkBefore) != 1 {
+		t.Fatalf(
+			"retention calls image=%d conversation=%d, want one each",
+			len(repository.purgedImageBefore),
+			len(repository.purgedTalkBefore),
+		)
+	}
+	wantImage := testNow().AddDate(0, 0, -7)
+	wantImage = time.Date(
+		wantImage.Year(),
+		wantImage.Month(),
+		wantImage.Day(),
+		0,
+		0,
+		0,
+		0,
+		time.UTC,
+	)
+	wantConversation := testNow().AddDate(0, 0, -14)
+	wantConversation = time.Date(
+		wantConversation.Year(),
+		wantConversation.Month(),
+		wantConversation.Day(),
+		0,
+		0,
+		0,
+		0,
+		time.UTC,
+	)
+	if !repository.purgedImageBefore[0].Equal(wantImage) ||
+		!repository.purgedTalkBefore[0].Equal(wantConversation) {
+		t.Fatalf(
+			"cutoffs image=%v conversation=%v, want %v and %v",
+			repository.purgedImageBefore[0],
+			repository.purgedTalkBefore[0],
+			wantImage,
+			wantConversation,
+		)
+	}
+}
+
+func TestPurgeRetainedRecordsSkipsDisabledWindows(t *testing.T) {
+	repository := &memoryRepository{}
+	service := newTestService(
+		t,
+		repository,
+		&fakeParentAccounts{},
+		&fakeDevices{},
+		&fakeAIDeletion{},
+		func(options *Options) {
+			options.Retention = &fakeRetention{settings: &operationsdomain.Settings{
+				Retention: operationsdomain.RetentionSettings{
+					AudioDays:        0,
+					ImageDays:        0,
+					ConversationDays: 0,
+				},
+			}}
+		},
+	)
+	if _, err := service.PurgeRetainedRecords(context.Background()); err != nil {
+		t.Fatalf("purge retained records: %v", err)
+	}
+	if len(repository.purgedImageBefore) != 0 ||
+		len(repository.purgedTalkBefore) != 0 {
+		t.Fatalf(
+			"disabled retention called delete: image=%d conversation=%d",
+			len(repository.purgedImageBefore),
+			len(repository.purgedTalkBefore),
 		)
 	}
 }

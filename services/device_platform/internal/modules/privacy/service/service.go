@@ -608,6 +608,36 @@ func (s *Service) PurgeExpiredRecords(
 	return s.repository.PurgeExpiredRecords(ctx, s.clock.Now().UTC())
 }
 
+// PurgeRetainedRecords enforces the operator-published image and conversation
+// history windows. A zero value disables that window, matching the retention
+// UI. AudioDays is intentionally not passed: the platform never persists raw
+// audio, so there is no audio history to delete.
+func (s *Service) PurgeRetainedRecords(
+	ctx context.Context,
+) (repository.RetainedRecordPurge, error) {
+	imageDays := s.retentionPolicy.ImageRetentionDays
+	conversationDays := s.retentionPolicy.ConversationRetentionDays
+	if s.retention != nil {
+		settings, _, err := s.retentionSettings(ctx)
+		if err != nil {
+			return repository.RetainedRecordPurge{}, err
+		}
+		imageDays = settings.Retention.ImageDays
+		conversationDays = settings.Retention.ConversationDays
+	}
+	now := s.clock.Now().UTC()
+	imageBefore := retentionCutoff(now, imageDays)
+	conversationBefore := retentionCutoff(now, conversationDays)
+	if imageBefore.IsZero() && conversationBefore.IsZero() {
+		return repository.RetainedRecordPurge{}, nil
+	}
+	return s.repository.PurgeRetainedRecords(
+		ctx,
+		imageBefore,
+		conversationBefore,
+	)
+}
+
 // PurgeUsageReports removes aggregated usage-ledger days older than the
 // operator-configured window. A zero window disables the scheduled purge so a
 // deployment can retain usage days indefinitely; the console validates a
@@ -636,14 +666,49 @@ func (s *Service) PurgeUsageReports(
 }
 
 func (s *Service) usageReportRetentionDays(ctx context.Context) int {
-	if s.retention == nil {
-		return 0
-	}
-	settings, _, err := s.retention.Settings(ctx)
+	settings, _, err := s.retentionSettings(ctx)
 	if err != nil || settings == nil {
 		return 0
 	}
 	return settings.Retention.UsageReportDays
+}
+
+// retentionSettings fails closed when the authoritative settings source is
+// unavailable. Callers must not infer "keep nothing" or "keep forever" after a
+// database read error.
+func (s *Service) retentionSettings(
+	ctx context.Context,
+) (*operationsdomain.Settings, int64, error) {
+	if s.retention == nil {
+		return &operationsdomain.Settings{
+			Retention: operationsdomain.DefaultRetentionSettings(),
+		}, 0, nil
+	}
+	settings, version, err := s.retention.Settings(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	if settings == nil {
+		return nil, 0, errors.New("retention settings are unavailable")
+	}
+	return settings, version, nil
+}
+
+func retentionCutoff(now time.Time, days int) time.Time {
+	if days <= 0 {
+		return time.Time{}
+	}
+	cutoff := now.AddDate(0, 0, -days)
+	return time.Date(
+		cutoff.Year(),
+		cutoff.Month(),
+		cutoff.Day(),
+		0,
+		0,
+		0,
+		0,
+		time.UTC,
+	)
 }
 
 func (s *Service) executeDeletion(

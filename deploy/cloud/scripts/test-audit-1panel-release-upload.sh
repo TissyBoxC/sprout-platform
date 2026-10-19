@@ -33,12 +33,12 @@ EOF
 
 SPROUT_1PANEL_WWW_DIR="$fixture_root/www" \
 SPROUT_API_SITE_NAME=api.example.test \
-  "$audit_script"
+  bash "$audit_script"
 
 sed -i '/proxy_request_buffering off;/d' "$upload_file"
 if SPROUT_1PANEL_WWW_DIR="$fixture_root/www" \
   SPROUT_API_SITE_NAME=api.example.test \
-  "$audit_script" >/dev/null 2>&1; then
+  bash "$audit_script" >/dev/null 2>&1; then
   echo "审计错误地接受了会缓冲请求体的上传代理。" >&2
   exit 1
 fi
@@ -52,7 +52,7 @@ location ^~ /other/ {
 EOF
 if SPROUT_1PANEL_WWW_DIR="$fixture_root/www" \
   SPROUT_API_SITE_NAME=api.example.test \
-  "$audit_script" >/dev/null 2>&1; then
+  bash "$audit_script" >/dev/null 2>&1; then
   echo "审计错误地接受了不覆盖发布前缀的代理片段。" >&2
   exit 1
 fi

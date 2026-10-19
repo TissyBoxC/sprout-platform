@@ -2,6 +2,14 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 
 import type { ApiError } from '@/api/apiError'
+import { createAdminFamilyMembershipClient } from '@/api/adminFamilyMembership'
+import { createHttpClient } from '@/api/httpClient'
+import type {
+  AdminFamilyInvitation,
+  AdminFamilyInvitationRole,
+  AdminFamilyMember,
+  AdminFamilyMemberRole,
+} from '@/api/adminFamilyMembership'
 import type { AIModelOption } from '@/api/adminOperations'
 import {
   useFamilyAccountStore,
@@ -12,12 +20,11 @@ import {
   type UpdateAdminFamilyAiAccountInput,
   type UpdateAdminFamilyProfileInput,
 } from '@/features/family/application/familyAccountStore'
-import {
-  adminCanProxyFamilyWrites,
-  familyRoleBoundaries,
-} from '@/features/family/domain/familyMembershipBoundary'
+import { useAdminFamilyMembershipStore } from '@/features/family/application/adminFamilyMembershipStore'
 
 const store = useFamilyAccountStore()
+const membershipStore = useAdminFamilyMembershipStore()
+membershipStore.setClient(createAdminFamilyMembershipClient(createHttpClient()))
 const isCreateOpen = ref(false)
 const selectedFamilyId = ref('')
 const profileForm = reactive<UpdateAdminFamilyProfileInput>(emptyProfileForm())
@@ -27,6 +34,14 @@ const passwordForm = reactive({
   confirmation: '',
 })
 const isPasswordResetOpen = ref(false)
+const invitationForm = reactive({
+  email: '',
+  role: 'guardian' as AdminFamilyInvitationRole,
+})
+const memberRoleDrafts = ref<Record<string, AdminFamilyMemberRole>>({})
+const pendingRoleMember = ref<AdminFamilyMember | null>(null)
+const pendingRemovalMember = ref<AdminFamilyMember | null>(null)
+const pendingRevocation = ref<AdminFamilyInvitation | null>(null)
 const feedbackBySection = reactive({
   profile: emptySectionFeedback(),
   ai: emptySectionFeedback(),
@@ -70,6 +85,7 @@ const aiUsageError = computed(() =>
     ? null
     : store.aiUsageErrorFor(selectedFamily.value.parentAccountId),
 )
+const membershipReadiness = computed(() => (membershipStore.isReadOnly ? '只读' : '可管理'))
 
 onMounted(() => {
   void store.load()
@@ -131,20 +147,180 @@ async function openFamily(family: AdminFamily): Promise<void> {
     })
   }
   clearSectionFeedback()
+  membershipStore.clear()
   await Promise.all([
     store.loadFamilyDevices(family.parentAccountId),
     family.aiAccount === null
       ? Promise.resolve(null)
       : store.loadFamilyAIUsage(family.parentAccountId),
+    membershipStore.load(family.parentAccountId),
   ])
 }
 
 function closeFamily(): void {
+  membershipStore.clear()
   selectedFamilyId.value = ''
   isPasswordResetOpen.value = false
   passwordForm.password = ''
   passwordForm.confirmation = ''
   clearSectionFeedback()
+  resetMembershipDrafts()
+}
+
+function resetMembershipDrafts(): void {
+  memberRoleDrafts.value = {}
+  invitationForm.email = ''
+  invitationForm.role = 'guardian'
+  pendingRoleMember.value = null
+  pendingRemovalMember.value = null
+  pendingRevocation.value = null
+}
+
+function memberRoleLabel(role: AdminFamilyMemberRole): string {
+  return membershipStore.memberRoleOptions.find((option) => option.value === role)?.label ?? role
+}
+
+function invitationRoleLabel(role: AdminFamilyInvitationRole): string {
+  return (
+    membershipStore.invitationRoleOptions.find((option) => option.value === role)?.label ?? role
+  )
+}
+
+function invitationStatusLabel(status: AdminFamilyInvitation['status']): string {
+  return (
+    {
+      pending: '等待加入',
+      accepted: '已加入',
+      revoked: '已撤回',
+    }[status] ?? '状态未知'
+  )
+}
+
+function memberDisplayName(member: AdminFamilyMember): string {
+  return member.displayName || '家庭监护成员'
+}
+
+function roleDraftFor(member: AdminFamilyMember): AdminFamilyMemberRole {
+  return memberRoleDrafts.value[member.userId] ?? member.role
+}
+
+function setMemberRoleDraft(member: AdminFamilyMember, event: Event): void {
+  const target = event.target
+  if (!(target instanceof HTMLSelectElement)) {
+    return
+  }
+  const nextRole = target.value
+  if (nextRole !== 'owner' && nextRole !== 'guardian' && nextRole !== 'viewer') {
+    target.value = member.role
+    return
+  }
+  memberRoleDrafts.value = {
+    ...memberRoleDrafts.value,
+    [member.userId]: nextRole,
+  }
+}
+
+function requestMemberRoleChange(member: AdminFamilyMember): void {
+  const nextRole = roleDraftFor(member)
+  if (nextRole === member.role || !membershipStore.canManage) {
+    return
+  }
+  pendingRoleMember.value = member
+}
+
+async function confirmMemberRoleChange(): Promise<void> {
+  const member = pendingRoleMember.value
+  if (member === null) {
+    return
+  }
+  const nextRole = roleDraftFor(member)
+  const result = await membershipStore.changeMemberRole(member.userId, nextRole)
+  if (result.succeeded) {
+    memberRoleDrafts.value = {
+      ...memberRoleDrafts.value,
+      [member.userId]: nextRole,
+    }
+  }
+  pendingRoleMember.value = null
+}
+
+function cancelMemberRoleChange(): void {
+  const member = pendingRoleMember.value
+  if (member !== null) {
+    const drafts = { ...memberRoleDrafts.value }
+    delete drafts[member.userId]
+    memberRoleDrafts.value = drafts
+  }
+  pendingRoleMember.value = null
+}
+
+function requestRemoveMember(member: AdminFamilyMember): void {
+  if (!membershipStore.canManage) {
+    return
+  }
+  pendingRemovalMember.value = member
+}
+
+async function confirmRemoveMember(): Promise<void> {
+  const member = pendingRemovalMember.value
+  if (member === null) {
+    return
+  }
+  const result = await membershipStore.removeMember(member.userId)
+  if (result.succeeded) {
+    const drafts = { ...memberRoleDrafts.value }
+    delete drafts[member.userId]
+    memberRoleDrafts.value = drafts
+  }
+  pendingRemovalMember.value = null
+}
+
+async function submitInvitation(): Promise<void> {
+  if (!membershipStore.canManage || membershipStore.isSubmitting) {
+    return
+  }
+  const email = invitationForm.email.trim()
+  if (!isValidParentEmail(email)) {
+    membershipStore.error = {
+      kind: 'validation',
+      message: '请输入有效的邀请邮箱。',
+      retryable: false,
+    }
+    return
+  }
+  const result = await membershipStore.createInvitation(email, invitationForm.role)
+  if (result.succeeded) {
+    invitationForm.email = ''
+    invitationForm.role = 'guardian'
+  }
+}
+
+function isValidParentEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+}
+
+function requestRevokeInvitation(invitation: AdminFamilyInvitation): void {
+  if (!membershipStore.canManage || invitation.status !== 'pending') {
+    return
+  }
+  pendingRevocation.value = invitation
+}
+
+async function confirmRevokeInvitation(): Promise<void> {
+  const invitation = pendingRevocation.value
+  if (invitation === null) {
+    return
+  }
+  await membershipStore.revokeInvitation(invitation.id)
+  pendingRevocation.value = null
+}
+
+async function reloadMembership(): Promise<void> {
+  if (selectedFamily.value === null) {
+    return
+  }
+  await membershipStore.load(selectedFamily.value.parentAccountId)
+  resetMembershipDrafts()
 }
 
 async function saveProfile(): Promise<void> {
@@ -852,11 +1028,7 @@ function emptySectionFeedback(): {
               </p>
             </Transition>
             <Transition name="toast">
-              <p
-                v-if="feedbackBySection.profile.warning"
-                class="warning-message"
-                role="alert"
-              >
+              <p v-if="feedbackBySection.profile.warning" class="warning-message" role="alert">
                 {{ feedbackBySection.profile.warning }}
               </p>
             </Transition>
@@ -935,11 +1107,7 @@ function emptySectionFeedback(): {
                   </p>
                 </Transition>
                 <Transition name="toast">
-                  <p
-                    v-if="feedbackBySection.ai.warning"
-                    class="warning-message"
-                    role="alert"
-                  >
+                  <p v-if="feedbackBySection.ai.warning" class="warning-message" role="alert">
                     {{ feedbackBySection.ai.warning }}
                   </p>
                 </Transition>
@@ -979,9 +1147,7 @@ function emptySectionFeedback(): {
                     </div>
                   </div>
 
-                  <div v-if="store.isLoadingModels" class="inline-state">
-                    正在读取可用模型…
-                  </div>
+                  <div v-if="store.isLoadingModels" class="inline-state">正在读取可用模型…</div>
                   <div v-else-if="store.modelError" class="inline-state error">
                     {{ store.modelError.message }}
                     <button type="button" class="text-button" @click="store.load()">
@@ -1133,41 +1299,236 @@ function emptySectionFeedback(): {
               <div class="section-heading">
                 <div>
                   <h3>家庭成员与邀请</h3>
-                  <p>家长可邀请另一位家长共同照看，也可为只读查看设置成员。</p>
+                  <p>维护共同照看孩子的家庭成员，并查看已发出的邀请。</p>
+                </div>
+                <div class="membership-heading-actions">
+                  <span class="status" :class="membershipStore.isReadOnly ? 'viewer' : 'active'">
+                    {{ membershipReadiness }}
+                  </span>
+                  <button
+                    type="button"
+                    class="text-button"
+                    :disabled="membershipStore.isLoading || membershipStore.isSubmitting"
+                    @click="reloadMembership"
+                  >
+                    {{ membershipStore.isLoading ? '正在更新…' : '更新成员' }}
+                  </button>
                 </div>
               </div>
 
-              <p class="field-hint">
-                为避免管理员误操作自己的家庭，管理端暂不代理家长的邀请列表、角色修改和移除操作。家长账号所有者可通过家长端管理邀请；本页只展示家庭账号的当前管理范围。
+              <p v-if="membershipStore.isReadOnly" class="inline-state">
+                当前账号可以查看家庭成员和邀请，但不能调整成员角色、移除成员或撤回邀请。
               </p>
 
-              <ul class="device-list">
-                <li
-                  v-for="role in familyRoleBoundaries"
-                  :key="role.role"
-                >
-                  <div class="device-list-header">
-                    <strong>{{ role.label }}</strong>
-                    <span
-                      :class="[
-                        'status',
-                        role.role === 'owner' ? 'active' : undefined,
-                      ]"
+              <Transition name="toast">
+                <p v-if="membershipStore.lastMessage" class="success-message" role="status">
+                  {{ membershipStore.lastMessage }}
+                </p>
+              </Transition>
+              <Transition name="toast">
+                <p v-if="membershipStore.lastWarning" class="warning-message" role="alert">
+                  {{ membershipStore.lastWarning }}
+                </p>
+              </Transition>
+              <Transition name="toast">
+                <div v-if="membershipStore.conflictMessage" class="inline-state warning">
+                  <span>{{ membershipStore.conflictMessage }}</span>
+                  <button
+                    type="button"
+                    class="text-button"
+                    :disabled="membershipStore.isLoading"
+                    @click="membershipStore.reloadAfterConflict"
+                  >
+                    读取最新状态
+                  </button>
+                </div>
+              </Transition>
+
+              <div v-if="membershipStore.isLoading" class="inline-state">
+                正在读取家庭成员和邀请…
+              </div>
+              <div v-else-if="membershipStore.error" class="inline-state error">
+                <span>
+                  {{
+                    membershipStore.error.kind === 'insufficient_permission'
+                      ? '你没有权限查看这个家庭的成员和邀请。'
+                      : membershipStore.error.message
+                  }}
+                </span>
+                <button type="button" class="text-button" @click="reloadMembership">
+                  重新加载
+                </button>
+              </div>
+              <template v-else>
+                <div class="membership-block">
+                  <div class="membership-block-heading">
+                    <div>
+                      <strong>当前成员</strong>
+                      <p class="field-hint">每个家庭始终保留一位所有者。</p>
+                    </div>
+                    <span class="membership-count">{{ membershipStore.members.length }} 人</span>
+                  </div>
+
+                  <div v-if="membershipStore.members.length === 0" class="empty-section">
+                    <p>还没有读取到家庭成员。</p>
+                    <button
+                      type="button"
+                      class="secondary"
+                      :disabled="membershipStore.isLoading"
+                      @click="reloadMembership"
                     >
-                      {{ role.availability }}
+                      重新加载
+                    </button>
+                  </div>
+                  <ul v-else class="membership-list">
+                    <li
+                      v-for="member in membershipStore.members"
+                      :key="member.id"
+                      class="membership-row"
+                    >
+                      <div class="membership-person">
+                        <strong>{{ memberDisplayName(member) }}</strong>
+                        <span class="device-meta">
+                          {{ memberRoleLabel(member.role) }}
+                          ·
+                          {{ member.accountStatus === 'active' ? '账号可用' : '账号已停用' }}
+                        </span>
+                        <span class="device-meta"> 加入于 {{ formatDate(member.createdAt) }} </span>
+                      </div>
+                      <div class="membership-role-editor">
+                        <label>
+                          <span class="sr-only"
+                            >调整 {{ memberDisplayName(member) }} 的家庭角色</span
+                          >
+                          <select
+                            :value="roleDraftFor(member)"
+                            :disabled="
+                              !membershipStore.canManage ||
+                              membershipStore.isSubmitting ||
+                              membershipStore.isLoading
+                            "
+                            @change="setMemberRoleDraft(member, $event)"
+                          >
+                            <option
+                              v-for="option in membershipStore.memberRoleOptions"
+                              :key="option.value"
+                              :value="option.value"
+                            >
+                              {{ option.label }}
+                            </option>
+                          </select>
+                        </label>
+                        <button
+                          type="button"
+                          class="secondary compact"
+                          :disabled="
+                            !membershipStore.canManage ||
+                            membershipStore.isSubmitting ||
+                            roleDraftFor(member) === member.role
+                          "
+                          @click="requestMemberRoleChange(member)"
+                        >
+                          保存角色
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        class="text-button danger"
+                        :disabled="!membershipStore.canManage || membershipStore.isSubmitting"
+                        @click="requestRemoveMember(member)"
+                      >
+                        移除成员
+                      </button>
+                    </li>
+                  </ul>
+                </div>
+
+                <div class="membership-block">
+                  <div class="membership-block-heading">
+                    <div>
+                      <strong>家庭邀请</strong>
+                      <p class="field-hint">待接受的邀请可随时撤回。</p>
+                    </div>
+                    <span class="membership-count">
+                      {{ membershipStore.pendingInvitations.length }} 个待接受
                     </span>
                   </div>
-                  <p class="device-meta">{{ role.description }}</p>
-                </li>
-              </ul>
 
-              <p
-                v-if="!adminCanProxyFamilyWrites"
-                class="warning-message"
-                role="note"
-              >
-                管理员不能代替家长创建邀请、调整成员角色或移除成员，以免把管理员自己的家庭误当成家长家庭。
-              </p>
+                  <form
+                    v-if="membershipStore.canManage"
+                    class="invitation-form"
+                    @submit.prevent="submitInvitation"
+                  >
+                    <label>
+                      <span>邀请邮箱</span>
+                      <input
+                        v-model.trim="invitationForm.email"
+                        type="email"
+                        inputmode="email"
+                        autocomplete="email"
+                        required
+                        placeholder="请输入家长的登录邮箱"
+                      />
+                    </label>
+                    <label>
+                      <span>加入后的角色</span>
+                      <select v-model="invitationForm.role">
+                        <option
+                          v-for="option in membershipStore.invitationRoleOptions"
+                          :key="option.value"
+                          :value="option.value"
+                        >
+                          {{ option.label }}
+                        </option>
+                      </select>
+                    </label>
+                    <button type="submit" class="primary" :disabled="membershipStore.isSubmitting">
+                      {{ membershipStore.isSubmitting ? '正在发出邀请…' : '发出邀请' }}
+                    </button>
+                  </form>
+                  <p v-else class="field-hint">你没有发出邀请和撤回邀请的权限。</p>
+
+                  <div v-if="membershipStore.invitations.length === 0" class="empty-section">
+                    <p>还没有发出家庭邀请。填写家长邮箱后，邀请会显示在这里。</p>
+                  </div>
+                  <ul v-else class="membership-list">
+                    <li
+                      v-for="invitation in membershipStore.invitations"
+                      :key="invitation.id"
+                      class="membership-row invitation-row"
+                    >
+                      <div class="membership-person">
+                        <strong>{{ invitation.email }}</strong>
+                        <span class="device-meta">
+                          {{ invitationRoleLabel(invitation.role) }} · 发出于
+                          {{ formatDate(invitation.createdAt) }}
+                        </span>
+                        <span class="device-meta">
+                          {{
+                            invitation.status === 'pending'
+                              ? `有效期至 ${formatDate(invitation.expiresAt)}`
+                              : invitation.status === 'accepted'
+                                ? `加入于 ${formatDate(invitation.acceptedAt)}`
+                                : '邀请已撤回'
+                          }}
+                        </span>
+                      </div>
+                      <span :class="['status', invitation.status]">
+                        {{ invitationStatusLabel(invitation.status) }}
+                      </span>
+                      <button
+                        v-if="invitation.status === 'pending'"
+                        type="button"
+                        class="text-button danger"
+                        :disabled="!membershipStore.canManage || membershipStore.isSubmitting"
+                        @click="requestRevokeInvitation(invitation)"
+                      >
+                        撤回邀请
+                      </button>
+                    </li>
+                  </ul>
+                </div>
+              </template>
             </section>
 
             <section class="detail-card">
@@ -1324,6 +1685,117 @@ function emptySectionFeedback(): {
             </button>
           </div>
         </form>
+      </div>
+    </Transition>
+
+    <Transition name="modal">
+      <div v-if="pendingRoleMember" class="dialog-backdrop" @click.self="cancelMemberRoleChange">
+        <div
+          class="dialog confirmation-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="member-role-title"
+        >
+          <h2 id="member-role-title">确认调整家庭角色</h2>
+          <p class="dialog-hint">
+            将 {{ memberDisplayName(pendingRoleMember) }} 的角色调整为
+            {{
+              memberRoleLabel(roleDraftFor(pendingRoleMember))
+            }}。角色变化会立即影响她能查看和管理的家庭内容。
+          </p>
+          <div class="dialog-actions">
+            <button
+              type="button"
+              class="secondary"
+              :disabled="membershipStore.isSubmitting"
+              @click="cancelMemberRoleChange"
+            >
+              暂不调整
+            </button>
+            <button
+              type="button"
+              class="primary"
+              :disabled="membershipStore.isSubmitting"
+              @click="confirmMemberRoleChange"
+            >
+              {{ membershipStore.isSubmitting ? '正在保存…' : '保存新角色' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition name="modal">
+      <div
+        v-if="pendingRemovalMember"
+        class="dialog-backdrop"
+        @click.self="pendingRemovalMember = null"
+      >
+        <div
+          class="dialog confirmation-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="remove-member-title"
+        >
+          <h2 id="remove-member-title">移除家庭成员</h2>
+          <p class="dialog-hint">
+            移除
+            {{ memberDisplayName(pendingRemovalMember) }}
+            后，她将不能再查看或管理这个家庭。此操作无法撤销。
+          </p>
+          <div class="dialog-actions">
+            <button
+              type="button"
+              class="secondary"
+              :disabled="membershipStore.isSubmitting"
+              @click="pendingRemovalMember = null"
+            >
+              保留成员
+            </button>
+            <button
+              type="button"
+              class="danger-button"
+              :disabled="membershipStore.isSubmitting"
+              @click="confirmRemoveMember"
+            >
+              {{ membershipStore.isSubmitting ? '正在移除…' : '移除成员' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition name="modal">
+      <div v-if="pendingRevocation" class="dialog-backdrop" @click.self="pendingRevocation = null">
+        <div
+          class="dialog confirmation-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="revoke-invitation-title"
+        >
+          <h2 id="revoke-invitation-title">撤回家庭邀请</h2>
+          <p class="dialog-hint">
+            撤回发给 {{ pendingRevocation.email }} 的邀请后，对方将不能再用这封邀请加入家庭。
+          </p>
+          <div class="dialog-actions">
+            <button
+              type="button"
+              class="secondary"
+              :disabled="membershipStore.isSubmitting"
+              @click="pendingRevocation = null"
+            >
+              保留邀请
+            </button>
+            <button
+              type="button"
+              class="danger-button"
+              :disabled="membershipStore.isSubmitting"
+              @click="confirmRevokeInvitation"
+            >
+              {{ membershipStore.isSubmitting ? '正在撤回…' : '撤回邀请' }}
+            </button>
+          </div>
+        </div>
       </div>
     </Transition>
   </section>
@@ -1764,6 +2236,185 @@ tbody tr:hover {
   gap: 16px;
 }
 
+.membership-heading-actions,
+.membership-block-heading,
+.membership-row,
+.membership-role-editor,
+.invitation-form {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.membership-block {
+  display: grid;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid #f7d9e2;
+}
+
+.membership-block-heading,
+.membership-row {
+  justify-content: space-between;
+}
+
+.membership-block-heading strong {
+  color: var(--sprout-text);
+}
+
+.membership-count {
+  color: var(--sprout-text-muted);
+  font-size: 13px;
+}
+
+.membership-list {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.membership-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 14px;
+  padding: 14px 15px;
+  border: 1px solid #f7d9e2;
+  border-radius: 16px;
+  background: #fffbfc;
+  transition:
+    border-color var(--sprout-duration-fast) ease,
+    background-color var(--sprout-duration-fast) ease;
+}
+
+.membership-row:hover {
+  border-color: #e9a5b8;
+  background: #fff7fa;
+}
+
+.membership-person {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.membership-person strong,
+.membership-person span {
+  overflow-wrap: anywhere;
+}
+
+.membership-role-editor {
+  justify-content: flex-end;
+}
+
+.membership-role-editor label {
+  display: grid;
+}
+
+.membership-role-editor select {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid #f0bdcb;
+  border-radius: var(--sprout-radius-control);
+  background: #ffffff;
+  color: var(--sprout-text);
+  font: inherit;
+}
+
+.membership-role-editor select:focus,
+.invitation-form input:focus,
+.invitation-form select:focus {
+  border-color: #d94f83;
+  box-shadow: 0 0 0 3px rgb(217 79 131 / 12%);
+  outline: none;
+}
+
+.invitation-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px auto;
+  align-items: end;
+  padding: 14px 15px;
+  border: 1px solid #f7d9e2;
+  border-radius: 16px;
+  background: #fff7fa;
+}
+
+.invitation-form label {
+  display: grid;
+  gap: 7px;
+}
+
+.invitation-form input,
+.invitation-form select {
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid #f0bdcb;
+  border-radius: 13px;
+  background: #ffffff;
+  color: var(--sprout-text);
+  font: inherit;
+}
+
+.compact {
+  min-height: 38px;
+  padding: 0 12px;
+}
+
+.text-button.danger {
+  color: #a12b4a;
+}
+
+.text-button.danger:not(:disabled):hover {
+  color: #7d1f38;
+}
+
+.danger-button {
+  border-color: #b83b5c;
+  background: #b83b5c;
+  color: #ffffff;
+}
+
+.danger-button:not(:disabled):hover {
+  border-color: #982b48;
+  background: #982b48;
+}
+
+.status.viewer,
+.status.pending {
+  background: #fff3cd;
+  color: #755600;
+}
+
+.status.accepted {
+  background: #e7f8ee;
+  color: #1d6b3f;
+}
+
+.status.revoked {
+  background: #fff0f2;
+  color: #a12b4a;
+}
+
+.inline-state.warning {
+  border: 1px solid #e6c56d;
+  background: #fff9e8;
+  color: #7a5411;
+}
+
+.confirmation-dialog {
+  width: min(100%, 520px);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2096,6 +2747,21 @@ tbody tr:hover {
   .security-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .membership-heading-actions,
+  .invitation-form,
+  .membership-row,
+  .membership-role-editor {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .membership-role-editor select,
+  .membership-role-editor button,
+  .invitation-form button {
+    width: 100%;
   }
 
   .security-row button,

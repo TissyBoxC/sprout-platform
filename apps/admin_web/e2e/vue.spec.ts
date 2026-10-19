@@ -1017,6 +1017,112 @@ test('manages a family AI account, profile, password, and bound devices', async 
       body: JSON.stringify({ data: {} }),
     })
   })
+  await page.route('**/api/v1/admin/families/parent-1/members', async (route) => {
+    expect(route.request().method()).toBe('GET')
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          membership_revision: 3,
+          members: [
+            {
+              id: 'member-owner',
+              family_id: 'family-1',
+              user_id: 'user-owner',
+              role: 'owner',
+              display_name: '王',
+              account_role: 'parent',
+              account_status: 'active',
+              created_at: '2026-10-01T10:00:00Z',
+              updated_at: '2026-10-01T10:00:00Z',
+            },
+            {
+              id: 'member-guardian',
+              family_id: 'family-1',
+              user_id: 'user-guardian',
+              role: 'guardian',
+              display_name: '李',
+              account_role: 'parent',
+              account_status: 'active',
+              created_at: '2026-10-01T11:00:00Z',
+              updated_at: '2026-10-01T11:00:00Z',
+            },
+          ],
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/families/parent-1/members/user-guardian', async (route) => {
+    expect(route.request().method()).toBe('PUT')
+    expect(route.request().headers()['if-match']).toBe('3')
+    expect(route.request().postDataJSON()).toEqual({
+      role: 'viewer',
+    })
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          member: {
+            id: 'member-guardian',
+            family_id: 'family-1',
+            user_id: 'user-guardian',
+            role: 'viewer',
+          },
+        },
+      }),
+    })
+  })
+  await page.route('**/api/v1/admin/families/parent-1/invitations', async (route) => {
+    const request = route.request()
+    if (request.method() === 'GET') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            membership_revision: 3,
+            invitations: [
+              {
+                id: 'invitation-1',
+                family_id: 'family-1',
+                email: 'guardian@example.com',
+                role: 'guardian',
+                status: 'pending',
+                invited_by_user_id: 'user-owner',
+                created_at: '2026-10-02T10:00:00Z',
+                expires_at: '2026-10-09T10:00:00Z',
+                accepted_at: null,
+              },
+            ],
+          },
+        }),
+      })
+      return
+    }
+    expect(request.method()).toBe('POST')
+    expect(request.headers()['if-match']).toBe('3')
+    expect(request.postDataJSON()).toEqual({
+      email: 'second@example.com',
+      role: 'viewer',
+    })
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          invitation: {
+            id: 'invitation-2',
+            family_id: 'family-1',
+            email: 'second@example.com',
+            role: 'viewer',
+            status: 'pending',
+            invited_by_user_id: 'user-owner',
+            created_at: '2026-10-03T10:00:00Z',
+            expires_at: '2026-10-10T10:00:00Z',
+            accepted_at: null,
+          },
+        },
+      }),
+    })
+  })
 
   await page.goto('/families')
 
@@ -1033,11 +1139,9 @@ test('manages a family AI account, profile, password, and bound devices', async 
   await expect(page.getByRole('heading', { name: '家庭成员与邀请' })).toBeVisible()
   await expect(page.getByText('守护者', { exact: true })).toBeVisible()
   await expect(page.getByText('查看者', { exact: true })).toBeVisible()
-  await expect(
-    page.getByText(
-      '管理员不能代替家长创建邀请、调整成员角色或移除成员，以免把管理员自己的家庭误当成家长家庭。',
-    ),
-  ).toBeVisible()
+  await expect(page.getByText('guardian@example.com')).toBeVisible()
+  await expect(page.getByText('等待加入', { exact: true })).toBeVisible()
+  await expect(page.getByText('管理员不能代替家长创建邀请', { exact: false })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: '绑定设备' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '账号安全' })).toBeVisible()
   await expect(page.getByText('正在读取可用模型…')).toHaveCount(0)
@@ -1073,6 +1177,18 @@ test('manages a family AI account, profile, password, and bound devices', async 
   await resetDialog.getByRole('button', { name: '重置密码' }).click()
   await expect(page.getByText('密码已重置，该家长需要重新登录。')).toBeVisible()
 
+  await page.getByLabel('调整 李 的家庭角色').selectOption('viewer')
+  await page.getByRole('button', { name: '保存角色' }).click()
+  const roleDialog = page.getByRole('dialog', { name: '确认调整家庭角色' })
+  await expect(roleDialog).toBeVisible()
+  await roleDialog.getByRole('button', { name: '保存新角色' }).click()
+  await expect(page.getByText('成员角色已更新。')).toBeVisible()
+
+  await page.getByLabel('邀请邮箱').fill('second@example.com')
+  await page.getByLabel('加入后的角色', { exact: true }).selectOption('viewer')
+  await page.getByRole('button', { name: '发出邀请' }).click()
+  await expect(page.getByText('邀请已发出。')).toBeVisible()
+
   await page.setViewportSize({ width: 390, height: 844 })
   const drawer = page.locator('.family-drawer')
   await expect(drawer).toBeVisible()
@@ -1080,9 +1196,7 @@ test('manages a family AI account, profile, password, and bound devices', async 
   expect(drawerBox?.width).toBeLessThanOrEqual(390)
 
   await page.getByRole('button', { name: '关闭', exact: true }).click()
-  await expect(page.getByRole('row', { name: /李.*13273330085/ })).toContainText(
-    '额度 12.50',
-  )
+  await expect(page.getByRole('row', { name: /李.*13273330085/ })).toContainText('额度 12.50')
 
   await page.getByRole('button', { name: '管理' }).click()
   await expect(page.getByLabel('剩余额度')).toHaveValue('12.5')

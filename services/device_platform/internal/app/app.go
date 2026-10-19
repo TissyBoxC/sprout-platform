@@ -345,6 +345,10 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create OTA service: %w", err)
 	}
+	// The runtime service is created before OTA. Wire the OTA authority here so
+	// command validation and OTA publication share one repository and one
+	// device eligibility policy.
+	deviceRuntimeService.SetFirmwareUpdateAuthorizer(ota)
 	featureCenterHealthProbes := map[string]featureCenterService.HealthProbe{
 		"auth": schemaReadinessProbe(
 			databaseStore.Pool(),

@@ -12,6 +12,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
 	familydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/domain"
+	otaDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/domain"
 	policydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/domain"
 )
 
@@ -97,6 +98,10 @@ type recordHeartbeatRequest struct {
 
 type createRuntimeCommandRequest struct {
 	CommandType string `json:"command_type"`
+	// ReleaseID is accepted only for firmware_update. The OTA module resolves
+	// it to a device-owned active deployment and published release; callers
+	// cannot provide a signature, URL, or deployment kind.
+	ReleaseID string `json:"release_id,omitempty"`
 }
 
 type acknowledgeRuntimeCommandRequest struct {
@@ -294,18 +299,44 @@ func (handler deviceRuntimeHandler) createCommand(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	accountID, _ := authenticatedAccountID(request)
+	accountID, ok := authenticatedAccountID(request)
+	if !ok {
+		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
+		return
+	}
 	var payload createRuntimeCommandRequest
 	if err := decodeJSON(request, &payload); err != nil {
 		writeError(response, request, http.StatusBadRequest, "invalid_request", "请选择要执行的操作")
 		return
 	}
+	commandType := domain.CommandType(strings.TrimSpace(payload.CommandType))
+	commandPayload := map[string]any{}
+	switch commandType {
+	case domain.CommandFirmwareUpdate:
+		releaseID := strings.TrimSpace(payload.ReleaseID)
+		if releaseID == "" {
+			writeError(response, request, http.StatusUnprocessableEntity, "invalid_device_command", "请选择已获授权的系统更新")
+			return
+		}
+		commandPayload["release_id"] = releaseID
+	default:
+		if strings.TrimSpace(payload.ReleaseID) != "" {
+			writeError(response, request, http.StatusUnprocessableEntity, "invalid_device_command", "这个操作不需要更新任务")
+			return
+		}
+	}
+	if !domain.CommandTypeIsValid(commandType) {
+		// Keep the administrator command route from turning this request into a
+		// type-only probe; the runtime service repeats this check.
+		writeError(response, request, http.StatusUnprocessableEntity, "invalid_device_command", "请选择要执行的操作")
+		return
+	}
 	command, err := handler.service.CreateCommand(
 		request.Context(),
 		strings.TrimSpace(request.PathValue("device_id")),
-		domain.CommandType(strings.TrimSpace(payload.CommandType)),
+		commandType,
 		accountID,
-		map[string]any{},
+		commandPayload,
 	)
 	if err != nil {
 		writeDeviceRuntimeError(response, request, err)
@@ -604,6 +635,14 @@ func deviceCommandResponse(command *domain.Command) map[string]any {
 	} else {
 		response["payload"] = command.Payload
 	}
+	// Firmware deployed in the field reads release_id from the command envelope
+	// rather than the nested payload. Keep that projection while retaining
+	// payload for clients that follow the documented transport.
+	if command.Type == domain.CommandFirmwareUpdate {
+		if releaseID, ok := command.Payload["release_id"].(string); ok {
+			response["release_id"] = releaseID
+		}
+	}
 	return response
 }
 
@@ -617,6 +656,22 @@ func writeDeviceRuntimeError(
 		writeError(response, request, http.StatusUnprocessableEntity, "invalid_device_status", "设备状态需要重新同步")
 	case errors.Is(err, domain.ErrInvalidCommand):
 		writeError(response, request, http.StatusUnprocessableEntity, "invalid_device_command", "请选择要执行的操作")
+	case errors.Is(err, domain.ErrFirmwareUpdateUnavailable):
+		writeError(response, request, http.StatusServiceUnavailable, "firmware_update_unavailable", "系统更新暂时无法下发，请稍后重试")
+	case errors.Is(err, domain.ErrFirmwareUpdateAlreadyQueued):
+		writeError(response, request, http.StatusConflict, "firmware_update_already_queued", "这次系统更新已经在下发中")
+	case errors.Is(err, otaDomain.ErrDeploymentNotFound):
+		writeError(response, request, http.StatusNotFound, "firmware_deployment_not_found", "没有找到这次系统更新任务")
+	case errors.Is(err, otaDomain.ErrReleaseNotFound):
+		writeError(response, request, http.StatusNotFound, "firmware_release_not_found", "这次系统更新已不存在")
+	case errors.Is(err, otaDomain.ErrDeviceNotEligible):
+		writeError(response, request, http.StatusForbidden, "firmware_update_not_authorized", "这台设备不能执行这次系统更新")
+	case errors.Is(err, otaDomain.ErrDeploymentStateConflict):
+		writeError(response, request, http.StatusConflict, "firmware_update_state_conflict", "这次系统更新已经结束，不能再次下发")
+	case errors.Is(err, otaDomain.ErrInvalidDeployment):
+		writeError(response, request, http.StatusUnprocessableEntity, "invalid_firmware_update", "请选择有效的系统更新任务")
+	case errors.Is(err, otaDomain.ErrRollbackNotAllowed):
+		writeError(response, request, http.StatusForbidden, "firmware_rollback_not_authorized", "这次回滚没有得到更新策略的允许")
 	case errors.Is(err, domain.ErrDeviceNotFound),
 		errors.Is(err, bindingdomain.ErrDeviceNotFound):
 		writeError(response, request, http.StatusNotFound, "device_not_found", "没有找到这台设备")

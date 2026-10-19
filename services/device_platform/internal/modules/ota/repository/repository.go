@@ -71,6 +71,11 @@ type Repository interface {
 	CreateDeployment(ctx context.Context, deployment *domain.Deployment) (*domain.Deployment, error)
 	GetDeployment(ctx context.Context, deploymentID string) (*domain.Deployment, error)
 	GetDeploymentByRequestID(ctx context.Context, requestID string) (*domain.Deployment, error)
+	GetDeploymentForRuntimeUpdate(
+		ctx context.Context,
+		deviceID string,
+		releaseID string,
+	) (*domain.Deployment, error)
 	ListDeployments(
 		ctx context.Context,
 		filter domain.DeploymentFilter,
@@ -1014,12 +1019,73 @@ func (r *PostgresRepository) GetDeploymentByRequestID(
 	)
 }
 
+// GetDeploymentForRuntimeUpdate returns the newest active deployment that
+// authorizes a firmware_update runtime command for this exact device and
+// release. A rollback deployment authorizes its rollback target, not the
+// release that triggered the rollback.
+func (r *PostgresRepository) GetDeploymentForRuntimeUpdate(
+	ctx context.Context,
+	deviceID string,
+	releaseID string,
+) (*domain.Deployment, error) {
+	return r.getDeploymentWithArguments(
+		ctx,
+		deploymentSelect+`
+			WHERE deployment.device_id = $1
+			  AND (
+			      deployment.release_id = $2
+			      OR deployment.rollback_release_id = $2
+			  )
+			  AND deployment.status IN (
+			      'queued',
+			      'offered',
+			      'downloading',
+			      'validating',
+			      'installing',
+			      'pending_verify'
+			  )
+			  AND release.status = 'published'
+			  AND release.size_bytes > 0
+			  AND release.size_bytes <= $3
+			  AND NOT EXISTS (
+			      SELECT 1
+			      FROM ota_legacy_quarantined_releases AS quarantine
+			      WHERE quarantine.release_id = release.id
+			  )
+			ORDER BY deployment.created_at DESC
+			LIMIT 1
+		`,
+		deviceID,
+		releaseID,
+		maxOTAArtifactSizeBytes,
+	)
+}
+
 func (r *PostgresRepository) getDeployment(
 	ctx context.Context,
 	statement string,
 	argument any,
 ) (*domain.Deployment, error) {
 	deployment, err := scanDeployment(r.pool.QueryRow(ctx, statement, argument))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrDeploymentNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return deployment, nil
+}
+
+func (r *PostgresRepository) getDeploymentWithArguments(
+	ctx context.Context,
+	statement string,
+	arguments ...any,
+) (*domain.Deployment, error) {
+	deployment, err := scanDeployment(r.pool.QueryRow(
+		ctx,
+		statement,
+		arguments...,
+	))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrDeploymentNotFound
 	}

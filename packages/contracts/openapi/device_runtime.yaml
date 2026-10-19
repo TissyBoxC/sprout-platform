@@ -446,6 +446,29 @@ paths:
                     - reconnect_network
                     - resync_time
                     - factory_reset
+                    - display_message
+                    - sync_privacy_consent
+                    - firmware_update
+                release_id:
+                  type: string
+                  format: uuid
+                  description: Required only for firmware_update; OTA verifies release, device eligibility, and an active deployment.
+              oneOf:
+                - properties:
+                    command_type:
+                      enum:
+                        - firmware_update
+                  required:
+                    - release_id
+                - properties:
+                    command_type:
+                      enum:
+                        - refresh_configuration
+                        - reconnect_network
+                        - resync_time
+                        - factory_reset
+                        - display_message
+                        - sync_privacy_consent
       responses:
         '201':
           description: Command queued
@@ -459,6 +482,18 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: An active firmware update command already exists for this release
+          content:
+            application/json:
+              schema:
+                $ref: '../errors/error_response.schema.json'
+        '503':
+          description: The authoritative OTA service is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '../errors/error_response.schema.json'
   /api/v1/admin/ota/releases:
     get:
       operationId: listAdminOtaReleases
@@ -732,6 +767,46 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createAdminOtaDeployment
+      summary: Create one device deployment for a published firmware release
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/OtaReleaseID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+              properties:
+                device_id:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+      responses:
+        '201':
+          description: Device deployment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaDeploymentEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
   /api/v1/admin/ota/deployments/{deployment_id}/retry:
     post:
       operationId: retryAdminOtaDeployment
@@ -1619,6 +1694,9 @@ components:
             - reconnect_network
             - resync_time
             - factory_reset
+            - display_message
+            - sync_privacy_consent
+            - firmware_update
         status:
           type: string
           enum:
@@ -1643,6 +1721,12 @@ components:
           format: date-time
         result_code:
           type: string
+        release_id:
+          type: string
+          description: Present for firmware_update and carries the exact authorized OTA release id.
+        payload:
+          type: object
+          additionalProperties: true
   responses:
     BadRequest:
       description: Request body is malformed

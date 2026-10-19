@@ -97,6 +97,7 @@ type operationsAdminService interface {
 		platform string,
 		channel string,
 		currentVersion string,
+		currentResourceVersion string,
 	) (*operationsdomain.AppUpdate, error)
 }
 

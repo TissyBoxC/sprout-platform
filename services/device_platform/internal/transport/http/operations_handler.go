@@ -18,11 +18,15 @@ func (handler adminHandler) appUpdate(
 	platform := strings.TrimSpace(request.URL.Query().Get("platform"))
 	channel := strings.TrimSpace(request.URL.Query().Get("channel"))
 	currentVersion := strings.TrimSpace(request.URL.Query().Get("current_version"))
+	currentResourceVersion := strings.TrimSpace(
+		request.URL.Query().Get("current_resource_version"),
+	)
 	update, err := handler.operationsService.AppUpdate(
 		request.Context(),
 		platform,
 		channel,
 		currentVersion,
+		currentResourceVersion,
 	)
 	if err != nil {
 		if errors.Is(err, operationsdomain.ErrUpdateNotAvailable) ||

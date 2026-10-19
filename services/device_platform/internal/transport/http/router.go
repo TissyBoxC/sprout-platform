@@ -3120,6 +3120,9 @@ func otaAuditAction(request *http.Request) string {
 		return "admin.ota.release.rolled_back"
 	case strings.HasSuffix(path, "/retry"):
 		return "admin.ota.deployment.retried"
+	case strings.HasSuffix(path, "/deployments") &&
+		request.Method == http.MethodPost:
+		return "admin.ota.deployment.created"
 	case strings.Contains(path, "/ota/releases"):
 		if request.Method == http.MethodPost {
 			return "admin.ota.release.created"

@@ -1926,8 +1926,20 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/DeviceRuntimeNotFound"
+        "409":
+          description: An active firmware update command already exists for this release
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
         "422":
           $ref: "#/components/responses/DeviceUnprocessable"
+        "503":
+          description: The authoritative OTA service is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
   /api/v1/admin/devices/{device_id}/sessions/revoke:
@@ -7517,6 +7529,14 @@ paths:
           schema:
             type: string
             maxLength: 32
+        - name: current_resource_version
+          in: query
+          required: false
+          description: Installed resource package version; resource and client versions are evaluated independently.
+          schema:
+            type: string
+            maxLength: 32
+            pattern: '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$'
       responses:
         "200":
           description: Newest available update for the client
@@ -9392,6 +9412,49 @@ paths:
                 $ref: "#/components/schemas/ResponseEnvelope"
         "422":
           description: Invalid pagination or status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: Create one device deployment for a published firmware release
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/OTAReleaseId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OTAAdminDeploymentRequest"
+      responses:
+        "201":
+          description: Firmware deployment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OTAAdminDeploymentEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Firmware release or device not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Firmware release is not published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Device is not eligible or request is incomplete
           content:
             application/json:
               schema:
@@ -14184,6 +14247,7 @@ components:
             - factory_reset
             - display_message
             - sync_privacy_consent
+            - firmware_update
         status:
           type: string
           enum:
@@ -14207,6 +14271,9 @@ components:
           nullable: true
         result_code:
           type: string
+        release_id:
+          type: string
+          description: Present for firmware_update. It is the exact OTA release authorized by the device's active deployment.
         payload:
           type: object
           additionalProperties: true
@@ -14247,6 +14314,27 @@ components:
             - factory_reset
             - display_message
             - sync_privacy_consent
+            - firmware_update
+        release_id:
+          type: string
+          format: uuid
+          description: Required only for firmware_update. The OTA module verifies the release exists, is published, matches device eligibility, and has an active deployment.
+      oneOf:
+        - properties:
+            command_type:
+              enum:
+                - firmware_update
+          required:
+            - release_id
+        - properties:
+            command_type:
+              enum:
+                - refresh_configuration
+                - reconnect_network
+                - resync_time
+                - factory_reset
+                - display_message
+                - sync_privacy_consent
     DeviceCommandAckRequest:
       type: object
       additionalProperties: false
@@ -23670,6 +23758,16 @@ components:
       properties:
         deployment_id:
           type: string
+          maxLength: 128
+    OTAAdminDeploymentRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+      properties:
+        device_id:
+          type: string
+          minLength: 1
           maxLength: 128
     AppUpdate:
       type: object

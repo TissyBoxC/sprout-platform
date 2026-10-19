@@ -673,6 +673,13 @@ func (s *Service) AssignRelease(
 	if release.Status != domain.ReleaseStatusPublished {
 		return nil, domain.ErrReleaseStateConflict
 	}
+	if release.SignatureStatus != domain.SignatureStatusVerified ||
+		release.SignatureVerifiedAt == nil ||
+		!domain.ValidEd25519Signature(release.Signature) ||
+		release.SizeBytes <= 0 ||
+		release.SizeBytes > domain.MaxArtifactSizeBytes {
+		return nil, domain.ErrDeviceNotEligible
+	}
 	device, err := s.repository.GetDeviceContext(ctx, deviceID)
 	if err != nil {
 		return nil, err
@@ -718,6 +725,67 @@ func (s *Service) GetDeployment(
 		return nil, domain.ErrDeploymentNotFound
 	}
 	return s.repository.GetDeployment(ctx, deploymentID)
+}
+
+// AuthorizeRuntimeFirmwareUpdate validates that a firmware_update runtime
+// command refers to an existing active deployment for the same device and
+// resolves the exact published release that deployment targets. The runtime
+// command is only a delivery trigger; it cannot create a deployment, choose a
+// version, or retry a failed rollout.
+func (s *Service) AuthorizeRuntimeFirmwareUpdate(
+	ctx context.Context,
+	deviceID string,
+	releaseID string,
+) (*domain.RuntimeFirmwareUpdateAuthorization, error) {
+	deviceID = strings.TrimSpace(deviceID)
+	releaseID = strings.TrimSpace(releaseID)
+	if deviceID == "" || releaseID == "" || !validUUID(releaseID) {
+		return nil, domain.ErrInvalidDeployment
+	}
+	release, err := s.repository.GetRelease(ctx, releaseID)
+	if err != nil {
+		return nil, err
+	}
+	device, err := s.repository.GetDeviceContext(ctx, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	deployment, err := s.repository.GetDeploymentForRuntimeUpdate(
+		ctx,
+		deviceID,
+		release.ID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if !domain.DeploymentCanReceiveRuntimeCommand(deployment.Status) {
+		return nil, domain.ErrDeploymentStateConflict
+	}
+	if release.Status != domain.ReleaseStatusPublished ||
+		release.HardwareRevision != device.HardwareRevision ||
+		release.SizeBytes <= 0 ||
+		release.SizeBytes > domain.MaxArtifactSizeBytes ||
+		release.SignatureStatus != domain.SignatureStatusVerified ||
+		release.SignatureVerifiedAt == nil ||
+		!domain.ValidEd25519Signature(release.Signature) ||
+		!domain.ValidVersion(release.Version) ||
+		!domain.EligibleForRelease(release, *device) {
+		return nil, domain.ErrDeviceNotEligible
+	}
+	deploymentKind := "install"
+	if strings.TrimSpace(deployment.RollbackReleaseID) != "" {
+		if deployment.RollbackReleaseID != release.ID ||
+			strings.TrimSpace(deployment.RollbackOfDeploymentID) == "" {
+			return nil, domain.ErrRollbackNotAllowed
+		}
+		deploymentKind = "rollback"
+	}
+	return &domain.RuntimeFirmwareUpdateAuthorization{
+		ReleaseID:       release.ID,
+		FirmwareVersion: release.Version,
+		DeploymentID:    deployment.ID,
+		DeploymentKind:  deploymentKind,
+	}, nil
 }
 
 // Statistics returns rollout counts and failure rates.

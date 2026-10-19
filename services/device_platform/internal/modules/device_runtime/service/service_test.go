@@ -568,6 +568,223 @@ func TestFactoryResetCommandIsAccepted(t *testing.T) {
 	}
 }
 
+type firmwareUpdateAuthorizerStub struct {
+	deviceID      string
+	releaseID     string
+	authorization *FirmwareUpdateAuthorization
+	err           error
+}
+
+func (authorizer *firmwareUpdateAuthorizerStub) AuthorizeRuntimeFirmwareUpdate(
+	_ context.Context,
+	deviceID string,
+	releaseID string,
+) (*FirmwareUpdateAuthorization, error) {
+	authorizer.deviceID = deviceID
+	authorizer.releaseID = releaseID
+	return authorizer.authorization, authorizer.err
+}
+
+func TestFirmwareUpdateCommandUsesOtaAuthorizationAndCarriesReleaseID(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 18, 9, 0, 0, 0, time.UTC)
+	releaseID := "00000000-0000-4000-8000-000000000001"
+	authorizer := &firmwareUpdateAuthorizerStub{
+		authorization: &FirmwareUpdateAuthorization{
+			ReleaseID:       releaseID,
+			FirmwareVersion: "0.14.0",
+			DeploymentID:    "00000000-0000-4000-8000-000000000002",
+			DeploymentKind:  "install",
+		},
+	}
+	repository := newMemoryRepository()
+	publisher := &recordingCommandPublisher{}
+	service, err := New(Options{
+		Repository: repository,
+		BindingService: &memoryBindingReader{
+			deviceID: "device_test_001",
+		},
+		Clock:                    fixedClock{now: now},
+		CommandPublisher:         publisher,
+		FirmwareUpdateAuthorizer: authorizer,
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+	command, err := service.CreateCommand(
+		context.Background(),
+		"device_test_001",
+		domain.CommandFirmwareUpdate,
+		"admin_test_001",
+		map[string]any{"release_id": releaseID},
+	)
+	if err != nil {
+		t.Fatalf("create firmware update command: %v", err)
+	}
+	if authorizer.deviceID != "device_test_001" ||
+		authorizer.releaseID != releaseID {
+		t.Fatalf(
+			"authorizer called with device=%q release=%q",
+			authorizer.deviceID,
+			authorizer.releaseID,
+		)
+	}
+	if command.Type != domain.CommandFirmwareUpdate ||
+		command.Payload["release_id"] != releaseID ||
+		len(command.Payload) != 1 {
+		t.Fatalf("unexpected firmware command: %#v", command)
+	}
+	if publisher.command == nil ||
+		publisher.command.Payload["release_id"] != releaseID {
+		t.Fatal("MQTT publisher must receive the release id payload")
+	}
+}
+
+func TestFirmwareUpdateCommandRejectsUnsafePayloadsAndAuthorizationErrors(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 18, 9, 0, 0, 0, time.UTC)
+	releaseID := "00000000-0000-4000-8000-000000000001"
+	tests := []struct {
+		name       string
+		payload    map[string]any
+		authorizer FirmwareUpdateAuthorizer
+		want       error
+	}{
+		{
+			name:    "missing release id",
+			payload: map[string]any{},
+			want:    domain.ErrInvalidCommand,
+		},
+		{
+			name:    "unknown payload field",
+			payload: map[string]any{"release_id": releaseID, "firmware_version": "9.9.9"},
+			want:    domain.ErrInvalidCommand,
+		},
+		{
+			name:    "non uuid release id",
+			payload: map[string]any{"release_id": "latest"},
+			want:    domain.ErrInvalidCommand,
+		},
+		{
+			name:    "missing authorizer",
+			payload: map[string]any{"release_id": releaseID},
+			want:    domain.ErrFirmwareUpdateUnavailable,
+		},
+		{
+			name:    "ota rejects release",
+			payload: map[string]any{"release_id": releaseID},
+			authorizer: &firmwareUpdateAuthorizerStub{
+				err: domain.ErrFirmwareUpdateUnavailable,
+			},
+			want: domain.ErrFirmwareUpdateUnavailable,
+		},
+		{
+			name:    "authorization release mismatch",
+			payload: map[string]any{"release_id": releaseID},
+			authorizer: &firmwareUpdateAuthorizerStub{
+				authorization: &FirmwareUpdateAuthorization{
+					ReleaseID:       "00000000-0000-4000-8000-000000000099",
+					FirmwareVersion: "0.14.0",
+					DeploymentID:    "00000000-0000-4000-8000-000000000002",
+					DeploymentKind:  "install",
+				},
+			},
+			want: domain.ErrInvalidCommand,
+		},
+		{
+			name:    "authorization missing deployment",
+			payload: map[string]any{"release_id": releaseID},
+			authorizer: &firmwareUpdateAuthorizerStub{
+				authorization: &FirmwareUpdateAuthorization{
+					ReleaseID:       releaseID,
+					FirmwareVersion: "0.14.0",
+					DeploymentKind:  "install",
+				},
+			},
+			want: domain.ErrInvalidCommand,
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			service, err := New(Options{
+				Repository: newMemoryRepository(),
+				BindingService: &memoryBindingReader{
+					deviceID: "device_test_001",
+				},
+				Clock:                    fixedClock{now: now},
+				FirmwareUpdateAuthorizer: test.authorizer,
+			})
+			if err != nil {
+				t.Fatalf("create runtime service: %v", err)
+			}
+			_, err = service.CreateCommand(
+				context.Background(),
+				"device_test_001",
+				domain.CommandFirmwareUpdate,
+				"admin_test_001",
+				test.payload,
+			)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("error = %v, want %v", err, test.want)
+			}
+		})
+	}
+}
+
+func TestMaintenanceCommandPayloadsAreTypeSpecific(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 18, 9, 0, 0, 0, time.UTC)
+	service, err := New(Options{
+		Repository: newMemoryRepository(),
+		BindingService: &memoryBindingReader{
+			deviceID: "device_test_001",
+		},
+		Clock: fixedClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("create runtime service: %v", err)
+	}
+	if _, err := service.CreateCommand(
+		context.Background(),
+		"device_test_001",
+		domain.CommandRefreshConfiguration,
+		"admin_test_001",
+		map[string]any{"notification_id": "must-not-smuggle"},
+	); !errors.Is(err, domain.ErrInvalidCommand) {
+		t.Fatalf("maintenance payload was accepted: %v", err)
+	}
+	if _, err := service.CreateCommand(
+		context.Background(),
+		"device_test_001",
+		domain.CommandDisplayMessage,
+		"admin_test_001",
+		map[string]any{
+			"notification_id": "notification_test_001",
+			"artifact_url":    "https://attacker.example/app.apk",
+		},
+	); !errors.Is(err, domain.ErrInvalidCommand) {
+		t.Fatalf("display payload with unknown field was accepted: %v", err)
+	}
+	if _, err := service.CreateCommand(
+		context.Background(),
+		"device_test_001",
+		domain.CommandDisplayMessage,
+		"admin_test_001",
+		map[string]any{
+			"notification_id":  "notification_test_001",
+			"title":            "From home",
+			"body":             "Please come home.",
+			"severity":         "info",
+			"duration_seconds": 30,
+			"category":         "family_message",
+		},
+	); err != nil {
+		t.Fatalf("valid display payload rejected: %v", err)
+	}
+}
+
 func TestListDeviceStatusesReturnsOnlineAndMissingRuntimeStates(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
@@ -750,7 +967,7 @@ func TestCreateCommandPublishesToCommandTransport(t *testing.T) {
 		"device_test_001",
 		domain.CommandRefreshConfiguration,
 		"admin_test_001",
-		map[string]any{"reason": "support"},
+		map[string]any{},
 	)
 	if err != nil {
 		t.Fatalf("create command: %v", err)

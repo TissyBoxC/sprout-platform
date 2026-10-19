@@ -10,6 +10,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -314,6 +315,13 @@ func (r *PostgresRepository) CreateCommand(
 		command.ExpiresAt,
 	)
 	if err != nil {
+		var postgresError *pgconn.PgError
+		if errors.As(err, &postgresError) &&
+			postgresError.Code == "23505" &&
+			postgresError.ConstraintName ==
+				"device_runtime_commands_firmware_active_unique" {
+			return domain.ErrFirmwareUpdateAlreadyQueued
+		}
 		return fmt.Errorf("insert device runtime command: %w", err)
 	}
 	return nil

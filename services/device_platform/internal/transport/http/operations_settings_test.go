@@ -120,7 +120,13 @@ func (*settingsAdminService) FindReleaseArtifact(context.Context, string, string
 	return nil, nil
 }
 
-func (*settingsAdminService) AppUpdate(context.Context, string, string, string) (*operationsdomain.AppUpdate, error) {
+func (*settingsAdminService) AppUpdate(
+	context.Context,
+	string,
+	string,
+	string,
+	string,
+) (*operationsdomain.AppUpdate, error) {
 	return nil, nil
 }
 

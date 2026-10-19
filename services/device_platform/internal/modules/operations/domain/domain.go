@@ -413,6 +413,14 @@ type AppUpdate struct {
 	MinSupportedVersion string `json:"min_supported_version"`
 }
 
+// PublishedUpdates keeps the newest client and resource releases separate.
+// They are independent version streams and must not be reduced to one row
+// before the caller compares its installed package and resource versions.
+type PublishedUpdates struct {
+	Client   *Release
+	Resource *Release
+}
+
 // ReleaseInput is a validated release registration request.
 type ReleaseInput struct {
 	Version             string

@@ -90,6 +90,10 @@ type otaInstallRequest struct {
 	DeploymentID string `json:"deployment_id"`
 }
 
+type otaAdminDeploymentRequest struct {
+	DeviceID string `json:"device_id"`
+}
+
 func (handler otaHandler) registerRoutes(
 	mux *http.ServeMux,
 	requireAdmin func(http.HandlerFunc) http.HandlerFunc,
@@ -139,6 +143,10 @@ func (handler otaHandler) registerRoutes(
 		requireAdmin(handler.listAdminDeployments),
 	)
 	mux.HandleFunc(
+		"POST /api/v1/admin/ota/releases/{release_id}/deployments",
+		requireAdmin(handler.createAdminDeployment),
+	)
+	mux.HandleFunc(
 		"POST /api/v1/admin/ota/deployments/{deployment_id}/retry",
 		requireAdmin(handler.retryAdminDeployment),
 	)
@@ -146,6 +154,54 @@ func (handler otaHandler) registerRoutes(
 		"GET /api/v1/admin/ota/statistics",
 		requireAdmin(handler.adminStatistics),
 	)
+}
+
+// createAdminDeployment creates one operator-owned deployment for a published
+// firmware release. The device runtime command is deliberately not created
+// here: the operator can then trigger delivery through the audited runtime
+// command endpoint, which revalidates this exact deployment through OTA.
+func (handler otaHandler) createAdminDeployment(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	actorID, ok := authenticatedAccountID(request)
+	if !ok {
+		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
+		return
+	}
+	var payload otaAdminDeploymentRequest
+	if err := decodeJSON(request, &payload); err != nil {
+		writeError(response, request, http.StatusBadRequest, "invalid_request", "请选择要升级的设备")
+		return
+	}
+	deviceID := strings.TrimSpace(payload.DeviceID)
+	releaseID := strings.TrimSpace(request.PathValue("release_id"))
+	if deviceID == "" || releaseID == "" {
+		writeError(response, request, http.StatusUnprocessableEntity, "invalid_ota_deployment", "请选择设备和固件版本")
+		return
+	}
+	deployment, err := handler.service.AssignRelease(
+		request.Context(),
+		releaseID,
+		deviceID,
+		"admin:"+actorID+":"+deviceID+":"+releaseID,
+		actorID,
+	)
+	if err != nil {
+		if errors.Is(err, domain.ErrDeviceNotEligible) {
+			writeError(
+				response,
+				request,
+				http.StatusUnprocessableEntity,
+				"device_not_eligible",
+				"这台设备暂不适用该更新",
+			)
+			return
+		}
+		handler.writeError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusCreated, deployment)
 }
 
 // registerGuardianRoutes registers parent-app OTA routes behind the family
@@ -1300,6 +1356,14 @@ func (handler otaHandler) writeError(
 			http.StatusUnprocessableEntity,
 			"invalid_ota_event",
 			"设备更新状态需要重新同步",
+		)
+	case errors.Is(err, domain.ErrInvalidDeployment):
+		writeError(
+			response,
+			request,
+			http.StatusUnprocessableEntity,
+			"invalid_ota_deployment",
+			"请选择设备和已发布的固件版本",
 		)
 	case errors.Is(err, domain.ErrNoUpdateAvailable):
 		writeError(

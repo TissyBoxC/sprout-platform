@@ -54,7 +54,7 @@ type Repository interface {
 		ctx context.Context,
 		platform string,
 		channel string,
-	) (*domain.Release, error)
+	) (*domain.PublishedUpdates, error)
 }
 
 // FindReleaseArtifact returns the newest matching registration for a single
@@ -587,7 +587,7 @@ func (r *PostgresRepository) LatestPublishedUpdate(
 	ctx context.Context,
 	platform string,
 	channel string,
-) (*domain.Release, error) {
+) (*domain.PublishedUpdates, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT
 			id,
@@ -637,13 +637,13 @@ func (r *PostgresRepository) LatestPublishedUpdate(
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate published updates: %w", err)
 	}
-	if bestClient != nil {
-		return bestClient, nil
+	if bestClient == nil && bestResource == nil {
+		return nil, domain.ErrReleaseNotFound
 	}
-	if bestResource != nil {
-		return bestResource, nil
-	}
-	return nil, domain.ErrReleaseNotFound
+	return &domain.PublishedUpdates{
+		Client:   bestClient,
+		Resource: bestResource,
+	}, nil
 }
 
 type rowScanner interface {

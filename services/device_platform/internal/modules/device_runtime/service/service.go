@@ -15,6 +15,7 @@ import (
 	bindingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/service"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/repository"
+	otaDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
 	"github.com/google/uuid"
 )
@@ -63,6 +64,24 @@ type CommandPublisher interface {
 	) error
 }
 
+// FirmwareUpdateAuthorizer is the narrow OTA validation port used before a
+// firmware_update runtime command becomes durable. It deliberately exposes no
+// release creation or deployment mutation; the OTA module remains the only
+// authority that can approve a firmware rollout.
+type FirmwareUpdateAuthorizer interface {
+	AuthorizeRuntimeFirmwareUpdate(
+		ctx context.Context,
+		deviceID string,
+		releaseID string,
+	) (*FirmwareUpdateAuthorization, error)
+}
+
+// FirmwareUpdateAuthorization is the immutable OTA authorization checked
+// before a firmware_update command may be persisted. DeploymentKind is not
+// duplicated in the command payload: OTA's deployment row remains the single
+// source of truth.
+type FirmwareUpdateAuthorization = otaDomain.RuntimeFirmwareUpdateAuthorization
+
 // Service validates, stores, and exposes device runtime state.
 type Service struct {
 	repository          repository.Repository
@@ -70,6 +89,7 @@ type Service struct {
 	diagnosticReader    DiagnosticReader
 	acknowledgementSink CommandAcknowledgementSink
 	commandPublisher    CommandPublisher
+	firmwareUpdateAuth  FirmwareUpdateAuthorizer
 	timeSource          clock.Clock
 	offlineThreshold    time.Duration
 	commandTTL          time.Duration
@@ -77,14 +97,15 @@ type Service struct {
 
 // Options contains runtime service dependencies and policy.
 type Options struct {
-	Repository          repository.Repository
-	BindingService      BindingReader
-	DiagnosticReader    DiagnosticReader
-	AcknowledgementSink CommandAcknowledgementSink
-	CommandPublisher    CommandPublisher
-	Clock               clock.Clock
-	OfflineThreshold    time.Duration
-	CommandTTL          time.Duration
+	Repository               repository.Repository
+	BindingService           BindingReader
+	DiagnosticReader         DiagnosticReader
+	AcknowledgementSink      CommandAcknowledgementSink
+	CommandPublisher         CommandPublisher
+	FirmwareUpdateAuthorizer FirmwareUpdateAuthorizer
+	Clock                    clock.Clock
+	OfflineThreshold         time.Duration
+	CommandTTL               time.Duration
 }
 
 // New creates the device runtime service.
@@ -113,6 +134,7 @@ func New(options Options) (*Service, error) {
 		diagnosticReader:    options.DiagnosticReader,
 		acknowledgementSink: options.AcknowledgementSink,
 		commandPublisher:    options.CommandPublisher,
+		firmwareUpdateAuth:  options.FirmwareUpdateAuthorizer,
 		timeSource:          timeSource,
 		offlineThreshold:    offlineThreshold,
 		commandTTL:          commandTTL,
@@ -132,6 +154,14 @@ func (s *Service) SetCommandAcknowledgementSink(
 // with the durable row plus HTTP-poll recovery path only.
 func (s *Service) SetCommandPublisher(publisher CommandPublisher) {
 	s.commandPublisher = publisher
+}
+
+// SetFirmwareUpdateAuthorizer wires the OTA validation port after both
+// services have been constructed.
+func (s *Service) SetFirmwareUpdateAuthorizer(
+	authorizer FirmwareUpdateAuthorizer,
+) {
+	s.firmwareUpdateAuth = authorizer
 }
 
 // RecordHeartbeat validates and persists one authenticated runtime snapshot.
@@ -421,6 +451,21 @@ func (s *Service) CreateCommand(
 	if !domain.CommandTypeIsValid(commandType) {
 		return nil, domain.ErrInvalidCommand
 	}
+	if commandType == domain.CommandFirmwareUpdate {
+		authorization, err := s.authorizeFirmwareUpdate(
+			ctx,
+			deviceID,
+			payload,
+		)
+		if err != nil {
+			return nil, err
+		}
+		payload = map[string]any{
+			"release_id": authorization.ReleaseID,
+		}
+	} else if err := validateNonFirmwareCommandPayload(commandType, payload); err != nil {
+		return nil, err
+	}
 	requestID, err := randomIdentifier("request")
 	if err != nil {
 		return nil, err
@@ -447,6 +492,78 @@ func (s *Service) CreateCommand(
 		_ = s.commandPublisher.PublishCommand(ctx, command.DeviceID, command)
 	}
 	return command, nil
+}
+
+func validateNonFirmwareCommandPayload(
+	commandType domain.CommandType,
+	payload map[string]any,
+) error {
+	if commandType == domain.CommandDisplayMessage {
+		if len(payload) == 0 {
+			return nil
+		}
+		allowed := map[string]bool{
+			"notification_id":  true,
+			"title":            true,
+			"body":             true,
+			"severity":         true,
+			"duration_seconds": true,
+			"category":         true,
+		}
+		for key := range payload {
+			if !allowed[key] {
+				return domain.ErrInvalidCommand
+			}
+		}
+		notificationID, ok := payload["notification_id"].(string)
+		if !ok || strings.TrimSpace(notificationID) == "" {
+			return domain.ErrInvalidCommand
+		}
+		return nil
+	}
+	if len(payload) != 0 {
+		return domain.ErrInvalidCommand
+	}
+	return nil
+}
+
+func (s *Service) authorizeFirmwareUpdate(
+	ctx context.Context,
+	deviceID string,
+	payload map[string]any,
+) (*FirmwareUpdateAuthorization, error) {
+	releaseID, ok := domain.FirmwareUpdateReleaseID(payload)
+	if !ok || uuid.Validate(strings.TrimSpace(releaseID)) != nil {
+		return nil, domain.ErrInvalidCommand
+	}
+	if s.firmwareUpdateAuth == nil {
+		return nil, domain.ErrFirmwareUpdateUnavailable
+	}
+	authorization, err := s.firmwareUpdateAuth.AuthorizeRuntimeFirmwareUpdate(
+		ctx,
+		deviceID,
+		strings.TrimSpace(releaseID),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if authorization == nil ||
+		strings.TrimSpace(authorization.ReleaseID) != strings.TrimSpace(releaseID) ||
+		!validReleaseID(authorization.ReleaseID) ||
+		!validReleaseID(authorization.DeploymentID) ||
+		authorization.FirmwareVersion == "" ||
+		(authorization.DeploymentKind != "install" &&
+			authorization.DeploymentKind != "rollback") {
+		return nil, domain.ErrInvalidCommand
+	}
+	return authorization, nil
+}
+
+func validReleaseID(value string) bool {
+	parsed, err := uuid.Parse(strings.TrimSpace(value))
+	return err == nil &&
+		parsed != uuid.Nil &&
+		parsed.String() == strings.TrimSpace(value)
 }
 
 // ListCommands returns recent maintenance actions for one device.

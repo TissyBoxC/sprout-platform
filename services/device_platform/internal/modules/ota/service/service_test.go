@@ -390,6 +390,34 @@ func (repository *fakeRepository) GetDeploymentByRequestID(
 	return nil, domain.ErrDeploymentNotFound
 }
 
+func (repository *fakeRepository) GetDeploymentForRuntimeUpdate(
+	_ context.Context,
+	deviceID string,
+	releaseID string,
+) (*domain.Deployment, error) {
+	var selected *domain.Deployment
+	for _, deployment := range repository.deployments {
+		if deployment.DeviceID != deviceID {
+			continue
+		}
+		targetReleaseID := deployment.ReleaseID
+		if deployment.RollbackReleaseID != "" {
+			targetReleaseID = deployment.RollbackReleaseID
+		}
+		if targetReleaseID != releaseID {
+			continue
+		}
+		if selected == nil || deployment.CreatedAt.After(selected.CreatedAt) {
+			selected = deployment
+		}
+	}
+	if selected == nil {
+		return nil, domain.ErrDeploymentNotFound
+	}
+	copy := *selected
+	return &copy, nil
+}
+
 func (repository *fakeRepository) ListDeployments(
 	_ context.Context,
 	_ domain.DeploymentFilter,
@@ -1046,6 +1074,165 @@ func TestCanarySelectionIsDeterministic(t *testing.T) {
 	}
 	if !domain.CanaryContains("1.2.3", "device-1", 100) {
 		t.Fatal("100 percent canary should include every device")
+	}
+}
+
+func TestAuthorizeRuntimeFirmwareUpdateRequiresDeviceDeploymentAndPublishedHardware(t *testing.T) {
+	repository := newFakeRepository()
+	repository.device = &domain.DeviceContext{
+		DeviceID:         "device-1",
+		HardwareRevision: "sprout-v1",
+		CurrentVersion:   "1.0.0",
+	}
+	release := &domain.Release{
+		ID:                 "00000000-0000-4000-8000-000000000001",
+		Version:            "1.2.3",
+		Channel:            domain.ChannelStable,
+		HardwareRevision:   "sprout-v1",
+		MinSourceVersion:   "1.0.0",
+		SizeBytes:          1024,
+		ArtifactKey:        "firmware/1.2.3.bin",
+		SHA256:             strings.Repeat("a", 64),
+		Status:             domain.ReleaseStatusPublished,
+		Target:             domain.Target{Scope: domain.TargetScopeDevice, DeviceID: "device-1"},
+		SignatureStatus:    domain.SignatureStatusVerified,
+		SignatureAlgorithm: "ed25519",
+		Signature:          strings.Repeat("A", 86) + "==",
+	}
+	verifiedAt := time.Now().UTC()
+	release.SignatureVerifiedAt = &verifiedAt
+	repository.releases[release.ID] = release
+	deployment := &domain.Deployment{
+		ID:        "00000000-0000-4000-8000-000000000002",
+		ReleaseID: release.ID,
+		DeviceID:  "device-1",
+		Status:    domain.DeploymentStatusQueued,
+		CreatedAt: time.Now().UTC(),
+	}
+	repository.deployments[deployment.ID] = deployment
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	authorization, err := service.AuthorizeRuntimeFirmwareUpdate(
+		context.Background(),
+		"device-1",
+		release.ID,
+	)
+	if err != nil {
+		t.Fatalf("authorize runtime update: %v", err)
+	}
+	if authorization.ReleaseID != release.ID ||
+		authorization.DeploymentID != deployment.ID ||
+		authorization.DeploymentKind != "install" {
+		t.Fatalf("unexpected authorization: %#v", authorization)
+	}
+
+	release.HardwareRevision = "sprout-v2"
+	if _, err := service.AuthorizeRuntimeFirmwareUpdate(
+		context.Background(),
+		"device-1",
+		release.ID,
+	); !errors.Is(err, domain.ErrDeviceNotEligible) {
+		t.Fatalf("expected hardware mismatch to be rejected, got %v", err)
+	}
+
+	release.HardwareRevision = "sprout-v1"
+	release.SignatureStatus = domain.SignatureStatusPending
+	release.SignatureVerifiedAt = nil
+	if _, err := service.AuthorizeRuntimeFirmwareUpdate(
+		context.Background(),
+		"device-1",
+		release.ID,
+	); !errors.Is(err, domain.ErrDeviceNotEligible) {
+		t.Fatalf("expected an unverified release to be rejected, got %v", err)
+	}
+	release.SignatureStatus = domain.SignatureStatusVerified
+	release.SignatureVerifiedAt = &verifiedAt
+
+	deployment.Status = domain.DeploymentStatusFailed
+	if _, err := service.AuthorizeRuntimeFirmwareUpdate(
+		context.Background(),
+		"device-1",
+		release.ID,
+	); !errors.Is(err, domain.ErrDeploymentStateConflict) {
+		t.Fatalf("expected failed deployment to require an explicit retry, got %v", err)
+	}
+}
+
+func TestAuthorizeRuntimeFirmwareUpdateRejectsUnknownReleaseAndEndedDeployment(t *testing.T) {
+	repository := newFakeRepository()
+	repository.device = &domain.DeviceContext{
+		DeviceID:         "device-1",
+		HardwareRevision: "sprout-v1",
+		CurrentVersion:   "1.0.0",
+	}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	if _, err := service.AuthorizeRuntimeFirmwareUpdate(
+		context.Background(),
+		"device-1",
+		"00000000-0000-4000-8000-000000000001",
+	); !errors.Is(err, domain.ErrReleaseNotFound) {
+		t.Fatalf("expected unknown release rejection, got %v", err)
+	}
+}
+
+func TestAuthorizeRuntimeFirmwareUpdateRejectsDeviceOutsideCanary(t *testing.T) {
+	repository := newFakeRepository()
+	repository.device = &domain.DeviceContext{
+		DeviceID:         "",
+		HardwareRevision: "sprout-v1",
+		CurrentVersion:   "1.0.0",
+	}
+	release := &domain.Release{
+		ID:                 "00000000-0000-4000-8000-000000000071",
+		Version:            "9.9.9-canary",
+		Channel:            domain.ChannelCanary,
+		HardwareRevision:   "sprout-v1",
+		MinSourceVersion:   "1.0.0",
+		SizeBytes:          1024,
+		ArtifactKey:        "firmware/9.9.9-canary.bin",
+		SHA256:             strings.Repeat("e", 64),
+		Status:             domain.ReleaseStatusPublished,
+		Target:             domain.Target{Scope: domain.TargetScopeCanary, CanaryPercent: 1},
+		SignatureStatus:    domain.SignatureStatusVerified,
+		SignatureAlgorithm: "ed25519",
+		Signature:          strings.Repeat("A", 86) + "==",
+	}
+	verifiedAt := time.Now().UTC()
+	release.SignatureVerifiedAt = &verifiedAt
+	repository.releases[release.ID] = release
+	deployment := &domain.Deployment{
+		ID:        "00000000-0000-4000-8000-000000000072",
+		ReleaseID: release.ID,
+		Status:    domain.DeploymentStatusQueued,
+		CreatedAt: time.Now().UTC(),
+	}
+	if domain.CanaryContains(
+		release.Version,
+		"device-outside-canary",
+		release.Target.CanaryPercent,
+	) {
+		t.Skip("synthetic device unexpectedly falls inside the canary bucket")
+	}
+	repository.device.DeviceID = "device-outside-canary"
+	deployment.DeviceID = repository.device.DeviceID
+	repository.deployments[deployment.ID] = deployment
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	if _, err := service.AuthorizeRuntimeFirmwareUpdate(
+		context.Background(),
+		repository.device.DeviceID,
+		release.ID,
+	); !errors.Is(err, domain.ErrDeviceNotEligible) {
+		t.Fatalf("expected a device outside the canary to be rejected, got %v", err)
 	}
 }
 

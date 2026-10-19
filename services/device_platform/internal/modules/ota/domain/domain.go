@@ -401,6 +401,17 @@ type DeviceContext struct {
 	GroupIDs         []string
 }
 
+// RuntimeFirmwareUpdateAuthorization is the OTA-owned decision exposed to the
+// device runtime before it queues a firmware_update command. The command may
+// carry the authorized release id, but not a version, artifact, signature, or
+// deployment kind.
+type RuntimeFirmwareUpdateAuthorization struct {
+	ReleaseID       string
+	FirmwareVersion string
+	DeploymentID    string
+	DeploymentKind  string
+}
+
 // Group is a stable named audience for firmware rollouts.
 type Group struct {
 	ID               string    `json:"id"`
@@ -642,6 +653,24 @@ func CanTransitionDeployment(from DeploymentStatus, to DeploymentStatus) bool {
 			to == DeploymentStatusRolledBack
 	case DeploymentStatusFailed:
 		return to == DeploymentStatusQueued || to == DeploymentStatusRolledBack
+	default:
+		return false
+	}
+}
+
+// DeploymentCanReceiveRuntimeCommand reports whether a firmware_update command
+// may be queued for this deployment state. Failed deployments are intentionally
+// excluded until the operator explicitly retries them; otherwise a new command
+// would bypass the retry/version-conflict audit path.
+func DeploymentCanReceiveRuntimeCommand(status DeploymentStatus) bool {
+	switch status {
+	case DeploymentStatusQueued,
+		DeploymentStatusOffered,
+		DeploymentStatusDownloading,
+		DeploymentStatusValidating,
+		DeploymentStatusInstalling,
+		DeploymentStatusPendingVerify:
+		return true
 	default:
 		return false
 	}

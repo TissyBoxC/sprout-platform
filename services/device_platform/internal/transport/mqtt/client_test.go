@@ -287,6 +287,35 @@ func TestPublishCommandSurfacesBrokerError(t *testing.T) {
 	}
 }
 
+func TestPublishFirmwareUpdateCarriesOnlyAuthorizedReleaseID(t *testing.T) {
+	t.Parallel()
+	client := &Client{client: &stubPahoClient{connected: true}}
+	releaseID := "00000000-0000-4000-8000-000000000001"
+	command := sampleCommand()
+	command.Type = runtimedomain.CommandFirmwareUpdate
+	command.Payload = map[string]any{"release_id": releaseID}
+	if err := client.PublishCommand(
+		context.Background(),
+		"device_test_001",
+		command,
+	); err != nil {
+		t.Fatalf("PublishCommand() error = %v", err)
+	}
+	stub := client.client.(*stubPahoClient)
+	stub.mu.Lock()
+	payload, _ := stub.payload.([]byte)
+	stub.mu.Unlock()
+	var event DeviceCommandEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	if event.Payload.CommandType != "firmware_update" ||
+		event.Payload.Data["release_id"] != releaseID ||
+		len(event.Payload.Data) != 1 {
+		t.Fatalf("unexpected firmware command payload: %#v", event.Payload)
+	}
+}
+
 func TestConnectedReflectsBrokerState(t *testing.T) {
 	t.Parallel()
 	client := &Client{client: &stubPahoClient{connected: false}}

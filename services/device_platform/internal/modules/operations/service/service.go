@@ -122,10 +122,12 @@ func (s *Service) AppUpdate(
 	platform string,
 	channel string,
 	currentVersion string,
+	currentResourceVersion string,
 ) (*domain.AppUpdate, error) {
 	platform = strings.TrimSpace(platform)
 	channel = strings.TrimSpace(channel)
 	currentVersion = strings.TrimSpace(currentVersion)
+	currentResourceVersion = strings.TrimSpace(currentResourceVersion)
 	if !isReleasePlatform(platform) || platform == "all" {
 		return nil, domain.ErrUpdateNotAvailable
 	}
@@ -151,11 +153,16 @@ func (s *Service) AppUpdate(
 	if !isReleaseChannel(channel) {
 		return nil, domain.ErrUpdateNotAvailable
 	}
-	release, err := s.repository.LatestPublishedUpdate(ctx, platform, channel)
+	releases, err := s.repository.LatestPublishedUpdate(ctx, platform, channel)
 	if err != nil {
 		return nil, err
 	}
-	if currentVersion != "" && compareVersions(release.Version, currentVersion) <= 0 {
+	release := selectAppUpdateRelease(
+		releases,
+		currentVersion,
+		currentResourceVersion,
+	)
+	if release == nil {
 		return nil, domain.ErrUpdateNotAvailable
 	}
 	if release.Kind == domain.ReleaseKindClient &&
@@ -186,6 +193,36 @@ func (s *Service) AppUpdate(
 		IsMandatory:         isMandatory,
 		MinSupportedVersion: release.MinSupportedVersion,
 	}, nil
+}
+
+// selectAppUpdateRelease reports a client package whenever one is published,
+// because a full installation supersedes every resource-only change. Only
+// when no client package exists does it report a resource that is ahead of
+// the installed resource marker. Returning the current client again is
+// intentional: the client-side compatibility filter must be able to suppress
+// it without hiding a still-actionable resource.
+func selectAppUpdateRelease(
+	releases *domain.PublishedUpdates,
+	currentVersion string,
+	currentResourceVersion string,
+) *domain.Release {
+	if releases == nil {
+		return nil
+	}
+	if releases.Client != nil &&
+		(currentVersion == "" ||
+			compareVersions(releases.Client.Version, currentVersion) > 0) {
+		return releases.Client
+	}
+	if releases.Resource != nil &&
+		(currentResourceVersion == "" ||
+			compareVersions(
+				releases.Resource.Version,
+				currentResourceVersion,
+			) > 0) {
+		return releases.Resource
+	}
+	return nil
 }
 
 // Settings returns the current operations document.

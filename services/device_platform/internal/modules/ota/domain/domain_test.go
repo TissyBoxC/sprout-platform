@@ -31,3 +31,29 @@ func TestRollbackEventsRemainInProgressUntilTerminalEvent(t *testing.T) {
 		}
 	}
 }
+
+func TestDeploymentCanReceiveRuntimeCommandOnlyBeforeTerminalState(t *testing.T) {
+	t.Parallel()
+	for _, status := range []DeploymentStatus{
+		DeploymentStatusQueued,
+		DeploymentStatusOffered,
+		DeploymentStatusDownloading,
+		DeploymentStatusValidating,
+		DeploymentStatusInstalling,
+		DeploymentStatusPendingVerify,
+	} {
+		if !DeploymentCanReceiveRuntimeCommand(status) {
+			t.Errorf("status %q should accept a firmware_update command", status)
+		}
+	}
+	for _, status := range []DeploymentStatus{
+		DeploymentStatusSucceeded,
+		DeploymentStatusFailed,
+		DeploymentStatusRolledBack,
+		DeploymentStatus("unknown"),
+	} {
+		if DeploymentCanReceiveRuntimeCommand(status) {
+			t.Errorf("status %q must not accept a firmware_update command", status)
+		}
+	}
+}

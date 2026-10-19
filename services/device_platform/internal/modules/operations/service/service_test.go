@@ -17,7 +17,7 @@ type fakeSettingsRepository struct {
 	savedVersion     int64
 	currentVersion   int64
 	requestedChannel string
-	latestUpdate     *domain.Release
+	latestUpdate     *domain.PublishedUpdates
 	familyPage       domain.PageRequest
 	releasePage      domain.PageRequest
 }
@@ -97,7 +97,7 @@ func (repository *fakeSettingsRepository) LatestPublishedUpdate(
 	_ context.Context,
 	_ string,
 	channel string,
-) (*domain.Release, error) {
+) (*domain.PublishedUpdates, error) {
 	repository.requestedChannel = channel
 	if repository.latestUpdate == nil {
 		return nil, domain.ErrReleaseNotFound
@@ -312,12 +312,14 @@ func TestAppUpdateUsesConfiguredDefaultChannelWhenClientOmitsChannel(t *testing.
 		savedSettings: &domain.Settings{
 			Update: domain.UpdateSettings{Channel: domain.ReleaseChannelBeta},
 		},
-		latestUpdate: &domain.Release{
-			Kind:        domain.ReleaseKindClient,
-			Version:     "1.2.0",
-			Channel:     domain.ReleaseChannelBeta,
-			DownloadURL: "https://downloads.example.com/app-1.2.0.apk",
-			SHA256:      strings.Repeat("a", 64),
+		latestUpdate: &domain.PublishedUpdates{
+			Client: &domain.Release{
+				Kind:        domain.ReleaseKindClient,
+				Version:     "1.2.0",
+				Channel:     domain.ReleaseChannelBeta,
+				DownloadURL: "https://downloads.example.com/app-1.2.0.apk",
+				SHA256:      strings.Repeat("a", 64),
+			},
 		},
 	}
 	service, err := New(Options{Repository: repository})
@@ -325,7 +327,13 @@ func TestAppUpdateUsesConfiguredDefaultChannelWhenClientOmitsChannel(t *testing.
 		t.Fatalf("create service: %v", err)
 	}
 
-	update, err := service.AppUpdate(context.Background(), "android", "", "1.1.0")
+	update, err := service.AppUpdate(
+		context.Background(),
+		"android",
+		"",
+		"1.1.0",
+		"",
+	)
 	if err != nil {
 		t.Fatalf("app update: %v", err)
 	}
@@ -348,12 +356,14 @@ func TestAppUpdateExplicitChannelOverridesDefault(t *testing.T) {
 		savedSettings: &domain.Settings{
 			Update: domain.UpdateSettings{Channel: domain.ReleaseChannelStable},
 		},
-		latestUpdate: &domain.Release{
-			Kind:        domain.ReleaseKindClient,
-			Version:     "1.3.0",
-			Channel:     domain.ReleaseChannelCanary,
-			DownloadURL: "https://downloads.example.com/app-1.3.0.apk",
-			SHA256:      strings.Repeat("b", 64),
+		latestUpdate: &domain.PublishedUpdates{
+			Client: &domain.Release{
+				Kind:        domain.ReleaseKindClient,
+				Version:     "1.3.0",
+				Channel:     domain.ReleaseChannelCanary,
+				DownloadURL: "https://downloads.example.com/app-1.3.0.apk",
+				SHA256:      strings.Repeat("b", 64),
+			},
 		},
 	}
 	service, err := New(Options{Repository: repository})
@@ -366,6 +376,7 @@ func TestAppUpdateExplicitChannelOverridesDefault(t *testing.T) {
 		"android",
 		domain.ReleaseChannelCanary,
 		"1.1.0",
+		"",
 	); err != nil {
 		t.Fatalf("app update: %v", err)
 	}
@@ -375,5 +386,77 @@ func TestAppUpdateExplicitChannelOverridesDefault(t *testing.T) {
 			repository.requestedChannel,
 			domain.ReleaseChannelCanary,
 		)
+	}
+}
+
+func TestAppUpdateTreatsClientAndResourceVersionsIndependently(t *testing.T) {
+	t.Parallel()
+	resource := &domain.Release{
+		Kind:        domain.ReleaseKindResource,
+		Version:     "2.0.0",
+		Channel:     domain.ReleaseChannelStable,
+		DownloadURL: "https://downloads.example.com/resources-2.0.0.zip",
+		SHA256:      strings.Repeat("c", 64),
+	}
+	client := &domain.Release{
+		Kind:        domain.ReleaseKindClient,
+		Version:     "1.4.0",
+		Channel:     domain.ReleaseChannelStable,
+		DownloadURL: "https://downloads.example.com/app-1.4.0.apk",
+		SHA256:      strings.Repeat("d", 64),
+	}
+	repository := &fakeSettingsRepository{
+		savedSettings: &domain.Settings{
+			Update: domain.UpdateSettings{Channel: domain.ReleaseChannelStable},
+		},
+		latestUpdate: &domain.PublishedUpdates{
+			Client:   client,
+			Resource: resource,
+		},
+	}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	update, err := service.AppUpdate(
+		context.Background(),
+		"android",
+		"",
+		"1.4.0",
+		"2.0.0",
+	)
+	if !errors.Is(err, domain.ErrUpdateNotAvailable) || update != nil {
+		t.Fatalf("already current update = %#v, error = %v", update, err)
+	}
+
+	update, err = service.AppUpdate(
+		context.Background(),
+		"android",
+		"",
+		"1.4.0",
+		"1.9.0",
+	)
+	if err != nil {
+		t.Fatalf("resource update: %v", err)
+	}
+	if update == nil || update.Kind != domain.ReleaseKindResource ||
+		update.Version != "2.0.0" {
+		t.Fatalf("expected resource update, got %#v", update)
+	}
+
+	update, err = service.AppUpdate(
+		context.Background(),
+		"android",
+		"",
+		"1.3.0",
+		"2.0.0",
+	)
+	if err != nil {
+		t.Fatalf("client update: %v", err)
+	}
+	if update == nil || update.Kind != domain.ReleaseKindClient ||
+		update.Version != "1.4.0" {
+		t.Fatalf("resource marker hid the client update: %#v", update)
 	}
 }

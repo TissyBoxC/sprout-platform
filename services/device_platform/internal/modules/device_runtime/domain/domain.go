@@ -11,6 +11,13 @@ var (
 	ErrDeviceNotFound   = errors.New("device runtime not found")
 	ErrCommandNotFound  = errors.New("device runtime command not found")
 	ErrInvalidCommand   = errors.New("invalid device runtime command")
+	// ErrFirmwareUpdateAlreadyQueued reports an idempotent retry for the same
+	// device and release while an active firmware_update command still exists.
+	ErrFirmwareUpdateAlreadyQueued = errors.New("firmware update command already queued")
+	// ErrFirmwareUpdateUnavailable is returned when the OTA authority is not
+	// assembled or cannot validate a release. It fails closed so a deployment
+	// can never be guessed from a client-supplied version.
+	ErrFirmwareUpdateUnavailable = errors.New("firmware update authorization unavailable")
 )
 
 // ConnectionState is the transport state reported by a device.
@@ -189,6 +196,11 @@ const (
 	// in step with the platform. The payload carries only the four booleans and
 	// never any child content.
 	CommandSyncPrivacyConsent CommandType = "sync_privacy_consent"
+	// CommandFirmwareUpdate asks the OTA worker to apply an already-authorized
+	// release. The command carries only a release id after OTA verifies the
+	// device's active deployment. Release existence, hardware, rollout,
+	// signature, and rollback checks remain owned by the OTA module.
+	CommandFirmwareUpdate CommandType = "firmware_update"
 )
 
 // CommandTypeIsValid reports whether a command is part of the stable contract.
@@ -199,11 +211,31 @@ func CommandTypeIsValid(commandType CommandType) bool {
 		CommandResyncTime,
 		CommandFactoryReset,
 		CommandDisplayMessage,
-		CommandSyncPrivacyConsent:
+		CommandSyncPrivacyConsent,
+		CommandFirmwareUpdate:
 		return true
 	default:
 		return false
 	}
+}
+
+// FirmwareUpdateReleaseID returns the only payload value accepted by a
+// firmware_update command. Unknown fields are rejected by the service before
+// persistence, so a caller cannot smuggle a signature, URL, actor, or
+// deployment kind into the device command.
+func FirmwareUpdateReleaseID(payload map[string]any) (string, bool) {
+	if len(payload) != 1 {
+		return "", false
+	}
+	value, exists := payload["release_id"]
+	if !exists {
+		return "", false
+	}
+	releaseID, ok := value.(string)
+	if !ok || releaseID == "" {
+		return "", false
+	}
+	return releaseID, true
 }
 
 // CommandStatus tracks delivery and acknowledgement of one maintenance action.

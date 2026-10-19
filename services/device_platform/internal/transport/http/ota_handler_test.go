@@ -87,6 +87,98 @@ type deviceEventSessionVerifier struct {
 	deviceID string
 }
 
+type adminDeploymentOTARepository struct {
+	otarepository.Repository
+	release   *domain.Release
+	device    *domain.DeviceContext
+	created   *domain.Deployment
+	createErr error
+}
+
+func (repository *adminDeploymentOTARepository) GetRelease(
+	context.Context,
+	string,
+) (*domain.Release, error) {
+	copy := *repository.release
+	return &copy, nil
+}
+
+func (repository *adminDeploymentOTARepository) GetDeviceContext(
+	context.Context,
+	string,
+) (*domain.DeviceContext, error) {
+	copy := *repository.device
+	return &copy, nil
+}
+
+func (repository *adminDeploymentOTARepository) CreateDeployment(
+	_ context.Context,
+	deployment *domain.Deployment,
+) (*domain.Deployment, error) {
+	if repository.createErr != nil {
+		return nil, repository.createErr
+	}
+	copy := *deployment
+	repository.created = &copy
+	return &copy, nil
+}
+
+func newAdminDeploymentHandlerForTest(
+	t *testing.T,
+) (otaHandler, *adminDeploymentOTARepository) {
+	t.Helper()
+	verifiedAt := time.Date(2026, time.October, 18, 11, 0, 0, 0, time.UTC)
+	repository := &adminDeploymentOTARepository{
+		release: &domain.Release{
+			ID:                  "00000000-0000-4000-8000-000000000081",
+			Version:             "1.2.3",
+			Channel:             domain.ChannelStable,
+			HardwareRevision:    "sprout-v1",
+			MinSourceVersion:    "1.0.0",
+			ArtifactKey:         "firmware/1.2.3.bin",
+			SHA256:              strings.Repeat("a", 64),
+			SizeBytes:           1024,
+			Status:              domain.ReleaseStatusPublished,
+			Target:              domain.Target{Scope: domain.TargetScopeAll},
+			SignatureStatus:     domain.SignatureStatusVerified,
+			SignatureAlgorithm:  "ed25519",
+			Signature:           strings.Repeat("A", 86) + "==",
+			SignatureVerifiedAt: &verifiedAt,
+		},
+		device: &domain.DeviceContext{
+			DeviceID:         "device-1",
+			HardwareRevision: "sprout-v1",
+			CurrentVersion:   "1.0.0",
+		},
+	}
+	service, err := otaservice.New(otaservice.Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create OTA service: %v", err)
+	}
+	return newOTAHandler(service, nil, nil), repository
+}
+
+func postAdminDeployment(
+	handler otaHandler,
+	releaseID string,
+	body string,
+) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/admin/ota/releases/"+releaseID+"/deployments",
+		strings.NewReader(body),
+	)
+	request.SetPathValue("release_id", releaseID)
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		authenticatedAccountKey{},
+		"admin_test_001",
+	))
+	response := httptest.NewRecorder()
+	handler.createAdminDeployment(response, request)
+	return response
+}
+
 func (verifier deviceEventSessionVerifier) VerifyDeviceSession(
 	context.Context,
 	string,
@@ -151,6 +243,79 @@ func deviceEventPayload(eventType string, sequence int64) string {
 		panic(err)
 	}
 	return string(payload)
+}
+
+func TestAdminCreateDeploymentUsesPublishedReleaseAndEligibleDevice(t *testing.T) {
+	t.Parallel()
+	handler, repository := newAdminDeploymentHandlerForTest(t)
+	releaseID := repository.release.ID
+	response := postAdminDeployment(
+		handler,
+		releaseID,
+		`{"device_id":"device-1"}`,
+	)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if repository.created == nil ||
+		repository.created.ReleaseID != releaseID ||
+		repository.created.DeviceID != "device-1" ||
+		repository.created.RequestedBy != "admin_test_001" ||
+		repository.created.RequestID !=
+			"admin:admin_test_001:device-1:"+releaseID ||
+		repository.created.Status != domain.DeploymentStatusQueued {
+		t.Fatalf("unexpected deployment: %#v", repository.created)
+	}
+}
+
+func TestAdminCreateDeploymentRejectsMissingDeviceAndIneligibleHardware(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+		edit func(*adminDeploymentOTARepository)
+		code int
+	}{
+		{
+			name: "missing device",
+			body: `{}`,
+			code: http.StatusUnprocessableEntity,
+		},
+		{
+			name: "ineligible hardware",
+			body: `{"device_id":"device-1"}`,
+			edit: func(repository *adminDeploymentOTARepository) {
+				repository.device.HardwareRevision = "sprout-v2"
+			},
+			code: http.StatusUnprocessableEntity,
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			handler, repository := newAdminDeploymentHandlerForTest(t)
+			if test.edit != nil {
+				test.edit(repository)
+			}
+			response := postAdminDeployment(
+				handler,
+				repository.release.ID,
+				test.body,
+			)
+			if response.Code != test.code {
+				t.Fatalf(
+					"status = %d, want %d, body=%s",
+					response.Code,
+					test.code,
+					response.Body.String(),
+				)
+			}
+			if repository.created != nil {
+				t.Fatalf("invalid request created deployment: %#v", repository.created)
+			}
+		})
+	}
 }
 
 func TestValidateOTAReleaseMutationRequiresCurrentSignaturePayloadVersion(t *testing.T) {

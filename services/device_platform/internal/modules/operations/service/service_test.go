@@ -20,6 +20,12 @@ type fakeSettingsRepository struct {
 	latestUpdate     *domain.PublishedUpdates
 	familyPage       domain.PageRequest
 	releasePage      domain.PageRequest
+	createdRelease   *domain.Release
+	publishedID      string
+	deletedID        string
+	artifactLookup   domain.ReleaseIdentity
+	artifactResult   *domain.ReleaseArtifact
+	artifactErr      error
 }
 
 func (repository *fakeSettingsRepository) GetSettings(
@@ -77,20 +83,45 @@ func (repository *fakeSettingsRepository) ListReleases(
 	return nil, 0, nil
 }
 
-func (*fakeSettingsRepository) CreateRelease(context.Context, *domain.Release) error {
+func (repository *fakeSettingsRepository) CreateRelease(
+	_ context.Context,
+	release *domain.Release,
+) error {
+	repository.createdRelease = release
 	return nil
 }
 
-func (*fakeSettingsRepository) PublishRelease(context.Context, string, string) error {
+func (repository *fakeSettingsRepository) PublishRelease(
+	_ context.Context,
+	releaseID string,
+	_ string,
+) error {
+	repository.publishedID = releaseID
 	return nil
 }
 
-func (*fakeSettingsRepository) DeleteRelease(context.Context, string) error {
+func (repository *fakeSettingsRepository) DeleteRelease(
+	_ context.Context,
+	releaseID string,
+) error {
+	repository.deletedID = releaseID
 	return nil
 }
 
-func (*fakeSettingsRepository) FindReleaseArtifact(context.Context, string, string, string) (*domain.ReleaseArtifact, error) {
-	return nil, nil
+func (repository *fakeSettingsRepository) FindReleaseArtifact(
+	_ context.Context,
+	version string,
+	kind string,
+	platform string,
+	channel string,
+) (*domain.ReleaseArtifact, error) {
+	repository.artifactLookup = domain.ReleaseIdentity{
+		Version:  version,
+		Channel:  channel,
+		Kind:     kind,
+		Platform: platform,
+	}
+	return repository.artifactResult, repository.artifactErr
 }
 
 func (repository *fakeSettingsRepository) LatestPublishedUpdate(
@@ -119,11 +150,33 @@ func validSettings() *domain.Settings {
 		Update: domain.UpdateSettings{
 			Channel: domain.ReleaseChannelStable,
 		},
+		Safety: domain.SafetySettings{
+			MinorModeDefault: true,
+		},
 		Retention: domain.RetentionSettings{
 			ConversationDays: 30,
+			AudioDays:        0,
 			UsageReportDays:  domain.DefaultUsageReportRetentionDays,
 		},
 		Voice: domain.DefaultVoiceSettings(),
+	}
+}
+
+func TestUpdateSettingsRejectsPersistedRawAudioRetention(t *testing.T) {
+	repository := &fakeSettingsRepository{currentVersion: 1}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	settings := validSettings()
+	settings.Retention.AudioDays = 7
+	if _, _, err := service.UpdateSettings(
+		context.Background(),
+		settings,
+		"actor-id",
+		1,
+	); !errors.Is(err, domain.ErrInvalidSettings) {
+		t.Fatalf("expected invalid settings for raw audio retention, got %v", err)
 	}
 }
 
@@ -279,10 +332,9 @@ func TestUpdateSettingsRejectsOutOfRangeVoiceIdleWindow(t *testing.T) {
 	}
 }
 
-// Minor mode is a platform safety invariant, not an operator preference. A
-// request that tries to turn it off must be persisted as enabled so the
-// console can never display a disabled protection that is actually mandatory.
-func TestUpdateSettingsForcesMinorModeDefaultOn(t *testing.T) {
+// Minor mode is a platform safety invariant, not an operator preference. An
+// API caller cannot persist a settings document that disables it.
+func TestUpdateSettingsRejectsMinorModeDisabled(t *testing.T) {
 	repository := &fakeSettingsRepository{currentVersion: 3}
 	service, err := New(Options{Repository: repository})
 	if err != nil {
@@ -291,17 +343,13 @@ func TestUpdateSettingsForcesMinorModeDefaultOn(t *testing.T) {
 	settings := validSettings()
 	settings.Safety.MinorModeDefault = false
 
-	saved, _, err := service.UpdateSettings(
+	if _, _, err := service.UpdateSettings(
 		context.Background(),
 		settings,
 		"actor-id",
 		3,
-	)
-	if err != nil {
-		t.Fatalf("update settings: %v", err)
-	}
-	if !saved.Safety.MinorModeDefault {
-		t.Fatal("minor mode default was persisted as disabled")
+	); !errors.Is(err, domain.ErrInvalidSettings) {
+		t.Fatalf("expected invalid settings for disabled minor mode, got %v", err)
 	}
 }
 
@@ -519,5 +567,107 @@ func TestAppUpdateTreatsClientAndResourceVersionsIndependently(t *testing.T) {
 	if update == nil || update.Kind != domain.ReleaseKindClient ||
 		update.Version != "1.4.0" {
 		t.Fatalf("resource marker hid the client update: %#v", update)
+	}
+}
+
+func TestCreateReleaseAllowsSameVersionForDifferentArtifactIdentity(t *testing.T) {
+	t.Parallel()
+	repository := &fakeSettingsRepository{}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	input := domain.ReleaseInput{
+		Version:             "0.29.0",
+		Channel:             domain.ReleaseChannelStable,
+		Kind:                domain.ReleaseKindClient,
+		Platform:            "android",
+		DownloadURL:         "https://download.example.test/0.29.0.apk",
+		SHA256:              strings.Repeat("a", 64),
+		ReleaseNotes:        "修复设备连接。",
+		MinSupportedVersion: "",
+	}
+	release, err := service.CreateRelease(context.Background(), input)
+	if err != nil {
+		t.Fatalf("create release: %v", err)
+	}
+	if release.ID == "" || repository.createdRelease == nil {
+		t.Fatal("expected a persisted release with its generated identity")
+	}
+	if repository.createdRelease.Version != input.Version ||
+		repository.createdRelease.Kind != input.Kind ||
+		repository.createdRelease.Platform != input.Platform ||
+		repository.createdRelease.Channel != input.Channel {
+		t.Fatalf("unexpected persisted identity: %+v", repository.createdRelease)
+	}
+}
+
+func TestPublishAndDeleteAddressOneReleaseByID(t *testing.T) {
+	t.Parallel()
+	repository := &fakeSettingsRepository{}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	releaseID := "72453d1e-dce3-401a-96db-e96db54c9fd5"
+
+	if err := service.PublishRelease(context.Background(), releaseID, "admin-id"); err != nil {
+		t.Fatalf("publish release: %v", err)
+	}
+	if err := service.DeleteRelease(context.Background(), releaseID); err != nil {
+		t.Fatalf("delete release: %v", err)
+	}
+	if repository.publishedID != releaseID || repository.deletedID != releaseID {
+		t.Fatalf(
+			"delegated ids = publish %q delete %q, want %q",
+			repository.publishedID,
+			repository.deletedID,
+			releaseID,
+		)
+	}
+	if err := service.PublishRelease(context.Background(), "0.29.0", "admin-id"); !errors.Is(
+		err,
+		domain.ErrReleaseNotFound,
+	) {
+		t.Fatalf("version-only publish error = %v, want release not found", err)
+	}
+}
+
+func TestFindReleaseArtifactPreservesChannelAndRegistrationIdentity(t *testing.T) {
+	t.Parallel()
+	expected := &domain.ReleaseArtifact{
+		Version:     "0.29.0",
+		Kind:        domain.ReleaseKindClient,
+		Platform:    "android",
+		DownloadURL: "https://download.example.test/0.29.0.apk",
+		SHA256:      strings.Repeat("b", 64),
+	}
+	repository := &fakeSettingsRepository{artifactResult: expected}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	artifact, err := service.FindReleaseArtifact(
+		context.Background(),
+		"0.29.0",
+		domain.ReleaseKindClient,
+		"android",
+		domain.ReleaseChannelBeta,
+	)
+	if err != nil {
+		t.Fatalf("find artifact: %v", err)
+	}
+	if artifact != expected {
+		t.Fatalf("artifact = %+v, want exact repository result", artifact)
+	}
+	if repository.artifactLookup != (domain.ReleaseIdentity{
+		Version:  "0.29.0",
+		Channel:  domain.ReleaseChannelBeta,
+		Kind:     domain.ReleaseKindClient,
+		Platform: "android",
+	}) {
+		t.Fatalf("lookup identity = %+v", repository.artifactLookup)
 	}
 }

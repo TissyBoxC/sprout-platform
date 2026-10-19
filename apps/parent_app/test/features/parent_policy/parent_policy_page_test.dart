@@ -101,6 +101,14 @@ void main() {
     expect(find.text('每日使用时长'), findsOneWidget);
   });
 
+  testWidgets('shows minor mode as a fixed platform baseline', (tester) async {
+    await tester.pumpWidget(_policyApp(_ControlledPolicyController(_policy())));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('未成年人保护模式由平台固定开启，不能关闭'), findsOneWidget);
+    expect(find.widgetWithText(SwitchListTile, '未成年人保护模式'), findsNothing);
+  });
+
   testWidgets('shows a reload path when another page changed the policy', (
     tester,
   ) async {

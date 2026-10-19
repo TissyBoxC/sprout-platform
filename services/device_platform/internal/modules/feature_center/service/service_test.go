@@ -572,6 +572,68 @@ func TestUpdateConfigRejectsReadOnlyFeature(t *testing.T) {
 	}
 }
 
+func TestUpdateConfigRejectsMinorModeOverride(t *testing.T) {
+	service, err := New(Options{
+		Repository:  newMemoryRepository(),
+		Definitions: DefaultRegistry(),
+		Clock:       fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	_, err = service.UpdateConfig(
+		context.Background(),
+		"platform_security",
+		map[string]any{"minor_mode_default": false},
+		"admin-001",
+		0,
+	)
+	var validation *domain.ConfigValidationError
+	if !errors.As(err, &validation) ||
+		!errors.Is(validation.Err, domain.ErrImmutableConfigField) {
+		t.Fatalf("expected immutable minor mode error, got %v", err)
+	}
+}
+
+func TestPlatformSecurityProjectsMinorModeAsEnforcedSystemValue(t *testing.T) {
+	runtimeSettings := &memoryRuntimeSettings{settings: &operationsdomain.Settings{
+		Safety: operationsdomain.SafetySettings{MinorModeDefault: false},
+	}}
+	service, err := New(Options{
+		Repository:  newMemoryRepository(),
+		Definitions: DefaultRegistry(),
+		Clock:       fixedClock{},
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	service.SetRuntimeSettingsReader(runtimeSettings)
+
+	feature, err := service.Get(context.Background(), "platform_security")
+	if err != nil {
+		t.Fatalf("get platform security: %v", err)
+	}
+	if feature.Values["minor_mode_default"] != true {
+		t.Fatalf(
+			"projected minor mode = %#v, want enforced true",
+			feature.Values["minor_mode_default"],
+		)
+	}
+	for _, field := range feature.ConfigSchema {
+		if field.Key != "minor_mode_default" {
+			continue
+		}
+		if field.Editable {
+			t.Fatal("minor mode must be exposed as a read-only system field")
+		}
+		if field.Source != domain.ConfigSourceSystem {
+			t.Fatalf("minor mode source = %q, want system", field.Source)
+		}
+		return
+	}
+	t.Fatal("minor mode field is missing from the platform security schema")
+}
+
 func TestUpdateConfigRejectsImmutableSystemField(t *testing.T) {
 	definition := featureDef(
 		"platform_security",
@@ -581,7 +643,8 @@ func TestUpdateConfigRejectsImmutableSystemField(t *testing.T) {
 		"安全团队",
 		true,
 		configFields(
-			boolField("minor_mode_default", "默认启用未成年人模式", true, true),
+			systemBoolField("minor_mode_default", "未成年人保护模式", true),
+			boolField("output_moderation_enabled", "启用输出审核", true, true),
 			systemSelectField("runtime_environment", "运行环境", "production", []domain.ConfigOption{
 				{Value: "production", Label: "生产环境"},
 			}),
@@ -672,6 +735,15 @@ func TestDefaultRegistryCoversRequiredFeatures(t *testing.T) {
 			t.Fatalf("incomplete feature definition: %+v", definition.Feature)
 		}
 	}
+	platformSecurity, ok := registered["platform_security"]
+	if !ok {
+		t.Fatal("platform security definition is missing")
+	}
+	minorMode := findConfigField(platformSecurity.Feature.ConfigSchema, "minor_mode_default")
+	if minorMode == nil || minorMode.Editable ||
+		minorMode.Source != domain.ConfigSourceSystem {
+		t.Fatalf("minor mode must be a read-only system invariant: %+v", minorMode)
+	}
 	if len(required) != len(registered) {
 		t.Fatalf("required inventory count = %d, registered count = %d",
 			len(required), len(registered))
@@ -693,6 +765,23 @@ func TestDefaultRegistryCoversRequiredFeatures(t *testing.T) {
 			t.Fatalf("unexpected feature %q must be added to the required inventory", featureID)
 		}
 	}
+}
+
+func findConfigField(
+	fields []domain.ConfigField,
+	key string,
+) *domain.ConfigField {
+	for index := range fields {
+		if fields[index].Key == key {
+			return &fields[index]
+		}
+		if fields[index].Type == domain.ConfigFieldObject {
+			if found := findConfigField(fields[index].Fields, key); found != nil {
+				return found
+			}
+		}
+	}
+	return nil
 }
 
 func TestDefaultRegistryActiveFeaturesHaveHealthAndReadOnlyReason(t *testing.T) {

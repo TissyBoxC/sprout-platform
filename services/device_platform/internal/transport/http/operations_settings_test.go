@@ -22,6 +22,9 @@ type settingsAdminService struct {
 	releasePage    int
 	releaseSize    int
 	listFamilyErr  error
+	publishedID    string
+	deletedID      string
+	artifactLookup operationsdomain.ReleaseIdentity
 }
 
 func (*settingsAdminService) Settings(
@@ -108,16 +111,44 @@ func (*settingsAdminService) CreateRelease(context.Context, operationsdomain.Rel
 	return nil, nil
 }
 
-func (*settingsAdminService) PublishRelease(context.Context, string, string) error {
+func (service *settingsAdminService) PublishRelease(
+	_ context.Context,
+	releaseID string,
+	_ string,
+) error {
+	service.publishedID = releaseID
 	return nil
 }
 
-func (*settingsAdminService) DeleteRelease(context.Context, string) error {
+func (service *settingsAdminService) DeleteRelease(
+	_ context.Context,
+	releaseID string,
+) error {
+	service.deletedID = releaseID
 	return nil
 }
 
-func (*settingsAdminService) FindReleaseArtifact(context.Context, string, string, string) (*operationsdomain.ReleaseArtifact, error) {
-	return nil, nil
+func (service *settingsAdminService) FindReleaseArtifact(
+	_ context.Context,
+	version string,
+	kind string,
+	platform string,
+	channel string,
+) (*operationsdomain.ReleaseArtifact, error) {
+	service.artifactLookup = operationsdomain.ReleaseIdentity{
+		Version:  version,
+		Channel:  channel,
+		Kind:     kind,
+		Platform: platform,
+	}
+	return &operationsdomain.ReleaseArtifact{
+		Version:     version,
+		Channel:     channel,
+		Kind:        kind,
+		Platform:    platform,
+		DownloadURL: "https://download.example.test/app.apk",
+		SHA256:      strings.Repeat("a", 64),
+	}, nil
 }
 
 func (*settingsAdminService) AppUpdate(
@@ -180,6 +211,9 @@ func TestUpdateSettingsPassesExpectedVersionAndMapsConflict(t *testing.T) {
 	if service.updateVersion != 4 || service.updateSettings == nil {
 		t.Fatalf("unexpected delegated update: version=%d settings=%v", service.updateVersion, service.updateSettings)
 	}
+	if !service.updateSettings.Safety.MinorModeDefault {
+		t.Fatal("omitted minor mode must be materialized as the enforced true value")
+	}
 
 	service.updateErr = &operationsdomain.SettingsVersionConflictError{
 		ExpectedVersion: 4,
@@ -213,6 +247,62 @@ func TestUpdateSettingsPassesExpectedVersionAndMapsConflict(t *testing.T) {
 	}
 	if envelope.Error.Code != "settings_version_conflict" {
 		t.Fatalf("unexpected conflict code: %q", envelope.Error.Code)
+	}
+}
+
+func TestUpdateSettingsRejectsDisabledMinorMode(t *testing.T) {
+	service := &settingsAdminService{}
+	handler := adminHandler{operationsService: service}
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/admin/settings",
+		strings.NewReader(`{
+			"settings": {"safety":{"minor_mode_default":false}},
+			"expected_version": 4
+		}`),
+	)
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		authenticatedAccountKey{},
+		"admin-001",
+	))
+	recorder := httptest.NewRecorder()
+
+	handler.updateSettings(recorder, request)
+
+	if recorder.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422: %s", recorder.Code, recorder.Body.String())
+	}
+	if service.updateSettings != nil {
+		t.Fatal("disabled minor mode must not reach the service")
+	}
+}
+
+func TestUpdateSettingsRejectsRawAudioRetention(t *testing.T) {
+	service := &settingsAdminService{}
+	handler := adminHandler{operationsService: service}
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/admin/settings",
+		strings.NewReader(`{
+			"settings": {"retention":{"audio_days":7}},
+			"expected_version": 4
+		}`),
+	)
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		authenticatedAccountKey{},
+		"admin-001",
+	))
+	recorder := httptest.NewRecorder()
+
+	handler.updateSettings(recorder, request)
+
+	if recorder.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422: %s", recorder.Code, recorder.Body.String())
+	}
+	if service.updateSettings != nil {
+		t.Fatal("raw audio retention must not reach the service")
 	}
 }
 
@@ -312,5 +402,92 @@ func TestListReleasesRejectsInvalidPagination(t *testing.T) {
 				t.Fatal("invalid pagination must not reach the service")
 			}
 		})
+	}
+}
+
+func TestPublishAndDeleteReleaseUseRecordIdentity(t *testing.T) {
+	t.Parallel()
+	service := &settingsAdminService{}
+	handler := adminHandler{operationsService: service}
+	releaseID := "72453d1e-dce3-401a-96db-e96db54c9fd5"
+	publishRequest := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/admin/releases/"+releaseID+"/publish",
+		nil,
+	)
+	publishRequest.SetPathValue("release_id", releaseID)
+	publishRequest = publishRequest.WithContext(context.WithValue(
+		publishRequest.Context(),
+		authenticatedAccountKey{},
+		"admin-001",
+	))
+	publishResponse := httptest.NewRecorder()
+
+	handler.publishRelease(publishResponse, publishRequest)
+
+	if publishResponse.Code != http.StatusOK || service.publishedID != releaseID {
+		t.Fatalf(
+			"publish status=%d delegated id=%q",
+			publishResponse.Code,
+			service.publishedID,
+		)
+	}
+
+	deleteRequest := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/v1/admin/releases/"+releaseID,
+		nil,
+	)
+	deleteRequest.SetPathValue("release_id", releaseID)
+	deleteResponse := httptest.NewRecorder()
+
+	handler.deleteRelease(deleteResponse, deleteRequest)
+
+	if deleteResponse.Code != http.StatusOK || service.deletedID != releaseID {
+		t.Fatalf(
+			"delete status=%d delegated id=%q",
+			deleteResponse.Code,
+			service.deletedID,
+		)
+	}
+}
+
+func TestGetReleaseArtifactPassesExactChannelAndIdentity(t *testing.T) {
+	t.Parallel()
+	service := &settingsAdminService{}
+	handler := adminHandler{operationsService: service}
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/admin/release-artifacts/0.29.0?kind=client&platform=android&channel=beta",
+		nil,
+	)
+	request.SetPathValue("version", "0.29.0")
+	response := httptest.NewRecorder()
+
+	handler.getReleaseArtifact(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Artifact struct {
+				Channel string `json:"channel"`
+			} `json:"artifact"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode artifact response: %v", err)
+	}
+	if envelope.Data.Artifact.Channel != "beta" {
+		t.Fatalf("artifact channel = %q, want beta", envelope.Data.Artifact.Channel)
+	}
+	if service.artifactLookup != (operationsdomain.ReleaseIdentity{
+		Version:  "0.29.0",
+		Channel:  "beta",
+		Kind:     "client",
+		Platform: "android",
+	}) {
+		t.Fatalf("artifact lookup = %+v", service.artifactLookup)
 	}
 }

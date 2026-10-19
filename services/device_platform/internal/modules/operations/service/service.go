@@ -39,6 +39,7 @@ type ReleaseArtifactStore interface {
 		version string,
 		kind string,
 		platform string,
+		channel string,
 	) (*domain.ReleaseArtifact, error)
 }
 
@@ -229,7 +230,12 @@ func selectAppUpdateRelease(
 func (s *Service) Settings(
 	ctx context.Context,
 ) (*domain.Settings, int64, error) {
-	return s.repository.GetSettings(ctx)
+	settings, version, err := s.repository.GetSettings(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	normalizeChildSafetyInvariants(settings)
+	return settings, version, nil
 }
 
 // VoiceDefaults returns the platform-level realtime voice profile applied to
@@ -315,6 +321,9 @@ func (s *Service) UpdateSettings(
 				current.Account.GuardianConsentVersion
 		}
 	}
+	if !settings.Safety.MinorModeDefault {
+		return nil, 0, domain.ErrInvalidSettings
+	}
 	if err := validateSettings(settings); err != nil {
 		return nil, 0, err
 	}
@@ -378,24 +387,36 @@ func (s *Service) FindReleaseArtifact(
 	version string,
 	kind string,
 	platform string,
+	channel string,
 ) (*domain.ReleaseArtifact, error) {
 	version = strings.TrimSpace(version)
 	kind = strings.TrimSpace(kind)
 	platform = strings.TrimSpace(platform)
+	channel = strings.TrimSpace(channel)
+	if channel == "" {
+		channel = domain.ReleaseChannelStable
+	}
 	if !versionPattern.MatchString(version) ||
 		!isReleaseKind(kind) ||
+		!isReleaseChannel(channel) ||
 		platform == "all" ||
 		!isReleasePlatform(platform) {
 		return nil, domain.ErrReleaseNotFound
 	}
-	artifact, err := s.repository.FindReleaseArtifact(ctx, version, kind, platform)
+	artifact, err := s.repository.FindReleaseArtifact(
+		ctx,
+		version,
+		kind,
+		platform,
+		channel,
+	)
 	if err == nil {
 		return artifact, nil
 	}
 	if !errors.Is(err, domain.ErrReleaseNotFound) || s.artifactStore == nil {
 		return nil, err
 	}
-	return s.artifactStore.FindArtifact(ctx, version, kind, platform)
+	return s.artifactStore.FindArtifact(ctx, version, kind, platform, channel)
 }
 
 // CreateRelease validates and stores a draft delivery.
@@ -446,34 +467,32 @@ func (s *Service) CreateRelease(
 // PublishRelease makes one draft visible to clients.
 func (s *Service) PublishRelease(
 	ctx context.Context,
-	version string,
+	releaseID string,
 	actorAccountID string,
 ) error {
-	version = strings.TrimSpace(version)
-	if !versionPattern.MatchString(version) {
+	releaseID = strings.TrimSpace(releaseID)
+	if _, err := uuid.Parse(releaseID); err != nil {
 		return domain.ErrReleaseNotFound
 	}
-	return s.repository.PublishRelease(ctx, version, actorAccountID)
+	return s.repository.PublishRelease(ctx, releaseID, actorAccountID)
 }
 
 // DeleteRelease removes a draft or retired release.
 func (s *Service) DeleteRelease(
 	ctx context.Context,
-	version string,
+	releaseID string,
 ) error {
-	version = strings.TrimSpace(version)
-	if !versionPattern.MatchString(version) {
+	releaseID = strings.TrimSpace(releaseID)
+	if _, err := uuid.Parse(releaseID); err != nil {
 		return domain.ErrReleaseNotFound
 	}
-	return s.repository.DeleteRelease(ctx, version)
+	return s.repository.DeleteRelease(ctx, releaseID)
 }
 
 func validateSettings(settings *domain.Settings) error {
-	// Minor mode is the platform's baseline child-safety contract: every
-	// account, child profile, and device starts from the protected path. The
-	// stored value stays visible for audit, but an API caller must not be able
-	// to disable it through a settings update.
-	settings.Safety.MinorModeDefault = true
+	// Minor mode is the platform's baseline child-safety contract. Updates
+	// reject a false value instead of silently rewriting it so a caller cannot
+	// believe it disabled the protection.
 	consentVersion, err := domain.ValidateGuardianConsentVersion(
 		settings.Account.GuardianConsentVersion,
 	)
@@ -498,8 +517,9 @@ func validateSettings(settings *domain.Settings) error {
 		!versionPattern.MatchString(settings.Update.ForceUpgradeBelow) {
 		return domain.ErrInvalidSettings
 	}
-	if settings.Retention.AudioDays < 0 ||
+	if settings.Retention.AudioDays != 0 ||
 		settings.Retention.ImageDays < 0 ||
+		settings.Retention.ImageDays > 3650 ||
 		settings.Retention.ConversationDays < 0 ||
 		settings.Retention.ConversationDays > 3650 {
 		return domain.ErrInvalidSettings
@@ -531,6 +551,13 @@ func validateSettings(settings *domain.Settings) error {
 		return domain.ErrInvalidSettings
 	}
 	return nil
+}
+
+func normalizeChildSafetyInvariants(settings *domain.Settings) {
+	if settings == nil {
+		return
+	}
+	settings.Safety.MinorModeDefault = true
 }
 
 func isReleaseKind(value string) bool {

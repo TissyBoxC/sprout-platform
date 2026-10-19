@@ -9021,13 +9021,13 @@ paths:
                 $ref: "#/components/schemas/ResponseEnvelope"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
-  /api/v1/admin/releases/{version}/publish:
+  /api/v1/admin/releases/{release_id}/publish:
     put:
       summary: Publish one registered release
       security:
         - userToken: []
       parameters:
-        - $ref: "#/components/parameters/ReleaseVersion"
+        - $ref: "#/components/parameters/ReleaseId"
       responses:
         "200":
           description: Release published
@@ -9047,13 +9047,13 @@ paths:
                 $ref: "#/components/schemas/ResponseEnvelope"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
-  /api/v1/admin/releases/{version}:
+  /api/v1/admin/releases/{release_id}:
     delete:
       summary: Delete one registered release
       security:
         - userToken: []
       parameters:
-        - $ref: "#/components/parameters/ReleaseVersion"
+        - $ref: "#/components/parameters/ReleaseId"
       responses:
         "200":
           description: Release deleted
@@ -9082,6 +9082,7 @@ paths:
         - $ref: "#/components/parameters/ReleaseVersion"
         - $ref: "#/components/parameters/ReleaseArtifactKind"
         - $ref: "#/components/parameters/ReleaseArtifactPlatform"
+        - $ref: "#/components/parameters/ReleaseArtifactChannel"
       responses:
         "200":
           description: Release artifact metadata
@@ -10871,6 +10872,13 @@ components:
       schema:
         type: string
         pattern: "^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$"
+    ReleaseId:
+      name: release_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     ReleaseArtifactKind:
       name: kind
       in: query
@@ -10885,6 +10893,17 @@ components:
       schema:
         type: string
         maxLength: 64
+    ReleaseArtifactChannel:
+      name: channel
+      in: query
+      required: false
+      schema:
+        type: string
+        enum:
+          - stable
+          - beta
+          - canary
+        default: stable
     ReleaseFilePath:
       name: path
       in: path
@@ -13215,6 +13234,7 @@ components:
       type: object
       additionalProperties: false
       required:
+        - id
         - version
         - channel
         - kind
@@ -13229,6 +13249,9 @@ components:
         - updated_at
         - published_at
       properties:
+        id:
+          type: string
+          format: uuid
         version:
           type: string
           minLength: 1
@@ -13384,11 +13407,8 @@ components:
         - channel
         - kind
         - platform
-        - file_name
-        - relative_path
+        - download_url
         - sha256
-        - size_bytes
-        - url
       properties:
         version:
           type: string
@@ -13396,8 +13416,10 @@ components:
           maxLength: 64
         channel:
           type: string
-          minLength: 1
-          maxLength: 64
+          enum:
+            - stable
+            - beta
+            - canary
         kind:
           type: string
           minLength: 1
@@ -13406,22 +13428,11 @@ components:
           type: string
           minLength: 1
           maxLength: 32
-        file_name:
-          type: string
-          minLength: 1
-          maxLength: 255
-        relative_path:
-          type: string
-          minLength: 1
-          maxLength: 1024
         sha256:
           type: string
           minLength: 64
           maxLength: 64
-        size_bytes:
-          type: integer
-          minimum: 0
-        url:
+        download_url:
           type: string
           minLength: 1
           maxLength: 2048
@@ -24607,6 +24618,8 @@ components:
         minor_mode_default:
           type: boolean
           const: true
+          readOnly: true
+          description: Platform-enforced child-safety invariant. This field is informational and cannot be changed by an administrator.
         output_moderation_enabled:
           type: boolean
         crisis_intervention_enabled:
@@ -24666,13 +24679,18 @@ components:
         audio_days:
           type: integer
           minimum: 0
+          maximum: 0
+          description: Raw audio is never retained by the platform; this value must stay zero.
         image_days:
           type: integer
           minimum: 0
+          maximum: 3650
+          description: Age after which image-derived vision task and result history is removed; zero disables the history window.
         conversation_days:
           type: integer
           minimum: 0
           maximum: 3650
+          description: Age after which conversation-derived metadata such as video call history is removed; zero disables the history window.
         usage_report_days:
           type: integer
           minimum: 1
@@ -24726,11 +24744,58 @@ components:
         - expected_version
       properties:
         settings:
-          $ref: "#/components/schemas/AdminSettings"
+          $ref: "#/components/schemas/AdminSettingsUpdate"
         expected_version:
           type: integer
           format: int64
           minimum: 0
+    AdminSafetySettingsUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - output_moderation_enabled
+        - crisis_intervention_enabled
+        - allow_audio_upload
+        - allow_image_upload
+      properties:
+        minor_mode_default:
+          type: boolean
+          const: true
+          writeOnly: true
+          description: Deprecated compatibility field for older consoles. Omit it or send true; false is rejected.
+        output_moderation_enabled:
+          type: boolean
+        crisis_intervention_enabled:
+          type: boolean
+        allow_audio_upload:
+          type: boolean
+          const: false
+        allow_image_upload:
+          type: boolean
+          const: false
+    AdminSettingsUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - ai
+        - account
+        - safety
+        - voice
+        - update
+        - retention
+      properties:
+        ai:
+          $ref: "#/components/schemas/AdminAISettings"
+        account:
+          $ref: "#/components/schemas/AdminAccountSettings"
+        safety:
+          $ref: "#/components/schemas/AdminSafetySettingsUpdate"
+        voice:
+          $ref: "#/components/schemas/AdminVoiceSettings"
+        update:
+          $ref: "#/components/schemas/AdminUpdateSettings"
+        retention:
+          $ref: "#/components/schemas/AdminRetentionSettings"
     OperationsRelease:
       type: object
       additionalProperties: false

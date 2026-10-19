@@ -14,6 +14,7 @@ import {
   readGuardianConsentVersion,
   writeGuardianConsentVersion,
 } from '@/features/system/domain/guardianConsentVersion'
+import { assertMinorModeNotDisabled } from '@/features/system/domain/minorModeInvariant'
 
 export interface SystemSettings {
   defaultBalanceUsd: number
@@ -23,7 +24,6 @@ export interface SystemSettings {
   smsVerificationEnabled: boolean
   emailLoginEnabled: boolean
   guardianConsentVersion: string
-  minorModeDefaultEnabled: boolean
   outputModerationEnabled: boolean
   crisisInterventionEnabled: boolean
   continuousConversationEnabled: boolean
@@ -47,7 +47,6 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   smsVerificationEnabled: true,
   emailLoginEnabled: true,
   guardianConsentVersion: DEFAULT_GUARDIAN_CONSENT_VERSION,
-  minorModeDefaultEnabled: true,
   outputModerationEnabled: true,
   crisisInterventionEnabled: true,
   continuousConversationEnabled: true,
@@ -119,6 +118,8 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
         settings: systemSettingsToPayload(settings.value),
         expected_version: version.value,
       })
+      const savedResponse = response.data.data?.settings ?? {}
+      assertMinorModeNotDisabled(recordValue(recordValue(savedResponse).safety))
       settings.value = systemSettingsFromResponse(response.data.data?.settings ?? {})
       version.value = numberValue(response.data.data?.version, version.value)
       lastWarning.value = apiNoticeWarning(readApiNotice(response.data))
@@ -253,6 +254,7 @@ export function systemSettingsFromResponse(value: Record<string, unknown>): Syst
   const voice = recordValue(value.voice)
   const update = recordValue(value.update)
   const retention = recordValue(value.retention)
+  assertMinorModeNotDisabled(safety)
 
   return {
     defaultBalanceUsd: numberValue(ai.default_balance_usd, defaults.defaultBalanceUsd),
@@ -265,10 +267,6 @@ export function systemSettingsFromResponse(value: Record<string, unknown>): Syst
     ),
     emailLoginEnabled: booleanValue(account.email_login_enabled, defaults.emailLoginEnabled),
     guardianConsentVersion: readGuardianConsentVersion(account),
-    minorModeDefaultEnabled: booleanValue(
-      safety.minor_mode_default,
-      defaults.minorModeDefaultEnabled,
-    ),
     outputModerationEnabled: booleanValue(
       safety.output_moderation_enabled,
       defaults.outputModerationEnabled,
@@ -317,9 +315,6 @@ export function systemSettingsToPayload(settings: SystemSettings): Record<string
       guardian_consent_version: writeGuardianConsentVersion(settings),
     },
     safety: {
-      // 平台不变量：后端会强制写回 true。前端固定发送 true，避免旧页面
-      // 或手工请求把未成年人模式伪装成可关闭的运营开关。
-      minor_mode_default: true,
       output_moderation_enabled: settings.outputModerationEnabled,
       crisis_intervention_enabled: settings.crisisInterventionEnabled,
       // P0 约束要求儿童音视频默认不上传。开启前必须实现逐项监护人授权流程。

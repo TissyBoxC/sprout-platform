@@ -41,8 +41,50 @@ func (handler adminHandler) appUpdate(
 }
 
 type settingsResponse struct {
-	Settings operationsdomain.Settings `json:"settings"`
-	Version  int64                     `json:"version"`
+	Settings adminSettingsResponse `json:"settings"`
+	Version  int64                 `json:"version"`
+}
+
+// adminSettingsResponse separates read-only safety invariants from editable
+// settings. The nested safety object is the update DTO and therefore omits
+// minor mode, making it impossible for an older control surface to mistake
+// the protection for an operator switch.
+type adminSettingsResponse struct {
+	AI        operationsdomain.AISettings        `json:"ai"`
+	Account   operationsdomain.AccountSettings   `json:"account"`
+	Safety    adminSafetySettingsResponse        `json:"safety"`
+	Voice     operationsdomain.VoiceSettings     `json:"voice"`
+	Update    operationsdomain.UpdateSettings    `json:"update"`
+	Retention operationsdomain.RetentionSettings `json:"retention"`
+}
+
+type adminSafetySettingsResponse struct {
+	MinorModeDefault          bool `json:"minor_mode_default"`
+	OutputModerationEnabled   bool `json:"output_moderation_enabled"`
+	CrisisInterventionEnabled bool `json:"crisis_intervention_enabled"`
+	AllowAudioUpload          bool `json:"allow_audio_upload"`
+	AllowImageUpload          bool `json:"allow_image_upload"`
+}
+
+func newAdminSettingsResponse(
+	settings *operationsdomain.Settings,
+) adminSettingsResponse {
+	safety := settings.Safety
+	safety.MinorModeDefault = true
+	return adminSettingsResponse{
+		AI:      settings.AI,
+		Account: settings.Account,
+		Safety: adminSafetySettingsResponse{
+			MinorModeDefault:          true,
+			OutputModerationEnabled:   safety.OutputModerationEnabled,
+			CrisisInterventionEnabled: safety.CrisisInterventionEnabled,
+			AllowAudioUpload:          safety.AllowAudioUpload,
+			AllowImageUpload:          safety.AllowImageUpload,
+		},
+		Voice:     settings.Voice,
+		Update:    settings.Update,
+		Retention: settings.Retention,
+	}
 }
 
 type createReleaseRequest struct {
@@ -75,7 +117,7 @@ func (handler adminHandler) getSettings(
 			operationsdomain.DefaultGuardianConsentVersion
 	}
 	writeSuccess(response, request, http.StatusOK, settingsResponse{
-		Settings: *settings,
+		Settings: newAdminSettingsResponse(settings),
 		Version:  version,
 	})
 }
@@ -104,9 +146,14 @@ func (handler adminHandler) updateSettings(
 		writeError(response, request, http.StatusBadRequest, "invalid_request", "请检查填写的内容")
 		return
 	}
+	settingsInput, err := body.Settings.settings()
+	if err != nil {
+		writeError(response, request, http.StatusUnprocessableEntity, "invalid_settings", "请检查设置内容")
+		return
+	}
 	settings, version, err := handler.operationsService.UpdateSettings(
 		request.Context(),
-		body.Settings,
+		settingsInput,
 		accountID,
 		body.ExpectedVersion,
 	)
@@ -129,14 +176,61 @@ func (handler adminHandler) updateSettings(
 		return
 	}
 	writeSuccess(response, request, http.StatusOK, settingsResponse{
-		Settings: *settings,
+		Settings: newAdminSettingsResponse(settings),
 		Version:  version,
 	})
 }
 
 type settingsUpdateBody struct {
-	Settings        *operationsdomain.Settings
+	Settings        *adminSettingsUpdateRequest
 	ExpectedVersion int64
+}
+
+// adminSettingsUpdateRequest accepts the writable settings document. Minor
+// mode is deliberately absent; the decoder also accepts its legacy true value
+// below so a rolling deployment with an old console stays compatible.
+type adminSettingsUpdateRequest struct {
+	AI        operationsdomain.AISettings        `json:"ai"`
+	Account   operationsdomain.AccountSettings   `json:"account"`
+	Safety    adminSafetySettingsUpdateRequest   `json:"safety"`
+	Voice     operationsdomain.VoiceSettings     `json:"voice"`
+	Update    operationsdomain.UpdateSettings    `json:"update"`
+	Retention operationsdomain.RetentionSettings `json:"retention"`
+}
+
+type adminSafetySettingsUpdateRequest struct {
+	MinorModeDefault          *bool `json:"minor_mode_default"`
+	OutputModerationEnabled   bool  `json:"output_moderation_enabled"`
+	CrisisInterventionEnabled bool  `json:"crisis_intervention_enabled"`
+	AllowAudioUpload          bool  `json:"allow_audio_upload"`
+	AllowImageUpload          bool  `json:"allow_image_upload"`
+}
+
+func (request adminSettingsUpdateRequest) settings() (*operationsdomain.Settings, error) {
+	if request.Safety.MinorModeDefault != nil &&
+		!*request.Safety.MinorModeDefault {
+		return nil, operationsdomain.ErrInvalidSettings
+	}
+	if request.Retention.AudioDays != 0 {
+		return nil, operationsdomain.ErrInvalidSettings
+	}
+	if request.Safety.AllowAudioUpload || request.Safety.AllowImageUpload {
+		return nil, operationsdomain.ErrInvalidSettings
+	}
+	return &operationsdomain.Settings{
+		AI:      request.AI,
+		Account: request.Account,
+		Safety: operationsdomain.SafetySettings{
+			MinorModeDefault:          true,
+			OutputModerationEnabled:   request.Safety.OutputModerationEnabled,
+			CrisisInterventionEnabled: request.Safety.CrisisInterventionEnabled,
+			AllowAudioUpload:          request.Safety.AllowAudioUpload,
+			AllowImageUpload:          request.Safety.AllowImageUpload,
+		},
+		Voice:     request.Voice,
+		Update:    request.Update,
+		Retention: request.Retention,
+	}, nil
 }
 
 var errMissingSettingsEnvelope = errors.New("missing settings envelope")
@@ -283,7 +377,7 @@ func (handler adminHandler) createRelease(
 	)
 	if err != nil {
 		if errors.Is(err, operationsdomain.ErrReleaseAlreadyExists) {
-			writeError(response, request, http.StatusConflict, "release_exists", "这个版本已经存在")
+			writeError(response, request, http.StatusConflict, "release_exists", "同版本、渠道、类型和平台的更新已经登记")
 			return
 		}
 		if errors.Is(err, operationsdomain.ErrInvalidSettings) {
@@ -305,10 +399,10 @@ func (handler adminHandler) publishRelease(
 		writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
 		return
 	}
-	version := strings.TrimSpace(request.PathValue("version"))
+	releaseID := strings.TrimSpace(request.PathValue("release_id"))
 	if err := handler.operationsService.PublishRelease(
 		request.Context(),
-		version,
+		releaseID,
 		accountID,
 	); err != nil {
 		if errors.Is(err, operationsdomain.ErrReleaseNotPublishable) {
@@ -325,13 +419,13 @@ func (handler adminHandler) deleteRelease(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
-	version := strings.TrimSpace(request.PathValue("version"))
+	releaseID := strings.TrimSpace(request.PathValue("release_id"))
 	if err := handler.operationsService.DeleteRelease(
 		request.Context(),
-		version,
+		releaseID,
 	); err != nil {
 		if errors.Is(err, operationsdomain.ErrReleaseNotFound) {
-			writeError(response, request, http.StatusNotFound, "release_not_found", "没有找到这个更新版本")
+			writeError(response, request, http.StatusNotFound, "release_not_found", "没有找到这条更新记录")
 			return
 		}
 		writeError(response, request, http.StatusInternalServerError, "service_error", "更新记录没有删除，请稍后重试")

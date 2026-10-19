@@ -24,9 +24,9 @@ const DefaultCacheTTL = 10 * time.Second
 
 // SafetyPolicy is the effective child-safety switch projection.
 //
-// CrisisInterventionEnabled is retained for observability, but callers must
-// treat crisis handling as mandatory: the platform contract never lets an
-// operator disable the protective response.
+// CrisisInterventionEnabled and MinorModeDefault are retained for
+// observability, but callers must treat both as mandatory: the platform
+// contract never lets an operator disable either protection.
 type SafetyPolicy struct {
 	OutputModerationEnabled   bool `json:"output_moderation_enabled"`
 	CrisisInterventionEnabled bool `json:"crisis_intervention_enabled"`
@@ -115,9 +115,9 @@ func decodeSafetyPolicy(raw []byte) (SafetyPolicy, error) {
 	// Crisis handling is a non-negotiable child-safety guarantee. The stored
 	// value is reported for visibility, but the effective policy is always on.
 	document.Safety.CrisisInterventionEnabled = true
-	// Minor mode is the same kind of platform invariant: every new account
-	// starts on the protected path, so a stale or tampered settings document
-	// must not be able to turn the default off.
+	// Minor mode is the same kind of platform invariant: every account starts
+	// on the protected path, so a stale or tampered settings document must not
+	// be able to turn the protection off in the gateway.
 	document.Safety.MinorModeDefault = true
 	return document.Safety, nil
 }

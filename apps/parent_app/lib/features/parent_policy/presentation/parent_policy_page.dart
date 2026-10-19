@@ -335,6 +335,26 @@ class _ParentPolicyFormState extends ConsumerState<_ParentPolicyForm> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
+          Material(
+            color: Theme.of(context).colorScheme.secondaryContainer,
+            borderRadius: BorderRadius.circular(18),
+            child: const Padding(
+              padding: EdgeInsets.all(16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.shield_outlined),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      '未成年人保护模式由平台固定开启，不能关闭。你可以在这里收紧使用时长、内容范围和免打扰时段。',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
           if (_showVersionConflict)
             Padding(
               padding: const EdgeInsets.only(bottom: 14),

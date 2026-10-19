@@ -176,7 +176,7 @@ func (s *Service) runtimeValues(
 		}, version, nil
 	case "platform_security":
 		return map[string]any{
-			"minor_mode_default":          settings.Safety.MinorModeDefault,
+			"minor_mode_default":          true,
 			"output_moderation_enabled":   settings.Safety.OutputModerationEnabled,
 			"crisis_intervention_enabled": settings.Safety.CrisisInterventionEnabled,
 		}, version, nil
@@ -266,9 +266,6 @@ func (s *Service) updateRuntimeValues(
 		)
 		return true, err
 	case "platform_security":
-		if value, ok := boolValue(values, "minor_mode_default"); ok {
-			settings.Safety.MinorModeDefault = value
-		}
 		if value, ok := boolValue(values, "output_moderation_enabled"); ok {
 			settings.Safety.OutputModerationEnabled = value
 		}

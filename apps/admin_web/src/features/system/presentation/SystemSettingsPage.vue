@@ -250,8 +250,8 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
           <div class="toggle-list">
             <div class="toggle-row readonly-row">
               <span>
-                <strong>新账号默认开启未成年人模式</strong>
-                <small>平台安全基线固定启用；家长仍可在自己的账号中调整可用范围。</small>
+                <strong>未成年人保护模式</strong>
+                <small>这是平台固定的安全基线，家长可通过儿童档案、时间限制和内容范围调整具体使用方式。</small>
               </span>
               <span class="readonly-value">固定开启</span>
             </div>
@@ -447,9 +447,10 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
               <input
                 v-model.number="store.settings.audioRetentionDays"
                 type="number"
-                min="0"
+                readonly
                 step="1"
               />
+              <small class="field-hint">平台不长期保存原始语音，只有脱敏审计和聚合统计。</small>
             </label>
             <label>
               <span>图像保留天数</span>
@@ -459,6 +460,7 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
                 min="0"
                 step="1"
               />
+              <small class="field-hint">超过天数的视觉任务与识别结果会自动清理；0 表示不按历史窗口清理。</small>
             </label>
             <label>
               <span>对话记录保留天数</span>
@@ -468,6 +470,7 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
                 min="0"
                 step="1"
               />
+              <small class="field-hint">平台不保存对话正文，此窗口用于清理通话等会话元数据；0 表示不按历史窗口清理。</small>
             </label>
             <label>
               <span>使用报告保留天数</span>

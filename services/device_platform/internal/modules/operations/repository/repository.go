@@ -42,13 +42,14 @@ type Repository interface {
 	) (*authdomain.ParentOverview, error)
 	ListReleases(ctx context.Context, page domain.PageRequest) ([]domain.Release, int, error)
 	CreateRelease(ctx context.Context, release *domain.Release) error
-	PublishRelease(ctx context.Context, version string, actorAccountID string) error
-	DeleteRelease(ctx context.Context, version string) error
+	PublishRelease(ctx context.Context, releaseID string, actorAccountID string) error
+	DeleteRelease(ctx context.Context, releaseID string) error
 	FindReleaseArtifact(
 		ctx context.Context,
 		version string,
 		kind string,
 		platform string,
+		channel string,
 	) (*domain.ReleaseArtifact, error)
 	LatestPublishedUpdate(
 		ctx context.Context,
@@ -65,18 +66,21 @@ func (r *PostgresRepository) FindReleaseArtifact(
 	version string,
 	kind string,
 	platform string,
+	channel string,
 ) (*domain.ReleaseArtifact, error) {
 	var artifact domain.ReleaseArtifact
 	err := r.pool.QueryRow(ctx, `
-		SELECT version, kind, platform, download_url, sha256
+		SELECT version, channel, kind, platform, download_url, sha256
 		FROM platform_releases
 		WHERE version = $1
 		  AND kind = $2
 		  AND platform = $3
+		  AND channel = $4
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, version, kind, platform).Scan(
+	`, version, kind, platform, channel).Scan(
 		&artifact.Version,
+		&artifact.Channel,
 		&artifact.Kind,
 		&artifact.Platform,
 		&artifact.DownloadURL,
@@ -254,6 +258,7 @@ func (r *PostgresRepository) GetSettings(
 		settings.Account.GuardianConsentVersion =
 			domain.DefaultGuardianConsentVersion
 	}
+	settings.Safety.MinorModeDefault = true
 	return &settings, version, nil
 }
 
@@ -545,7 +550,7 @@ func (r *PostgresRepository) CreateRelease(
 // PublishRelease makes a draft visible to clients.
 func (r *PostgresRepository) PublishRelease(
 	ctx context.Context,
-	version string,
+	releaseID string,
 	actorAccountID string,
 ) error {
 	tag, err := r.pool.Exec(ctx, `
@@ -554,9 +559,9 @@ func (r *PostgresRepository) PublishRelease(
 		    published_at = COALESCE(published_at, NOW()),
 		    published_by = NULLIF($2, '')::uuid,
 		    updated_at = NOW()
-		WHERE version = $1
+		WHERE id = NULLIF($1, '')::uuid
 		  AND status = 'draft'
-	`, version, actorAccountID)
+	`, releaseID, actorAccountID)
 	if err != nil {
 		return fmt.Errorf("publish platform release: %w", err)
 	}
@@ -569,13 +574,13 @@ func (r *PostgresRepository) PublishRelease(
 // DeleteRelease removes a draft or retired release only.
 func (r *PostgresRepository) DeleteRelease(
 	ctx context.Context,
-	version string,
+	releaseID string,
 ) error {
 	tag, err := r.pool.Exec(ctx, `
 		DELETE FROM platform_releases
-		WHERE version = $1
+		WHERE id = NULLIF($1, '')::uuid
 		  AND status IN ('draft', 'retired')
-	`, version)
+	`, releaseID)
 	if err != nil {
 		return fmt.Errorf("delete platform release: %w", err)
 	}
@@ -620,6 +625,8 @@ func (r *PostgresRepository) LatestPublishedUpdate(
 	}
 	defer rows.Close()
 
+	// Platform-specific artifacts must win over an "all" package at the same
+	// version. A newer version still supersedes either one.
 	var bestClient *domain.Release
 	var bestResource *domain.Release
 	for rows.Next() {
@@ -628,16 +635,10 @@ func (r *PostgresRepository) LatestPublishedUpdate(
 			return nil, fmt.Errorf("scan published update: %w", err)
 		}
 		if release.Kind == domain.ReleaseKindClient {
-			if bestClient == nil ||
-				domain.CompareVersions(release.Version, bestClient.Version) > 0 {
-				bestClient = release
-			}
+			bestClient = preferredAppUpdateRelease(bestClient, release)
 			continue
 		}
-		if bestResource == nil ||
-			domain.CompareVersions(release.Version, bestResource.Version) > 0 {
-			bestResource = release
-		}
+		bestResource = preferredAppUpdateRelease(bestResource, release)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate published updates: %w", err)
@@ -649,6 +650,30 @@ func (r *PostgresRepository) LatestPublishedUpdate(
 		Client:   bestClient,
 		Resource: bestResource,
 	}, nil
+}
+
+// preferredAppUpdateRelease chooses exactly one artifact for an update line.
+// The same version can legitimately contain APK and Admin Web client records;
+// a platform-specific artifact must win over an "all" package, and a direct
+// platform match must win over a fallback with the same version.
+func preferredAppUpdateRelease(
+	current *domain.Release,
+	candidate *domain.Release,
+) *domain.Release {
+	if current == nil {
+		return candidate
+	}
+	comparison := domain.CompareVersions(candidate.Version, current.Version)
+	if comparison > 0 {
+		return candidate
+	}
+	if comparison < 0 {
+		return current
+	}
+	if current.Platform == "all" && candidate.Platform != "all" {
+		return candidate
+	}
+	return current
 }
 
 type rowScanner interface {
@@ -683,7 +708,7 @@ func mapReleaseWriteError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if strings.Contains(err.Error(), "platform_releases_version_unique") {
+	if strings.Contains(err.Error(), "platform_releases_artifact_identity_unique") {
 		return domain.ErrReleaseAlreadyExists
 	}
 	return fmt.Errorf("insert platform release: %w", err)

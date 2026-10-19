@@ -40,6 +40,20 @@ func TestSafetyPolicyAlwaysEnablesMinorMode(t *testing.T) {
 	}
 }
 
+func TestSafetyPolicyEnforcesMinorModeWhenFieldIsMissing(t *testing.T) {
+	policy, err := decodeSafetyPolicy([]byte(`{
+		"safety": {
+			"output_moderation_enabled": true
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("decodeSafetyPolicy() error = %v", err)
+	}
+	if !policy.MinorModeDefault {
+		t.Fatal("missing minor mode must still project as enforced true")
+	}
+}
+
 func TestSafetyPolicyRejectsMalformedDocument(t *testing.T) {
 	if _, err := decodeSafetyPolicy([]byte(`not-json`)); err == nil {
 		t.Fatal("decodeSafetyPolicy() error = nil, want a decode error")

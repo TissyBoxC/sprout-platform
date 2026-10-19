@@ -310,11 +310,23 @@ type AccountSettings struct {
 
 // SafetySettings controls child safety defaults and media retention.
 type SafetySettings struct {
+	// MinorModeDefault is a persisted safety invariant, not an operator
+	// preference. The management HTTP contract projects it as a separate,
+	// read-only field and never accepts it in an update payload.
 	MinorModeDefault          bool `json:"minor_mode_default"`
 	OutputModerationEnabled   bool `json:"output_moderation_enabled"`
 	CrisisInterventionEnabled bool `json:"crisis_intervention_enabled"`
 	AllowAudioUpload          bool `json:"allow_audio_upload"`
 	AllowImageUpload          bool `json:"allow_image_upload"`
+}
+
+// EnforceSafetyInvariants applies child-safety guarantees that cannot be
+// disabled by a stored document, an API caller, or a dependent gateway.
+func (s *SafetySettings) EnforceSafetyInvariants() {
+	if s == nil {
+		return
+	}
+	s.MinorModeDefault = true
 }
 
 // VoiceSettings controls the defaults applied to a newly created child's
@@ -466,11 +478,22 @@ type ReleaseInput struct {
 	MinSupportedVersion string
 }
 
+// ReleaseIdentity is the exact management address of one release artifact.
+// Version alone is not sufficient because one brand release can contain an
+// APK, Admin Web bundle, contracts package, and firmware at the same version.
+type ReleaseIdentity struct {
+	Version  string
+	Channel  string
+	Kind     string
+	Platform string
+}
+
 // ReleaseArtifact identifies one downloadable release file for the management
-// console. It is resolved from persisted release records by version, kind, and
-// platform; callers never supply the URL themselves.
+// console. It is resolved from persisted release records by version, channel,
+// kind, and platform; callers never supply the URL themselves.
 type ReleaseArtifact struct {
 	Version     string `json:"version"`
+	Channel     string `json:"channel"`
 	Kind        string `json:"kind"`
 	Platform    string `json:"platform"`
 	DownloadURL string `json:"download_url"`

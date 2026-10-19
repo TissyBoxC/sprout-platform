@@ -121,7 +121,7 @@ func DefaultRegistry() []Definition {
 			)),
 		featureDef("platform_security", "平台安全", "管理员权限、审计与安全策略。", "security", "安全团队", true,
 			configFields(
-				boolField("minor_mode_default", "默认启用未成年人模式", true, true),
+				systemBoolField("minor_mode_default", "未成年人保护模式", true),
 				boolField("output_moderation_enabled", "启用输出审核", true, true),
 				boolField("crisis_intervention_enabled", "启用危机干预", true, true),
 			),
@@ -423,6 +423,17 @@ func systemSelectField(
 ) domain.ConfigField {
 	field := baseField(key, label, domain.ConfigFieldSelect, value, false)
 	field.Options = options
+	field.Source = domain.ConfigSourceSystem
+	return field
+}
+
+func systemBoolField(
+	key string,
+	label string,
+	value bool,
+) domain.ConfigField {
+	field := boolField(key, label, value, false)
+	field.Help = "平台安全基线固定启用，不能在此处关闭。"
 	field.Source = domain.ConfigSourceSystem
 	return field
 }

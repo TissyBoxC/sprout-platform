@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
+import { apiNoticeWarning } from '@/api/apiNotice'
 import { mapApiError, type ApiError } from '@/api/apiError'
 import {
   createAdminVersionManagementClient,
@@ -46,6 +47,7 @@ export const useVersionManagementStore = defineStore('admin-version-management',
   const error = ref<ApiError | null>(null)
   const lastMessage = ref('')
   const checkWarning = ref('')
+  const lastWarning = ref('')
   let operationRequestGeneration = 0
 
   const services = computed(() => {
@@ -96,10 +98,13 @@ export const useVersionManagementStore = defineStore('admin-version-management',
     isChecking.value = true
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     checkWarning.value = ''
     try {
       const previousCheckedAt = snapshot.value?.checkedAt ?? ''
-      const requestedSnapshot = await client.checkServiceVersions()
+      const checkResponse = await client.checkServiceVersions()
+      const requestedSnapshot = checkResponse.value
+      lastWarning.value = apiNoticeWarning(checkResponse.notice)
       // The worker refreshes asynchronously. A timeout is not a successful
       // check: preserve the previous snapshot and expose a retryable state.
       const checkResult = await waitForCheckedSnapshot(
@@ -161,11 +166,15 @@ export const useVersionManagementStore = defineStore('admin-version-management',
     upgradingServiceIds.value = [...upgradingServiceIds.value, service.id]
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
+    checkWarning.value = ''
     try {
-      const operation = await client.upgradeService(service.id, requestedVersion)
+      const result = await client.upgradeService(service.id, requestedVersion)
+      const operation = result.value
       if (operation === null) {
         throw new Error('missing service upgrade operation')
       }
+      lastWarning.value = apiNoticeWarning(result.notice)
       upsertOperation(operation)
       selectedOperation.value = operation
       lastMessage.value = `${service.displayName || service.id} 的升级已开始。`
@@ -188,11 +197,14 @@ export const useVersionManagementStore = defineStore('admin-version-management',
     isUpgradingAll.value = true
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      const operation = await client.upgradeAllServices()
+      const result = await client.upgradeAllServices()
+      const operation = result.value
       if (operation === null) {
         throw new Error('missing all-service upgrade operation')
       }
+      lastWarning.value = apiNoticeWarning(result.notice)
       upsertOperation(operation)
       selectedOperation.value = operation
       lastMessage.value = '全部服务升级已开始，完成后会自动更新状态。'
@@ -366,6 +378,7 @@ export const useVersionManagementStore = defineStore('admin-version-management',
     isUpgrading,
     isUpgradingAll,
     lastMessage,
+    lastWarning,
     loadServiceReleases,
     operationForService,
     operations,

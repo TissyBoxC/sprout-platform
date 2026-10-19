@@ -299,6 +299,11 @@ function operationLog(operation: AdminServiceVersionOperation | null): string {
       </p>
     </Transition>
     <Transition name="toast">
+      <p v-if="store.lastWarning" class="warning-message" role="alert">
+        {{ store.lastWarning }}
+      </p>
+    </Transition>
+    <Transition name="toast">
       <p v-if="store.error" class="error-message" role="alert">
         {{ store.error.message }}
       </p>
@@ -782,6 +787,15 @@ button:disabled {
 
 .success-message {
   color: #1d6b3f;
+}
+
+.warning-message {
+  margin: 14px 0 0;
+  padding: 12px 16px;
+  border: 1px solid #e6c56d;
+  border-radius: 14px;
+  background: #fff9e8;
+  color: #7a5411;
 }
 
 .up-to-date-message {

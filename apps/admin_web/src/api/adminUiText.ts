@@ -1,5 +1,9 @@
 import type { AxiosInstance } from 'axios'
 
+import {
+  readApiNotice,
+  type ApiMutationResult,
+} from '@/api/apiNotice'
 import { createHttpClient } from '@/api/httpClient'
 
 export type UiTextPlatform = 'parent_app' | 'admin_web' | 'device_firmware'
@@ -84,17 +88,25 @@ export interface UiTextVersionRef {
 export interface AdminUiTextClient {
   loadVersions(query?: UiTextVersionQuery): Promise<UiTextVersionPage>
   loadVersion(ref: UiTextVersionRef): Promise<UiTextDetail>
-  createDraft(input: UiTextDraftInput): Promise<UiTextDetail>
-  updateDraft(ref: UiTextVersionRef, input: UiTextDraftInput): Promise<UiTextDetail>
-  submitVersion(ref: UiTextVersionRef): Promise<UiTextPackage>
-  approveVersion(ref: UiTextVersionRef): Promise<UiTextPackage>
-  rejectVersion(ref: UiTextVersionRef, reason: string): Promise<UiTextPackage>
+  createDraft(input: UiTextDraftInput): Promise<ApiMutationResult<UiTextDetail>>
+  updateDraft(
+    ref: UiTextVersionRef,
+    input: UiTextDraftInput,
+  ): Promise<ApiMutationResult<UiTextDetail>>
+  submitVersion(ref: UiTextVersionRef): Promise<ApiMutationResult<UiTextPackage>>
+  approveVersion(ref: UiTextVersionRef): Promise<ApiMutationResult<UiTextPackage>>
+  rejectVersion(
+    ref: UiTextVersionRef,
+    reason: string,
+  ): Promise<ApiMutationResult<UiTextPackage>>
   publishVersion(
     ref: UiTextVersionRef,
     signatureKeyId: string,
     signature: string,
-  ): Promise<UiTextPackage>
-  withdrawVersion(ref: UiTextVersionRef): Promise<UiTextPackage>
+  ): Promise<ApiMutationResult<UiTextPackage>>
+  withdrawVersion(
+    ref: UiTextVersionRef,
+  ): Promise<ApiMutationResult<UiTextPackage>>
 }
 
 /// Creates the client for remote UI text management. Every mutation returns the
@@ -122,7 +134,9 @@ export function createAdminUiTextClient(
       return requiredDetail(response.data?.data)
     },
 
-    async createDraft(input: UiTextDraftInput): Promise<UiTextDetail> {
+    async createDraft(
+      input: UiTextDraftInput,
+    ): Promise<ApiMutationResult<UiTextDetail>> {
       const response = await httpClient.post('/api/v1/admin/ui-text/packages/drafts', {
         package_id: input.packageId.trim(),
         language: input.language.trim(),
@@ -130,26 +144,42 @@ export function createAdminUiTextClient(
         min_client_version: input.minClientVersion.trim(),
         entries: input.entries.map(entryPayload),
       })
-      return requiredDetail(response.data?.data)
+      return {
+        value: requiredDetail(response.data?.data),
+        notice: readApiNotice(response.data),
+      }
     },
 
-    async updateDraft(ref: UiTextVersionRef, input: UiTextDraftInput): Promise<UiTextDetail> {
+    async updateDraft(
+      ref: UiTextVersionRef,
+      input: UiTextDraftInput,
+    ): Promise<ApiMutationResult<UiTextDetail>> {
       const response = await httpClient.put(versionPath(ref), {
         min_client_version: input.minClientVersion.trim(),
         entries: input.entries.map(entryPayload),
       })
-      return requiredDetail(response.data?.data)
+      return {
+        value: requiredDetail(response.data?.data),
+        notice: readApiNotice(response.data),
+      }
     },
 
-    async submitVersion(ref: UiTextVersionRef): Promise<UiTextPackage> {
+    async submitVersion(
+      ref: UiTextVersionRef,
+    ): Promise<ApiMutationResult<UiTextPackage>> {
       return runVersionAction(httpClient, ref, 'submit')
     },
 
-    async approveVersion(ref: UiTextVersionRef): Promise<UiTextPackage> {
+    async approveVersion(
+      ref: UiTextVersionRef,
+    ): Promise<ApiMutationResult<UiTextPackage>> {
       return runVersionAction(httpClient, ref, 'approve')
     },
 
-    async rejectVersion(ref: UiTextVersionRef, reason: string): Promise<UiTextPackage> {
+    async rejectVersion(
+      ref: UiTextVersionRef,
+      reason: string,
+    ): Promise<ApiMutationResult<UiTextPackage>> {
       return runVersionAction(httpClient, ref, 'reject', { reason: reason.trim() })
     },
 
@@ -157,14 +187,16 @@ export function createAdminUiTextClient(
       ref: UiTextVersionRef,
       signatureKeyId: string,
       signature: string,
-    ): Promise<UiTextPackage> {
+    ): Promise<ApiMutationResult<UiTextPackage>> {
       return runVersionAction(httpClient, ref, 'publish', {
         signature_key_id: signatureKeyId.trim(),
         signature: signature.trim(),
       })
     },
 
-    async withdrawVersion(ref: UiTextVersionRef): Promise<UiTextPackage> {
+    async withdrawVersion(
+      ref: UiTextVersionRef,
+    ): Promise<ApiMutationResult<UiTextPackage>> {
       return runVersionAction(httpClient, ref, 'withdraw')
     },
   }
@@ -175,9 +207,12 @@ async function runVersionAction(
   ref: UiTextVersionRef,
   action: string,
   body?: Record<string, unknown>,
-): Promise<UiTextPackage> {
+): Promise<ApiMutationResult<UiTextPackage>> {
   const response = await httpClient.post(`${versionPath(ref)}/${action}`, body ?? {})
-  return requiredPackage(response.data?.data)
+  return {
+    value: requiredPackage(response.data?.data),
+    notice: readApiNotice(response.data),
+  }
 }
 
 function versionPath(ref: UiTextVersionRef): string {

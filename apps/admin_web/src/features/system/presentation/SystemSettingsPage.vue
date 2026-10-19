@@ -99,6 +99,11 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
       <p v-if="store.lastMessage" class="success-message">{{ store.lastMessage }}</p>
     </Transition>
     <Transition name="toast">
+      <p v-if="store.lastWarning" class="warning-message" role="alert">
+        {{ store.lastWarning }}
+      </p>
+    </Transition>
+    <Transition name="toast">
       <p v-if="store.error && store.isLoaded" class="error-message">
         {{ store.error.message }}
       </p>
@@ -1046,6 +1051,15 @@ textarea:focus {
 .success-message {
   margin: 0 0 14px;
   color: #1d6b3f;
+}
+
+.warning-message {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid #e6c56d;
+  border-radius: 14px;
+  background: #fff9e8;
+  color: #7a5411;
 }
 
 @keyframes spin {

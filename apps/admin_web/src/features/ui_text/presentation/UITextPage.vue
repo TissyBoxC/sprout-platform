@@ -294,6 +294,11 @@ function formatTime(value: string): string {
       <p v-if="store.lastMessage" class="success-message">{{ store.lastMessage }}</p>
     </Transition>
     <Transition name="toast">
+      <p v-if="store.lastWarning" class="warning-message" role="alert">
+        {{ store.lastWarning }}
+      </p>
+    </Transition>
+    <Transition name="toast">
       <p v-if="store.error" class="error-message">{{ store.error.message }}</p>
     </Transition>
 
@@ -1006,6 +1011,15 @@ h2 small {
 .success-message {
   background: #e6f6ec;
   color: #1f7a45;
+}
+
+.warning-message {
+  margin: 0 0 14px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: #fff3d4;
+  color: #7a5411;
+  font-weight: 600;
 }
 
 .error-message {

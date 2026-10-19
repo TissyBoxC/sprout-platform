@@ -1,5 +1,9 @@
 import type { AxiosInstance } from 'axios'
 
+import {
+  readApiNotice,
+  type ApiMutationResult,
+} from '@/api/apiNotice'
 import { createHttpClient } from '@/api/httpClient'
 
 export type NotificationCategory =
@@ -90,8 +94,12 @@ export interface AdminNotificationsClient {
   loadNotifications(
     filters: AdminNotificationFilters,
   ): Promise<AdminNotificationListResult>
-  createNotification(input: CreateAdminNotificationInput): Promise<AdminNotification>
-  deleteNotification(notificationId: string): Promise<void>
+  createNotification(
+    input: CreateAdminNotificationInput,
+  ): Promise<ApiMutationResult<AdminNotification>>
+  deleteNotification(
+    notificationId: string,
+  ): Promise<ApiMutationResult<null>>
   loadStats(): Promise<AdminNotificationStats>
 }
 
@@ -135,19 +143,28 @@ export function createAdminNotificationsClient(
 
     async createNotification(
       input: CreateAdminNotificationInput,
-    ): Promise<AdminNotification> {
+    ): Promise<ApiMutationResult<AdminNotification>> {
       const response = await httpClient.post(basePath, toCreatePayload(input))
       const notification = toNullableNotification(response.data?.data?.notification)
       if (notification === null) {
         throw new Error('notification response is missing a notification')
       }
-      return notification
+      return {
+        value: notification,
+        notice: readApiNotice(response.data),
+      }
     },
 
-    async deleteNotification(notificationId: string): Promise<void> {
-      await httpClient.delete(
+    async deleteNotification(
+      notificationId: string,
+    ): Promise<ApiMutationResult<null>> {
+      const response = await httpClient.delete(
         `${basePath}/${encodeURIComponent(notificationId.trim())}`,
       )
+      return {
+        value: null,
+        notice: readApiNotice(response.data),
+      }
     },
 
     async loadStats(): Promise<AdminNotificationStats> {

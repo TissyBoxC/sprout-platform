@@ -1,5 +1,10 @@
 import type { AxiosInstance } from 'axios'
 
+import {
+  readApiNotice,
+  type ApiMutationResult,
+  type ApiNotice,
+} from '@/api/apiNotice'
 import { createHttpClient } from '@/api/httpClient'
 
 /// One administrator account as the permission screen needs it. It never
@@ -28,7 +33,10 @@ export interface AdminPermissionOverview {
 
 export interface AdminPermissionsClient {
   load(): Promise<AdminPermissionOverview>
-  update(accountId: string, permissions: string[]): Promise<AdminPermissionAccount>
+  update(
+    accountId: string,
+    permissions: string[],
+  ): Promise<ApiMutationResult<AdminPermissionAccount>>
 }
 
 /// The assignable catalog is closed and must stay in sync with the platform
@@ -87,7 +95,10 @@ export function createAdminPermissionsClient(
       return { catalog, accounts }
     },
 
-    async update(accountId: string, permissions: string[]): Promise<AdminPermissionAccount> {
+    async update(
+      accountId: string,
+      permissions: string[],
+    ): Promise<ApiMutationResult<AdminPermissionAccount>> {
       const response = await httpClient.put(`${basePath}/${encodeURIComponent(accountId.trim())}`, {
         permissions,
       })
@@ -95,7 +106,10 @@ export function createAdminPermissionsClient(
       if (account === null) {
         throw new Error('permission response is missing an account')
       }
-      return account
+      return {
+        value: account,
+        notice: readApiNotice(response.data),
+      }
     },
   }
 }

@@ -89,6 +89,16 @@ function healthLabel(value: FeatureHealthStatus): string {
   )
 }
 
+function healthSourceLabel(value: string): string {
+  return (
+    {
+      service_runtime: '实时服务检查',
+      database_state: '持久化状态',
+      not_configured: '尚未配置',
+    }[value] ?? '来源未声明'
+  )
+}
+
 function formatTime(value: string): string {
   if (!value) {
     return '暂未接入'
@@ -316,6 +326,10 @@ function reloadFeatureList(): void {
                   <dt>配置版本</dt>
                   <dd>第 {{ selectedFeature.version }} 版</dd>
                 </div>
+                <div>
+                  <dt>健康来源</dt>
+                  <dd>{{ healthSourceLabel(selectedFeature.healthSource) }}</dd>
+                </div>
               </dl>
 
               <section class="health-panel" :class="healthStatus">
@@ -326,7 +340,15 @@ function reloadFeatureList(): void {
                     <p v-if="selectedFeature.health.message">
                       {{ selectedFeature.health.message }}
                     </p>
-                    <p v-else-if="healthStatus === 'unknown'">这项功能还没有接入可用的健康检查。</p>
+                    <p v-else-if="healthStatus === 'unknown'">
+                      {{
+                        selectedFeature.healthSource === 'service_runtime'
+                          ? '实时检查已完成，但当前还不能判定功能是否可用。'
+                          : selectedFeature.healthSource === 'database_state'
+                            ? '当前只能确认持久化状态，尚不能替代功能级健康检查。'
+                            : '这项功能还没有接入可用的健康检查。'
+                      }}
+                    </p>
                     <p v-else>最近一次检查未附带说明。</p>
                   </div>
                 </div>

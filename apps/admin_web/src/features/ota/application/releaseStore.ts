@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
+import { apiNoticeWarning, readApiNotice } from '@/api/apiNotice'
 import { mapApiError, type ApiError } from '@/api/apiError'
 import {
   createAdminOperationsClient,
@@ -70,6 +71,7 @@ export const useReleaseStore = defineStore('admin-releases', () => {
   const isSubmitting = ref(false)
   const error = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  const lastWarning = ref('')
   const pagination = ref<ReleasePagination>({
     page: 1,
     pageSize: DEFAULT_PAGE_SIZE,
@@ -280,8 +282,9 @@ export const useReleaseStore = defineStore('admin-releases', () => {
     isSubmitting.value = true
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      await httpClient.post('/api/v1/admin/releases', {
+      const response = await httpClient.post('/api/v1/admin/releases', {
         version: input.version.trim(),
         channel: input.channel,
         kind: input.kind,
@@ -292,6 +295,7 @@ export const useReleaseStore = defineStore('admin-releases', () => {
         is_mandatory: input.isMandatory,
         min_supported_version: input.minimumSupportedVersion.trim(),
       })
+      lastWarning.value = apiNoticeWarning(readApiNotice(response.data))
       await load(1)
       lastMessage.value = '更新版本已登记。'
       return true
@@ -346,10 +350,12 @@ export const useReleaseStore = defineStore('admin-releases', () => {
     isSubmitting.value = true
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      await httpClient.put(
+      const response = await httpClient.put(
         `/api/v1/admin/releases/${encodeURIComponent(version)}/publish`,
       )
+      lastWarning.value = apiNoticeWarning(readApiNotice(response.data))
       await load(pagination.value.page)
       lastMessage.value = `版本 ${version} 已发布。`
       return true
@@ -365,10 +371,12 @@ export const useReleaseStore = defineStore('admin-releases', () => {
     isSubmitting.value = true
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      await httpClient.delete(
+      const response = await httpClient.delete(
         `/api/v1/admin/releases/${encodeURIComponent(version)}`,
       )
+      lastWarning.value = apiNoticeWarning(readApiNotice(response.data))
       const nextPage =
         releases.value.length === 1 && pagination.value.page > 1
           ? pagination.value.page - 1
@@ -392,6 +400,7 @@ export const useReleaseStore = defineStore('admin-releases', () => {
     isSubmitting,
     isResolvingArtifact,
     lastMessage,
+    lastWarning,
     pageEnd,
     pageStart,
     pagination,

@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
+import { apiNoticeWarning, readApiNotice } from '@/api/apiNotice'
 import {
   createAdminDownloadFilesClient,
   type DownloadFile,
@@ -85,6 +86,7 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
   const statisticsDegraded = ref(false)
   const error = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  const lastWarning = ref('')
   let releaseRequestGeneration = 0
   let deploymentRequestGeneration = 0
 
@@ -238,16 +240,18 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
 
   async function createRelease(input: CreateOtaReleaseInput): Promise<boolean> {
     return submitAction('固件版本已创建。', async () => {
-      await client.createRelease(input)
+      const result = await client.createRelease(input)
       await load()
+      return apiNoticeWarning(result.notice)
     })
   }
 
   async function updateRelease(releaseId: string, input: UpdateOtaReleaseInput): Promise<boolean> {
     return submitAction('固件版本已更新。', async () => {
-      await client.updateRelease(releaseId, input)
+      const result = await client.updateRelease(releaseId, input)
       await load()
       await loadReleaseDetail(releaseId)
+      return apiNoticeWarning(result.notice)
     })
   }
 
@@ -285,9 +289,10 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
 
   async function retryDeployment(deployment: OtaDeployment): Promise<boolean> {
     return submitAction('设备升级任务已重新下发。', async () => {
-      await client.retryDeployment(deployment.deploymentId)
+      const result = await client.retryDeployment(deployment.deploymentId)
       await refreshSelectedRelease()
       await load()
+      return apiNoticeWarning(result.notice)
     })
   }
 
@@ -305,11 +310,14 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
       return false
     }
     return submitAction('固件更新已下发，设备联网后会开始下载。', async () => {
-      await client.createDeployment(release.releaseId, normalizedDeviceID)
+      const deploymentResult = await client.createDeployment(
+        release.releaseId,
+        normalizedDeviceID,
+      )
       // The OTA deployment is the durable authorization record. The runtime
       // command re-checks that exact record before delivery, so a failure here
       // is surfaced and the deployment remains visible for an explicit retry.
-      await createHttpClient().post(
+      const commandResponse = await createHttpClient().post(
         `/api/v1/admin/devices/${encodeURIComponent(normalizedDeviceID)}/commands`,
         {
           command_type: 'firmware_update',
@@ -318,6 +326,10 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
       )
       await refreshSelectedRelease()
       await load()
+      return joinWarnings(
+        apiNoticeWarning(deploymentResult.notice),
+        apiNoticeWarning(readApiNotice(commandResponse.data)),
+      )
     })
   }
 
@@ -341,7 +353,7 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
     error.value = null
     lastMessage.value = ''
     try {
-      const file = await downloadFilesClient.uploadFile(
+      const result = await downloadFilesClient.uploadFile(
         {
           file: input.file,
           filename: input.filename,
@@ -355,8 +367,10 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
           uploadProgress.value = progress
         },
       )
+      const file = result.value
       uploadProgress.value = 100
       await loadFirmwareFiles()
+      lastWarning.value = apiNoticeWarning(result.notice)
       lastMessage.value = `${input.filename} 已上传到固件发布目录。`
       return file
     } catch (caught: unknown) {
@@ -412,23 +426,25 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
   function clearMessages(): void {
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
   }
 
   async function submitReleaseAction(
     release: OtaRelease,
-    action: () => Promise<OtaRelease>,
+    action: () => Promise<{ value: OtaRelease; notice: import('@/api/apiNotice').ApiNotice | null }>,
     successMessage: string,
   ): Promise<boolean> {
     return submitAction(successMessage, async () => {
-      await action()
+      const result = await action()
       await load()
       await loadReleaseDetail(release.releaseId)
+      return apiNoticeWarning(result.notice)
     })
   }
 
   async function submitAction(
     successMessage: string,
-    action: () => Promise<void>,
+    action: () => Promise<string | void>,
   ): Promise<boolean> {
     if (isSubmitting.value) {
       return false
@@ -436,8 +452,9 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
     isSubmitting.value = true
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      await action()
+      lastWarning.value = (await action()) ?? ''
       lastMessage.value = successMessage
       return true
     } catch (caught: unknown) {
@@ -470,6 +487,7 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
     isLoadingFiles,
     isSubmitting,
     lastMessage,
+    lastWarning,
     load,
     loadDeploymentPage,
     loadFirmwareFiles,
@@ -495,6 +513,12 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
     withdrawRelease,
   }
 })
+
+function joinWarnings(...warnings: string[]): string {
+  return [...new Set(warnings.map((warning) => warning.trim()).filter(Boolean))].join(
+    '\n',
+  )
+}
 
 export function otaReleaseStatusLabel(value: OtaReleaseStatus): string {
   return {

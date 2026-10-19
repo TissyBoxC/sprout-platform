@@ -1,5 +1,9 @@
 import type { AxiosInstance } from 'axios'
 
+import {
+  readApiNotice,
+  type ApiMutationResult,
+} from '@/api/apiNotice'
 import { createHttpClient } from '@/api/httpClient'
 
 export type OtaReleaseChannel = 'stable' | 'canary' | 'internal'
@@ -139,19 +143,27 @@ export interface UpdateOtaReleaseInput extends CreateOtaReleaseInput {
 
 export interface AdminOtaClient {
   loadReleases(filters: OtaReleaseFilters): Promise<OtaReleaseListResult>
-  createRelease(input: CreateOtaReleaseInput): Promise<OtaRelease>
+  createRelease(input: CreateOtaReleaseInput): Promise<ApiMutationResult<OtaRelease>>
   loadRelease(releaseId: string): Promise<OtaReleaseDetail>
-  updateRelease(releaseId: string, input: UpdateOtaReleaseInput): Promise<OtaRelease>
-  publishRelease(releaseId: string): Promise<OtaRelease>
-  pauseRelease(releaseId: string): Promise<OtaRelease>
-  withdrawRelease(releaseId: string): Promise<OtaRelease>
-  rollbackRelease(releaseId: string): Promise<OtaRelease>
+  updateRelease(
+    releaseId: string,
+    input: UpdateOtaReleaseInput,
+  ): Promise<ApiMutationResult<OtaRelease>>
+  publishRelease(releaseId: string): Promise<ApiMutationResult<OtaRelease>>
+  pauseRelease(releaseId: string): Promise<ApiMutationResult<OtaRelease>>
+  withdrawRelease(releaseId: string): Promise<ApiMutationResult<OtaRelease>>
+  rollbackRelease(releaseId: string): Promise<ApiMutationResult<OtaRelease>>
   loadDeployments(
     releaseId: string,
     filters: OtaDeploymentListFilters,
   ): Promise<OtaDeploymentListResult>
-  createDeployment(releaseId: string, deviceId: string): Promise<OtaDeployment>
-  retryDeployment(deploymentId: string): Promise<OtaDeployment>
+  createDeployment(
+    releaseId: string,
+    deviceId: string,
+  ): Promise<ApiMutationResult<OtaDeployment>>
+  retryDeployment(
+    deploymentId: string,
+  ): Promise<ApiMutationResult<OtaDeployment>>
   loadStatistics(): Promise<OtaStatistics>
 }
 
@@ -188,9 +200,11 @@ export function createAdminOtaClient(
       }
     },
 
-    async createRelease(input: CreateOtaReleaseInput): Promise<OtaRelease> {
+    async createRelease(
+      input: CreateOtaReleaseInput,
+    ): Promise<ApiMutationResult<OtaRelease>> {
       const response = await httpClient.post(`${basePath}/releases`, toCreatePayload(input))
-      return expectRelease(response.data?.data)
+      return mutationResult(expectRelease(response.data?.data), response.data)
     },
 
     async loadRelease(releaseId: string): Promise<OtaReleaseDetail> {
@@ -221,40 +235,51 @@ export function createAdminOtaClient(
       }
     },
 
-    async updateRelease(releaseId: string, input: UpdateOtaReleaseInput): Promise<OtaRelease> {
+    async updateRelease(
+      releaseId: string,
+      input: UpdateOtaReleaseInput,
+    ): Promise<ApiMutationResult<OtaRelease>> {
       const response = await httpClient.put(
         `${basePath}/releases/${encodeURIComponent(releaseId.trim())}`,
         toUpdatePayload(input),
       )
-      return expectRelease(response.data?.data)
+      return mutationResult(expectRelease(response.data?.data), response.data)
     },
 
-    async publishRelease(releaseId: string): Promise<OtaRelease> {
+    async publishRelease(
+      releaseId: string,
+    ): Promise<ApiMutationResult<OtaRelease>> {
       const response = await httpClient.post(
         `${basePath}/releases/${encodeURIComponent(releaseId.trim())}/publish`,
       )
-      return expectRelease(response.data?.data)
+      return mutationResult(expectRelease(response.data?.data), response.data)
     },
 
-    async pauseRelease(releaseId: string): Promise<OtaRelease> {
+    async pauseRelease(
+      releaseId: string,
+    ): Promise<ApiMutationResult<OtaRelease>> {
       const response = await httpClient.post(
         `${basePath}/releases/${encodeURIComponent(releaseId.trim())}/pause`,
       )
-      return expectRelease(response.data?.data)
+      return mutationResult(expectRelease(response.data?.data), response.data)
     },
 
-    async withdrawRelease(releaseId: string): Promise<OtaRelease> {
+    async withdrawRelease(
+      releaseId: string,
+    ): Promise<ApiMutationResult<OtaRelease>> {
       const response = await httpClient.post(
         `${basePath}/releases/${encodeURIComponent(releaseId.trim())}/withdraw`,
       )
-      return expectRelease(response.data?.data)
+      return mutationResult(expectRelease(response.data?.data), response.data)
     },
 
-    async rollbackRelease(releaseId: string): Promise<OtaRelease> {
+    async rollbackRelease(
+      releaseId: string,
+    ): Promise<ApiMutationResult<OtaRelease>> {
       const response = await httpClient.post(
         `${basePath}/releases/${encodeURIComponent(releaseId.trim())}/rollback`,
       )
-      return expectRelease(response.data?.data)
+      return mutationResult(expectRelease(response.data?.data), response.data)
     },
 
     async loadDeployments(
@@ -281,7 +306,10 @@ export function createAdminOtaClient(
       }
     },
 
-    async createDeployment(releaseId: string, deviceId: string): Promise<OtaDeployment> {
+    async createDeployment(
+      releaseId: string,
+      deviceId: string,
+    ): Promise<ApiMutationResult<OtaDeployment>> {
       const normalizedReleaseID = releaseId.trim()
       const normalizedDeviceID = deviceId.trim()
       if (!normalizedReleaseID || !normalizedDeviceID) {
@@ -295,10 +323,12 @@ export function createAdminOtaClient(
       if (deployment === null) {
         throw new Error('ota deployment response is missing a deployment')
       }
-      return deployment
+      return mutationResult(deployment, response.data)
     },
 
-    async retryDeployment(deploymentId: string): Promise<OtaDeployment> {
+    async retryDeployment(
+      deploymentId: string,
+    ): Promise<ApiMutationResult<OtaDeployment>> {
       const response = await httpClient.post(
         `${basePath}/deployments/${encodeURIComponent(deploymentId.trim())}/retry`,
       )
@@ -306,13 +336,23 @@ export function createAdminOtaClient(
       if (deployment === null) {
         throw new Error('ota deployment response is missing a deployment')
       }
-      return deployment
+      return mutationResult(deployment, response.data)
     },
 
     async loadStatistics(): Promise<OtaStatistics> {
       const response = await httpClient.get(`${basePath}/statistics`)
       return toStatistics(response.data?.data)
     },
+  }
+}
+
+function mutationResult<T>(
+  value: T,
+  envelope: unknown,
+): ApiMutationResult<T> {
+  return {
+    value,
+    notice: readApiNotice(envelope),
   }
 }
 

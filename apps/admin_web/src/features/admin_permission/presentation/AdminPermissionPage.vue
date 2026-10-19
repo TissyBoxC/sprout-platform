@@ -13,6 +13,9 @@ const selectedAccount = computed(
   () => store.accounts.find((account) => account.accountId === selectedAccountId.value) ?? null,
 )
 const selectedSaveError = computed(() => store.saveErrors[selectedAccountId.value] ?? null)
+const selectedSaveWarning = computed(
+  () => store.saveWarnings[selectedAccountId.value] ?? '',
+)
 const selectedIsSaving = computed(() => store.savingAccountId === selectedAccountId.value)
 const selectedIsDirty = computed(
   () => selectedAccount.value !== null && store.isDirty(selectedAccount.value.accountId),
@@ -164,6 +167,9 @@ function toggleWildcard(event: Event): void {
         <p v-if="selectedSaveError" class="error-message">
           {{ selectedSaveError.message }}
         </p>
+        <p v-if="selectedSaveWarning" class="warning-message" role="alert">
+          {{ selectedSaveWarning }}
+        </p>
 
         <div class="panel-footer">
           <p>
@@ -259,6 +265,15 @@ button:disabled {
   border: 1px solid #bfe3c8;
   background: #f2fbf4;
   color: #2f6b40;
+}
+
+.warning-message {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid #e6c56d;
+  border-radius: 14px;
+  background: #fff9e8;
+  color: #7a5411;
 }
 
 .error-message {

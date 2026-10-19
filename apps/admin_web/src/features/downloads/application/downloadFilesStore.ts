@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
+import { apiNoticeWarning, readApiNotice, type ApiNotice } from '@/api/apiNotice'
 import {
   canonicalArtifactRelativePath,
   createAdminDownloadFilesClient,
@@ -40,6 +41,9 @@ export interface DownloadFileUploadState {
     | 'conflict'
   indexState: 'idle' | 'refreshed' | 'failed'
   listState: 'idle' | 'refreshed' | 'failed'
+  registrationNotice: string
+  indexNotice: string
+  listNotice: string
   canRetryRegistration: boolean
   error: string
 }
@@ -93,6 +97,7 @@ export interface DownloadUploadResult {
   listRefreshed: boolean
   uploadedFile: DownloadFile | null
   error: ApiError | null
+  warning: string
 }
 
 export interface PendingUploadMetadata {
@@ -133,11 +138,15 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
     registrationState: 'idle',
     indexState: 'idle',
     listState: 'idle',
+    registrationNotice: '',
+    indexNotice: '',
+    listNotice: '',
     canRetryRegistration: false,
     error: '',
   })
   const error = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  const lastWarning = ref('')
   let pendingUpload: { input: DownloadFileUpload; file: DownloadFile } | null = null
   let completionSequence = 0
   let filesRequestSequence = 0
@@ -271,11 +280,15 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
       registrationState: 'idle',
       indexState: 'idle',
       listState: 'idle',
+      registrationNotice: '',
+      indexNotice: '',
+      listNotice: '',
       canRetryRegistration: false,
       error: '',
     }
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     const requestSequence = ++completionSequence
     pendingUpload = null
     try {
@@ -298,13 +311,15 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
           listRefreshed: false,
           uploadedFile: null,
           error: existingConflict,
+          warning: '',
         }
       }
-      const uploadedFile = await client.uploadFile(input, (progress) => {
+      const uploadResult = await client.uploadFile(input, (progress) => {
         if (requestSequence === completionSequence) {
           uploadState.value = { ...uploadState.value, progress }
         }
       })
+      const uploadedFile = uploadResult.value
       if (requestSequence !== completionSequence) {
         return cancelledUploadResult()
       }
@@ -316,7 +331,13 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
         uploadedFilePath: uploadedFile.relativePath,
       }
       pendingUpload = { input, file: uploadedFile }
-      return await completeUploadCompletion(uploadedFile, input, requestSequence)
+      lastWarning.value = apiNoticeWarning(uploadResult.notice)
+      return await completeUploadCompletion(
+        uploadedFile,
+        input,
+        requestSequence,
+        uploadResult.notice,
+      )
     } catch (caught: unknown) {
       const mappedError = mapApiError(caught)
       if (requestSequence !== completionSequence) {
@@ -328,6 +349,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
           isUploading: false,
           isRegistering: false,
           registrationState: 'failed',
+          registrationNotice: '',
           canRetryRegistration: true,
           error: `文件已经上传，但后续处理失败：${mappedError.message}`,
         }
@@ -339,6 +361,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
           listRefreshed: false,
           uploadedFile: pendingUpload.file,
           error: mappedError,
+          warning: lastWarning.value,
         }
       }
       uploadState.value = {
@@ -354,6 +377,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
         listRefreshed: false,
         uploadedFile: null,
         error: mappedError,
+        warning: '',
       }
     } finally {
       if (requestSequence === completionSequence) {
@@ -381,6 +405,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
         listRefreshed: false,
         uploadedFile: null,
         error: mappedError,
+        warning: '',
       }
     }
     return completeUploadCompletion(pending.file, pending.input)
@@ -434,6 +459,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
     uploadedFile: DownloadFile,
     input: DownloadFileUpload,
     requestSequence = ++completionSequence,
+    uploadNotice: ApiNotice | null = null,
   ): Promise<DownloadUploadResult> {
     uploadState.value = {
       ...uploadState.value,
@@ -457,6 +483,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
         ...uploadState.value,
         isRegistering: false,
         registrationState: 'failed',
+        registrationNotice: '',
         canRetryRegistration: true,
         error: `文件已经上传，但版本登记失败：${mappedError.message}`,
       }
@@ -468,6 +495,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
         listRefreshed: false,
         uploadedFile,
         error: mappedError,
+        warning: apiNoticeWarning(uploadNotice),
       }
     }
     if (requestSequence !== completionSequence) {
@@ -497,6 +525,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
         listRefreshed: false,
         uploadedFile,
         error: mappedError,
+        warning: apiNoticeWarning(uploadNotice),
       }
     }
     if (registration === 'skipped' || registration === 'notes_missing') {
@@ -515,6 +544,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
         listRefreshed: false,
         uploadedFile,
         error: mappedError,
+        warning: apiNoticeWarning(uploadNotice),
       }
     }
 
@@ -534,6 +564,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
       listRefreshed,
       uploadedFile,
       error: null,
+      warning: latestUploadWarning(),
     }
   }
 
@@ -545,11 +576,19 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
       }
     }
     try {
-      const nextStatus = await client.refreshIndex()
+      const result = await client.refreshIndex()
+      const nextStatus = result.value
       if (requestSequence !== completionSequence) {
         return false
       }
       indexStatus.value = nextStatus
+      uploadState.value = {
+        ...uploadState.value,
+        indexNotice: joinWarnings(
+          uploadState.value.indexNotice,
+          apiNoticeWarning(result.notice),
+        ),
+      }
       uploadState.value = {
         ...uploadState.value,
         indexState: 'refreshed',
@@ -630,7 +669,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
       return 'notes_missing'
     }
     try {
-      await httpClient.post('/api/v1/admin/releases', {
+      const response = await httpClient.post('/api/v1/admin/releases', {
         version: file.version,
         channel: 'stable',
         kind: file.kind,
@@ -641,6 +680,10 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
         is_mandatory: false,
         min_supported_version: '',
       })
+      lastWarning.value = joinWarnings(
+        lastWarning.value,
+        apiNoticeWarning(readApiNotice(response.data)),
+      )
     } catch (caught: unknown) {
       if (releaseAlreadyExists(caught)) {
         return 'conflict'
@@ -719,17 +762,37 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
     return file.downloadUrl
   }
 
+  function latestUploadWarning(): string {
+    return joinWarnings(
+      lastWarning.value,
+      uploadState.value.registrationNotice,
+      uploadState.value.indexNotice,
+      uploadState.value.listNotice,
+    )
+  }
+
   async function remove(file: DownloadFile): Promise<boolean> {
     deletingPaths.value = [...deletingPaths.value, file.relativePath]
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      await client.deleteFile(file.relativePath)
+      const deletion = await client.deleteFile(file.relativePath)
+      lastWarning.value = apiNoticeWarning(deletion.notice)
       files.value = files.value.filter((item) => item.relativePath !== file.relativePath)
-      indexStatus.value = await client.refreshIndex().catch(() => ({
-        ...emptyDownloadIndexStatus,
-        isAvailable: false,
-      }))
+      const refreshedIndex = await client.refreshIndex().catch(() => null)
+      if (refreshedIndex === null) {
+        indexStatus.value = {
+          ...emptyDownloadIndexStatus,
+          isAvailable: false,
+        }
+      } else {
+        indexStatus.value = refreshedIndex.value
+        lastWarning.value = joinWarnings(
+          lastWarning.value,
+          apiNoticeWarning(refreshedIndex.notice),
+        )
+      }
       await reloadFiles()
       lastMessage.value = `${file.name} 已从下载服务器删除。`
       return true
@@ -750,8 +813,11 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
     isRefreshingIndex.value = true
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      indexStatus.value = await client.refreshIndex()
+      const result = await client.refreshIndex()
+      indexStatus.value = result.value
+      lastWarning.value = apiNoticeWarning(result.notice)
       lastMessage.value =
         indexStatus.value.pendingFileCount === 0
           ? '发布索引已刷新，所有文件都可以登记版本。'
@@ -856,6 +922,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
     }
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     uploadState.value = {
       isUploading: false,
       isRegistering: false,
@@ -865,6 +932,9 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
       registrationState: 'idle',
       indexState: 'idle',
       listState: 'idle',
+      registrationNotice: '',
+      indexNotice: '',
+      listNotice: '',
       canRetryRegistration: false,
       error: '',
     }
@@ -919,6 +989,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
     isRefreshingIndex,
     isDeleting,
     lastMessage,
+    lastWarning,
     pendingUploadMetadata,
     pendingFileCount,
     previewUploadPath,
@@ -1009,6 +1080,7 @@ function incompleteUploadResult(
     listRefreshed: false,
     uploadedFile,
     error: null,
+    warning: '',
   }
 }
 
@@ -1020,7 +1092,14 @@ function cancelledUploadResult(): DownloadUploadResult {
     listRefreshed: false,
     uploadedFile: null,
     error: null,
+    warning: '',
   }
+}
+
+function joinWarnings(...warnings: string[]): string {
+  return [...new Set(warnings.map((warning) => warning.trim()).filter(Boolean))].join(
+    '\n',
+  )
 }
 
 function releaseAlreadyExists(caught: unknown): boolean {

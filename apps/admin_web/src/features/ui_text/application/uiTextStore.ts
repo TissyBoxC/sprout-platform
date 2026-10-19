@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
+import { apiNoticeWarning } from '@/api/apiNotice'
 import { mapApiError, type ApiError } from '@/api/apiError'
 import {
   createAdminUiTextClient,
@@ -49,6 +50,7 @@ export const useUiTextStore = defineStore('admin-ui-text', () => {
   const isSubmitting = ref(false)
   const error = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  const lastWarning = ref('')
 
   const selectedRef = ref<UiTextVersionRef | null>(null)
   const selectedDetail = ref<UiTextDetail | null>(null)
@@ -109,7 +111,8 @@ export const useUiTextStore = defineStore('admin-ui-text', () => {
     const result = await runMutation(async () => {
       const created = await client.createDraft(input)
       await load()
-      await openVersion(refFromDetail(created))
+      await openVersion(refFromDetail(created.value))
+      return apiNoticeWarning(created.notice)
     })
     if (result.succeeded) {
       lastMessage.value = '文案草稿已创建。'
@@ -122,9 +125,10 @@ export const useUiTextStore = defineStore('admin-ui-text', () => {
     input: UiTextDraftInput,
   ): Promise<UiTextActionResult> {
     const result = await runMutation(async () => {
-      await client.updateDraft(ref, input)
+      const updated = await client.updateDraft(ref, input)
       await load()
       await openVersion(ref)
+      return apiNoticeWarning(updated.notice)
     })
     if (result.succeeded) {
       lastMessage.value = '文案草稿已保存。'
@@ -177,17 +181,19 @@ export const useUiTextStore = defineStore('admin-ui-text', () => {
   function clearMessages(): void {
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
   }
 
   async function runVersionAction(
-    action: () => Promise<unknown>,
+    action: () => Promise<{ notice: import('@/api/apiNotice').ApiNotice | null }>,
     ref: UiTextVersionRef,
     successMessage: string,
   ): Promise<UiTextActionResult> {
     const result = await runMutation(async () => {
-      await action()
+      const response = await action()
       await load()
       await openVersion(ref)
+      return apiNoticeWarning(response.notice)
     })
     if (result.succeeded) {
       lastMessage.value = successMessage
@@ -195,12 +201,15 @@ export const useUiTextStore = defineStore('admin-ui-text', () => {
     return result
   }
 
-  async function runMutation(operation: () => Promise<void>): Promise<UiTextActionResult> {
+  async function runMutation(
+    operation: () => Promise<string | void>,
+  ): Promise<UiTextActionResult> {
     isSubmitting.value = true
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      await operation()
+      lastWarning.value = (await operation()) ?? ''
       return { succeeded: true, error: null }
     } catch (caught: unknown) {
       const mappedError = mapApiError(caught)
@@ -221,6 +230,7 @@ export const useUiTextStore = defineStore('admin-ui-text', () => {
     isDetailLoading,
     isSubmitting,
     lastMessage,
+    lastWarning,
     load,
     openVersion,
     page,

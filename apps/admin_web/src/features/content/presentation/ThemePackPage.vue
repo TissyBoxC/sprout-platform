@@ -166,6 +166,11 @@ function statusClass(status: string): string {
       </p>
     </Transition>
     <Transition name="toast">
+      <p v-if="store.lastWarning" class="warning-message" role="alert">
+        {{ store.lastWarning }}
+      </p>
+    </Transition>
+    <Transition name="toast">
       <p v-if="store.error" class="error-message" role="alert">
         {{ store.error.message }}
       </p>
@@ -435,6 +440,11 @@ button.chip.selected {
 .success-message {
   background: #eaf6ef;
   color: #1f6b45;
+}
+
+.warning-message {
+  background: #fff8e6;
+  color: #7a5411;
 }
 
 .error-message {

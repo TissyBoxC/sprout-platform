@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
+import { apiNoticeWarning } from '@/api/apiNotice'
 import { mapApiError, type ApiError } from '@/api/apiError'
 import {
   createAdminNotificationsClient,
@@ -63,6 +64,7 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
   const statsError = ref<ApiError | null>(null)
   const familiesError = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  const lastWarning = ref('')
   let pageRequestGeneration = 0
   let activePageRequests = 0
   let statsRequestGeneration = 0
@@ -203,9 +205,11 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
     isSubmitting.value = true
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      await client.createNotification(input)
+      const result = await client.createNotification(input)
       lastMessage.value = '通知已发布，家长会收到这条消息。'
+      lastWarning.value = apiNoticeWarning(result.notice)
       await load()
       return true
     } catch (caught: unknown) {
@@ -220,9 +224,11 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
     deletingId.value = notificationId
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      await client.deleteNotification(notificationId)
+      const result = await client.deleteNotification(notificationId)
       lastMessage.value = '通知已删除。'
+      lastWarning.value = apiNoticeWarning(result.notice)
       await loadAfterDelete()
       return true
     } catch (caught: unknown) {
@@ -262,6 +268,7 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
     isLoadingFamilies,
     isSubmitting,
     lastMessage,
+    lastWarning,
     load,
     loadFamilies,
     loadPage,

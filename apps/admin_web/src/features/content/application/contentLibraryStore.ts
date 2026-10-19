@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
+import { apiNoticeWarning } from '@/api/apiNotice'
 import {
   createAdminContentClient,
   type AdminContentClient,
@@ -57,6 +58,7 @@ export const useContentLibraryStore = defineStore('admin-content-library', () =>
   const isSubmitting = ref(false)
   const error = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  const lastWarning = ref('')
 
   const selectedPackageId = ref('')
   const selectedPackage = ref<ContentPackage | null>(null)
@@ -144,8 +146,9 @@ export const useContentLibraryStore = defineStore('admin-content-library', () =>
   async function createPackage(input: ContentPackageCreateInput): Promise<ContentStatusResult> {
     closePackage()
     const result = await runMutation(async () => {
-      await client.createPackage(input)
+      const created = await client.createPackage(input)
       await load()
+      return apiNoticeWarning(created.notice)
     })
     if (result.succeeded) {
       lastMessage.value = '内容草稿已创建。'
@@ -160,7 +163,8 @@ export const useContentLibraryStore = defineStore('admin-content-library', () =>
   ): Promise<ContentStatusResult> {
     const result = await runMutation(async () => {
       const updated = await client.updateVersion(packageId, packageVersion, input)
-      await applyUpdatedPackage(packageId, updated)
+      await applyUpdatedPackage(packageId, updated.value)
+      return apiNoticeWarning(updated.notice)
     })
     if (result.succeeded) {
       lastMessage.value = '内容草稿已保存。'
@@ -268,13 +272,14 @@ export const useContentLibraryStore = defineStore('admin-content-library', () =>
   }
 
   async function runVersionAction(
-    action: () => Promise<ContentPackage | null>,
+    action: () => Promise<{ value: ContentPackage | null; notice: import('@/api/apiNotice').ApiNotice | null }>,
     packageId: string,
     successMessage: string,
   ): Promise<ContentStatusResult> {
     const result = await runMutation(async () => {
       const updated = await action()
-      await applyUpdatedPackage(packageId, updated)
+      await applyUpdatedPackage(packageId, updated.value)
+      return apiNoticeWarning(updated.notice)
     })
     if (result.succeeded) {
       lastMessage.value = successMessage
@@ -282,12 +287,15 @@ export const useContentLibraryStore = defineStore('admin-content-library', () =>
     return result
   }
 
-  async function runMutation(operation: () => Promise<void>): Promise<ContentStatusResult> {
+  async function runMutation(
+    operation: () => Promise<string | void>,
+  ): Promise<ContentStatusResult> {
     isSubmitting.value = true
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      await operation()
+      lastWarning.value = (await operation()) ?? ''
       return { succeeded: true, error: null }
     } catch (caught: unknown) {
       const mappedError = mapApiError(caught)
@@ -313,6 +321,7 @@ export const useContentLibraryStore = defineStore('admin-content-library', () =>
     isDetailLoading,
     isSubmitting,
     lastMessage,
+    lastWarning,
     load,
     loadDownloadFiles,
     openPackage,

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
+import { apiNoticeWarning, readApiNotice } from '@/api/apiNotice'
 import { mapApiError, type ApiError } from '@/api/apiError'
 import { createHttpClient } from '@/api/httpClient'
 
@@ -109,6 +110,7 @@ export const useDeviceStore = defineStore('admin-devices', () => {
   const isSubmitting = ref(false)
   const error = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  const lastWarning = ref('')
   const provisioningSnapshots = ref<Record<string, ProvisioningSnapshot | undefined>>({})
   const isLoadingProvisioning = ref(false)
   const provisioningError = ref<ApiError | null>(null)
@@ -139,10 +141,12 @@ export const useDeviceStore = defineStore('admin-devices', () => {
     isSubmitting.value = true
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      await httpClient.delete(
+      const response = await httpClient.delete(
         `/api/v1/admin/families/${encodeURIComponent(parentAccountId)}/devices/${encodeURIComponent(deviceId)}`,
       )
+      lastWarning.value = apiNoticeWarning(readApiNotice(response.data))
       updateRevokedSession(deviceId)
       await loadProvisioning(deviceId)
       await load()
@@ -173,10 +177,12 @@ export const useDeviceStore = defineStore('admin-devices', () => {
     isSubmitting.value = true
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      await httpClient.post(`/api/v1/admin/devices/${deviceId}/commands`, {
+      const response = await httpClient.post(`/api/v1/admin/devices/${deviceId}/commands`, {
         command_type: commandType,
       })
+      lastWarning.value = apiNoticeWarning(readApiNotice(response.data))
       lastMessage.value = '操作已发送，设备将在下一次连接时执行。'
       await loadCommands(deviceId)
       return true
@@ -233,11 +239,13 @@ export const useDeviceStore = defineStore('admin-devices', () => {
     isRevokingSessions.value = true
     revokeError.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
       const response = await httpClient.post(
         `/api/v1/admin/devices/${encodeURIComponent(normalizedDeviceId)}/sessions/revoke`,
         { disable_device: disableDevice },
       )
+      lastWarning.value = apiNoticeWarning(readApiNotice(response.data))
       const payload = record(response.data?.data)
       if (payload.sessions_revoked !== true) {
         revokeError.value = {
@@ -304,6 +312,7 @@ export const useDeviceStore = defineStore('admin-devices', () => {
     isSubmitting,
     isRevokingSessions,
     lastMessage,
+    lastWarning,
     provisioningError,
     provisioningSnapshots,
     revokeError,

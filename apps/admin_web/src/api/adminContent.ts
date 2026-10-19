@@ -1,5 +1,9 @@
 import type { AxiosInstance } from 'axios'
 
+import {
+  readApiNotice,
+  type ApiMutationResult,
+} from '@/api/apiNotice'
 import { createHttpClient } from '@/api/httpClient'
 
 export type ContentCategory =
@@ -129,33 +133,52 @@ export interface ContentPackageCreateInput extends ContentDraftInput {
 export interface AdminContentClient {
   loadPackages(query?: ContentPackageQuery): Promise<ContentPackagePage>
   loadPackage(packageId: string): Promise<ContentPackage>
-  createPackage(input: ContentPackageCreateInput): Promise<ContentPackage | null>
+  createPackage(
+    input: ContentPackageCreateInput,
+  ): Promise<ApiMutationResult<ContentPackage | null>>
   updateVersion(
     packageId: string,
     packageVersion: number,
     input: ContentDraftInput,
-  ): Promise<ContentPackage | null>
-  submitVersion(packageId: string, packageVersion: number): Promise<ContentPackage | null>
-  approveVersion(packageId: string, packageVersion: number): Promise<ContentPackage | null>
+  ): Promise<ApiMutationResult<ContentPackage | null>>
+  submitVersion(
+    packageId: string,
+    packageVersion: number,
+  ): Promise<ApiMutationResult<ContentPackage | null>>
+  approveVersion(
+    packageId: string,
+    packageVersion: number,
+  ): Promise<ApiMutationResult<ContentPackage | null>>
   rejectVersion(
     packageId: string,
     packageVersion: number,
     reason: string,
-  ): Promise<ContentPackage | null>
-  publishVersion(packageId: string, packageVersion: number): Promise<ContentPackage | null>
-  withdrawVersion(packageId: string, packageVersion: number): Promise<ContentPackage | null>
-  archiveVersion(packageId: string, packageVersion: number): Promise<ContentPackage | null>
+  ): Promise<ApiMutationResult<ContentPackage | null>>
+  publishVersion(
+    packageId: string,
+    packageVersion: number,
+  ): Promise<ApiMutationResult<ContentPackage | null>>
+  withdrawVersion(
+    packageId: string,
+    packageVersion: number,
+  ): Promise<ApiMutationResult<ContentPackage | null>>
+  archiveVersion(
+    packageId: string,
+    packageVersion: number,
+  ): Promise<ApiMutationResult<ContentPackage | null>>
 
   /// Theme packs: curated collections of published content packages.
   loadThemePacks(): Promise<ThemePack[]>
-  saveThemePack(input: ThemePackInput): Promise<ThemePack>
-  publishThemePack(themeId: string): Promise<ThemePack>
-  withdrawThemePack(themeId: string): Promise<ThemePack>
-  deleteThemePack(themeId: string): Promise<void>
+  saveThemePack(input: ThemePackInput): Promise<ApiMutationResult<ThemePack>>
+  publishThemePack(themeId: string): Promise<ApiMutationResult<ThemePack>>
+  withdrawThemePack(themeId: string): Promise<ApiMutationResult<ThemePack>>
+  deleteThemePack(themeId: string): Promise<ApiMutationResult<null>>
 
   /// Offline download policy shared by the guardian app and every device.
   loadOfflinePolicy(): Promise<OfflinePolicy>
-  saveOfflinePolicy(input: OfflinePolicyInput): Promise<OfflinePolicy>
+  saveOfflinePolicy(
+    input: OfflinePolicyInput,
+  ): Promise<ApiMutationResult<OfflinePolicy>>
   loadOfflinePolicyAcknowledgements(familyId: string): Promise<OfflinePolicyAcknowledgement[]>
 }
 
@@ -187,7 +210,9 @@ export function createAdminContentClient(
       return requiredPackage(response.data?.data)
     },
 
-    async createPackage(input: ContentPackageCreateInput): Promise<ContentPackage | null> {
+    async createPackage(
+      input: ContentPackageCreateInput,
+    ): Promise<ApiMutationResult<ContentPackage | null>> {
       const response = await httpClient.post('/api/v1/admin/content/packages', {
         package_id: input.packageId.trim(),
         title: input.title.trim(),
@@ -198,14 +223,17 @@ export function createAdminContentClient(
         size_bytes: input.sizeBytes,
       })
       const created = optionalVersion(response.data?.data)
-      return created === null ? null : toPackageFromVersion(created)
+      return {
+        value: created === null ? null : toPackageFromVersion(created),
+        notice: readApiNotice(response.data),
+      }
     },
 
     async updateVersion(
       packageId: string,
       packageVersion: number,
       input: ContentDraftInput,
-    ): Promise<ContentPackage | null> {
+    ): Promise<ApiMutationResult<ContentPackage | null>> {
       const response = await httpClient.put(versionPath(packageId, packageVersion), {
         title: input.title.trim(),
         category: input.category,
@@ -215,17 +243,23 @@ export function createAdminContentClient(
         size_bytes: input.sizeBytes,
       })
       const updated = optionalVersion(response.data?.data)
-      return updated === null ? null : toPackageFromVersion(updated)
+      return {
+        value: updated === null ? null : toPackageFromVersion(updated),
+        notice: readApiNotice(response.data),
+      }
     },
 
-    async submitVersion(packageId: string, packageVersion: number): Promise<ContentPackage | null> {
+    async submitVersion(
+      packageId: string,
+      packageVersion: number,
+    ): Promise<ApiMutationResult<ContentPackage | null>> {
       return runVersionAction(httpClient, packageId, packageVersion, 'submit')
     },
 
     async approveVersion(
       packageId: string,
       packageVersion: number,
-    ): Promise<ContentPackage | null> {
+    ): Promise<ApiMutationResult<ContentPackage | null>> {
       return runVersionAction(httpClient, packageId, packageVersion, 'approve')
     },
 
@@ -233,7 +267,7 @@ export function createAdminContentClient(
       packageId: string,
       packageVersion: number,
       reason: string,
-    ): Promise<ContentPackage | null> {
+    ): Promise<ApiMutationResult<ContentPackage | null>> {
       return runVersionAction(httpClient, packageId, packageVersion, 'reject', {
         reason: reason.trim(),
       })
@@ -242,21 +276,21 @@ export function createAdminContentClient(
     async publishVersion(
       packageId: string,
       packageVersion: number,
-    ): Promise<ContentPackage | null> {
+    ): Promise<ApiMutationResult<ContentPackage | null>> {
       return runVersionAction(httpClient, packageId, packageVersion, 'publish')
     },
 
     async withdrawVersion(
       packageId: string,
       packageVersion: number,
-    ): Promise<ContentPackage | null> {
+    ): Promise<ApiMutationResult<ContentPackage | null>> {
       return runVersionAction(httpClient, packageId, packageVersion, 'withdraw')
     },
 
     async archiveVersion(
       packageId: string,
       packageVersion: number,
-    ): Promise<ContentPackage | null> {
+    ): Promise<ApiMutationResult<ContentPackage | null>> {
       return runVersionAction(httpClient, packageId, packageVersion, 'archive')
     },
 
@@ -265,7 +299,9 @@ export function createAdminContentClient(
       return toThemePacks(response.data?.data)
     },
 
-    async saveThemePack(input: ThemePackInput): Promise<ThemePack> {
+    async saveThemePack(
+      input: ThemePackInput,
+    ): Promise<ApiMutationResult<ThemePack>> {
       const response = await httpClient.put(
         `/api/v1/admin/content/theme-packs/${encodeURIComponent(input.themeId.trim())}`,
         {
@@ -276,19 +312,28 @@ export function createAdminContentClient(
           package_ids: input.packageIds,
         },
       )
-      return requiredThemePack(response.data?.data)
+      return {
+        value: requiredThemePack(response.data?.data),
+        notice: readApiNotice(response.data),
+      }
     },
 
-    async publishThemePack(themeId: string): Promise<ThemePack> {
+    async publishThemePack(themeId: string): Promise<ApiMutationResult<ThemePack>> {
       return runThemeAction(httpClient, themeId, 'publish')
     },
 
-    async withdrawThemePack(themeId: string): Promise<ThemePack> {
+    async withdrawThemePack(themeId: string): Promise<ApiMutationResult<ThemePack>> {
       return runThemeAction(httpClient, themeId, 'withdraw')
     },
 
-    async deleteThemePack(themeId: string): Promise<void> {
-      await httpClient.delete(`/api/v1/admin/content/theme-packs/${encodeURIComponent(themeId)}`)
+    async deleteThemePack(themeId: string): Promise<ApiMutationResult<null>> {
+      const response = await httpClient.delete(
+        `/api/v1/admin/content/theme-packs/${encodeURIComponent(themeId)}`,
+      )
+      return {
+        value: null,
+        notice: readApiNotice(response.data),
+      }
     },
 
     async loadOfflinePolicy(): Promise<OfflinePolicy> {
@@ -296,7 +341,9 @@ export function createAdminContentClient(
       return toOfflinePolicy(response.data?.data)
     },
 
-    async saveOfflinePolicy(input: OfflinePolicyInput): Promise<OfflinePolicy> {
+    async saveOfflinePolicy(
+      input: OfflinePolicyInput,
+    ): Promise<ApiMutationResult<OfflinePolicy>> {
       const response = await httpClient.put('/api/v1/admin/content/offline-policy', {
         offline_enabled: input.offlineEnabled,
         max_cached_packages: input.maxCachedPackages,
@@ -304,7 +351,10 @@ export function createAdminContentClient(
         cache_ttl_hours: input.cacheTtlHours,
         download_over_wifi_only: input.downloadOverWifiOnly,
       })
-      return toOfflinePolicy(response.data?.data)
+      return {
+        value: toOfflinePolicy(response.data?.data),
+        notice: readApiNotice(response.data),
+      }
     },
 
     async loadOfflinePolicyAcknowledgements(
@@ -361,12 +411,15 @@ async function runThemeAction(
   httpClient: AxiosInstance,
   themeId: string,
   action: string,
-): Promise<ThemePack> {
+): Promise<ApiMutationResult<ThemePack>> {
   const response = await httpClient.post(
     `/api/v1/admin/content/theme-packs/${encodeURIComponent(themeId)}/${action}`,
     {},
   )
-  return requiredThemePack(response.data?.data)
+  return {
+    value: requiredThemePack(response.data?.data),
+    notice: readApiNotice(response.data),
+  }
 }
 
 function toThemePacks(value: unknown): ThemePack[] {
@@ -427,13 +480,16 @@ async function runVersionAction(
   packageVersion: number,
   action: string,
   body?: Record<string, unknown>,
-): Promise<ContentPackage | null> {
+): Promise<ApiMutationResult<ContentPackage | null>> {
   const response = await httpClient.post(
     `${versionPath(packageId, packageVersion)}/${action}`,
     body ?? {},
   )
   const version = optionalVersion(response.data?.data)
-  return version === null ? null : toPackageFromVersion(version)
+  return {
+    value: version === null ? null : toPackageFromVersion(version),
+    notice: readApiNotice(response.data),
+  }
 }
 
 function versionPath(packageId: string, packageVersion: number): string {

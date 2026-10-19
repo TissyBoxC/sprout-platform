@@ -513,6 +513,11 @@ function deploymentProgress(deployment: OtaDeployment): number {
       </p>
     </Transition>
     <Transition name="toast">
+      <p v-if="store.lastWarning" class="warning-message" role="alert">
+        {{ store.lastWarning }}
+      </p>
+    </Transition>
+    <Transition name="toast">
       <p v-if="store.error" class="error-message" role="alert">
         {{ store.error.message }}
         <button type="button" class="text-button" @click="store.load">重新加载</button>
@@ -1515,6 +1520,15 @@ button:disabled {
   border: 1px solid #bfe3cb;
   background: #f2fbf5;
   color: #1d6b3f;
+}
+
+.warning-message {
+  margin: 14px 0 0;
+  padding: 12px 15px;
+  border: 1px solid #e6c56d;
+  border-radius: 15px;
+  background: #fff9e8;
+  color: #7a5411;
 }
 
 .error-message {

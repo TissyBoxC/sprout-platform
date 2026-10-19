@@ -312,6 +312,7 @@ function handleMutationResult(
     setSectionError(section, result.error)
     return
   }
+  feedbackBySection[section].warning = result.warning
   if (result.refreshError !== null) {
     feedbackBySection[section].error = result.refreshError
     feedbackBySection[section].message = refreshFailureMessage
@@ -330,11 +331,13 @@ function clearSectionFeedback(): void {
 function setSectionError(section: SectionName, value: ApiError | null): void {
   feedbackBySection[section].error = value
   feedbackBySection[section].message = ''
+  feedbackBySection[section].warning = ''
 }
 
 function resetSectionFeedback(section: SectionName): void {
   feedbackBySection[section].error = null
   feedbackBySection[section].message = ''
+  feedbackBySection[section].warning = ''
 }
 
 function statusLabel(value: string): string {
@@ -499,8 +502,9 @@ type SectionName = 'profile' | 'ai' | 'password'
 function emptySectionFeedback(): {
   error: ApiError | null
   message: string
+  warning: string
 } {
-  return { error: null, message: '' }
+  return { error: null, message: '', warning: '' }
 }
 </script>
 
@@ -530,6 +534,11 @@ function emptySectionFeedback(): {
     <Transition name="toast">
       <p v-if="store.lastMessage && !selectedFamily" class="success-message">
         {{ store.lastMessage }}
+      </p>
+    </Transition>
+    <Transition name="toast">
+      <p v-if="store.lastWarning && !selectedFamily" class="warning-message" role="alert">
+        {{ store.lastWarning }}
       </p>
     </Transition>
     <Transition name="toast">
@@ -839,6 +848,15 @@ function emptySectionFeedback(): {
               </p>
             </Transition>
             <Transition name="toast">
+              <p
+                v-if="feedbackBySection.profile.warning"
+                class="warning-message"
+                role="alert"
+              >
+                {{ feedbackBySection.profile.warning }}
+              </p>
+            </Transition>
+            <Transition name="toast">
               <p v-if="feedbackBySection.profile.error" class="error-message" role="alert">
                 {{ feedbackBySection.profile.error.message }}
               </p>
@@ -910,6 +928,15 @@ function emptySectionFeedback(): {
                 <Transition name="toast">
                   <p v-if="feedbackBySection.ai.message" class="success-message" role="status">
                     {{ feedbackBySection.ai.message }}
+                  </p>
+                </Transition>
+                <Transition name="toast">
+                  <p
+                    v-if="feedbackBySection.ai.warning"
+                    class="warning-message"
+                    role="alert"
+                  >
+                    {{ feedbackBySection.ai.warning }}
                   </p>
                 </Transition>
                 <Transition name="toast">
@@ -1008,6 +1035,9 @@ function emptySectionFeedback(): {
                 </button>
                 <p v-if="feedbackBySection.ai.message" class="success-message">
                   {{ feedbackBySection.ai.message }}
+                </p>
+                <p v-if="feedbackBySection.ai.warning" class="warning-message" role="alert">
+                  {{ feedbackBySection.ai.warning }}
                 </p>
                 <p v-if="feedbackBySection.ai.error" class="error-message">
                   {{ feedbackBySection.ai.error.message }}
@@ -1172,6 +1202,9 @@ function emptySectionFeedback(): {
               </div>
               <p v-if="feedbackBySection.password.message" class="success-message">
                 {{ feedbackBySection.password.message }}
+              </p>
+              <p v-if="feedbackBySection.password.warning" class="warning-message" role="alert">
+                {{ feedbackBySection.password.warning }}
               </p>
               <p v-if="feedbackBySection.password.error" class="error-message">
                 {{ feedbackBySection.password.error.message }}
@@ -1540,6 +1573,15 @@ tbody tr:hover {
 
 .success-message {
   color: #1d6b3f;
+}
+
+.warning-message {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid #e6c56d;
+  border-radius: 14px;
+  background: #fff9e8;
+  color: #7a5411;
 }
 
 .dialog-backdrop,

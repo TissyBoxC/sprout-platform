@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
+import { apiNoticeWarning } from '@/api/apiNotice'
 import {
   createAdminContentClient,
   type AdminContentClient,
@@ -26,6 +27,7 @@ export const useThemePackStore = defineStore('admin-content-theme-packs', () => 
   const isSubmitting = ref(false)
   const error = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  const lastWarning = ref('')
 
   const draftCount = computed(
     () => packs.value.filter((pack) => pack.status === 'draft').length,
@@ -49,9 +51,12 @@ export const useThemePackStore = defineStore('admin-content-theme-packs', () => 
   async function save(input: ThemePackInput): Promise<ThemePackStatusResult> {
     isSubmitting.value = true
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      const saved = await client.saveThemePack(input)
+      const result = await client.saveThemePack(input)
+      const saved = result.value
       merge(saved)
+      lastWarning.value = apiNoticeWarning(result.notice)
       lastMessage.value = `主题包「${saved.title}」已保存`
       return { succeeded: true, error: null }
     } catch (saveError) {
@@ -73,9 +78,11 @@ export const useThemePackStore = defineStore('admin-content-theme-packs', () => 
   async function remove(themeId: string): Promise<ThemePackStatusResult> {
     isSubmitting.value = true
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      await client.deleteThemePack(themeId)
+      const result = await client.deleteThemePack(themeId)
       packs.value = packs.value.filter((pack) => pack.themeId !== themeId)
+      lastWarning.value = apiNoticeWarning(result.notice)
       lastMessage.value = '已删除主题包'
       return { succeeded: true, error: null }
     } catch (removeError) {
@@ -87,14 +94,17 @@ export const useThemePackStore = defineStore('admin-content-theme-packs', () => 
 
   async function runAction(
     themeId: string,
-    action: () => Promise<ThemePack>,
+    action: () => Promise<{ value: ThemePack; notice: import('@/api/apiNotice').ApiNotice | null }>,
     message: string,
   ): Promise<ThemePackStatusResult> {
     isSubmitting.value = true
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      const updated = await action()
+      const result = await action()
+      const updated = result.value
       merge(updated)
+      lastWarning.value = apiNoticeWarning(result.notice)
       lastMessage.value = message
       return { succeeded: true, error: null }
     } catch (actionError) {
@@ -121,6 +131,7 @@ export const useThemePackStore = defineStore('admin-content-theme-packs', () => 
     isSubmitting,
     error,
     lastMessage,
+    lastWarning,
     draftCount,
     publishedCount,
     load,

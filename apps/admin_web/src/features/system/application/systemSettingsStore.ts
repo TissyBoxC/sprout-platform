@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
+import { apiNoticeWarning, readApiNotice } from '@/api/apiNotice'
 import { mapApiError, type ApiError } from '@/api/apiError'
 import {
   createAdminOperationsClient,
@@ -72,6 +73,7 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
   const isSaving = ref(false)
   const error = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  const lastWarning = ref('')
 
   async function load(): Promise<void> {
     isLoading.value = true
@@ -104,6 +106,7 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
     isSaving.value = true
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
       const response = await httpClient.put('/api/v1/admin/settings', {
         settings: toPayload(settings.value),
@@ -111,6 +114,7 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
       })
       settings.value = toSettings(response.data.data?.settings ?? {})
       version.value = numberValue(response.data.data?.version, version.value)
+      lastWarning.value = apiNoticeWarning(readApiNotice(response.data))
       lastMessage.value = '系统设置已保存。'
       return true
     } catch (caught: unknown) {
@@ -141,6 +145,7 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
     isLoading,
     isSaving,
     lastMessage,
+    lastWarning,
     load,
     isLoaded,
     modelOptions,

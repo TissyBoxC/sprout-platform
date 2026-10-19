@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
+import { apiNoticeWarning } from '@/api/apiNotice'
 import { mapApiError, type ApiError } from '@/api/apiError'
 import {
   createAdminPermissionsClient,
@@ -28,6 +29,8 @@ export const useAdminPermissionStore = defineStore('admin-permissions', () => {
   const error = ref<ApiError | null>(null)
   const saveErrors = ref<Record<string, ApiError | null>>({})
   const lastMessage = ref('')
+  const lastWarning = ref('')
+  const saveWarnings = ref<Record<string, string>>({})
 
   const groups = computed<AdminPermissionGroup[]>(() => {
     const grouped: AdminPermissionGroup[] = []
@@ -53,6 +56,7 @@ export const useAdminPermissionStore = defineStore('admin-permissions', () => {
     isLoading.value = true
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
       const overview = await client.load()
       catalog.value = overview.catalog
@@ -111,13 +115,21 @@ export const useAdminPermissionStore = defineStore('admin-permissions', () => {
   async function save(accountId: string): Promise<boolean> {
     savingAccountId.value = accountId
     lastMessage.value = ''
+    lastWarning.value = ''
+    saveWarnings.value = { ...saveWarnings.value, [accountId]: '' }
     saveErrors.value = { ...saveErrors.value, [accountId]: null }
     try {
-      const updated = await client.update(accountId, sortPermissions(draftFor(accountId)))
+      const result = await client.update(accountId, sortPermissions(draftFor(accountId)))
+      const updated = result.value
       accounts.value = accounts.value.map((account) =>
         account.accountId === accountId ? updated : account,
       )
       drafts.value = { ...drafts.value, [accountId]: [...updated.permissions] }
+      lastWarning.value = apiNoticeWarning(result.notice)
+      saveWarnings.value = {
+        ...saveWarnings.value,
+        [accountId]: lastWarning.value,
+      }
       lastMessage.value = '权限已保存。'
       return true
     } catch (caught: unknown) {
@@ -125,6 +137,7 @@ export const useAdminPermissionStore = defineStore('admin-permissions', () => {
         ...saveErrors.value,
         [accountId]: mapApiError(caught),
       }
+      saveWarnings.value = { ...saveWarnings.value, [accountId]: '' }
       return false
     } finally {
       savingAccountId.value = ''
@@ -142,9 +155,11 @@ export const useAdminPermissionStore = defineStore('admin-permissions', () => {
     isLoading,
     isWildcard,
     lastMessage,
+    lastWarning,
     load,
     save,
     saveErrors,
+    saveWarnings,
     savingAccountId,
     setWildcard,
     togglePermission,

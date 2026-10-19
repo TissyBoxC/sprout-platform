@@ -1,6 +1,11 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
+import {
+  apiNoticeWarning,
+  readApiNotice,
+  type ApiNotice,
+} from '@/api/apiNotice'
 import { mapApiError, type ApiError } from '@/api/apiError'
 import {
   createAdminOperationsClient,
@@ -78,6 +83,7 @@ export interface FamilyMutationResult {
   succeeded: boolean
   error: ApiError | null
   refreshError: ApiError | null
+  warning: string
 }
 
 export interface AdminFamilyAiUsageModel {
@@ -140,6 +146,7 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   const error = ref<ApiError | null>(null)
   const modelError = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  const lastWarning = ref('')
   const pagination = ref<AdminFamilyPagination>({
     page: 1,
     pageSize: DEFAULT_PAGE_SIZE,
@@ -186,6 +193,7 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
     isSubmitting.value = true
     error.value = null
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
       const response = await httpClient.post('/api/v1/admin/families', {
         phone: input.phone.trim(),
@@ -194,8 +202,10 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
         child_nickname: input.childNickname.trim(),
         child_birthday: input.childBirthday,
       })
+      const warning = auditWarning(readApiNotice(response.data))
       const refreshError = await loadFamilies(1, false)
       const aiAccount = toAiAccountFromResponse(response.data?.data)
+      lastWarning.value = warning
       if (refreshError !== null) {
         lastMessage.value = '家长账号已创建，列表暂时没有更新，请重新加载。'
       } else if (aiAccount === null) {
@@ -221,6 +231,7 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
       const response = await httpClient.post(
         `/api/v1/admin/families/${encodeURIComponent(parentAccountId)}/ai-account`,
       )
+      const warning = auditWarning(readApiNotice(response.data))
       const existing = familyById(parentAccountId)?.aiAccount ?? null
       const responseAccount = toAiAccountFromResponse(
         response.data?.data,
@@ -230,9 +241,14 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
         replaceAiAccount(parentAccountId, responseAccount)
       }
       const refreshError = await loadFamilies(pagination.value.page, false)
-      return { succeeded: true, error: null, refreshError }
+      return { succeeded: true, error: null, refreshError, warning }
     } catch (caught: unknown) {
-      return { succeeded: false, error: mapApiError(caught), refreshError: null }
+      return {
+        succeeded: false,
+        error: mapApiError(caught),
+        refreshError: null,
+        warning: '',
+      }
     } finally {
       isSubmitting.value = false
     }
@@ -253,6 +269,7 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
           reason: '由管理端调整家长 AI 服务',
         },
       )
+      const warning = auditWarning(readApiNotice(response.data))
       const existing =
         familyByProviderAccountId(input.providerAccountId)?.aiAccount ?? null
       const responseAccount = toAiAccountFromResponse(
@@ -264,9 +281,14 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
         replaceAiAccountByProviderId(input.providerAccountId, responseAccount)
       }
       const refreshError = await loadFamilies(pagination.value.page, false)
-      return { succeeded: true, error: null, refreshError }
+      return { succeeded: true, error: null, refreshError, warning }
     } catch (caught: unknown) {
-      return { succeeded: false, error: mapApiError(caught), refreshError: null }
+      return {
+        succeeded: false,
+        error: mapApiError(caught),
+        refreshError: null,
+        warning: '',
+      }
     } finally {
       isUpdatingAiAccount.value = false
     }
@@ -278,7 +300,7 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   ): Promise<FamilyMutationResult> {
     isUpdatingProfile.value = true
     try {
-      await httpClient.put(
+      const response = await httpClient.put(
         `/api/v1/admin/families/${encodeURIComponent(parentAccountId)}/profile`,
         {
           display_name: input.displayName.trim(),
@@ -287,10 +309,16 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
           child_birthday: input.childBirthday,
         },
       )
+      const warning = auditWarning(readApiNotice(response.data))
       const refreshError = await loadFamilies(pagination.value.page, false)
-      return { succeeded: true, error: null, refreshError }
+      return { succeeded: true, error: null, refreshError, warning }
     } catch (caught: unknown) {
-      return { succeeded: false, error: mapApiError(caught), refreshError: null }
+      return {
+        succeeded: false,
+        error: mapApiError(caught),
+        refreshError: null,
+        warning: '',
+      }
     } finally {
       isUpdatingProfile.value = false
     }
@@ -302,14 +330,20 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   ): Promise<FamilyMutationResult> {
     isResettingPassword.value = true
     try {
-      await httpClient.post(
+      const response = await httpClient.post(
         `/api/v1/admin/families/${encodeURIComponent(parentAccountId)}/password`,
         { password },
       )
+      const warning = auditWarning(readApiNotice(response.data))
       const refreshError = await loadFamilies(pagination.value.page, false)
-      return { succeeded: true, error: null, refreshError }
+      return { succeeded: true, error: null, refreshError, warning }
     } catch (caught: unknown) {
-      return { succeeded: false, error: mapApiError(caught), refreshError: null }
+      return {
+        succeeded: false,
+        error: mapApiError(caught),
+        refreshError: null,
+        warning: '',
+      }
     } finally {
       isResettingPassword.value = false
     }
@@ -682,6 +716,7 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
     isUpdatingAiAccount,
     isUpdatingProfile,
     lastMessage,
+    lastWarning,
     load,
     loadFamilyAIUsage,
     loadFamilyDevices,
@@ -700,6 +735,10 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
     updateParentProfile,
   }
 })
+
+function auditWarning(notice: ApiNotice | null): string {
+  return apiNoticeWarning(notice)
+}
 
 function toPagination(
   value: unknown,

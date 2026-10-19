@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
+import { apiNoticeWarning } from '@/api/apiNotice'
 import {
   createAdminContentClient,
   type AdminContentClient,
@@ -40,6 +41,7 @@ export const useOfflinePolicyStore = defineStore('admin-content-offline-policy',
   const error = ref<ApiError | null>(null)
   const acknowledgementsError = ref<ApiError | null>(null)
   const lastMessage = ref('')
+  const lastWarning = ref('')
 
   const cacheMegabytes = computed(() =>
     policy.value === null ? 0 : Math.round(policy.value.maxCacheBytes / BYTES_PER_MEGABYTE),
@@ -63,9 +65,12 @@ export const useOfflinePolicyStore = defineStore('admin-content-offline-policy',
   async function save(input: OfflinePolicyInput): Promise<OfflinePolicyStatusResult> {
     isSubmitting.value = true
     lastMessage.value = ''
+    lastWarning.value = ''
     try {
-      const saved = await client.saveOfflinePolicy(input)
+      const result = await client.saveOfflinePolicy(input)
+      const saved = result.value
       policy.value = saved
+      lastWarning.value = apiNoticeWarning(result.notice)
       lastMessage.value = `离线下载策略已更新到版本 ${saved.revision}`
       return { succeeded: true, error: null }
     } catch (saveError) {
@@ -103,6 +108,7 @@ export const useOfflinePolicyStore = defineStore('admin-content-offline-policy',
     error,
     acknowledgementsError,
     lastMessage,
+    lastWarning,
     cacheMegabytes,
     behindCount,
     load,

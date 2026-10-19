@@ -287,6 +287,11 @@ function formatTime(value: string): string {
         {{ store.lastMessage }}
       </p>
     </Transition>
+    <Transition name="toast">
+      <p v-if="store.lastWarning" class="warning-message" role="alert">
+        {{ store.lastWarning }}
+      </p>
+    </Transition>
 
     <section v-if="store.statsError" class="support-error" role="alert">
       <div>
@@ -1048,6 +1053,15 @@ td small {
   border-radius: var(--sprout-radius-control);
   background: #f2fbf6;
   color: #1d6b3f;
+}
+
+.warning-message {
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid #e6c56d;
+  border-radius: var(--sprout-radius-control);
+  background: #fff9e8;
+  color: #7a5411;
 }
 
 .support-error {

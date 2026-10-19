@@ -1,5 +1,9 @@
 import type { AxiosInstance, AxiosProgressEvent } from 'axios'
 
+import {
+  readApiNotice,
+  type ApiMutationResult,
+} from '@/api/apiNotice'
 import { createHttpClient } from '@/api/httpClient'
 
 export type DownloadArtifactKind = 'resource' | 'client' | 'firmware' | 'unknown'
@@ -67,9 +71,12 @@ export type UploadProgressHandler = (percent: number) => void
 
 export interface AdminDownloadFilesClient {
   loadFiles(query?: DownloadFileQuery): Promise<DownloadFile[]>
-  uploadFile(input: DownloadFileUpload, onProgress?: UploadProgressHandler): Promise<DownloadFile>
-  deleteFile(relativePath: string): Promise<void>
-  refreshIndex(): Promise<DownloadIndexStatus>
+  uploadFile(
+    input: DownloadFileUpload,
+    onProgress?: UploadProgressHandler,
+  ): Promise<ApiMutationResult<DownloadFile>>
+  deleteFile(relativePath: string): Promise<ApiMutationResult<null>>
+  refreshIndex(): Promise<ApiMutationResult<DownloadIndexStatus>>
   loadIndexStatus(): Promise<DownloadIndexStatus>
 }
 
@@ -93,7 +100,7 @@ export function createAdminDownloadFilesClient(
     async uploadFile(
       input: DownloadFileUpload,
       onProgress?: UploadProgressHandler,
-    ): Promise<DownloadFile> {
+    ): Promise<ApiMutationResult<DownloadFile>> {
       const directory = canonicalArtifactDirectory(input)
       const relativePath = joinRelativePath(directory, input.filename)
       const formData = new FormData()
@@ -116,18 +123,28 @@ export function createAdminDownloadFilesClient(
           onProgress(uploadPercent(event))
         },
       })
-      return toDownloadFile(response.data?.data?.file)
+      return {
+        value: toDownloadFile(response.data?.data?.file),
+        notice: readApiNotice(response.data),
+      }
     },
 
-    async deleteFile(relativePath: string): Promise<void> {
-      await httpClient.delete(
+    async deleteFile(relativePath: string): Promise<ApiMutationResult<null>> {
+      const response = await httpClient.delete(
         `/api/v1/admin/storage/files/${encodeRelativePath(relativePath)}`,
       )
+      return {
+        value: null,
+        notice: readApiNotice(response.data),
+      }
     },
 
-    async refreshIndex(): Promise<DownloadIndexStatus> {
+    async refreshIndex(): Promise<ApiMutationResult<DownloadIndexStatus>> {
       const response = await httpClient.post('/api/v1/admin/storage/index/refresh')
-      return toIndexStatus(response.data?.data)
+      return {
+        value: toIndexStatus(response.data?.data),
+        notice: readApiNotice(response.data),
+      }
     },
 
     async loadIndexStatus(): Promise<DownloadIndexStatus> {

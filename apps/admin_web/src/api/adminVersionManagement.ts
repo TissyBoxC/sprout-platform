@@ -1,5 +1,6 @@
 import axios, { type AxiosInstance } from 'axios'
 
+import { readApiNotice, type ApiNotice } from '@/api/apiNotice'
 import { createHttpClient } from '@/api/httpClient'
 
 export type ServiceVersionStatus = 'current' | 'outdated' | 'unknown' | 'updating' | 'failed'
@@ -54,13 +55,22 @@ export interface AdminServiceVersionOperation {
 
 export interface AdminVersionManagementClient {
   loadServiceVersions(): Promise<ServiceVersionSnapshot>
-  checkServiceVersions(): Promise<ServiceVersionSnapshot>
+  checkServiceVersions(): Promise<{
+    value: ServiceVersionSnapshot
+    notice: ApiNotice | null
+  }>
   loadServiceReleases(serviceId: string): Promise<ServiceVersionRelease[]>
   upgradeService(
     serviceId: string,
     targetVersion?: string,
-  ): Promise<AdminServiceVersionOperation | null>
-  upgradeAllServices(): Promise<AdminServiceVersionOperation | null>
+  ): Promise<{
+    value: AdminServiceVersionOperation | null
+    notice: ApiNotice | null
+  }>
+  upgradeAllServices(): Promise<{
+    value: AdminServiceVersionOperation | null
+    notice: ApiNotice | null
+  }>
   loadServiceVersionOperations(): Promise<AdminServiceVersionOperation[]>
   loadServiceVersionOperation(operationId: string): Promise<AdminServiceVersionOperation | null>
 }
@@ -84,9 +94,15 @@ export function createAdminVersionManagementClient(
       return toSnapshot(response.data?.data)
     },
 
-    async checkServiceVersions(): Promise<ServiceVersionSnapshot> {
+    async checkServiceVersions(): Promise<{
+      value: ServiceVersionSnapshot
+      notice: ApiNotice | null
+    }> {
       const response = await httpClient.post('/api/v1/admin/service-versions/check')
-      return toSnapshot(response.data?.data)
+      return {
+        value: toSnapshot(response.data?.data),
+        notice: readApiNotice(response.data),
+      }
     },
 
     async loadServiceReleases(serviceId: string): Promise<ServiceVersionRelease[]> {
@@ -108,18 +124,30 @@ export function createAdminVersionManagementClient(
     async upgradeService(
       serviceId: string,
       targetVersion?: string,
-    ): Promise<AdminServiceVersionOperation | null> {
+    ): Promise<{
+      value: AdminServiceVersionOperation | null
+      notice: ApiNotice | null
+    }> {
       const normalizedTargetVersion = targetVersion?.trim() ?? ''
       const response = await httpClient.post(
         `/api/v1/admin/service-versions/${encodeURIComponent(serviceId)}/upgrade`,
         normalizedTargetVersion === '' ? undefined : { target_version: normalizedTargetVersion },
       )
-      return toNullableOperation(response.data?.data?.operation)
+      return {
+        value: toNullableOperation(response.data?.data?.operation),
+        notice: readApiNotice(response.data),
+      }
     },
 
-    async upgradeAllServices(): Promise<AdminServiceVersionOperation | null> {
+    async upgradeAllServices(): Promise<{
+      value: AdminServiceVersionOperation | null
+      notice: ApiNotice | null
+    }> {
       const response = await httpClient.post('/api/v1/admin/service-versions/upgrade')
-      return toNullableOperation(response.data?.data?.operation)
+      return {
+        value: toNullableOperation(response.data?.data?.operation),
+        notice: readApiNotice(response.data),
+      }
     },
 
     async loadServiceVersionOperations(): Promise<AdminServiceVersionOperation[]> {

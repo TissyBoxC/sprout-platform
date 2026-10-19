@@ -587,6 +587,62 @@ func TestReleaseValidationRejectsUnsafeArtifactPaths(t *testing.T) {
 			artifactKey: "firmware/1.2.3.bin",
 			artifactURL: "https://download.clarkhub.cn/firmware/1.2.3.bin#fragment",
 		},
+		{
+			name:        "query",
+			artifactKey: "firmware/1.2.3.bin",
+			artifactURL: "https://download.clarkhub.cn/firmware/1.2.3.bin?channel=stable",
+		},
+		{
+			name:        "bare query delimiter",
+			artifactKey: "firmware/1.2.3.bin",
+			artifactURL: "https://download.clarkhub.cn/firmware/1.2.3.bin?",
+		},
+		{
+			name:        "bare fragment delimiter",
+			artifactKey: "firmware/1.2.3.bin",
+			artifactURL: "https://download.clarkhub.cn/firmware/1.2.3.bin#",
+		},
+		{
+			name:        "non-ascii URL",
+			artifactKey: "firmware/1.2.3.bin",
+			artifactURL: "https://download.clarkhub.cn/firmware/固件.bin",
+		},
+		{
+			name:        "oversized URL",
+			artifactKey: "firmware/1.2.3.bin",
+			artifactURL: "https://download.clarkhub.cn/" +
+				strings.Repeat("a", 512) + "/firmware/1.2.3.bin",
+		},
+		{
+			name:        "non-ascii key",
+			artifactKey: "firmware/固件.bin",
+			artifactURL: valid.ArtifactURL,
+		},
+		{
+			name:        "question mark key",
+			artifactKey: "firmware/1.2.3.bin?",
+			artifactURL: valid.ArtifactURL,
+		},
+		{
+			name:        "oversized key",
+			artifactKey: strings.Repeat("a", 513),
+			artifactURL: valid.ArtifactURL,
+		},
+		{
+			name:        "uppercase scheme",
+			artifactKey: "firmware/1.2.3.bin",
+			artifactURL: "HTTPS://download.clarkhub.cn/firmware/1.2.3.bin",
+		},
+		{
+			name:        "trailing slash",
+			artifactKey: "firmware/1.2.3.bin",
+			artifactURL: "https://download.clarkhub.cn/firmware/1.2.3.bin/",
+		},
+		{
+			name:        "backslash",
+			artifactKey: "firmware/1.2.3.bin",
+			artifactURL: `https://download.clarkhub.cn/firmware/1.2.3.bin\extra`,
+		},
 	}
 	for _, testCase := range invalid {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -611,6 +667,101 @@ func TestReleaseValidationRejectsUnsafeArtifactPaths(t *testing.T) {
 				t.Fatalf("expected invalid release, got %v", err)
 			}
 		})
+	}
+}
+
+func TestReleaseValidationMatchesArtifactURLLengthBoundary(t *testing.T) {
+	valid := validReleaseInput()
+	atPath := &domain.Release{
+		ID:                 valid.ID,
+		Version:            valid.Version,
+		Channel:            valid.Channel,
+		HardwareRevision:   valid.HardwareRevision,
+		MinSourceVersion:   valid.MinSourceVersion,
+		ArtifactURL:        "https://download.clarkhub.cn/firmware/release@2026/1.2.3.bin",
+		ArtifactKey:        "firmware/release@2026/1.2.3.bin",
+		SHA256:             valid.SHA256,
+		SizeBytes:          valid.SizeBytes,
+		SignatureKeyID:     valid.SignatureKeyID,
+		SignatureAlgorithm: valid.SignatureAlgorithm,
+		Signature:          valid.Signature,
+		RollbackAllowed:    valid.RollbackAllowed,
+		Mandatory:          valid.Mandatory,
+		Target:             valid.Target,
+	}
+	if err := domain.ValidateRelease(atPath); err != nil {
+		t.Fatalf("at-sign in a path segment must not count as userinfo: %v", err)
+	}
+	prefix := "https://download.clarkhub.cn/"
+	suffix := "/" + valid.ArtifactKey
+	maximumLength := 512
+	maximumURL := prefix +
+		strings.Repeat(
+			"a",
+			maximumLength-len(prefix)-len(suffix),
+		) +
+		suffix
+	if len(maximumURL) != maximumLength {
+		t.Fatalf("fixture URL length = %d, want %d", len(maximumURL), maximumLength)
+	}
+	release := &domain.Release{
+		ID:                 valid.ID,
+		Version:            valid.Version,
+		Channel:            valid.Channel,
+		HardwareRevision:   valid.HardwareRevision,
+		MinSourceVersion:   valid.MinSourceVersion,
+		ArtifactURL:        maximumURL,
+		ArtifactKey:        valid.ArtifactKey,
+		SHA256:             valid.SHA256,
+		SizeBytes:          valid.SizeBytes,
+		SignatureKeyID:     valid.SignatureKeyID,
+		SignatureAlgorithm: valid.SignatureAlgorithm,
+		Signature:          valid.Signature,
+		RollbackAllowed:    valid.RollbackAllowed,
+		Mandatory:          valid.Mandatory,
+		Target:             valid.Target,
+	}
+	if err := domain.ValidateRelease(release); err != nil {
+		t.Fatalf("512-byte artifact URL must be accepted: %v", err)
+	}
+	release.ArtifactURL = prefix +
+		strings.Repeat(
+			"a",
+			maximumLength-len(prefix)-len(suffix)+1,
+		) +
+		suffix
+	if len(release.ArtifactURL) != 513 {
+		t.Fatalf("fixture URL length = %d, want 513", len(release.ArtifactURL))
+	}
+	if err := domain.ValidateRelease(release); !errors.Is(
+		err,
+		domain.ErrInvalidRelease,
+	) {
+		t.Fatalf("513-byte artifact URL must be rejected, got %v", err)
+	}
+}
+
+func TestReleaseValidationRequiresMinimumSourceVersion(t *testing.T) {
+	valid := validReleaseInput()
+	release := &domain.Release{
+		ID:                 valid.ID,
+		Version:            valid.Version,
+		Channel:            valid.Channel,
+		HardwareRevision:   valid.HardwareRevision,
+		MinSourceVersion:   "",
+		ArtifactURL:        valid.ArtifactURL,
+		ArtifactKey:        valid.ArtifactKey,
+		SHA256:             valid.SHA256,
+		SizeBytes:          valid.SizeBytes,
+		SignatureKeyID:     valid.SignatureKeyID,
+		SignatureAlgorithm: valid.SignatureAlgorithm,
+		Signature:          valid.Signature,
+		RollbackAllowed:    valid.RollbackAllowed,
+		Mandatory:          valid.Mandatory,
+		Target:             valid.Target,
+	}
+	if err := domain.ValidateRelease(release); !errors.Is(err, domain.ErrInvalidRelease) {
+		t.Fatalf("empty minimum source version must be rejected, got %v", err)
 	}
 }
 

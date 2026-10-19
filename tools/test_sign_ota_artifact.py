@@ -177,7 +177,6 @@ class SignOtaArtifactTest(unittest.TestCase):
         valid_urls = (
             "https://download.example.com/firmware/1.2.3.bin",
             "https://download.example.com/releases/firmware/1.2.3.bin",
-            "https://download.example.com/firmware/1.2.3.bin?channel=stable",
         )
         for artifact_url in valid_urls:
             with self.subTest(artifact_url=artifact_url):
@@ -198,6 +197,15 @@ class SignOtaArtifactTest(unittest.TestCase):
             "https://download.example.com/firmware//1.2.3.bin",
             "https://user:password@download.example.com/firmware/1.2.3.bin",
             "https://download.example.com/firmware/1.2.3.bin#fragment",
+            "https://download.example.com/firmware/1.2.3.bin#",
+            "https://download.example.com/firmware/1.2.3.bin?channel=stable",
+            "https://download.example.com/firmware/1.2.3.bin?",
+            "HTTPS://download.example.com/firmware/1.2.3.bin",
+            "https://download.example.com/firmware/1.2.3.bin/",
+            "https://download.example.com/firmware/1.2.3.bin%2fextra",
+            "https://download.example.com/firmware/1.2.3.bin\\extra",
+            "https://download.example.com/firmware/固件.bin",
+            "https://download.example.com/" + "a" * 512 + "/firmware/1.2.3.bin",
         )
         for artifact_url in invalid_urls:
             with self.subTest(artifact_url=artifact_url):
@@ -207,18 +215,109 @@ class SignOtaArtifactTest(unittest.TestCase):
                         artifact_key,
                     )
 
-    def test_build_release_manifest_defaults_minimum_source_version(self) -> None:
+    def test_artifact_key_matches_device_byte_and_character_limits(self) -> None:
+        self.assertEqual(
+            sign_ota_artifact.validate_artifact_key("firmware/" + "a" * 503),
+            "firmware/" + "a" * 503,
+        )
+        self.assertEqual(
+            sign_ota_artifact.validate_artifact_key(
+                "firmware/release@2026/1.2.3.bin"
+            ),
+            "firmware/release@2026/1.2.3.bin",
+        )
+        invalid_keys = (
+            "firmware/" + "a" * 504,
+            "firmware/固件.bin",
+            "firmware/1.2.3.bin?",
+            "firmware/1.2.3.bin#",
+            "firmware/1.2.3.bin%20",
+        )
+        for artifact_key in invalid_keys:
+            with self.subTest(artifact_key=artifact_key):
+                with self.assertRaises(ValueError):
+                    sign_ota_artifact.validate_artifact_key(artifact_key)
+
+    def test_artifact_url_matches_device_512_byte_boundary(self) -> None:
+        artifact_key = "firmware/1.2.3.bin"
+        prefix = "https://download.example.com/"
+        suffix = "/" + artifact_key
+        prefix_length = len(prefix)
+        suffix_length = len(suffix)
+        maximum_length = sign_ota_artifact.MAX_ARTIFACT_URL_BYTES
+        self.assertGreaterEqual(
+            maximum_length,
+            prefix_length + suffix_length,
+        )
+        maximum_url = (
+            prefix
+            + "a" * (maximum_length - prefix_length - suffix_length)
+            + suffix
+        )
+        self.assertEqual(len(maximum_url), 512)
+        self.assertEqual(
+            sign_ota_artifact.validate_artifact_url(
+                maximum_url,
+                artifact_key,
+            ),
+            maximum_url,
+        )
+        at_path_key = "firmware/release@2026/1.2.3.bin"
+        at_path_url = (
+            "https://download.example.com/releases/"
+            "release@2026/" + at_path_key
+        )
+        self.assertEqual(
+            sign_ota_artifact.validate_artifact_url(
+                at_path_url,
+                at_path_key,
+            ),
+            at_path_url,
+        )
+        oversized_url = (
+            prefix
+            + "a" * (maximum_length - prefix_length - suffix_length + 1)
+            + suffix
+        )
+        self.assertEqual(len(oversized_url), 513)
+        with self.assertRaises(ValueError):
+            sign_ota_artifact.validate_artifact_url(
+                oversized_url,
+                artifact_key,
+            )
+
+    def test_artifact_size_matches_device_partition_capacity(self) -> None:
+        self.assertEqual(
+            sign_ota_artifact.MAX_ARTIFACT_SIZE,
+            4 * 1024 * 1024,
+        )
+
+    def test_build_release_manifest_rejects_artifact_over_four_mib(self) -> None:
+        private_key = Ed25519PrivateKey.generate()
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            artifact = Path(temporary_directory) / "firmware.bin"
+            artifact.write_bytes(
+                b"x" * (sign_ota_artifact.MAX_ARTIFACT_SIZE + 1)
+            )
+            with self.assertRaisesRegex(
+                ValueError,
+                "between 1 and 4194304 bytes",
+            ):
+                self.build_manifest(artifact, private_key)
+
+    def test_build_release_manifest_requires_minimum_source_version(self) -> None:
         private_key = Ed25519PrivateKey.generate()
         with tempfile.TemporaryDirectory() as temporary_directory:
             artifact = Path(temporary_directory) / "firmware.bin"
             artifact.write_bytes(b"ota firmware bytes")
-            manifest = self.build_manifest(
-                artifact,
-                private_key,
-                min_source_version="",
-            )
-            self.assertEqual(manifest["min_source_version"], "0.0.0")
-            self.assert_manifest_signature_valid(manifest, private_key)
+            for value in ("", None):
+                with self.subTest(value=value):
+                    with self.assertRaises(ValueError):
+                        self.build_manifest(
+                            artifact,
+                            private_key,
+                            min_source_version=value,
+                        )
 
     def test_release_policy_fields_are_validated_before_signing(self) -> None:
         private_key = Ed25519PrivateKey.generate()
@@ -283,6 +382,8 @@ class SignOtaArtifactTest(unittest.TestCase):
                 "bootloader.bin",
                 "--artifact-url",
                 "https://download.example.com/bootloader.bin",
+                "--min-source-version",
+                "1.0.0",
                 "--output",
                 str(output_path),
             ]
@@ -333,7 +434,9 @@ class SignOtaArtifactTest(unittest.TestCase):
                     "firmware.bin",
                     "--artifact-url",
                     "https://download.example.com/firmware.bin",
-                    "--output",
+                "--min-source-version",
+                "1.0.0",
+                "--output",
                     str(output_path),
                 ],
                 check=True,

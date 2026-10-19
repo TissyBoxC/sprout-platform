@@ -1107,17 +1107,21 @@ components:
             - internal
         artifact_key:
           type: string
+          minLength: 1
+          maxLength: 512
+          pattern: '^[A-Za-z0-9._~!$&()*+,;=:@-]+(/[A-Za-z0-9._~!$&()*+,;=:@-]+)*$'
         artifact_url:
           type: string
           format: uri
-          pattern: ^https://
+          maxLength: 512
+          pattern: '^https://[^/?#@\\%]+/[A-Za-z0-9._~!$&()*+,;=:@/-]*[A-Za-z0-9._~!$&()*+,;=:@-]$'
         sha256:
           type: string
           pattern: '^[a-f0-9]{64}$'
         size_bytes:
           type: integer
           minimum: 1
-          maximum: 16777216
+          maximum: 4194304
         signature_key_id:
           type: string
         signature_algorithm:
@@ -1141,7 +1145,7 @@ components:
         rollback_allowed:
           type: boolean
         min_source_version:
-          type: string
+          $ref: "../schemas/common.schema.json#/$defs/firmware_version"
         release_notes:
           type: string
           maxLength: 4000

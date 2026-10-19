@@ -64,7 +64,7 @@
       "type": "string",
       "format": "uri",
       "pattern": "^https://",
-      "maxLength": 2048
+      "maxLength": 512
     },
     "sha256": {
       "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/sha256"
@@ -72,7 +72,7 @@
     "size_bytes": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 16777216
+      "maximum": 4194304
     },
     "signature_key_id": {
       "type": "string",
@@ -114,15 +114,7 @@
       "minimum": 1
     },
     "min_source_version": {
-      "anyOf": [
-        {
-          "type": "string",
-          "maxLength": 0
-        },
-        {
-          "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/firmware_version"
-        }
-      ]
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/firmware_version"
     },
     "published_at": {
       "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"

@@ -666,7 +666,7 @@ func ValidateRelease(release *Release) error {
 		!release.Channel.Valid() ||
 		release.HardwareRevision == "" ||
 		len(release.HardwareRevision) > 128 ||
-		(release.MinSourceVersion != "" && !ValidVersion(release.MinSourceVersion)) ||
+		!ValidVersion(release.MinSourceVersion) ||
 		release.ArtifactKey == "" ||
 		len(release.ArtifactKey) > 512 ||
 		!ValidSHA256(release.SHA256) ||
@@ -721,10 +721,10 @@ func ValidSignature(value string) bool {
 		base64Pattern.MatchString(value)
 }
 
-// MaxArtifactSizeBytes matches the 16 MiB application partition and the
+// MaxArtifactSizeBytes matches the 4 MiB OTA application partitions and the
 // shared OTA schema/signer contract. Platform drafts must reject anything a
 // production device cannot install.
-const MaxArtifactSizeBytes int64 = 16 * 1024 * 1024
+const MaxArtifactSizeBytes int64 = 4 * 1024 * 1024
 
 // ValidateDeployment checks a new release/device assignment.
 func ValidateDeployment(deployment *Deployment) error {
@@ -777,12 +777,18 @@ func ValidSignatureAlgorithm(value string) bool {
 }
 
 func isHTTPSArtifactURL(value string) bool {
+	if value == "" || len(value) > 512 || !isPrintableASCII(value) {
+		return false
+	}
 	parsed, err := url.Parse(value)
 	return err == nil &&
-		strings.EqualFold(parsed.Scheme, "https") &&
+		strings.HasPrefix(value, "https://") &&
+		parsed.Scheme == "https" &&
 		parsed.Host != "" &&
 		parsed.Hostname() != "" &&
 		parsed.User == nil &&
+		parsed.RawQuery == "" &&
+		!strings.ContainsAny(value, "?#%\\") &&
 		parsed.Fragment == ""
 }
 
@@ -790,11 +796,21 @@ func validArtifactKey(value string) bool {
 	if value == "" ||
 		len(value) > 512 ||
 		strings.HasPrefix(value, "/") ||
-		strings.ContainsAny(value, "\\\x00\r\n") {
+		!isPrintableASCII(value) ||
+		strings.ContainsAny(value, "\\?#%") {
 		return false
 	}
 	for _, segment := range strings.Split(value, "/") {
 		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+func isPrintableASCII(value string) bool {
+	for index := 0; index < len(value); index++ {
+		if value[index] < 0x21 || value[index] > 0x7e {
 			return false
 		}
 	}

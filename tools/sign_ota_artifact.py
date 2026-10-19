@@ -35,7 +35,9 @@ SEMVER_PATTERN = re.compile(
 )
 HARDWARE_REVISION_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 CHANNEL_PATTERN = re.compile(r"^(?:stable|canary|internal)$")
-MAX_ARTIFACT_SIZE = 16 * 1024 * 1024
+MAX_ARTIFACT_SIZE = 4 * 1024 * 1024
+MAX_ARTIFACT_KEY_BYTES = 512
+MAX_ARTIFACT_URL_BYTES = 512
 SIGNATURE_PAYLOAD_VERSION = "2"
 CANONICAL_SIGNATURE_FIELDS = (
     "schema_version",
@@ -73,7 +75,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--artifact-url", required=True)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--channel", default="stable")
-    parser.add_argument("--min-source-version", default="")
+    parser.add_argument("--min-source-version", required=True)
     parser.add_argument("--no-rollback", action="store_true")
     parser.add_argument("--mandatory", action="store_true")
     parser.add_argument("--release-notes", default="")
@@ -105,8 +107,14 @@ def validate_artifact_key(artifact_key: str) -> str:
     """Return a canonical relative POSIX artifact path or reject it."""
     if not isinstance(artifact_key, str) or not artifact_key:
         raise ValueError("artifact key must be a non-empty relative POSIX path")
+    if len(artifact_key.encode("utf-8")) > MAX_ARTIFACT_KEY_BYTES:
+        raise ValueError("artifact key must not exceed 512 UTF-8 bytes")
     if "\\" in artifact_key or "\x00" in artifact_key:
         raise ValueError("artifact key must not contain backslashes or NUL")
+    if any(ord(character) < 0x21 or ord(character) > 0x7E for character in artifact_key):
+        raise ValueError("artifact key must use printable ASCII characters")
+    if any(character in artifact_key for character in ("?", "#", "%")):
+        raise ValueError("artifact key must not contain query, fragment, or escape delimiters")
     if artifact_key.startswith("/"):
         raise ValueError("artifact key must be relative")
     segments = artifact_key.split("/")
@@ -133,17 +141,27 @@ def validate_artifact_url(artifact_url: str, artifact_key: str) -> str:
     validate_artifact_key(artifact_key)
     if not isinstance(artifact_url, str) or not artifact_url:
         raise ValueError("artifact URL must be a non-empty HTTPS URL")
+    if len(artifact_url.encode("utf-8")) > MAX_ARTIFACT_URL_BYTES:
+        raise ValueError("artifact URL must not exceed 512 UTF-8 bytes")
     if any(character in artifact_url for character in ("\r", "\n", "\x00")):
         raise ValueError("artifact URL must not contain line breaks or NUL")
+    if any(ord(character) < 0x21 or ord(character) > 0x7E for character in artifact_url):
+        raise ValueError("artifact URL must use printable ASCII characters")
+    if any(character in artifact_url for character in ("?", "#", "%", "\\")):
+        raise ValueError("artifact URL must not contain query, fragment, escape, or backslash characters")
     try:
         parsed = urlsplit(artifact_url)
         parsed_port = parsed.port
     except ValueError as error:
         raise ValueError("artifact URL is malformed") from error
-    if parsed.scheme.lower() != "https" or not parsed.hostname:
+    if not artifact_url.startswith("https://"):
+        raise ValueError("artifact URL must use a lowercase https:// scheme")
+    if parsed.scheme != "https" or not parsed.hostname:
         raise ValueError("artifact URL must use HTTPS with a host")
     if parsed.username is not None or parsed.password is not None:
         raise ValueError("artifact URL must not contain user information")
+    if parsed.query:
+        raise ValueError("artifact URL must not contain a query")
     if parsed.fragment:
         raise ValueError("artifact URL must not contain a fragment")
     if parsed_port is not None and not 1 <= parsed_port <= 65535:
@@ -155,6 +173,11 @@ def validate_artifact_url(artifact_url: str, artifact_key: str) -> str:
         raise ValueError("artifact URL path does not contain the artifact key")
     if path_segments[-len(key_segments) :] != key_segments:
         raise ValueError("artifact URL path does not contain the artifact key")
+    if (
+        len(path_segments) > len(key_segments)
+        and not artifact_url.endswith("/" + artifact_key)
+    ):
+        raise ValueError("artifact URL must end directly with the artifact key")
     return artifact_url
 
 
@@ -201,6 +224,17 @@ def validate_release_policy_fields(
     min_source_version: str,
     published_at: str,
 ) -> None:
+    string_fields = {
+        "release id": release_id,
+        "firmware version": firmware_version,
+        "hardware revision": hardware_revision,
+        "channel": channel,
+        "minimum source version": min_source_version,
+        "published_at": published_at,
+    }
+    for field_name, value in string_fields.items():
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"{field_name} must be a non-empty string")
     try:
         parsed_release_id = uuid.UUID(release_id)
     except (AttributeError, ValueError) as error:
@@ -253,11 +287,11 @@ def build_release_manifest(
         raise FileNotFoundError(f"OTA artifact does not exist: {artifact}")
     size_bytes = artifact.stat().st_size
     if size_bytes < 1 or size_bytes > MAX_ARTIFACT_SIZE:
-        raise ValueError("OTA artifact size must be between 1 and 16777216 bytes")
+        raise ValueError("OTA artifact size must be between 1 and 4194304 bytes")
     timestamp = published_at or datetime.now(timezone.utc).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
-    minimum_source = min_source_version or "0.0.0"
+    minimum_source = min_source_version
     validate_release_policy_fields(
         release_id=release_id,
         firmware_version=firmware_version,

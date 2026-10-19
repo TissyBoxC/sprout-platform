@@ -42,6 +42,7 @@ export interface AIGatewayChildPolicy {
 
 export interface ReleaseArtifact {
   version: string
+  channel: string
   kind: string
   platform: string
   downloadUrl: string
@@ -56,6 +57,7 @@ export interface AdminOperationsClient {
     version: string,
     kind: string,
     platform: string,
+    channel: string,
   ): Promise<ReleaseArtifact | null>
 }
 
@@ -128,10 +130,11 @@ export function createAdminOperationsClient(
       version: string,
       kind: string,
       platform: string,
+      channel: string,
     ): Promise<ReleaseArtifact | null> {
       const response = await httpClient.get(
         `/api/v1/admin/release-artifacts/${encodeURIComponent(version.trim())}`,
-        { params: { kind, platform } },
+        { params: { kind, platform, channel } },
       )
       const value = recordValue(response.data?.data?.artifact)
       if (Object.keys(value).length === 0) {
@@ -139,6 +142,7 @@ export function createAdminOperationsClient(
       }
       return {
         version: stringValue(value.version, version.trim()),
+        channel: stringValue(value.channel, channel),
         kind: stringValue(value.kind, kind),
         platform: stringValue(value.platform, platform),
         downloadUrl: stringValue(value.download_url ?? value.downloadUrl),

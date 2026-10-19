@@ -532,6 +532,7 @@ func (s *Service) FindArtifact(
 	version string,
 	kind string,
 	platform string,
+	channel string,
 ) (*ArtifactLookup, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -539,13 +540,18 @@ func (s *Service) FindArtifact(
 	version = strings.TrimSpace(version)
 	kind = strings.TrimSpace(kind)
 	platform = strings.TrimSpace(platform)
+	channel = strings.TrimSpace(channel)
+	if channel == "" {
+		channel = domain.DefaultChannel
+	}
 	if !versionPattern.MatchString(version) ||
 		!kindPattern.MatchString(kind) ||
-		!platformPattern.MatchString(platform) {
+		!platformPattern.MatchString(platform) ||
+		!channelPattern.MatchString(channel) {
 		return nil, domain.ErrArtifactNotFound
 	}
 	expectedKind := artifactDirectoryKind(kind, platform, "")
-	expectedPrefix := path.Join(version, domain.DefaultChannel, platform, expectedKind) + "/"
+	expectedPrefix := path.Join(version, channel, platform, expectedKind) + "/"
 	inventory, err := s.Inventory(ctx)
 	if err != nil {
 		return nil, err

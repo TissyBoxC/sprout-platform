@@ -57,3 +57,53 @@ func TestFamilyMembershipRevisionMigrationHasAtomicConcurrencyShape(t *testing.T
 		}
 	}
 }
+
+func TestReleaseArtifactIdentityMigrationRemovesVersionOnlyUniqueness(t *testing.T) {
+	path := filepath.Join(
+		"..",
+		"..",
+		"..",
+		"migrations",
+		"0071_platform_release_artifact_identity.sql",
+	)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read release identity migration: %v", err)
+	}
+	sql := strings.ToLower(string(body))
+	for _, expected := range []string{
+		"drop constraint if exists platform_releases_version_unique",
+		"unique (version, channel, kind, platform)",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("release identity migration missing %q", expected)
+		}
+	}
+	if strings.Contains(sql, "begin;") || strings.Contains(sql, "commit;") {
+		t.Fatal("release identity migration must rely on the migration runner transaction")
+	}
+}
+
+func TestPlatformReleaseIdentityMigrationReplacesVersionConstraint(t *testing.T) {
+	path := filepath.Join(
+		"..",
+		"..",
+		"..",
+		"migrations",
+		"0071_platform_release_artifact_identity.sql",
+	)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read platform release identity migration: %v", err)
+	}
+	sql := string(body)
+	for _, expected := range []string{
+		"DROP CONSTRAINT IF EXISTS platform_releases_version_unique",
+		"platform_releases_artifact_identity_unique",
+		"UNIQUE (version, channel, kind, platform)",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("platform release identity migration missing %q", expected)
+		}
+	}
+}

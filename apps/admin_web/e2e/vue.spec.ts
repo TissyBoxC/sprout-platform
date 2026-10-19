@@ -1273,6 +1273,7 @@ test('keeps download controls hidden and readonly without storage.manage', async
 
 test('fills the current version and the release artifact automatically', async ({ page }) => {
   await useAdminSession(page)
+  let artifactChannel = ''
   await page.route('**/api/v1/admin/releases', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -1280,6 +1281,7 @@ test('fills the current version and the release artifact automatically', async (
     })
   })
   await page.route('**/api/v1/admin/release-artifacts/*', async (route) => {
+    artifactChannel = new URL(route.request().url()).searchParams.get('channel') ?? ''
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -1301,6 +1303,7 @@ test('fills the current version and the release artifact automatically', async (
   await expect(page.getByLabel('版本号')).toHaveValue(/\d+\.\d+\.\d+/)
   await page.getByRole('button', { name: '自动查找更新文件' }).click()
 
+  expect(artifactChannel).toBe('stable')
   await expect(page.getByLabel('下载地址')).toHaveValue(
     'https://downloads.example.com/0.8.1/app.apk',
   )

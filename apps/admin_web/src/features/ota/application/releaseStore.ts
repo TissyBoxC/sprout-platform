@@ -15,6 +15,7 @@ export type ReleaseChannel = 'stable' | 'beta' | 'canary'
 export type ReleasePlatform = 'android' | 'ios' | 'esp32_s3' | 'all'
 
 export interface AdminRelease {
+  id: string
   version: string
   channel: string
   kind: string
@@ -43,6 +44,7 @@ export interface CreateReleaseInput {
 
 export interface ReleaseArtifactLookup {
   version: string
+  channel: ReleaseChannel
   kind: ReleaseKind
   platform: ReleasePlatform
 }
@@ -318,6 +320,7 @@ export const useReleaseStore = defineStore('admin-releases', () => {
         input.version,
         input.kind,
         input.platform,
+        input.channel,
       )
       if (artifact === null) {
         error.value = {
@@ -346,18 +349,18 @@ export const useReleaseStore = defineStore('admin-releases', () => {
     }
   }
 
-  async function publish(version: string): Promise<boolean> {
+  async function publish(release: AdminRelease): Promise<boolean> {
     isSubmitting.value = true
     error.value = null
     lastMessage.value = ''
     lastWarning.value = ''
     try {
       const response = await httpClient.put(
-        `/api/v1/admin/releases/${encodeURIComponent(version)}/publish`,
+        `/api/v1/admin/releases/${encodeURIComponent(release.id)}/publish`,
       )
       lastWarning.value = apiNoticeWarning(readApiNotice(response.data))
       await load(pagination.value.page)
-      lastMessage.value = `版本 ${version} 已发布。`
+      lastMessage.value = `${release.version} 的${kindLabel(release.kind)}已发布。`
       return true
     } catch (caught: unknown) {
       error.value = mapApiError(caught)
@@ -367,14 +370,14 @@ export const useReleaseStore = defineStore('admin-releases', () => {
     }
   }
 
-  async function remove(version: string): Promise<boolean> {
+  async function remove(release: AdminRelease): Promise<boolean> {
     isSubmitting.value = true
     error.value = null
     lastMessage.value = ''
     lastWarning.value = ''
     try {
       const response = await httpClient.delete(
-        `/api/v1/admin/releases/${encodeURIComponent(version)}`,
+        `/api/v1/admin/releases/${encodeURIComponent(release.id)}`,
       )
       lastWarning.value = apiNoticeWarning(readApiNotice(response.data))
       const nextPage =
@@ -382,7 +385,7 @@ export const useReleaseStore = defineStore('admin-releases', () => {
           ? pagination.value.page - 1
           : pagination.value.page
       await load(nextPage)
-      lastMessage.value = `版本 ${version} 已删除。`
+      lastMessage.value = `${release.version} 的${kindLabel(release.kind)}已删除。`
       return true
     } catch (caught: unknown) {
       error.value = mapApiError(caught)
@@ -496,7 +499,7 @@ function mapReleaseError(caught: unknown): ApiError {
   ) {
     return {
       kind: 'validation',
-      message: '这个版本已经登记，请提高版本号后再登记。',
+      message: '同版本、渠道、类型和平台的更新已经登记，请调整其中一项后再登记。',
       retryable: false,
     }
   }
@@ -526,7 +529,7 @@ function artifactToCreateInput(
   }
   return {
     version: artifact.version || lookup.version,
-    channel: 'stable',
+    channel: normalizeReleaseChannel(artifact.channel, lookup.channel),
     kind: normalizeReleaseKind(artifact.kind, lookup.kind),
     platform: normalizeReleasePlatform(artifact.platform, lookup.platform),
     downloadUrl: artifact.downloadUrl,
@@ -558,8 +561,18 @@ function normalizeReleasePlatform(
     : fallback
 }
 
+function normalizeReleaseChannel(
+  value: string,
+  fallback: ReleaseChannel,
+): ReleaseChannel {
+  return value === 'stable' || value === 'beta' || value === 'canary'
+    ? value
+    : fallback
+}
+
 function toRelease(value: Record<string, unknown>): AdminRelease {
   return {
+    id: stringValue(value.id),
     version: stringValue(value.version),
     channel: stringValue(value.channel, 'stable'),
     kind: stringValue(value.kind, 'resource'),
@@ -573,6 +586,16 @@ function toRelease(value: Record<string, unknown>): AdminRelease {
     publishedAt: stringValue(value.published_at),
     createdAt: stringValue(value.created_at),
   }
+}
+
+function kindLabel(value: string): string {
+  return (
+    {
+      resource: '资源更新',
+      client: '客户端更新',
+      firmware: '设备固件',
+    }[value] ?? '更新记录'
+  )
 }
 
 function recordValue(value: unknown): Record<string, unknown> {

@@ -134,6 +134,7 @@ function usageReport(
 
 function releasePayload(version: string): Record<string, unknown> {
   return {
+    id: `release-${version}`,
     version,
     channel: 'stable',
     kind: 'client',
@@ -146,6 +147,30 @@ function releasePayload(version: string): Record<string, unknown> {
     status: 'published',
     published_at: '2026-10-18T09:00:00Z',
     created_at: '2026-10-18T09:00:00Z',
+  }
+}
+
+function releaseArtifactPayload(
+  version: string,
+  kind: string,
+  platform: string,
+  channel: string,
+): Record<string, unknown> {
+  return {
+    id: `release-${version}-${channel}-${kind}-${platform}`,
+    version,
+    channel,
+    kind,
+    platform,
+    download_url: `https://download.example.test/${version}/${channel}/${platform}/${kind}.bin`,
+    sha256: 'b'.repeat(64),
+    release_notes: `${version} ${kind}`,
+    is_mandatory: false,
+    min_supported_version: '',
+    status: 'draft',
+    published_at: '',
+    created_at: '2026-10-18T09:00:00Z',
+    updated_at: '2026-10-18T09:00:00Z',
   }
 }
 
@@ -187,6 +212,7 @@ async function fillUploadForm(
   })
   await dialog.getByLabel('文件名').fill(options.filename)
   await dialog.getByLabel('版本号').fill(options.version)
+  await dialog.getByLabel('更新渠道').selectOption('stable')
   await dialog.getByLabel('文件类型').selectOption(options.kind)
   await dialog.getByLabel('适用平台').selectOption(options.platform)
   await dialog.getByLabel('更新说明').fill(options.notes)
@@ -668,7 +694,7 @@ test('clamps to the previous release page after deleting the last item', async (
       },
     })
   })
-  await page.route('**/api/v1/admin/releases/1.0.1', async (route) => {
+  await page.route('**/api/v1/admin/releases/release-1.0.1', async (route) => {
     if (route.request().method() !== 'DELETE') {
       await fulfillJSON(route, 405, {
         error: { code: 'method_not_allowed', message: '' },
@@ -869,6 +895,62 @@ test('reloads the file list after a completed release when only the list refresh
   expect(fileListRequests).toBeGreaterThanOrEqual(3)
 })
 
+test('registers an uploaded file under its explicit release channel', async ({ page }) => {
+  await useAdminSession(page)
+  const registered: Record<string, unknown>[] = []
+  await page.route('**/api/v1/admin/storage/files', async (route) => {
+    await fulfillJSON(route, 200, { data: { files: [] } })
+  })
+  await page.route('**/api/v1/admin/storage/files/upload', async (route) => {
+    const file = {
+      ...uploadedFile('app-beta.apk', '7.0.0', 'client', 'android'),
+      relative_path: '7.0.0/beta/android/apk/app-beta.apk',
+      directory: '7.0.0/beta/android/apk',
+      channel: 'beta',
+      release: {
+        version: '7.0.0',
+        channel: 'beta',
+        kind: 'client',
+        platform: 'android',
+      },
+    }
+    await fulfillJSON(route, 200, { data: { file } })
+  })
+  await page.route('**/api/v1/admin/releases', async (route) => {
+    if (route.request().method() === 'GET') {
+      await fulfillJSON(route, 200, {
+        data: {
+          releases: [],
+          pagination: { page: 1, page_size: 100, total: 0, total_pages: 0 },
+        },
+      })
+      return
+    }
+    registered.push(JSON.parse(route.request().postData() ?? '{}'))
+    await fulfillJSON(route, 201, { data: {} })
+  })
+  await page.route('**/api/v1/admin/storage/index/status', async (route) => {
+    await fulfillJSON(route, 200, indexStatusPayload())
+  })
+  await page.route('**/api/v1/admin/storage/index/refresh', async (route) => {
+    await fulfillJSON(route, 200, indexStatusPayload())
+  })
+
+  await page.goto('/downloads')
+  const dialog = await fillUploadForm(page, {
+    filename: 'app-beta.apk',
+    version: '7.0.0',
+    kind: 'client',
+    platform: 'android',
+    notes: '测试渠道验证。',
+  })
+  await dialog.getByLabel('更新渠道').selectOption('beta')
+  await dialog.getByRole('button', { name: '上传并登记版本' }).click()
+
+  await expect.poll(() => registered.length).toBe(1)
+  expect(registered[0]?.channel).toBe('beta')
+})
+
 test('keeps release pagination available on a genuinely empty release catalog', async ({
   page,
 }) => {
@@ -923,7 +1005,7 @@ test('offers a concrete recovery path for a draft without release notes', async 
     }
     await fulfillJSON(route, 200, { data: {} })
   })
-  await page.route('**/api/v1/admin/releases/6.0.0', async (route) => {
+  await page.route('**/api/v1/admin/releases/release-6.0.0', async (route) => {
     deleted = true
     await fulfillJSON(route, 200, { data: {} })
   })
@@ -943,6 +1025,74 @@ test('offers a concrete recovery path for a draft without release notes', async 
     'https://download.example.test/6.0.0.apk',
   )
   expect(deleted).toBe(true)
+})
+
+test('renders and operates same-version artifacts by record identity', async ({
+  page,
+}) => {
+  await useAdminSession(page)
+  const apk = releaseArtifactPayload('0.29.0', 'client', 'android', 'stable')
+  const adminWeb = releaseArtifactPayload('0.29.0', 'client', 'all', 'stable')
+  const published: string[] = []
+  const deleted: string[] = []
+  let currentReleases = [apk, adminWeb]
+
+  await page.route('**/api/v1/admin/releases', async (route) => {
+    await fulfillJSON(route, 200, {
+      data: {
+        releases: currentReleases,
+        pagination: {
+          page: 1,
+          page_size: 20,
+          total: currentReleases.length,
+          total_pages: 1,
+        },
+      },
+    })
+  })
+  await page.route('**/api/v1/admin/releases/*/publish', async (route) => {
+    const releaseID = new URL(route.request().url()).pathname.split('/')[5]
+    const publishID = releaseID ?? ''
+    published.push(publishID)
+    currentReleases = currentReleases.map((release) =>
+      release.id === publishID ? { ...release, status: 'published' } : release,
+    )
+    await fulfillJSON(route, 200, { data: { published: true } })
+  })
+  await page.route('**/api/v1/admin/releases/*', async (route) => {
+    if (route.request().method() !== 'DELETE') {
+      await route.fallback()
+      return
+    }
+    const releaseID = new URL(route.request().url()).pathname.split('/').at(-1) ?? ''
+    deleted.push(releaseID)
+    currentReleases = currentReleases.filter((release) => release.id !== releaseID)
+    await fulfillJSON(route, 200, { data: { deleted: true } })
+  })
+
+  await page.goto('/releases')
+  await expect(page.locator('table tbody tr')).toHaveCount(2)
+  await expect(page.getByText('Android', { exact: true })).toBeVisible()
+  await expect(page.getByText('全部平台', { exact: true })).toBeVisible()
+
+  const firstRow = page
+    .locator('table tbody tr')
+    .filter({ hasText: 'Android' })
+    .first()
+  await firstRow.getByRole('button', { name: '发布' }).click()
+  await page.getByRole('button', { name: '确认发布' }).click()
+  await expect.poll(() => published.length).toBe(1)
+  expect(published[0]).toBe('release-0.29.0-client-android-stable')
+
+  const secondRow = page
+    .locator('table tbody tr')
+    .filter({ hasText: '全部平台' })
+    .first()
+  await secondRow.getByRole('button', { name: '删除' }).click()
+  await page.getByRole('button', { name: '删除版本' }).click()
+  await expect.poll(() => deleted.length).toBe(1)
+  expect(deleted[0]).toBe('release-0.29.0-client-all-stable')
+  await expect(page.locator('table tbody tr')).toHaveCount(1)
 })
 
 test('treats a failed replacement upload as a conflict without sending a file', async ({
@@ -993,12 +1143,15 @@ test('treats a failed replacement upload as a conflict without sending a file', 
   })
   await dialog.getByLabel('文件名').fill('sprout-parent-app-0.12.3.apk')
   await dialog.getByLabel('版本号').fill('0.12.3')
+  await dialog.getByLabel('更新渠道').selectOption('stable')
   await dialog.getByLabel('文件类型').selectOption('client')
   await dialog.getByLabel('适用平台').selectOption('android')
   await dialog.getByLabel('更新说明').fill('尝试覆盖。')
 
   await expect(
-    dialog.getByText('这个版本已经存在。一个版本只能对应一套发布文件，请提高版本号后再上传。'),
+    dialog.getByText(
+      '这个版本目录下已经有同名文件。为避免已校验文件被替换，请调整渠道、平台或文件名。',
+    ),
   ).toBeVisible()
   await expect(dialog.getByRole('button', { name: '上传并登记版本' })).toBeDisabled()
   expect(uploadRequests).toBe(0)

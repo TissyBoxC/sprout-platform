@@ -1494,7 +1494,7 @@ func NewRouter(options RouterOptions) http.Handler {
 					),
 				)
 				mux.HandleFunc(
-					"PUT /api/v1/admin/releases/{version}/publish",
+					"PUT /api/v1/admin/releases/{release_id}/publish",
 					authHandler.requireAdminPermissionAction(
 						authdomain.AdminPermissionStorageManage,
 						"admin.release.published",
@@ -1502,7 +1502,7 @@ func NewRouter(options RouterOptions) http.Handler {
 					),
 				)
 				mux.HandleFunc(
-					"DELETE /api/v1/admin/releases/{version}",
+					"DELETE /api/v1/admin/releases/{release_id}",
 					authHandler.requireAdminPermissionAction(
 						authdomain.AdminPermissionStorageManage,
 						"admin.release.deleted",

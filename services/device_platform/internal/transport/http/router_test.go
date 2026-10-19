@@ -1421,8 +1421,8 @@ func TestAdminReleaseContractDocumentsPublishingAndStorage(t *testing.T) {
 	}
 	for _, path := range []string{
 		"/api/v1/admin/releases:",
-		"/api/v1/admin/releases/{version}:",
-		"/api/v1/admin/releases/{version}/publish:",
+		"/api/v1/admin/releases/{release_id}:",
+		"/api/v1/admin/releases/{release_id}/publish:",
 		"/api/v1/admin/release-artifacts/{version}:",
 		"/api/v1/admin/storage/files:",
 		"/api/v1/admin/storage/files/upload:",
@@ -1448,6 +1448,7 @@ func TestAdminReleaseContractDocumentsPublishingAndStorage(t *testing.T) {
 		"AdminReleaseFileUploadRequest:",
 		"AdminReleaseIndexStatusEnvelope:",
 		"AdminReleaseIndexRefreshEnvelope:",
+		"ReleaseId:",
 	} {
 		if !bytes.Contains(contract, []byte(schema)) {
 			t.Fatalf("expected admin release schema %s in internal API contract", schema)
@@ -1539,6 +1540,8 @@ func TestOperationsContractDocumentsSettingsOverviewAndTelemetry(t *testing.T) {
 	for _, schema := range []string{
 		"AdminSettingsEnvelope:",
 		"AdminSettingsUpdateRequest:",
+		"AdminSettingsUpdate:",
+		"AdminSafetySettingsUpdate:",
 		"AdminSettings:",
 		"AdminOverviewEnvelope:",
 		"AdminOverview:",

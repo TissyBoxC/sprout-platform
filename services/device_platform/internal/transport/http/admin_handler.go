@@ -85,12 +85,13 @@ type operationsAdminService interface {
 		version string,
 		actorAccountID string,
 	) error
-	DeleteRelease(ctx context.Context, version string) error
+	DeleteRelease(ctx context.Context, releaseID string) error
 	FindReleaseArtifact(
 		ctx context.Context,
 		version string,
 		kind string,
 		platform string,
+		channel string,
 	) (*operationsdomain.ReleaseArtifact, error)
 	AppUpdate(
 		ctx context.Context,
@@ -595,6 +596,7 @@ func (handler adminHandler) getReleaseArtifact(
 		request.PathValue("version"),
 		request.URL.Query().Get("kind"),
 		request.URL.Query().Get("platform"),
+		request.URL.Query().Get("channel"),
 	)
 	if err != nil {
 		if errors.Is(err, operationsdomain.ErrReleaseNotFound) {

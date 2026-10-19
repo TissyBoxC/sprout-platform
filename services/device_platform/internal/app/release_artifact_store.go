@@ -19,16 +19,18 @@ func (adapter releaseArtifactStoreAdapter) FindArtifact(
 	version string,
 	kind string,
 	platform string,
+	channel string,
 ) (*operationsDomain.ReleaseArtifact, error) {
 	if adapter.store == nil {
 		return nil, operationsDomain.ErrReleaseNotFound
 	}
-	artifact, err := adapter.store.FindArtifact(ctx, version, kind, platform)
+	artifact, err := adapter.store.FindArtifact(ctx, version, kind, platform, channel)
 	if err != nil {
 		return nil, operationsDomain.ErrReleaseNotFound
 	}
 	return &operationsDomain.ReleaseArtifact{
 		Version:     artifact.Version,
+		Channel:     channel,
 		Kind:        artifact.Kind,
 		Platform:    artifact.Platform,
 		DownloadURL: artifact.DownloadURL,

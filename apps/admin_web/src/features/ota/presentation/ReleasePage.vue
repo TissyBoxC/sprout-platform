@@ -58,6 +58,7 @@ async function resolveArtifact(): Promise<void> {
   }
   const artifactInput = await store.resolveArtifact({
     version: createForm.version,
+    channel: createForm.channel,
     kind: createForm.kind,
     platform: createForm.platform,
   })
@@ -111,7 +112,7 @@ async function confirmPublish(): Promise<void> {
   ) {
     return
   }
-  const succeeded = await store.publish(pendingPublish.value.version)
+  const succeeded = await store.publish(pendingPublish.value)
   if (succeeded) {
     pendingPublish.value = null
   }
@@ -121,7 +122,7 @@ async function confirmDelete(): Promise<void> {
   if (pendingDelete.value === null || store.isSubmitting) {
     return
   }
-  const succeeded = await store.remove(pendingDelete.value.version)
+  const succeeded = await store.remove(pendingDelete.value)
   if (succeeded) {
     pendingDelete.value = null
   }
@@ -132,7 +133,7 @@ async function confirmNotesRecovery(): Promise<void> {
   if (release === null || store.isSubmitting) {
     return
   }
-  const succeeded = await store.remove(release.version)
+  const succeeded = await store.remove(release)
   if (!succeeded) {
     return
   }
@@ -389,7 +390,7 @@ function normalizePlatform(value: string): CreateReleaseInput['platform'] {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="release in store.releases" :key="release.version">
+            <tr v-for="release in store.releases" :key="release.id">
               <td>
                 <span class="release-version">{{ release.version }}</span>
                 <span v-if="release.isMandatory" class="mandatory">必须升级</span>

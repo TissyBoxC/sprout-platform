@@ -26,6 +26,7 @@ export interface DownloadFile {
   modifiedAt: string
   sha256: string
   version: string
+  channel: string
   kind: DownloadArtifactKind
   platform: DownloadArtifactPlatform
   downloadUrl: string
@@ -279,6 +280,7 @@ function toNullableDownloadFile(value: unknown): DownloadFile | null {
     ),
     sha256: stringValue(record.sha256),
     version: stringValue(record.version ?? release.version),
+    channel: stringValue(record.channel ?? release.channel, 'stable'),
     kind: artifactKind(record.kind ?? release.kind),
     platform: artifactPlatform(record.platform ?? release.platform),
     downloadUrl: stringValue(record.download_url ?? record.downloadUrl),

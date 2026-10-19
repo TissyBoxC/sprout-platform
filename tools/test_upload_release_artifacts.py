@@ -51,6 +51,61 @@ class UploadReleaseArtifactsTest(unittest.TestCase):
 
         self.assertEqual(payload["releases"][0]["version"], "0.9.0")
 
+    def test_same_version_channels_both_remain_in_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            local_index = root / "index.json"
+            stable_manifest = {
+                "version": "0.30.0",
+                "channel": "stable",
+                "artifacts": [
+                    {
+                        "platform": "android",
+                        "kind": "apk",
+                        "file_name": "sprout-parent-app-v0.30.0.apk",
+                        "sha256": "a" * 64,
+                    }
+                ],
+            }
+            beta_manifest = {
+                "version": "0.30.0",
+                "channel": "beta",
+                "artifacts": [
+                    {
+                        "platform": "android",
+                        "kind": "apk",
+                        "file_name": "sprout-parent-app-v0.30.0-beta.apk",
+                        "sha256": "b" * 64,
+                    }
+                ],
+            }
+
+            upload_release_artifacts.write_index_candidate(
+                local_index_path=local_index,
+                manifest=stable_manifest,
+                public_base_url="https://download.example.com",
+                title="稳定版",
+                published_at="2026-10-19T00:00:00Z",
+            )
+            upload_release_artifacts.write_index_candidate(
+                local_index_path=local_index,
+                manifest=beta_manifest,
+                public_base_url="https://download.example.com",
+                title="测试版",
+                published_at="2026-10-19T00:01:00Z",
+            )
+            payload = json.loads(local_index.read_text(encoding="utf-8"))
+
+        entries = {
+            release["channel"]: release
+            for release in payload["releases"]
+            if release["version"] == "0.30.0"
+        }
+        self.assertEqual(set(entries), {"stable", "beta"})
+        self.assertEqual(entries["stable"]["artifact_count"], 1)
+        self.assertIn("/0.30.0/stable/manifest.json", entries["stable"]["manifest_url"])
+        self.assertIn("/0.30.0/beta/manifest.json", entries["beta"]["manifest_url"])
+
     def test_authentication_failure_is_not_treated_as_missing_index(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

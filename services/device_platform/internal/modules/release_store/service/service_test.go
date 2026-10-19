@@ -483,6 +483,49 @@ func TestRefreshIndexMatchesPublicReleaseContract(t *testing.T) {
 	}
 }
 
+func TestRefreshIndexKeepsSameVersionChannelsSeparate(t *testing.T) {
+	service, root := newTestService(t)
+	artifacts := map[string]string{
+		"0.12.3/stable/android/apk/stable.apk": "stable",
+		"0.12.3/beta/android/apk/beta.apk":     "beta",
+	}
+	for relativePath, body := range artifacts {
+		if _, err := service.UploadFile(
+			context.Background(),
+			domain.UploadInput{RelativePath: relativePath},
+			strings.NewReader(body),
+		); err != nil {
+			t.Fatalf("seed %s: %v", relativePath, err)
+		}
+	}
+	for _, channel := range []string{"stable", "beta"} {
+		if _, err := service.RefreshIndex(
+			context.Background(),
+			domain.IndexRefreshRequest{Version: "0.12.3", Channel: channel},
+		); err != nil {
+			t.Fatalf("refresh %s: %v", channel, err)
+		}
+	}
+	payload, err := os.ReadFile(filepath.Join(root, "index.json"))
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	var index domain.ReleaseIndex
+	if err := json.Unmarshal(payload, &index); err != nil {
+		t.Fatalf("decode index: %v", err)
+	}
+	if len(index.Releases) != 2 {
+		t.Fatalf("same-version channels collapsed: %+v", index.Releases)
+	}
+	channels := map[string]bool{}
+	for _, release := range index.Releases {
+		channels[release.Channel] = true
+	}
+	if !channels["stable"] || !channels["beta"] {
+		t.Fatalf("expected stable and beta index entries, got %+v", channels)
+	}
+}
+
 func TestUploadFileBuildsCanonicalReleasePathFromMetadata(t *testing.T) {
 	service, root := newTestService(t)
 	uploaded, err := service.UploadFile(
@@ -588,6 +631,7 @@ func TestFindArtifactResolvesIndexedCIFileByRegistrationKind(t *testing.T) {
 		"0.12.4",
 		"client",
 		"android",
+		"stable",
 	)
 	if err != nil {
 		t.Fatalf("FindArtifact() returned unexpected error: %v", err)

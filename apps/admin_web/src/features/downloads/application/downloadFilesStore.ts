@@ -103,6 +103,7 @@ export interface DownloadUploadResult {
 export interface PendingUploadMetadata {
   filename: string
   version: string
+  channel: string
   kind: DownloadArtifactKind
   platform: DownloadArtifactPlatform
   releaseNotes: string
@@ -220,18 +221,28 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
       if (!version) {
         continue
       }
-      const existing = grouped.get(version) ?? []
+      const groupKey = `${version}\u0000${file.channel}`
+      const existing = grouped.get(groupKey) ?? []
       existing.push(file)
-      grouped.set(version, existing)
+      grouped.set(groupKey, existing)
     }
     return [...grouped.entries()]
-      .map(([version, artifacts]) => ({
-        version,
-        artifacts: [...artifacts].sort((left, right) =>
-          left.relativePath.localeCompare(right.relativePath),
-        ),
-      }))
-      .sort((left, right) => right.version.localeCompare(left.version, undefined, { numeric: true }))
+      .map(([groupKey, artifacts]) => {
+        const separator = groupKey.indexOf('\u0000')
+        return {
+          version: groupKey.slice(0, separator),
+          channel: groupKey.slice(separator + 1),
+          artifacts: [...artifacts].sort((left, right) =>
+            left.relativePath.localeCompare(right.relativePath),
+          ),
+        }
+      })
+      .sort((left, right) => {
+        const versionOrder = right.version.localeCompare(left.version, undefined, {
+          numeric: true,
+        })
+        return versionOrder !== 0 ? versionOrder : left.channel.localeCompare(right.channel)
+      })
   })
 
   async function load(): Promise<void> {
@@ -330,11 +341,12 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
         fileName: uploadedFile.name,
         uploadedFilePath: uploadedFile.relativePath,
       }
-      pendingUpload = { input, file: uploadedFile }
+      const resolvedInput = { ...input, channel: uploadedFile.channel }
+      pendingUpload = { input: resolvedInput, file: uploadedFile }
       lastWarning.value = apiNoticeWarning(uploadResult.notice)
       return await completeUploadCompletion(
         uploadedFile,
-        input,
+        resolvedInput,
         requestSequence,
         uploadResult.notice,
       )
@@ -424,7 +436,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
       conflictCheckInput = inputKey
       conflictCheckResult = {
         message:
-          '这个文件路径已经存在。为避免已校验文件被替换，请提高版本号或更换文件名。',
+          '这个版本目录下已经有同名文件。为避免已校验文件被替换，请调整渠道、平台或文件名。',
       }
       return conflictCheckResult
     }
@@ -433,17 +445,17 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
       conflictCheckResult = null
       return null
     }
-    const conflict = await findRegisteredRelease(
+    const release = await findRegisteredRelease(
       version,
       input.kind,
       input.platform,
-      true,
+      (input.channel ?? 'stable').trim() || 'stable',
     )
     conflictCheckInput = inputKey
-    conflictCheckResult = conflict
+    conflictCheckResult = release
       ? {
         message:
-          '这个版本已经登记过，不能再用新文件覆盖。请提高版本号后重新上传。',
+          '同版本、渠道、类型和平台已经登记过，不能用新文件覆盖。请调整其中一项后重试。',
       }
       : null
     return conflictCheckResult
@@ -513,7 +525,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
       const mappedError: ApiError = {
         kind: 'validation',
         message:
-          '这个版本、类型和平台已经登记过，不能再用新文件覆盖，请提高版本号后重新上传。',
+          '同版本、渠道、类型和平台已经登记过，不能用新文件覆盖。请调整其中一项后重试。',
         retryable: false,
       }
       uploadState.value = { ...uploadState.value, error: mappedError.message }
@@ -661,7 +673,12 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
     ) {
       return 'skipped'
     }
-    const existing = await findRegisteredRelease(file.version, file.kind, file.platform)
+    const existing = await findRegisteredRelease(
+      file.version,
+      file.kind,
+      file.platform,
+      file.channel,
+    )
     if (existing) {
       return 'conflict'
     }
@@ -671,7 +688,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
     try {
       const response = await httpClient.post('/api/v1/admin/releases', {
         version: file.version,
-        channel: 'stable',
+        channel: file.channel,
         kind: file.kind,
         platform: file.platform,
         download_url: downloadUrlForFile(file),
@@ -697,8 +714,8 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
     version: string,
     kind: DownloadArtifactKind,
     platform: DownloadArtifactPlatform,
-    matchVersionOnly = false,
-  ): Promise<boolean> {
+    channel: string,
+  ): Promise<Record<string, unknown> | null> {
     const pageSize = 100
     for (let page = 1; ; page += 1) {
       const response = await httpClient.get('/api/v1/admin/releases', {
@@ -706,17 +723,17 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
       })
       const payload = recordValue(response.data?.data)
       const records = Array.isArray(payload.releases) ? payload.releases : []
-      const matched = records.some((item: unknown) => {
+      const matched = records.find((item: unknown) => {
         const record = recordValue(item)
         return (
           stringValue(record.version) === version &&
-          (matchVersionOnly ||
-            (stringValue(record.kind) === kind &&
-              stringValue(record.platform) === platform))
+          stringValue(record.kind) === kind &&
+          stringValue(record.platform) === platform &&
+          stringValue(record.channel, 'stable') === channel
         )
       })
       if (matched) {
-        return true
+        return recordValue(matched)
       }
       const pagination = recordValue(payload.pagination)
       const totalPages = Number(pagination.total_pages)
@@ -724,7 +741,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
         pagination.has_more === true ||
         (Number.isInteger(totalPages) && page < totalPages)
       if (!hasNextPage || records.length === 0) {
-        return false
+        return null
       }
     }
   }
@@ -745,13 +762,13 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
         version,
         input.kind,
         input.platform,
-        true,
+        (input.channel ?? 'stable').trim() || 'stable',
       )
     ) {
       return {
         kind: 'validation',
         message:
-          '这个版本已经登记过，不能再用新文件覆盖。请提高版本号后重新上传。',
+          '同版本、渠道、类型和平台已经登记过，不能用新文件覆盖。请调整其中一项后重试。',
         retryable: false,
       }
     }
@@ -967,6 +984,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
     return {
       filename: pendingUpload.input.filename,
       version: pendingUpload.input.version,
+      channel: pendingUpload.file.channel,
       kind: pendingUpload.input.kind,
       platform: pendingUpload.input.platform,
       releaseNotes: pendingUpload.input.releaseNotes ?? '',
@@ -1059,6 +1077,7 @@ function fileUploadRelativePath(input: DownloadArtifactPathInput): string {
 function uploadConflictKey(input: DownloadFileUpload): string {
   return [
     input.version.trim(),
+    (input.channel ?? 'stable').trim(),
     input.kind,
     input.platform,
     input.filename.trim(),
@@ -1164,7 +1183,7 @@ export function buildUploadReview(
   }
   if (state.registrationState === 'conflict') {
     return {
-      summary: '文件已上传，但这个版本已经存在。请提高版本号后重新上传。',
+      summary: '文件已上传，但同版本、渠道、类型和平台的更新已经存在。请调整其中一项后重试。',
       actionLabel: '前往版本管理',
       action: 'manage_release',
       canManageRelease: true,

@@ -24,6 +24,7 @@ const uploadForm = reactive({
   file: null as File | null,
   filename: '',
   version: '',
+  channel: 'stable',
   kind: 'client' as DownloadArtifactKind,
   platform: 'android' as DownloadArtifactPlatform,
   releaseNotes: '',
@@ -50,7 +51,13 @@ onMounted(async () => {
 })
 
 watch(
-  () => [uploadForm.version, uploadForm.kind, uploadForm.platform, uploadForm.filename],
+  () => [
+    uploadForm.version,
+    uploadForm.channel,
+    uploadForm.kind,
+    uploadForm.platform,
+    uploadForm.filename,
+  ],
   () => {
     void refreshUploadConflict()
   },
@@ -136,6 +143,7 @@ async function refreshUploadConflict(): Promise<void> {
       file: uploadForm.file ?? new File([], uploadForm.filename),
       filename: uploadForm.filename,
       version: uploadForm.version,
+      channel: uploadForm.channel,
       kind: uploadForm.kind,
       platform: uploadForm.platform,
       overwrite: false,
@@ -165,6 +173,7 @@ async function performUpload(): Promise<void> {
     file: uploadForm.file,
     filename: uploadForm.filename,
     version: uploadForm.version,
+    channel: uploadForm.channel,
     kind: uploadForm.kind,
     platform: uploadForm.platform,
     overwrite: false,
@@ -241,6 +250,7 @@ function resetUploadForm(): void {
   uploadForm.file = null
   uploadForm.filename = ''
   uploadForm.version = ''
+  uploadForm.channel = 'stable'
   uploadForm.kind = 'client'
   uploadForm.platform = 'android'
   uploadForm.releaseNotes = ''
@@ -258,6 +268,7 @@ function restorePendingUploadForm(): void {
     uploadForm.filename = pending.filename
   }
   uploadForm.version = pending.version
+  uploadForm.channel = pending.channel
   uploadForm.kind = pending.kind
   uploadForm.platform = pending.platform
   if (uploadForm.releaseNotes.trim() === '') {
@@ -307,6 +318,16 @@ function fileKindIcon(kind: DownloadArtifactKind): string {
       firmware: '◇',
       unknown: '·',
     }[kind] ?? '·'
+  )
+}
+
+function channelLabel(value: string): string {
+  return (
+    {
+      stable: '稳定渠道',
+      beta: '测试渠道',
+      canary: '内测渠道',
+    }[value] ?? value
   )
 }
 
@@ -568,7 +589,7 @@ function sha256Summary(value: string): string {
       <div class="panel-heading">
         <div>
           <h2>按版本查看</h2>
-          <p>每个版本列出已经存在的文件，并标明是否已经登记到内容发布。</p>
+          <p>按版本和渠道列出已经存在的文件，并标明是否已经登记到内容发布。</p>
         </div>
         <span :class="['version-status', allVersionsRegistered ? 'complete' : 'pending']">
           {{ allVersionsRegistered ? '全部版本已登记' : '仍有版本待登记' }}
@@ -578,9 +599,10 @@ function sha256Summary(value: string): string {
         还没有带版本号的文件。上传时填写版本号后，会在这里按版本汇总。
       </div>
       <ul v-else class="version-list">
-        <li v-for="group in versionArtifactRows" :key="group.version">
+        <li v-for="group in versionArtifactRows" :key="`${group.version}-${group.channel}`">
           <div class="version-group-heading">
             <strong>{{ group.version }}</strong>
+            <span>{{ channelLabel(group.channel) }}</span>
             <span>
               {{ group.artifacts.filter((file) => file.isIndexed).length }} /
               {{ group.artifacts.length }} 已登记
@@ -648,6 +670,14 @@ function sha256Summary(value: string): string {
             <label>
               <span>版本号</span>
               <input v-model.trim="uploadForm.version" type="text" placeholder="例如 0.12.3" />
+            </label>
+            <label>
+              <span>更新渠道</span>
+              <select v-model="uploadForm.channel">
+                <option value="stable">稳定渠道</option>
+                <option value="beta">测试渠道</option>
+                <option value="canary">内测渠道</option>
+              </select>
             </label>
             <label>
               <span>文件类型</span>

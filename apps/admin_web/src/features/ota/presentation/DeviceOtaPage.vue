@@ -34,6 +34,9 @@ const isReleaseFormOpen = ref(false)
 const isUploadOpen = ref(false)
 const isFilePickerOpen = ref(false)
 const isDetailOpen = ref(false)
+const deploymentDeviceId = ref('')
+const deploymentFormError = ref('')
+const releasedDevices = ref<string[]>([])
 const editingRelease = ref<OtaRelease | null>(null)
 const pendingAction = ref<PendingAction | null>(null)
 const formError = ref('')
@@ -359,6 +362,25 @@ function closeDetail(): void {
 
 async function loadDeploymentPage(page: number): Promise<void> {
   await store.loadDeploymentPage(page)
+}
+
+async function sendToDevice(): Promise<void> {
+  deploymentFormError.value = ''
+  const release = detailRelease.value
+  if (release === null || release.status !== 'published') {
+    deploymentFormError.value = '只有已发布的固件版本可以下发。'
+    return
+  }
+  const deviceId = deploymentDeviceId.value.trim()
+  if (!deviceId) {
+    deploymentFormError.value = '请输入设备唯一标识。'
+    return
+  }
+  const succeeded = await store.sendFirmwareToDevice(release, deviceId)
+  if (succeeded) {
+    deploymentDeviceId.value = ''
+    releasedDevices.value = [deviceId, ...releasedDevices.value.filter((item) => item !== deviceId)]
+  }
 }
 
 function formatBytes(value: number): string {
@@ -1169,6 +1191,38 @@ function deploymentProgress(deployment: OtaDeployment): number {
                 <dd class="notes">{{ detailRelease.releaseNotes || '没有填写版本说明。' }}</dd>
               </div>
             </dl>
+
+            <section class="detail-section">
+              <div class="section-heading">
+                <h3>下发固件</h3>
+                <span>{{ otaReleaseStatusLabel(detailRelease.status) }}</span>
+              </div>
+              <div class="deployment-filter">
+                <label>
+                  <span>设备唯一标识</span>
+                  <input
+                    v-model.trim="deploymentDeviceId"
+                    type="text"
+                    maxlength="128"
+                    placeholder="例如 device_0123456789abcdef"
+                    :disabled="detailRelease.status !== 'published'"
+                    @input="deploymentFormError = ''"
+                  />
+                </label>
+                <button
+                  type="button"
+                  :disabled="store.isSubmitting || detailRelease.status !== 'published'"
+                  @click="sendToDevice"
+                >
+                  {{ store.isSubmitting ? '正在下发…' : '下发更新' }}
+                </button>
+              </div>
+              <p v-if="deploymentFormError" class="form-error">{{ deploymentFormError }}</p>
+              <div v-if="releasedDevices.length" class="deployment-device-list">
+                <span>本次已下发</span>
+                <code v-for="deviceId in releasedDevices" :key="deviceId">{{ deviceId }}</code>
+              </div>
+            </section>
 
             <section class="detail-section">
               <div class="section-heading">
@@ -2147,11 +2201,31 @@ progress::-moz-progress-bar {
 
 .deployment-filter {
   display: flex;
+  align-items: flex-end;
   justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .deployment-filter label {
-  width: min(220px, 100%);
+  width: min(280px, 100%);
+}
+
+.deployment-device-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--sprout-text-muted);
+  font-size: 12px;
+}
+
+.deployment-device-list code {
+  padding: 4px 8px;
+  border: 1px solid var(--sprout-outline-soft);
+  border-radius: 10px;
+  background: #fffbfc;
+  color: var(--sprout-text);
 }
 
 .empty-copy {

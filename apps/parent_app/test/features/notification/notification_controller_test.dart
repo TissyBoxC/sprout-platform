@@ -106,11 +106,13 @@ void main() {
     addTearDown(container.dispose);
 
     final state = await container.read(notificationControllerProvider.future);
-    await container
+    final result = await container
         .read(notificationControllerProvider.notifier)
         .markRead(state.items.single);
 
     final updated = container.read(notificationControllerProvider).value;
+    expect(result.didChange, isTrue);
+    expect(result.didFail, isFalse);
     expect(api.markedReadIds, <String>['n-1']);
     expect(updated?.items.single.isRead, isTrue);
     expect(updated?.unreadCount, 0);
@@ -134,11 +136,13 @@ void main() {
     addTearDown(container.dispose);
 
     final state = await container.read(notificationControllerProvider.future);
-    await container
+    final result = await container
         .read(notificationControllerProvider.notifier)
         .markRead(state.items.single);
 
     final restored = container.read(notificationControllerProvider).value;
+    expect(result.didFail, isTrue);
+    expect(result.errorMessage, '消息状态没有更新，请稍后重试');
     expect(restored?.items.single.isRead, isFalse);
     expect(restored?.unreadCount, 1);
   });
@@ -160,11 +164,12 @@ void main() {
     addTearDown(container.dispose);
 
     await container.read(notificationControllerProvider.future);
-    await container
+    final result = await container
         .read(notificationControllerProvider.notifier)
         .markAllRead();
 
     final state = container.read(notificationControllerProvider).value;
+    expect(result.didChange, isTrue);
     expect(api.markAllReadCalls, 1);
     expect(state?.items.every((item) => item.isRead), isTrue);
     expect(state?.unreadCount, 0);
@@ -208,6 +213,59 @@ void main() {
     );
     expect(notificationErrorMessage(StateError('boom')), '暂时无法读取消息，请稍后重试');
   });
+
+  test('maps permission and network failures without hiding read state', () {
+    expect(
+      notificationMutationMessage(
+        const AppException(
+          kind: AppErrorKind.insufficientPermission,
+          message: 'forbidden',
+          retryable: false,
+        ),
+        markingAll: false,
+      ),
+      '当前家庭角色不能标记这条消息，消息状态没有变化',
+    );
+    expect(
+      notificationMutationMessage(
+        const AppException(
+          kind: AppErrorKind.network,
+          message: 'offline',
+          retryable: true,
+        ),
+        markingAll: true,
+      ),
+      '网络连接不稳定，消息状态没有更新，请稍后重试',
+    );
+  });
+
+  test('mark-all restores unread state when the server fails', () async {
+    final api = _FakeNotificationApi(
+      pages: [
+        _page(
+          items: [_notification('n-1'), _notification('n-2')],
+          unreadCount: 2,
+          nextCursor: '',
+          hasMore: false,
+        ),
+      ],
+      failMarkAllRead: true,
+    );
+    final container = ProviderContainer(
+      overrides: [notificationApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(notificationControllerProvider.future);
+    final result = await container
+        .read(notificationControllerProvider.notifier)
+        .markAllRead();
+    final state = container.read(notificationControllerProvider).value;
+
+    expect(result.didFail, isTrue);
+    expect(state?.unreadCount, 2);
+    expect(state?.items.every((item) => !item.isRead), isTrue);
+  });
 }
 
 GuardianNotification _notification(String id, {bool isRead = false}) {
@@ -245,11 +303,13 @@ class _FakeNotificationApi implements NotificationApi {
   _FakeNotificationApi({
     required this.pages,
     this.failMarkRead = false,
+    this.failMarkAllRead = false,
     this.failAfterFirst = false,
   });
 
   final List<GuardianNotificationPage> pages;
   final bool failMarkRead;
+  final bool failMarkAllRead;
   final bool failAfterFirst;
 
   int listCalls = 0;
@@ -292,6 +352,13 @@ class _FakeNotificationApi implements NotificationApi {
   @override
   Future<void> markAllRead() async {
     markAllReadCalls += 1;
+    if (failMarkAllRead) {
+      throw const AppException(
+        kind: AppErrorKind.network,
+        message: 'offline',
+        retryable: true,
+      );
+    }
   }
 
   @override

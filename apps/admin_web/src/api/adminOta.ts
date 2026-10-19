@@ -150,6 +150,7 @@ export interface AdminOtaClient {
     releaseId: string,
     filters: OtaDeploymentListFilters,
   ): Promise<OtaDeploymentListResult>
+  createDeployment(releaseId: string, deviceId: string): Promise<OtaDeployment>
   retryDeployment(deploymentId: string): Promise<OtaDeployment>
   loadStatistics(): Promise<OtaStatistics>
 }
@@ -278,6 +279,23 @@ export function createAdminOtaClient(
         page: positiveInteger(payload.page, filters.page),
         pageSize: positiveInteger(payload.page_size ?? payload.pageSize, filters.pageSize),
       }
+    },
+
+    async createDeployment(releaseId: string, deviceId: string): Promise<OtaDeployment> {
+      const normalizedReleaseID = releaseId.trim()
+      const normalizedDeviceID = deviceId.trim()
+      if (!normalizedReleaseID || !normalizedDeviceID) {
+        throw new Error('firmware release and device are required')
+      }
+      const response = await httpClient.post(
+        `${basePath}/releases/${encodeURIComponent(normalizedReleaseID)}/deployments`,
+        { device_id: normalizedDeviceID },
+      )
+      const deployment = toNullableDeployment(response.data?.data)
+      if (deployment === null) {
+        throw new Error('ota deployment response is missing a deployment')
+      }
+      return deployment
     },
 
     async retryDeployment(deploymentId: string): Promise<OtaDeployment> {

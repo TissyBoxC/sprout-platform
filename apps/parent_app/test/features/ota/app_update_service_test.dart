@@ -32,6 +32,119 @@ void main() {
     });
   });
 
+  group('installed resource version reconciliation', () {
+    test('same installed resource version is not offered again', () {
+      final result = reconcileInstalledUpdate(
+        candidate: _update(),
+        installed: const AppUpdateVersions(
+          clientVersion: '1.0.0',
+          resourceVersion: '1.0.1',
+        ),
+      );
+
+      expect(result, isNull);
+    });
+
+    test('higher resource version remains available', () {
+      final result = reconcileInstalledUpdate(
+        candidate: _update(),
+        installed: const AppUpdateVersions(
+          clientVersion: '1.0.0',
+          resourceVersion: '1.0.0',
+        ),
+      );
+
+      expect(result?.version, '1.0.1');
+    });
+
+    test('higher client version remains available despite resource marker', () {
+      const clientUpdate = AppUpdateInfo(
+        kind: 'client',
+        version: '1.0.1',
+        downloadUrl: 'https://example.com/app.apk',
+        sha256:
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        releaseNotes: '客户端更新',
+        isMandatory: false,
+        minSupportedVersion: '1.0.0',
+      );
+      final result = reconcileInstalledUpdate(
+        candidate: clientUpdate,
+        installed: const AppUpdateVersions(
+          clientVersion: '1.0.0',
+          resourceVersion: '1.0.1',
+        ),
+      );
+
+      expect(result?.isClientUpdate, isTrue);
+    });
+
+    test('same client version is not offered again despite a resource marker', () {
+      const clientUpdate = AppUpdateInfo(
+        kind: 'client',
+        version: '1.0.1',
+        downloadUrl: 'https://example.com/app.apk',
+        sha256:
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        releaseNotes: '客户端更新',
+        isMandatory: false,
+        minSupportedVersion: '1.0.0',
+      );
+      final result = reconcileInstalledUpdate(
+        candidate: clientUpdate,
+        installed: const AppUpdateVersions(
+          clientVersion: '1.0.1',
+          resourceVersion: '0.9.0',
+        ),
+      );
+
+      expect(result, isNull);
+    });
+
+    test('without a resource marker the server decision is preserved', () {
+      final result = reconcileInstalledUpdate(
+        candidate: _update(),
+        installed: const AppUpdateVersions(
+          clientVersion: '1.0.0',
+          resourceVersion: '',
+        ),
+      );
+
+      expect(result, isNotNull);
+    });
+
+    test('compares numeric, pre-release and build metadata versions', () {
+      expect(compareAppVersions('1.10.0', '1.9.9'), greaterThan(0));
+      expect(compareAppVersions('1.0.1', '1.0.1+build.2'), 0);
+      expect(compareAppVersions('1.0.1-beta.2', '1.0.1-beta.3'), lessThan(0));
+      expect(compareAppVersions('1.0.1-beta.3', '1.0.1'), lessThan(0));
+      expect(compareAppVersions('1.0.1', '1.0.1'), 0);
+    });
+  });
+
+  test('installed resource marker is read only from the active file', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'sprout-resource-marker-test-',
+    );
+    addTearDown(() async {
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+    });
+    final marker = File(path.join(directory.path, 'current_version'));
+
+    expect(await AppUpdateService.readInstalledResourceVersion(marker), '');
+    await marker.writeAsString('  1.2.3  ');
+    expect(
+      await AppUpdateService.readInstalledResourceVersion(marker),
+      '1.2.3',
+    );
+    await marker.writeAsString('   ');
+    expect(await AppUpdateService.readInstalledResourceVersion(marker), '');
+  });
+
   group('resource archive boundary', () {
     test('rejects a traversing archive entry before writing it', () async {
       final supportDirectory = await Directory.systemTemp.createTemp(

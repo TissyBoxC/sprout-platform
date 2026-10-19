@@ -20,7 +20,7 @@ class AppUpdatePage extends ConsumerStatefulWidget {
   /// Test seam for update discovery without platform package metadata.
   final Future<AppUpdateInfo?> Function(
     AppUpdateCoordinator service,
-    String currentVersion,
+    AppUpdateVersions installed,
   )?
   updateLoader;
 
@@ -95,17 +95,14 @@ class _AppUpdatePageState extends ConsumerState<AppUpdatePage> {
       _actionError = null;
     });
     try {
-      final currentVersion = await _updateService.installedVersion();
-      final update = await _loadUpdate(currentVersion);
+      final installed = await _updateService.installedUpdateVersions();
+      final update = await _loadUpdate(installed);
       if (!mounted) {
         return;
       }
       setState(() {
         _isChecking = false;
-        _result = _UpdateCheckResult(
-          currentVersion: currentVersion,
-          update: update,
-        );
+        _result = _UpdateCheckResult(installed: installed, update: update);
       });
     } on Object catch (error) {
       if (!mounted) {
@@ -119,17 +116,16 @@ class _AppUpdatePageState extends ConsumerState<AppUpdatePage> {
     }
   }
 
-  Future<AppUpdateInfo?> _loadUpdate(String currentVersion) {
+  Future<AppUpdateInfo?> _loadUpdate(AppUpdateVersions installed) {
     final updateLoader = widget.updateLoader;
     if (updateLoader != null) {
-      return updateLoader(_updateService, currentVersion);
+      return updateLoader(_updateService, installed);
     }
-    return ref
-        .read(authApiProvider)
-        .appUpdate(
-          platform: Platform.isAndroid ? 'android' : 'ios',
-          currentVersion: currentVersion,
-        );
+    return discoverInstalledUpdate(
+      api: ref.read(authApiProvider),
+      platform: Platform.isAndroid ? 'android' : 'ios',
+      installed: installed,
+    );
   }
 
   Future<void> _install() async {
@@ -266,7 +262,7 @@ class _AppUpdatePageState extends ConsumerState<AppUpdatePage> {
     }
     return _UpdateAvailableState(
       update: update,
-      currentVersion: _result!.currentVersion,
+      currentVersion: _result!.installed.clientVersion,
       progress: _progress,
       actionError: _actionError ?? _updateService.updateProblem(update),
       isInstalling: _isInstalling,
@@ -278,12 +274,9 @@ class _AppUpdatePageState extends ConsumerState<AppUpdatePage> {
 }
 
 class _UpdateCheckResult {
-  const _UpdateCheckResult({
-    required this.currentVersion,
-    required this.update,
-  });
+  const _UpdateCheckResult({required this.installed, required this.update});
 
-  final String currentVersion;
+  final AppUpdateVersions installed;
   final AppUpdateInfo? update;
 }
 

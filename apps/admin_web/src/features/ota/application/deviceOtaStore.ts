@@ -291,6 +291,36 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
     })
   }
 
+  async function sendFirmwareToDevice(
+    release: OtaRelease,
+    deviceId: string,
+  ): Promise<boolean> {
+    const normalizedDeviceID = deviceId.trim()
+    if (!normalizedDeviceID) {
+      error.value = {
+        kind: 'validation',
+        message: '请输入设备的唯一标识',
+        retryable: false,
+      }
+      return false
+    }
+    return submitAction('固件更新已下发，设备联网后会开始下载。', async () => {
+      await client.createDeployment(release.releaseId, normalizedDeviceID)
+      // The OTA deployment is the durable authorization record. The runtime
+      // command re-checks that exact record before delivery, so a failure here
+      // is surfaced and the deployment remains visible for an explicit retry.
+      await createHttpClient().post(
+        `/api/v1/admin/devices/${encodeURIComponent(normalizedDeviceID)}/commands`,
+        {
+          command_type: 'firmware_update',
+          release_id: release.releaseId,
+        },
+      )
+      await refreshSelectedRelease()
+      await load()
+    })
+  }
+
   async function loadFirmwareFiles(query: DownloadFileQuery = {}): Promise<void> {
     isLoadingFiles.value = true
     error.value = null
@@ -453,6 +483,7 @@ export const useDeviceOtaStore = defineStore('admin-device-ota', () => {
     retryDeployment,
     rollbackRelease,
     selectRelease,
+    sendFirmwareToDevice,
     selectedReleaseId,
     statistics,
     statisticsDegraded,

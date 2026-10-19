@@ -155,7 +155,7 @@ void main() {
 
     expect(find.text('初芽 的固件'), findsOneWidget);
     expect(find.text('当前版本 0.9.0 · 可更新至 0.10.0'), findsOneWidget);
-    expect(find.widgetWithText(FilledButton, '开始更新设备固件'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, '开始升级设备固件'), findsOneWidget);
   });
 }
 
@@ -222,11 +222,11 @@ DeviceFirmwareUpdate _availableUpdate() {
   return DeviceFirmwareUpdate(
     deviceId: 'device_demo_003',
     deploymentId: 'ota_deployment_001',
+    deploymentKind: DeviceFirmwareDeploymentKind.install,
     status: DeviceFirmwareUpdateStatus.available,
     currentVersion: '0.9.0',
     targetVersion: '0.10.0',
     updateAvailable: true,
-    rollbackAvailable: false,
     progressPercent: 0,
     checkedAt: DateTime.parse('2026-10-09T00:00:00Z'),
     release: DeviceFirmwareRelease(

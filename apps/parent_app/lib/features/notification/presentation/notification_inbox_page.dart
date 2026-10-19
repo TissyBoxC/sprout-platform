@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -21,9 +23,7 @@ class NotificationInboxPage extends ConsumerWidget {
         actions: [
           if (unread > 0)
             TextButton(
-              onPressed: () => ref
-                  .read(notificationControllerProvider.notifier)
-                  .markAllRead(),
+              onPressed: () => _markAllRead(context, ref),
               child: const Text('全部已读'),
             ),
           IconButton(
@@ -115,17 +115,93 @@ class NotificationInboxPage extends ConsumerWidget {
     WidgetRef ref,
     GuardianNotification notification,
   ) async {
-    await ref
+    final destination = safeNotificationDestination(notification.actionPath);
+    if (destination != null && context.mounted) {
+      context.push(destination);
+    } else if (context.mounted) {
+      _showActionMessage(context, '这条消息没有可打开的页面，内容仍可在消息列表中查看');
+    }
+    unawaited(_syncReadState(context, ref, notification));
+  }
+
+  Future<void> _markAllRead(BuildContext context, WidgetRef ref) async {
+    final result = await ref
         .read(notificationControllerProvider.notifier)
-        .markRead(notification);
-    if (!context.mounted) {
+        .markAllRead();
+    if (!context.mounted || !result.didFail) {
       return;
     }
-    final path = notification.actionPath.trim();
-    if (path.startsWith('/')) {
-      context.push(path);
-    }
+    _showActionMessage(context, result.errorMessage!);
   }
+
+  Future<void> _syncReadState(
+    BuildContext context,
+    WidgetRef ref,
+    GuardianNotification notification,
+  ) async {
+    final result = await ref
+        .read(notificationControllerProvider.notifier)
+        .markRead(notification);
+    if (!context.mounted || !result.didFail) {
+      return;
+    }
+    _showActionMessage(context, result.errorMessage!);
+  }
+
+  void _showActionMessage(BuildContext context, String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+}
+
+/// Returns a safe in-app destination for a notification action.
+///
+/// Only absolute in-app paths without an authority, scheme, fragment,
+/// traversal, or control characters are accepted. Unknown routes remain the
+/// router's responsibility, while malformed values never leave the inbox.
+String? safeNotificationDestination(String rawPath) {
+  final raw = rawPath.trim();
+  if (raw.isEmpty ||
+      !raw.startsWith('/') ||
+      raw.startsWith('//') ||
+      raw.contains('\\') ||
+      raw.contains('..') ||
+      RegExp(r'[\u0000-\u001f\u007f]').hasMatch(raw)) {
+    return null;
+  }
+  final uri = Uri.tryParse(raw);
+  if (uri == null ||
+      uri.hasScheme ||
+      uri.hasAuthority ||
+      uri.hasFragment ||
+      uri.path.isEmpty ||
+      !uri.path.startsWith('/')) {
+    return null;
+  }
+  final decodedPath = _safeDecode(uri.path);
+  final decodedQuery = _safeDecode(uri.query);
+  if (decodedPath == null ||
+      decodedQuery == null ||
+      decodedPath.contains('..') ||
+      decodedPath.contains('\\') ||
+      _containsControl(decodedPath) ||
+      _containsControl(decodedQuery)) {
+    return null;
+  }
+  return uri.toString();
+}
+
+String? _safeDecode(String value) {
+  try {
+    return Uri.decodeComponent(value);
+  } on FormatException {
+    return null;
+  }
+}
+
+bool _containsControl(String value) {
+  return value.codeUnits.any((codeUnit) => codeUnit < 0x20 || codeUnit == 0x7f);
 }
 
 class _NotificationCard extends StatelessWidget {
@@ -194,10 +270,7 @@ class _NotificationCard extends StatelessWidget {
               ),
               if (notification.body.isNotEmpty) ...[
                 const SizedBox(height: 6),
-                Text(
-                  notification.body,
-                  style: theme.textTheme.bodyMedium,
-                ),
+                Text(notification.body, style: theme.textTheme.bodyMedium),
               ],
               if (notification.hasAction) ...[
                 const SizedBox(height: 10),
@@ -229,7 +302,11 @@ class _NotificationCard extends StatelessWidget {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.onRetry, required this.onCompose, super.key});
+  const _EmptyState({
+    required this.onRetry,
+    required this.onCompose,
+    super.key,
+  });
 
   final Future<void> Function() onRetry;
   final VoidCallback onCompose;
@@ -252,10 +329,7 @@ class _EmptyState extends StatelessWidget {
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 6),
-        const Text(
-          '设备状态、内容更新和平台通知会显示在这里。',
-          textAlign: TextAlign.center,
-        ),
+        const Text('设备状态、内容更新和平台通知会显示在这里。', textAlign: TextAlign.center),
         const SizedBox(height: 20),
         FilledButton.icon(
           onPressed: onCompose,
@@ -315,7 +389,9 @@ String _timeLabel(DateTime? time) {
   final local = time.toLocal();
   final now = DateTime.now();
   final sameDay =
-      local.year == now.year && local.month == now.month && local.day == now.day;
+      local.year == now.year &&
+      local.month == now.month &&
+      local.day == now.day;
   if (sameDay) {
     final hour = local.hour.toString().padLeft(2, '0');
     final minute = local.minute.toString().padLeft(2, '0');

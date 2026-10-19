@@ -516,6 +516,7 @@ class _AuthApiStub implements AuthApi {
   Future<AppUpdateInfo?> appUpdate({
     required String platform,
     required String currentVersion,
+    String? currentResourceVersion,
   }) {
     throw UnimplementedError();
   }

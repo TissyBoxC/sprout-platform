@@ -88,6 +88,7 @@ class AppUpdateInfo {
   final String minSupportedVersion;
 
   bool get isClientUpdate => kind == 'client';
+  bool get isResourceUpdate => kind == 'resource';
 
   factory AppUpdateInfo.fromJson(Map<String, Object?> json) {
     return AppUpdateInfo(
@@ -331,15 +332,23 @@ class AuthApi {
   }
 
   /// Returns the next available update, or null when the client is current.
+  ///
+  /// `current_resource_version` is forward-compatible: the current platform
+  /// may ignore it, while the client still suppresses an already activated
+  /// resource release locally.
   Future<AppUpdateInfo?> appUpdate({
     required String platform,
     required String currentVersion,
+    String? currentResourceVersion,
   }) async {
+    final resourceVersion = currentResourceVersion?.trim() ?? '';
     final response = await _apiClient.get(
       '/api/v1/app/update',
       queryParameters: {
         'platform': platform,
         'current_version': currentVersion,
+        if (resourceVersion.isNotEmpty)
+          'current_resource_version': resourceVersion,
       },
     );
     if (ApiClientNoContent.isEmptyNoContent(response)) {

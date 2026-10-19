@@ -12,9 +12,7 @@ void main() {
   testWidgets('update page exposes a visible return control while checking', (
     tester,
   ) async {
-    final service = _FakeUpdateCoordinator(
-      installedVersionFuture: Completer<String>().future,
-    );
+    final service = _FakeUpdateCoordinator(installedCompleter: Completer());
     await tester.pumpWidget(_updateApp(service));
     await tester.tap(find.text('打开更新页'));
     await tester.pump();
@@ -79,9 +77,104 @@ void main() {
     expect(find.text('软件更新'), findsOneWidget);
     expect(find.text('更新已停止，可以稍后重新开始'), findsOneWidget);
   });
+
+  testWidgets(
+    'check sends the active resource version and suppresses an equal one',
+    (tester) async {
+      final service = _FakeUpdateCoordinator(
+        installed: const AppUpdateVersions(
+          clientVersion: '1.0.0',
+          resourceVersion: '1.0.1',
+        ),
+      );
+      AppUpdateVersions? observed;
+      await tester.pumpWidget(
+        _updateApp(
+          service,
+          updateLoader: (_, installed) async {
+            observed = installed;
+            return reconcileInstalledUpdate(
+              candidate: _resourceUpdate(),
+              installed: installed,
+            );
+          },
+        ),
+      );
+      await tester.tap(find.text('打开更新页'));
+      await tester.pumpAndSettle();
+
+      expect(observed?.resourceVersion, '1.0.1');
+      expect(find.text('已经是最新版本'), findsOneWidget);
+      expect(find.text('有新的内容可以更新'), findsNothing);
+    },
+  );
+
+  testWidgets('a higher resource version is still offered', (tester) async {
+    final service = _FakeUpdateCoordinator(
+      installed: const AppUpdateVersions(
+        clientVersion: '1.0.0',
+        resourceVersion: '1.0.0',
+      ),
+    );
+    await tester.pumpWidget(
+      _updateApp(
+        service,
+        updateLoader: (_, installed) async => reconcileInstalledUpdate(
+          candidate: _resourceUpdate(),
+          installed: installed,
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开更新页'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('有新的内容可以更新'), findsOneWidget);
+    expect(find.text('当前 1.0.0，可更新到 1.0.1'), findsOneWidget);
+  });
+
+  testWidgets('a higher client version is not hidden by the resource marker', (
+    tester,
+  ) async {
+    final service = _FakeUpdateCoordinator(
+      installed: const AppUpdateVersions(
+        clientVersion: '1.0.0',
+        resourceVersion: '1.0.1',
+      ),
+    );
+    await tester.pumpWidget(
+      _updateApp(
+        service,
+        updateLoader: (_, installed) async => reconcileInstalledUpdate(
+          candidate: const AppUpdateInfo(
+            kind: 'client',
+            version: '1.0.1',
+            downloadUrl: 'https://example.com/app.apk',
+            sha256:
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            releaseNotes: '客户端更新',
+            isMandatory: false,
+            minSupportedVersion: '1.0.0',
+          ),
+          installed: installed,
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开更新页'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('发现新版本'), findsOneWidget);
+  });
 }
 
-Widget _updateApp(AppUpdateCoordinator service) {
+Widget _updateApp(
+  AppUpdateCoordinator service, {
+  Future<AppUpdateInfo?> Function(
+    AppUpdateCoordinator service,
+    AppUpdateVersions installed,
+  )?
+  updateLoader,
+}) {
   return ProviderScope(
     child: MaterialApp(
       home: Builder(
@@ -92,7 +185,8 @@ Widget _updateApp(AppUpdateCoordinator service) {
                 MaterialPageRoute<void>(
                   builder: (_) => AppUpdatePage(
                     updateService: service,
-                    updateLoader: (_, _) async => _resourceUpdate(),
+                    updateLoader:
+                        updateLoader ?? (_, _) async => _resourceUpdate(),
                   ),
                 ),
               ),
@@ -119,19 +213,25 @@ AppUpdateInfo _resourceUpdate() {
 
 class _FakeUpdateCoordinator implements AppUpdateCoordinator {
   _FakeUpdateCoordinator({
-    Future<String>? installedVersionFuture,
+    AppUpdateVersions installed = const AppUpdateVersions(
+      clientVersion: '1.0.0',
+      resourceVersion: '',
+    ),
+    this.installedCompleter,
     this.installCompleter,
-  }) : installedVersionFuture =
-           installedVersionFuture ?? Future<String>.value('1.0.0');
+  }) : _installed = installed;
 
-  final Future<String> installedVersionFuture;
+  final AppUpdateVersions _installed;
+  final Completer<AppUpdateVersions>? installedCompleter;
   final Completer<void>? installCompleter;
   CancelToken? cancelToken;
 
   @override
-  Future<String> installedVersion() {
-    return installedVersionFuture;
-  }
+  Future<AppUpdateVersions> installedUpdateVersions() =>
+      installedCompleter?.future ?? Future<AppUpdateVersions>.value(_installed);
+
+  @override
+  Future<String> installedVersion() async => _installed.clientVersion;
 
   @override
   String? updateProblem(AppUpdateInfo update) => null;

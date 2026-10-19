@@ -108,13 +108,31 @@ class NotificationController extends AsyncNotifier<NotificationInboxState> {
     }
   }
 
-  Future<void> markRead(GuardianNotification notification) async {
+  Future<NotificationMutationResult> markRead(
+    GuardianNotification notification,
+  ) async {
     if (notification.isRead) {
-      return;
+      return const NotificationMutationResult.alreadyApplied();
     }
     final current = state.value;
     if (current == null) {
-      return;
+      return const NotificationMutationResult.unavailable();
+    }
+    if (!current.items.any((item) => item.id == notification.id)) {
+      return const NotificationMutationResult.unavailable();
+    }
+    GuardianNotification? existing;
+    for (final item in current.items) {
+      if (item.id == notification.id) {
+        existing = item;
+        break;
+      }
+    }
+    if (existing == null) {
+      return const NotificationMutationResult.unavailable();
+    }
+    if (existing.isRead) {
+      return const NotificationMutationResult.alreadyApplied();
     }
     final updated = current.items
         .map((item) => item.id == notification.id ? _copyAsRead(item) : item)
@@ -127,16 +145,32 @@ class NotificationController extends AsyncNotifier<NotificationInboxState> {
     );
     try {
       await _api.markRead(notification.id);
-    } on Object {
+      return const NotificationMutationResult.succeeded();
+    } on Object catch (error) {
       // Restore the previous badge if the server rejected the change.
-      state = AsyncData(current);
+      final latest = state.value;
+      if (latest != null) {
+        state = AsyncData(
+          latest.copyWith(
+            items: latest.items
+                .map<GuardianNotification>(
+                  (item) => item.id == notification.id ? existing! : item,
+                )
+                .toList(growable: false),
+            unreadCount: latest.unreadCount + 1,
+          ),
+        );
+      }
+      return NotificationMutationResult.failed(
+        notificationMutationMessage(error, markingAll: false),
+      );
     }
   }
 
-  Future<void> markAllRead() async {
+  Future<NotificationMutationResult> markAllRead() async {
     final current = state.value;
     if (current == null || current.unreadCount == 0) {
-      return;
+      return const NotificationMutationResult.alreadyApplied();
     }
     state = AsyncData(
       current.copyWith(
@@ -146,10 +180,69 @@ class NotificationController extends AsyncNotifier<NotificationInboxState> {
     );
     try {
       await _api.markAllRead();
-    } on Object {
-      state = AsyncData(current);
+      return const NotificationMutationResult.succeeded();
+    } on Object catch (error) {
+      final latest = state.value;
+      if (latest != null) {
+        final unreadById = {
+          for (final item in current.items)
+            if (!item.isRead) item.id: item,
+        };
+        state = AsyncData(
+          latest.copyWith(
+            items: latest.items
+                .map<GuardianNotification>(
+                  (item) => item.isRead ? (unreadById[item.id] ?? item) : item,
+                )
+                .toList(growable: false),
+            unreadCount: current.unreadCount,
+          ),
+        );
+      }
+      return NotificationMutationResult.failed(
+        notificationMutationMessage(error, markingAll: true),
+      );
     }
   }
+}
+
+/// Result of one read-state mutation for page-level feedback.
+class NotificationMutationResult {
+  const NotificationMutationResult._({
+    required this.didChange,
+    this.errorMessage,
+  });
+
+  const NotificationMutationResult.succeeded() : this._(didChange: true);
+
+  const NotificationMutationResult.alreadyApplied() : this._(didChange: false);
+
+  const NotificationMutationResult.unavailable()
+    : this._(didChange: false, errorMessage: '消息状态暂时无法更新，请稍后重试');
+
+  const NotificationMutationResult.failed(String message)
+    : this._(didChange: false, errorMessage: message);
+
+  final bool didChange;
+  final String? errorMessage;
+
+  bool get didFail => errorMessage != null;
+}
+
+/// Maps read-state failures to copy that keeps the message visible and the
+/// retry decision explicit.
+String notificationMutationMessage(Object error, {required bool markingAll}) {
+  if (error is AppException) {
+    return switch (error.kind) {
+      AppErrorKind.unauthenticated => '登录已过期，消息仍未标记为已读，请重新登录后再试',
+      AppErrorKind.insufficientPermission =>
+        markingAll ? '当前家庭角色不能全部标记已读，消息状态没有变化' : '当前家庭角色不能标记这条消息，消息状态没有变化',
+      AppErrorKind.network => '网络连接不稳定，消息状态没有更新，请稍后重试',
+      AppErrorKind.serviceUnavailable => '服务暂时不可用，消息状态没有更新，请稍后重试',
+      _ => '消息状态没有更新，请稍后重试',
+    };
+  }
+  return '消息状态没有更新，请稍后重试';
 }
 
 GuardianNotification _copyAsRead(GuardianNotification notification) {

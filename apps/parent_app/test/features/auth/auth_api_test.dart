@@ -99,19 +99,21 @@ void main() {
     },
   );
 
-  test('update check sends platform and current version', () async {
+  test('update check sends platform, client and resource versions', () async {
     final client = _RecordingApiClient();
     final api = AuthApi(client);
 
     final update = await api.appUpdate(
       platform: 'android',
       currentVersion: '1.0.0',
+      currentResourceVersion: '1.0.1',
     );
 
     expect(client.path, '/api/v1/app/update');
     expect(client.queryParameters, {
       'platform': 'android',
       'current_version': '1.0.0',
+      'current_resource_version': '1.0.1',
     });
     expect(update?.isClientUpdate, isFalse);
     expect(update?.version, '1.0.1');
@@ -127,6 +129,22 @@ void main() {
     );
 
     expect(update, isNull);
+  });
+
+  test('update check omits an empty resource version', () async {
+    final client = _RecordingApiClient();
+    final api = AuthApi(client);
+
+    await api.appUpdate(
+      platform: 'android',
+      currentVersion: '1.0.0',
+      currentResourceVersion: '   ',
+    );
+
+    expect(client.queryParameters, {
+      'platform': 'android',
+      'current_version': '1.0.0',
+    });
   });
 
   test('malformed 200 update check fails closed', () async {

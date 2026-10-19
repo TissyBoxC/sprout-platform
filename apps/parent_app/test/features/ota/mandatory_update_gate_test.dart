@@ -70,6 +70,47 @@ void main() {
     expect(find.text('应用首页'), findsOneWidget);
   });
 
+  testWidgets('gate receives both installed versions for update discovery', (
+    tester,
+  ) async {
+    final service = _FakeUpdateCoordinator(
+      installed: const AppUpdateVersions(
+        clientVersion: '1.0.0',
+        resourceVersion: '1.0.1',
+      ),
+    );
+    AppUpdateVersions? observed;
+    await tester.pumpWidget(
+      _gateApp(
+        service: service,
+        updateLoader: (_, installed) async {
+          observed = installed;
+          return reconcileInstalledUpdate(
+            candidate: const AppUpdateInfo(
+              kind: 'resource',
+              version: '1.0.1',
+              downloadUrl: 'https://example.com/resource.zip',
+              sha256:
+                  'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+                  'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              releaseNotes: '内容更新',
+              isMandatory: true,
+              minSupportedVersion: '1.0.0',
+            ),
+            installed: installed,
+          );
+        },
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(observed?.clientVersion, '1.0.0');
+    expect(observed?.resourceVersion, '1.0.1');
+    expect(find.text('需要更新'), findsNothing);
+    expect(find.text('应用首页'), findsOneWidget);
+  });
+
   testWidgets('install runs without any dismissal control appearing', (
     tester,
   ) async {
@@ -204,7 +245,7 @@ Widget _gateApp({
   required AppUpdateCoordinator service,
   required Future<AppUpdateInfo?> Function(
     AppUpdateCoordinator service,
-    String currentVersion,
+    AppUpdateVersions installed,
   )
   updateLoader,
   MandatoryUpdatePlatform platform = const _AndroidUpdatePlatform(),
@@ -237,10 +278,21 @@ AppUpdateInfo _clientUpdate({required bool isMandatory}) {
 }
 
 class _FakeUpdateCoordinator implements AppUpdateCoordinator {
+  _FakeUpdateCoordinator({
+    this.installed = const AppUpdateVersions(
+      clientVersion: '1.0.0',
+      resourceVersion: '',
+    ),
+  });
+
+  final AppUpdateVersions installed;
   bool didInstallClientUpdate = false;
 
   @override
-  Future<String> installedVersion() async => '1.0.0';
+  Future<AppUpdateVersions> installedUpdateVersions() async => installed;
+
+  @override
+  Future<String> installedVersion() async => installed.clientVersion;
 
   @override
   String? updateProblem(AppUpdateInfo update) => null;

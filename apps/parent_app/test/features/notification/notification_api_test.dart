@@ -61,11 +61,7 @@ void main() {
     expect(await big.unreadCount(), 9999);
 
     final missing = NotificationApi(
-      _FakeApiClient(
-        response: <String, Object?>{
-          'data': <String, Object?>{},
-        },
-      ),
+      _FakeApiClient(response: <String, Object?>{'data': <String, Object?>{}}),
     );
     expect(await missing.unreadCount(), 0);
   });
@@ -92,8 +88,7 @@ void main() {
     expect(client.lastPostPath, '/api/v1/notifications/read-all');
   });
 
-  test('sends a family message with the device and display options',
-      () async {
+  test('sends a family message with the device and display options', () async {
     final client = _FakeApiClient(
       response: <String, Object?>{'data': <String, Object?>{}},
     );
@@ -121,9 +116,9 @@ void main() {
   });
 
   test('defaults missing optional copy without throwing', () {
-    final notification = GuardianNotification.fromJson(
-      <String, Object?>{'id': 'notice-1'},
-    );
+    final notification = GuardianNotification.fromJson(<String, Object?>{
+      'id': 'notice-1',
+    });
 
     expect(notification.category, 'system_announcement');
     expect(notification.severity, 'info');

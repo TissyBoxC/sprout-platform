@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parent_app/core/network/api_client.dart';
 import 'package:parent_app/features/ota/device_firmware/data/device_firmware_api.dart';
+import 'package:parent_app/features/ota/device_firmware/domain/device_firmware_update.dart';
 
 void main() {
   test('uses the exact device OTA endpoints', () async {
@@ -38,10 +39,26 @@ void main() {
 
     expect(update.deviceId, 'device_demo_001');
     expect(update.status.wireValue, 'available');
+    expect(update.deploymentKind, DeviceFirmwareDeploymentKind.install);
+  });
+
+  test('parses rollback metadata from a guardian status response', () async {
+    final client = _RecordingApiClient(rollback: true);
+    final api = DeviceFirmwareApi(client);
+
+    final update = await api.status('device_demo_001');
+
+    expect(update.status, DeviceFirmwareUpdateStatus.rollbackAvailable);
+    expect(update.deploymentKind, DeviceFirmwareDeploymentKind.rollback);
+    expect(update.rollbackReleaseId, 'ota_release_rollback');
+    expect(update.rollbackOfDeploymentId, 'ota_deployment_previous');
   });
 }
 
 class _RecordingApiClient implements ApiClient {
+  _RecordingApiClient({this.rollback = false});
+
+  final bool rollback;
   final List<String> calls = <String>[];
   Object? lastBody;
 
@@ -84,17 +101,22 @@ class _RecordingApiClient implements ApiClient {
     'data': <String, Object?>{
       'schema_version': '1.0.0',
       'device_id': 'device_demo_001',
-      'deployment_id': 'ota_deployment_001',
-      'status': 'available',
+      'deployment_id': rollback
+          ? 'ota_deployment_rollback'
+          : 'ota_deployment_001',
+      'deployment_kind': rollback ? 'rollback' : 'install',
+      if (rollback) 'rollback_release_id': 'ota_release_rollback',
+      if (rollback) 'rollback_of_deployment_id': 'ota_deployment_previous',
+      'status': rollback ? 'rollback_available' : 'available',
       'current_version': '0.9.0',
       'target_version': '0.10.0',
       'update_available': true,
-      'rollback_available': false,
+      'rollback_available': rollback,
       'progress_percent': 0,
       'checked_at': '2026-10-09T00:00:00Z',
       'release': <String, Object?>{
         'schema_version': '1.0.0',
-        'release_id': 'ota_release_001',
+        'release_id': rollback ? 'ota_release_rollback' : 'ota_release_001',
         'firmware_version': '0.10.0',
         'hardware_revision': 's3_n16r8',
         'channel': 'stable',

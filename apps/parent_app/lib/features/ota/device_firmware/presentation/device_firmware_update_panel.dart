@@ -138,6 +138,8 @@ class _FirmwarePanelContent extends ConsumerWidget {
             '当前版本 ${_versionLabel(update.currentVersion)}'
             '${update.targetVersion == null ? '' : ' · 可更新至 ${update.targetVersion}'}',
           ),
+          const SizedBox(height: 12),
+          _DeploymentKindNotice(update: update),
           const SizedBox(height: 16),
           _FirmwareTimeline(update: update),
           if (update.status.isInProgress) ...[
@@ -229,7 +231,7 @@ class _FirmwareActions extends ConsumerWidget {
                 ? () => _confirmInstall(context, notifier, deviceName, update)
                 : null,
             icon: const Icon(Icons.system_update_alt_rounded),
-            label: Text(isDeviceOnline ? '开始更新设备固件' : '设备离线，暂时不能更新'),
+            label: Text(isDeviceOnline ? '开始升级设备固件' : '设备离线，暂时不能升级'),
           )
         else if (state.canRetry) ...[
           FilledButton.icon(
@@ -287,7 +289,37 @@ class _FirmwareActions extends ConsumerWidget {
             message: '当前没有可执行的固件操作。',
             color: Colors.blueGrey,
           ),
+        if (!state.canRollback && update.rollbackBlockedReason != null) ...[
+          const SizedBox(height: 10),
+          Text(
+            update.rollbackBlockedReason!,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
       ],
+    );
+  }
+}
+
+class _DeploymentKindNotice extends StatelessWidget {
+  const _DeploymentKindNotice({required this.update});
+
+  final DeviceFirmwareUpdate update;
+
+  @override
+  Widget build(BuildContext context) {
+    final isRollback = update.isAuthorizedRollback;
+    final color = isRollback
+        ? Theme.of(context).colorScheme.tertiary
+        : Theme.of(context).colorScheme.primary;
+    return _InlineNotice(
+      icon: isRollback ? Icons.undo_rounded : Icons.system_update_alt_rounded,
+      message: switch (update.status) {
+        DeviceFirmwareUpdateStatus.rolledBack => '设备已完成授权回退，当前使用先前已验证的版本。',
+        _ when isRollback => '当前任务是授权回退：将设备恢复到先前已验证的版本。',
+        _ => '当前任务是常规升级：将设备安装到新的已签名版本。',
+      },
+      color: color,
     );
   }
 }
@@ -572,7 +604,7 @@ Future<void> _confirmRollback(
     builder: (context) => AlertDialog(
       title: const Text('回退设备固件'),
       content: Text(
-        '将把“$deviceName”恢复到上一个可用版本。'
+        '将把“$deviceName”恢复到平台已授权的上一个可用版本。'
         '回退期间请保持设备开机并连接电源。',
       ),
       actions: [

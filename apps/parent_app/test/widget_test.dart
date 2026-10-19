@@ -215,6 +215,7 @@ class _FailingAuthApi implements AuthApi {
   Future<AppUpdateInfo?> appUpdate({
     required String platform,
     required String currentVersion,
+    String? currentResourceVersion,
   }) {
     throw UnimplementedError();
   }
@@ -310,6 +311,7 @@ class _InvalidCredentialsAuthApi implements AuthApi {
   Future<AppUpdateInfo?> appUpdate({
     required String platform,
     required String currentVersion,
+    String? currentResourceVersion,
   }) {
     throw UnimplementedError();
   }
@@ -405,6 +407,7 @@ class _FailingRegisterAuthApi implements AuthApi {
   Future<AppUpdateInfo?> appUpdate({
     required String platform,
     required String currentVersion,
+    String? currentResourceVersion,
   }) {
     throw UnimplementedError();
   }

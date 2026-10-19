@@ -59,7 +59,7 @@ class MandatoryUpdateGate extends ConsumerStatefulWidget {
   /// Test seam for update discovery without platform package metadata.
   final Future<AppUpdateInfo?> Function(
     AppUpdateCoordinator service,
-    String currentVersion,
+    AppUpdateVersions installed,
   )?
   updateLoader;
 
@@ -125,8 +125,8 @@ class _MandatoryUpdateGateState extends ConsumerState<MandatoryUpdateGate>
       });
     }
     try {
-      final currentVersion = await _updateService.installedVersion();
-      final update = await _loadUpdate(currentVersion);
+      final installed = await _updateService.installedUpdateVersions();
+      final update = await _loadUpdate(installed);
       if (!mounted) {
         return;
       }
@@ -161,17 +161,16 @@ class _MandatoryUpdateGateState extends ConsumerState<MandatoryUpdateGate>
     }
   }
 
-  Future<AppUpdateInfo?> _loadUpdate(String currentVersion) {
+  Future<AppUpdateInfo?> _loadUpdate(AppUpdateVersions installed) {
     final updateLoader = widget.updateLoader;
     if (updateLoader != null) {
-      return updateLoader(_updateService, currentVersion);
+      return updateLoader(_updateService, installed);
     }
-    return ref
-        .read(authApiProvider)
-        .appUpdate(
-          platform: Platform.isAndroid ? 'android' : 'ios',
-          currentVersion: currentVersion,
-        );
+    return discoverInstalledUpdate(
+      api: ref.read(authApiProvider),
+      platform: Platform.isAndroid ? 'android' : 'ios',
+      installed: installed,
+    );
   }
 
   Future<void> _install() async {

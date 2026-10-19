@@ -40,14 +40,15 @@ class DeviceFirmwareState {
       update != null &&
       update!.status == DeviceFirmwareUpdateStatus.available &&
       update!.updateAvailable &&
+      update!.deploymentKind != DeviceFirmwareDeploymentKind.rollback &&
       update!.release?.isInstallable == true &&
       !update!.status.isInProgress;
 
   bool get canRetry => update?.status.allowsRetry == true;
 
   bool get canRollback =>
-      update?.rollbackAvailable == true ||
-      update?.status.allowsRollback == true;
+      update?.rollbackAvailable == true &&
+      update!.rollbackBlockedReason == null;
 
   DeviceFirmwareState copyWith({
     DeviceFirmwareUpdate? update,

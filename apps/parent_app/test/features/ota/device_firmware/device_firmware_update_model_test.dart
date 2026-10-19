@@ -12,6 +12,8 @@ void main() {
       expect(update.targetVersion, '0.10.0');
       expect(update.updateAvailable, isTrue);
       expect(update.rollbackAvailable, isFalse);
+      expect(update.deploymentKind, DeviceFirmwareDeploymentKind.install);
+      expect(update.isAuthorizedRollback, isFalse);
       expect(update.release?.channel, 'stable');
       expect(update.release?.isInstallable, isTrue);
       expect(update.release?.sizeBytes, 4194304);
@@ -83,6 +85,76 @@ void main() {
       expect(update.targetVersion, isNull);
     });
 
+    test('parses an authorized rollback with a coherent target release', () {
+      final json = _rollbackUpdateJson();
+
+      final update = DeviceFirmwareUpdate.fromJson(json);
+
+      expect(update.status, DeviceFirmwareUpdateStatus.rollbackAvailable);
+      expect(update.deploymentKind, DeviceFirmwareDeploymentKind.rollback);
+      expect(update.isAuthorizedRollback, isTrue);
+      expect(update.rollbackReleaseId, 'ota_release_rollback');
+      expect(update.rollbackOfDeploymentId, 'ota_deployment_previous');
+      expect(update.release?.releaseId, 'ota_release_rollback');
+      expect(update.rollbackBlockedReason, isNull);
+    });
+
+    test(
+      'accepts an older response that omits new optional rollback fields',
+      () {
+        final json = _deviceUpdateJson()..remove('deployment_kind');
+
+        final update = DeviceFirmwareUpdate.fromJson(json);
+
+        expect(update.deploymentKind, isNull);
+        expect(update.isAuthorizedRollback, isFalse);
+        expect(update.rollbackReleaseId, isNull);
+      },
+    );
+
+    test('rejects a rollback deployment missing its source deployment', () {
+      final json = _rollbackUpdateJson()..remove('rollback_of_deployment_id');
+
+      expect(() => DeviceFirmwareUpdate.fromJson(json), throwsFormatException);
+    });
+
+    test('rejects a rollback whose release does not match the target id', () {
+      final json = _rollbackUpdateJson();
+      final release = Map<String, Object?>.from(json['release']! as Map)
+        ..['release_id'] = 'ota_release_other';
+      json['release'] = release;
+
+      expect(() => DeviceFirmwareUpdate.fromJson(json), throwsFormatException);
+    });
+
+    test('rejects a rollback status without rollback identity', () {
+      final json = _deviceUpdateJson()
+        ..['status'] = 'rollback_available'
+        ..['rollback_available'] = true;
+
+      expect(() => DeviceFirmwareUpdate.fromJson(json), throwsFormatException);
+    });
+
+    test('rejects an install deployment carrying rollback identity', () {
+      final json = _deviceUpdateJson()
+        ..['rollback_release_id'] = 'ota_release_rollback'
+        ..['rollback_of_deployment_id'] = 'ota_deployment_previous';
+
+      expect(() => DeviceFirmwareUpdate.fromJson(json), throwsFormatException);
+    });
+
+    test('rejects contradictory rollback booleans', () {
+      final json = _deviceUpdateJson()..['rollback_available'] = true;
+
+      expect(() => DeviceFirmwareUpdate.fromJson(json), throwsFormatException);
+    });
+
+    test('rejects unknown deployment kinds instead of guessing', () {
+      final json = _deviceUpdateJson()..['deployment_kind'] = 'downgrade';
+
+      expect(() => DeviceFirmwareUpdate.fromJson(json), throwsFormatException);
+    });
+
     test('exposes retry, rollback, and in-progress state helpers', () {
       expect(DeviceFirmwareUpdateStatus.failed.allowsRetry, isTrue);
       expect(
@@ -100,6 +172,7 @@ Map<String, Object?> _deviceUpdateJson() {
     'schema_version': '1.0.0',
     'device_id': 'device_demo_001',
     'deployment_id': 'ota_deployment_001',
+    'deployment_kind': 'install',
     'status': 'available',
     'current_version': '0.9.0',
     'target_version': '0.10.0',
@@ -133,6 +206,24 @@ Map<String, Object?> _deviceUpdateJson() {
       'updated_at': '2026-10-09T00:00:00Z',
     },
   };
+}
+
+Map<String, Object?> _rollbackUpdateJson() {
+  final json = _deviceUpdateJson()
+    ..['deployment_id'] = 'ota_deployment_rollback'
+    ..['deployment_kind'] = 'rollback'
+    ..['status'] = 'rollback_available'
+    ..['update_available'] = true
+    ..['rollback_available'] = true
+    ..['target_version'] = '0.9.0'
+    ..['update_available'] = true
+    ..['rollback_release_id'] = 'ota_release_rollback'
+    ..['rollback_of_deployment_id'] = 'ota_deployment_previous';
+  final release = Map<String, Object?>.from(json['release']! as Map)
+    ..['release_id'] = 'ota_release_rollback'
+    ..['firmware_version'] = '0.9.0';
+  json['release'] = release;
+  return json;
 }
 
 extension on Map<String, Object?> {

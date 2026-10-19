@@ -10,9 +10,7 @@ import 'package:parent_app/features/ota/device_firmware/domain/device_firmware_u
 
 void main() {
   test('loads the latest state and does not poll while up to date', () async {
-    final api = _FakeDeviceFirmwareApi(
-      fetched: _update(status: 'up_to_date', updateAvailable: false),
-    );
+    final api = _FakeDeviceFirmwareApi(fetched: _update(status: 'up_to_date'));
     final container = _container(api);
     addTearDown(container.dispose);
 
@@ -174,22 +172,38 @@ ProviderContainer _container(DeviceFirmwareApi api) {
   );
 }
 
-DeviceFirmwareUpdate _update({
-  required String status,
-  bool updateAvailable = true,
-  double progress = 0,
-}) {
+DeviceFirmwareUpdate _update({required String status, double progress = 0}) {
   return DeviceFirmwareUpdate(
     deviceId: 'device_demo_001',
     deploymentId: 'ota_deployment_001',
+    deploymentKind:
+        DeviceFirmwareUpdateStatus.fromWireValue(status) ==
+            DeviceFirmwareUpdateStatus.rollbackAvailable
+        ? DeviceFirmwareDeploymentKind.rollback
+        : DeviceFirmwareDeploymentKind.install,
     status: DeviceFirmwareUpdateStatus.fromWireValue(status),
     currentVersion: '0.9.0',
     targetVersion: '0.10.0',
-    updateAvailable: updateAvailable,
-    rollbackAvailable: false,
+    updateAvailable:
+        DeviceFirmwareUpdateStatus.fromWireValue(status) !=
+            DeviceFirmwareUpdateStatus.upToDate &&
+        DeviceFirmwareUpdateStatus.fromWireValue(status) !=
+            DeviceFirmwareUpdateStatus.rolledBack,
+    rollbackReleaseId:
+        DeviceFirmwareUpdateStatus.fromWireValue(status) ==
+            DeviceFirmwareUpdateStatus.rollbackAvailable
+        ? 'ota_release_001'
+        : null,
+    rollbackOfDeploymentId:
+        DeviceFirmwareUpdateStatus.fromWireValue(status) ==
+            DeviceFirmwareUpdateStatus.rollbackAvailable
+        ? 'ota_deployment_previous'
+        : null,
     progressPercent: progress,
     checkedAt: DateTime.parse('2026-10-09T00:00:00Z'),
-    release: updateAvailable
+    release:
+        DeviceFirmwareUpdateStatus.fromWireValue(status) !=
+            DeviceFirmwareUpdateStatus.upToDate
         ? DeviceFirmwareRelease(
             releaseId: 'ota_release_001',
             firmwareVersion: '0.10.0',
@@ -259,7 +273,7 @@ class _FakeDeviceFirmwareApi implements DeviceFirmwareApi {
 
   @override
   Future<DeviceFirmwareUpdate> rollback(String deviceId) async {
-    return _update(status: 'rolled_back', updateAvailable: false);
+    return _update(status: 'rolled_back');
   }
 
   @override

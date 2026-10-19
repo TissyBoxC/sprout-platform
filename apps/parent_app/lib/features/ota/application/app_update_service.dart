@@ -31,8 +31,27 @@ class AppUpdateProgress {
 
 enum AppUpdateStage { downloading, verifying, installing, extracting }
 
+/// Versions currently installed on this client.
+///
+/// Package and resource versions advance independently. Keeping both in one
+/// value prevents the update page and startup gate from making different
+/// decisions after a resource-only update.
+class AppUpdateVersions {
+  const AppUpdateVersions({
+    required this.clientVersion,
+    required this.resourceVersion,
+  });
+
+  final String clientVersion;
+  final String resourceVersion;
+}
+
 /// Checks and applies one update through the page's cancellable flow.
 abstract interface class AppUpdateCoordinator {
+  /// Client and active resource versions used for update discovery.
+  Future<AppUpdateVersions> installedUpdateVersions();
+
+  /// Package version only, for diagnostics and legacy display.
   Future<String> installedVersion();
 
   String? updateProblem(AppUpdateInfo update);
@@ -75,6 +94,29 @@ class AppUpdateService implements AppUpdateCoordinator {
   static const _clientUpdateRetention = Duration(hours: 24);
   final Dio _downloadClient;
 
+  /// Reads both the installed package version and the active resource marker.
+  ///
+  /// A missing or unreadable marker means no resource package is active. It
+  /// must not be reported as a malformed package version because first-run
+  /// installations legitimately have no marker.
+  @override
+  Future<AppUpdateVersions> installedUpdateVersions() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    final supportDirectory = await getApplicationSupportDirectory();
+    final marker = File(
+      path.join(
+        supportDirectory.path,
+        _resourceRootName,
+        _currentVersionFileName,
+      ),
+    );
+    final resourceVersion = await readInstalledResourceVersion(marker);
+    return AppUpdateVersions(
+      clientVersion: packageInfo.version,
+      resourceVersion: resourceVersion,
+    );
+  }
+
   /// Describes why an advertised update cannot be installed, if any.
   ///
   /// The platform still returns update metadata during infrastructure
@@ -103,8 +145,22 @@ class AppUpdateService implements AppUpdateCoordinator {
   /// Returns the installed package version instead of a compile-time fallback.
   @override
   Future<String> installedVersion() async {
-    final packageInfo = await PackageInfo.fromPlatform();
-    return packageInfo.version;
+    final versions = await installedUpdateVersions();
+    return versions.clientVersion;
+  }
+
+  /// Reads and validates the marker written after an atomic resource install.
+  @visibleForTesting
+  static Future<String> readInstalledResourceVersion(File marker) async {
+    if (!await marker.exists()) {
+      return '';
+    }
+    try {
+      final version = (await marker.readAsString()).trim();
+      return version.isEmpty ? '' : version;
+    } on FileSystemException {
+      return '';
+    }
   }
 
   /// Downloads and opens the APK installer for a verified client package.
@@ -409,6 +465,155 @@ class AppUpdateService implements AppUpdateCoordinator {
   String _safeVersionDirectory(String version) {
     final sanitized = version.replaceAll(RegExp(r'[^0-9A-Za-z._-]'), '_');
     return sanitized.isEmpty ? 'unknown' : sanitized;
+  }
+}
+
+/// Applies the installed-version guard as a compatibility layer for platforms
+/// that only return a single update candidate.
+///
+/// A same-or-older candidate is not actionable for its own version stream.
+/// Client and resource versions advance independently, so either stream can
+/// still surface a newer package.
+AppUpdateInfo? reconcileInstalledUpdate({
+  required AppUpdateInfo? candidate,
+  required AppUpdateVersions installed,
+}) {
+  if (candidate == null) {
+    return null;
+  }
+  if (candidate.isClientUpdate) {
+    if (installed.clientVersion.isEmpty ||
+        compareAppVersions(candidate.version, installed.clientVersion) > 0) {
+      return candidate;
+    }
+    return null;
+  }
+  if (!candidate.isResourceUpdate || installed.resourceVersion.isEmpty) {
+    return candidate;
+  }
+  if (compareAppVersions(candidate.version, installed.resourceVersion) <= 0) {
+    return null;
+  }
+  return candidate;
+}
+
+/// Loads one update using the complete installed-version context.
+///
+/// Sends the resource version to future platform versions and applies the
+/// same-version guard locally so older servers cannot keep offering a package
+/// the client already activated.
+Future<AppUpdateInfo?> discoverInstalledUpdate({
+  required AuthApi api,
+  required String platform,
+  required AppUpdateVersions installed,
+}) async {
+  final candidate = await api.appUpdate(
+    platform: platform,
+    currentVersion: installed.clientVersion,
+    currentResourceVersion: installed.resourceVersion,
+  );
+  return reconcileInstalledUpdate(candidate: candidate, installed: installed);
+}
+
+/// Compares dotted numeric versions, treating a numeric pre-release suffix as
+/// older than its release. Non-version metadata is ignored.
+@visibleForTesting
+int compareAppVersions(String left, String right) {
+  final leftVersion = _ParsedVersion.tryParse(left);
+  final rightVersion = _ParsedVersion.tryParse(right);
+  if (leftVersion == null || rightVersion == null) {
+    return left.compareTo(right);
+  }
+  final coreLength = leftVersion.core.length > rightVersion.core.length
+      ? leftVersion.core.length
+      : rightVersion.core.length;
+  for (var index = 0; index < coreLength; index++) {
+    final leftPart = index < leftVersion.core.length
+        ? leftVersion.core[index]
+        : 0;
+    final rightPart = index < rightVersion.core.length
+        ? rightVersion.core[index]
+        : 0;
+    final comparison = leftPart.compareTo(rightPart);
+    if (comparison != 0) {
+      return comparison;
+    }
+  }
+  final leftPre = leftVersion.preRelease;
+  final rightPre = rightVersion.preRelease;
+  if (leftPre == null && rightPre == null) {
+    return 0;
+  }
+  if (leftPre == null) {
+    return 1;
+  }
+  if (rightPre == null) {
+    return -1;
+  }
+  final preLength = leftPre.length > rightPre.length
+      ? leftPre.length
+      : rightPre.length;
+  for (var index = 0; index < preLength; index++) {
+    final leftSegment = index < leftPre.length ? leftPre[index] : '';
+    final rightSegment = index < rightPre.length ? rightPre[index] : '';
+    final leftNumber = int.tryParse(leftSegment);
+    final rightNumber = int.tryParse(rightSegment);
+    if (leftNumber != null && rightNumber != null) {
+      final comparison = leftNumber.compareTo(rightNumber);
+      if (comparison != 0) {
+        return comparison;
+      }
+      continue;
+    }
+    if (leftNumber != null) {
+      return -1;
+    }
+    if (rightNumber != null) {
+      return 1;
+    }
+    final comparison = leftSegment.compareTo(rightSegment);
+    if (comparison != 0) {
+      return comparison;
+    }
+  }
+  return 0;
+}
+
+class _ParsedVersion {
+  const _ParsedVersion(this.core, this.preRelease);
+
+  final List<int> core;
+  final List<String>? preRelease;
+
+  static _ParsedVersion? tryParse(String value) {
+    final normalized = value.trim();
+    if (normalized.isEmpty) {
+      return null;
+    }
+    final withoutBuild = normalized.split('+').first;
+    final separator = withoutBuild.indexOf('-');
+    final coreText = separator == -1
+        ? withoutBuild
+        : withoutBuild.substring(0, separator);
+    final preText = separator == -1
+        ? null
+        : withoutBuild.substring(separator + 1);
+    final coreSegments = coreText.split('.');
+    if (coreSegments.isEmpty) {
+      return null;
+    }
+    final core = <int>[];
+    for (final segment in coreSegments) {
+      final number = int.tryParse(segment);
+      if (number == null || number < 0) {
+        return null;
+      }
+      core.add(number);
+    }
+    final preRelease = preText == null || preText.isEmpty
+        ? null
+        : preText.split('.');
+    return _ParsedVersion(core, preRelease);
   }
 }
 

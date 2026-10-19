@@ -108,11 +108,13 @@ class DeviceFirmwareUpdate {
     required this.status,
     required this.currentVersion,
     required this.updateAvailable,
-    required this.rollbackAvailable,
     required this.progressPercent,
     required this.checkedAt,
     this.deploymentId,
+    this.deploymentKind,
     this.targetVersion,
+    this.rollbackReleaseId,
+    this.rollbackOfDeploymentId,
     this.errorCode,
     this.errorMessage,
     this.release,
@@ -121,11 +123,17 @@ class DeviceFirmwareUpdate {
   final String schemaVersion;
   final String deviceId;
   final String? deploymentId;
+  final DeviceFirmwareDeploymentKind? deploymentKind;
   final DeviceFirmwareUpdateStatus status;
   final String currentVersion;
   final String? targetVersion;
   final bool updateAvailable;
-  final bool rollbackAvailable;
+  bool get rollbackAvailable =>
+      status == DeviceFirmwareUpdateStatus.rollbackAvailable &&
+      rollbackReleaseId != null &&
+      rollbackOfDeploymentId != null;
+  final String? rollbackReleaseId;
+  final String? rollbackOfDeploymentId;
   final double progressPercent;
   final String? errorCode;
   final String? errorMessage;
@@ -135,41 +143,97 @@ class DeviceFirmwareUpdate {
   factory DeviceFirmwareUpdate.fromJson(Map<String, Object?> json) {
     final releaseValue = json['release'];
     final progressValue = json['progress_percent'];
+    final deploymentId = _nullableTrimmedString(json['deployment_id']);
+    final deploymentKind = _optionalDeploymentKind(json['deployment_kind']);
+    final rollbackReleaseId = _nullableTrimmedString(
+      json['rollback_release_id'],
+    );
+    final rollbackOfDeploymentId = _nullableTrimmedString(
+      json['rollback_of_deployment_id'],
+    );
+    final status = DeviceFirmwareUpdateStatus.fromWireValue(
+      _requiredString(json['status'], 'status'),
+    );
+    final wireUpdateAvailable = _requiredBool(
+      json['update_available'],
+      'update_available',
+    );
+    final wireRollbackAvailable = _requiredBool(
+      json['rollback_available'],
+      'rollback_available',
+    );
+    final expectedRollbackAvailable =
+        status == DeviceFirmwareUpdateStatus.rollbackAvailable &&
+        rollbackReleaseId != null &&
+        rollbackOfDeploymentId != null;
+    if (wireRollbackAvailable != expectedRollbackAvailable) {
+      throw const FormatException(
+        'rollback availability conflicts with status',
+      );
+    }
+    final release = releaseValue is Map
+        ? DeviceFirmwareRelease.fromJson(
+            Map<String, Object?>.from(releaseValue),
+          )
+        : null;
+    _validateRollbackContract(
+      deploymentId: deploymentId,
+      deploymentKind: deploymentKind,
+      rollbackReleaseId: rollbackReleaseId,
+      rollbackOfDeploymentId: rollbackOfDeploymentId,
+      status: status,
+      updateAvailable: wireUpdateAvailable,
+      rollbackAvailable: wireRollbackAvailable,
+      release: release,
+    );
     return DeviceFirmwareUpdate(
       schemaVersion: _requiredSchemaVersion(json['schema_version']),
       deviceId: _requiredString(json['device_id'], 'device_id'),
-      deploymentId: _nullableTrimmedString(json['deployment_id']),
-      status: DeviceFirmwareUpdateStatus.fromWireValue(
-        _requiredString(json['status'], 'status'),
-      ),
+      deploymentId: deploymentId,
+      deploymentKind: deploymentKind,
+      status: status,
       currentVersion: _requiredString(
         json['current_version'],
         'current_version',
       ),
       targetVersion: _nullableTrimmedString(json['target_version']),
-      updateAvailable: json['update_available'] == true,
-      rollbackAvailable: json['rollback_available'] == true,
+      updateAvailable: wireUpdateAvailable,
+      rollbackReleaseId: rollbackReleaseId,
+      rollbackOfDeploymentId: rollbackOfDeploymentId,
       progressPercent: progressValue is num
           ? progressValue.toDouble().clamp(0, 100)
           : 0,
       errorCode: _nullableTrimmedString(json['error_code']),
       errorMessage: _nullableTrimmedString(json['error_message']),
       checkedAt: _requiredDateTime(json['checked_at'], 'checked_at'),
-      release: releaseValue is Map
-          ? DeviceFirmwareRelease.fromJson(
-              Map<String, Object?>.from(releaseValue),
-            )
-          : null,
+      release: release,
     );
+  }
+
+  /// Whether this deployment is an authorized firmware rollback.
+  bool get isAuthorizedRollback =>
+      deploymentKind == DeviceFirmwareDeploymentKind.rollback;
+
+  /// Why the current rollback controls are unavailable, when applicable.
+  String? get rollbackBlockedReason {
+    if (rollbackReleaseId == null || rollbackOfDeploymentId == null) {
+      return '当前没有可回退的已授权版本';
+    }
+    if (status.isInProgress) {
+      return '固件正在处理中，完成前不能回退';
+    }
+    return null;
   }
 
   DeviceFirmwareUpdate copyWith({
     String? deploymentId,
+    DeviceFirmwareDeploymentKind? deploymentKind,
     DeviceFirmwareUpdateStatus? status,
     String? currentVersion,
     String? targetVersion,
     bool? updateAvailable,
-    bool? rollbackAvailable,
+    String? rollbackReleaseId,
+    String? rollbackOfDeploymentId,
     double? progressPercent,
     String? errorCode,
     String? errorMessage,
@@ -180,17 +244,39 @@ class DeviceFirmwareUpdate {
       schemaVersion: schemaVersion,
       deviceId: deviceId,
       deploymentId: deploymentId ?? this.deploymentId,
+      deploymentKind: deploymentKind ?? this.deploymentKind,
       status: status ?? this.status,
       currentVersion: currentVersion ?? this.currentVersion,
       targetVersion: targetVersion ?? this.targetVersion,
       updateAvailable: updateAvailable ?? this.updateAvailable,
-      rollbackAvailable: rollbackAvailable ?? this.rollbackAvailable,
+      rollbackReleaseId: rollbackReleaseId ?? this.rollbackReleaseId,
+      rollbackOfDeploymentId:
+          rollbackOfDeploymentId ?? this.rollbackOfDeploymentId,
       progressPercent: progressPercent ?? this.progressPercent,
       errorCode: errorCode ?? this.errorCode,
       errorMessage: errorMessage ?? this.errorMessage,
       checkedAt: checkedAt ?? this.checkedAt,
       release: release ?? this.release,
     );
+  }
+}
+
+/// How the platform created the current firmware deployment.
+enum DeviceFirmwareDeploymentKind {
+  install('install'),
+  rollback('rollback');
+
+  const DeviceFirmwareDeploymentKind(this.wireValue);
+
+  final String wireValue;
+
+  static DeviceFirmwareDeploymentKind fromWireValue(String value) {
+    for (final kind in values) {
+      if (kind.wireValue == value) {
+        return kind;
+      }
+    }
+    throw FormatException('unknown device firmware deployment kind: $value');
   }
 }
 
@@ -274,6 +360,13 @@ int _requiredNonNegativeInt(Object? value, String field) {
   throw FormatException('missing $field');
 }
 
+bool _requiredBool(Object? value, String field) {
+  if (value is bool) {
+    return value;
+  }
+  throw FormatException('missing $field');
+}
+
 int? _optionalPercent(Object? value) {
   if (value == null) {
     return null;
@@ -340,4 +433,85 @@ String? _optionalTargetType(Object? value) {
     throw FormatException('unknown target type: $targetType');
   }
   return targetType;
+}
+
+DeviceFirmwareDeploymentKind? _optionalDeploymentKind(Object? value) {
+  final kind = _nullableTrimmedString(value);
+  if (kind == null) {
+    return null;
+  }
+  return DeviceFirmwareDeploymentKind.fromWireValue(kind);
+}
+
+void _validateRollbackContract({
+  required String? deploymentId,
+  required DeviceFirmwareDeploymentKind? deploymentKind,
+  required String? rollbackReleaseId,
+  required String? rollbackOfDeploymentId,
+  required DeviceFirmwareUpdateStatus status,
+  required bool updateAvailable,
+  required bool rollbackAvailable,
+  required DeviceFirmwareRelease? release,
+}) {
+  final hasRollbackIdentity =
+      rollbackReleaseId != null || rollbackOfDeploymentId != null;
+
+  if (deploymentKind == null) {
+    // Older platform versions may omit the new field. The rollback IDs and
+    // the explicit rollback status remain authoritative when present.
+    if (status == DeviceFirmwareUpdateStatus.rollbackAvailable &&
+        !rollbackAvailable) {
+      throw const FormatException('rollback status without availability');
+    }
+    if (hasRollbackIdentity) {
+      if (rollbackReleaseId == null || rollbackOfDeploymentId == null) {
+        throw const FormatException('incomplete rollback identity');
+      }
+      if (release == null || release.releaseId != rollbackReleaseId) {
+        throw const FormatException('rollback release mismatch');
+      }
+      if (deploymentId == null) {
+        throw const FormatException('rollback without deployment id');
+      }
+      if (!rollbackAvailable ||
+          !updateAvailable ||
+          status != DeviceFirmwareUpdateStatus.rollbackAvailable) {
+        throw const FormatException('rollback identity outside rollback state');
+      }
+    }
+    return;
+  }
+
+  if (deploymentId == null) {
+    throw const FormatException('deployment kind without deployment id');
+  }
+
+  switch (deploymentKind) {
+    case DeviceFirmwareDeploymentKind.install:
+      if (hasRollbackIdentity ||
+          rollbackAvailable ||
+          status == DeviceFirmwareUpdateStatus.rollbackAvailable) {
+        throw const FormatException('install deployment marked as rollback');
+      }
+    case DeviceFirmwareDeploymentKind.rollback:
+      if (rollbackReleaseId == null || rollbackOfDeploymentId == null) {
+        throw const FormatException('rollback deployment is incomplete');
+      }
+      if (release == null || release.releaseId != rollbackReleaseId) {
+        throw const FormatException('rollback release mismatch');
+      }
+      if (!updateAvailable) {
+        throw const FormatException('rollback deployment is unavailable');
+      }
+      if (status == DeviceFirmwareUpdateStatus.rolledBack) {
+        if (rollbackAvailable) {
+          throw const FormatException('completed rollback still available');
+        }
+        return;
+      }
+      if (!rollbackAvailable ||
+          status != DeviceFirmwareUpdateStatus.rollbackAvailable) {
+        throw const FormatException('rollback deployment state mismatch');
+      }
+  }
 }

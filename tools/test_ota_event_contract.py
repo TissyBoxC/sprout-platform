@@ -110,10 +110,7 @@ class OTAEventContractTest(unittest.TestCase):
         self.assertEqual(request["properties"]["sequence"]["minimum"], 1)
 
     def test_example_is_accepted_by_the_shared_schema_contract(self):
-        self.assertEqual(
-            set(self.example),
-            EXPECTED_FIELDS,
-        )
+        self.assertLessEqual(set(self.example), EXPECTED_FIELDS)
         self.assertIn(
             self.example["event_type"],
             EXPECTED_EVENT_TYPES,

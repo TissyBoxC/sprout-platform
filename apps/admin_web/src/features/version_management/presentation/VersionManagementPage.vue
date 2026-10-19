@@ -390,14 +390,8 @@ function operationLog(operation: AdminServiceVersionOperation | null): string {
                       <div class="service-name">
                         <strong>{{ service.displayName || service.id }}</strong>
                         <span v-if="service.isSelf" class="self-badge">管理端自身</span>
-                        <span v-if="service.catalogDependencyMissing" class="catalog-gap-badge">
-                          待后端接入
-                        </span>
                       </div>
                       <code>{{ service.image || '暂未提供镜像信息' }}</code>
-                      <small v-if="service.catalogDependencyMissing" class="catalog-gap-note">
-                        当前服务目录尚未返回该执行器，版本与健康状态需后端补齐后才能操作。
-                      </small>
                     </td>
                     <td class="version-cell">{{ service.currentVersion || '未知' }}</td>
                     <td class="version-cell">{{ service.latestVersion || '待检查' }}</td>
@@ -957,21 +951,6 @@ td small {
   color: #27627f;
   font-size: 11px;
   font-weight: 700;
-}
-
-.catalog-gap-badge {
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: #fff7e0;
-  color: #755600;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.catalog-gap-note {
-  max-width: 280px;
-  font-family: inherit !important;
-  line-height: 1.5;
 }
 
 code {

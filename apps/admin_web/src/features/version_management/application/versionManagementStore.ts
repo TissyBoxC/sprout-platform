@@ -16,7 +16,6 @@ import { createHttpClient } from '@/api/httpClient'
 const activeOperationStatuses = new Set(['queued', 'running', 'recovering'])
 const VERSION_CHECK_POLL_ATTEMPTS = 10
 const VERSION_CHECK_POLL_INTERVAL_MS = 250
-const upgradeWorkerDependencyId = 'upgrade_worker'
 
 export function isUpgradeableService(service: AdminServiceVersion): boolean {
   return service.upgradeSupported && service.upgradeExecutable
@@ -50,19 +49,7 @@ export const useVersionManagementStore = defineStore('admin-version-management',
   const lastWarning = ref('')
   let operationRequestGeneration = 0
 
-  const services = computed(() => {
-    const reportedServices = snapshot.value?.services ?? []
-    if (
-      snapshot.value === null ||
-      reportedServices.some((service) => service.id === upgradeWorkerDependencyId)
-    ) {
-      return reportedServices
-    }
-    return [
-      ...reportedServices,
-      upgradeWorkerDependencyRow(snapshot.value.checkedAt),
-    ]
-  })
+  const services = computed(() => snapshot.value?.services ?? [])
   const outdatedServices = computed(() =>
     services.value.filter(
       (service) =>
@@ -463,29 +450,4 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, milliseconds)
   })
-}
-
-/**
- * The upgrade executor is deployed by Compose but is not yet represented in
- * the backend service catalog. Keep it visible as an explicit dependency gap
- * without inventing an image tag, version, or upgrade action.
- */
-function upgradeWorkerDependencyRow(checkedAt: string): AdminServiceVersion {
-  return {
-    id: upgradeWorkerDependencyId,
-    displayName: '服务升级执行器',
-    role: '执行后台升级任务',
-    image: 'ghcr.io/tissyboxc/sprout-upgrade-worker',
-    currentVersion: '',
-    latestVersion: '',
-    status: 'unknown',
-    releaseUrl: '',
-    isSelf: false,
-    upgradeSupported: false,
-    upgradeExecutable: false,
-    canUpgrade: false,
-    lastCheckedAt: checkedAt,
-    updatedAt: checkedAt,
-    catalogDependencyMissing: true,
-  }
 }

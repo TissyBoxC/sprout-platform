@@ -23,7 +23,6 @@ export interface AdminServiceVersion {
   canUpgrade: boolean
   lastCheckedAt: string
   updatedAt: string
-  catalogDependencyMissing?: boolean
 }
 
 export interface ServiceVersionSnapshot {

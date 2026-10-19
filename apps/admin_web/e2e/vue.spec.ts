@@ -1790,7 +1790,7 @@ test('keeps service version controls readonly without service.upgrade', async ({
   expect(writeRequests).toBe(0)
 })
 
-test('shows upgrade_worker as a backend catalog gap without fabricating versions', async ({
+test('renders only the backend service catalog without fabricating worker rows', async ({
   page,
 }) => {
   await useAdminSession(page)
@@ -1833,12 +1833,7 @@ test('shows upgrade_worker as a backend catalog gap without fabricating versions
 
   await page.goto('/services')
 
-  const upgradeWorkerRow = page.getByRole('row', { name: /服务升级执行器/ })
-  await expect(upgradeWorkerRow).toBeVisible()
-  await expect(upgradeWorkerRow).toContainText('待后端接入')
-  await expect(upgradeWorkerRow).toContainText('版本与健康状态需后端补齐后才能操作')
-  await expect(upgradeWorkerRow.getByText('未知', { exact: true })).toBeVisible()
-  await expect(upgradeWorkerRow.getByText('待检查', { exact: true })).toBeVisible()
+  await expect(page.getByRole('row', { name: /服务升级执行器/ })).toHaveCount(0)
   await expect(page.getByRole('row', { name: /品牌管理端/ })).toBeVisible()
   await expect(page.getByRole('button', { name: /升级到/ })).toHaveCount(0)
 })

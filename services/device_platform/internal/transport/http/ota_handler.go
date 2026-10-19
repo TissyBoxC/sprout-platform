@@ -204,9 +204,9 @@ func (handler otaHandler) deviceUpdate(
 			current.Release.DeviceManifest(),
 			current.CurrentVersion,
 			&current.Deployment,
-			string(current.Deployment.Status),
+			currentDeviceUpdateStatus(current),
 			current.UpdateAvailable,
-			true,
+			current.Rollback,
 		)
 		return
 	}
@@ -429,9 +429,9 @@ func (handler otaHandler) statusForGuardian(
 		current.Release.DeviceManifest(),
 		current.CurrentVersion,
 		&current.Deployment,
-		string(current.Deployment.Status),
+		currentDeviceUpdateStatus(current),
 		current.UpdateAvailable,
-		true,
+		current.Rollback,
 	)
 }
 
@@ -1027,6 +1027,16 @@ func (handler otaHandler) writeCurrentDeviceUpdate(
 		"rollback_available": false,
 		"checked_at":         time.Now().UTC(),
 	})
+}
+
+func currentDeviceUpdateStatus(current *otaservice.CurrentDeviceUpdate) string {
+	if current == nil {
+		return "up_to_date"
+	}
+	if current.Rollback {
+		return "rollback_available"
+	}
+	return string(current.Deployment.Status)
 }
 
 func (handler otaHandler) currentVersion(

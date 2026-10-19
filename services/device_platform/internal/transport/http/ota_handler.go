@@ -1103,6 +1103,11 @@ func otaDeviceUpdatePayload(
 	}
 	if deployment != nil {
 		payload["deployment_id"] = deployment.ID
+		if strings.TrimSpace(deployment.RollbackReleaseID) != "" {
+			payload["deployment_kind"] = "rollback"
+		} else {
+			payload["deployment_kind"] = "install"
+		}
 		if deployment.RollbackReleaseID != "" {
 			payload["rollback_release_id"] = deployment.RollbackReleaseID
 			payload["rollback_of_deployment_id"] = deployment.RollbackOfDeploymentID

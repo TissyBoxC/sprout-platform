@@ -24,6 +24,13 @@
     "deployment_id": {
       "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
     },
+    "deployment_kind": {
+      "type": "string",
+      "enum": [
+        "install",
+        "rollback"
+      ]
+    },
     "rollback_release_id": {
       "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
     },
@@ -81,5 +88,61 @@
     "release": {
       "$ref": "https://sprout.example/contracts/schemas/ota_release.schema.json"
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "deployment_kind"
+        ],
+        "properties": {
+          "deployment_kind": {
+            "const": "rollback"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "deployment_id",
+          "rollback_release_id",
+          "rollback_of_deployment_id"
+        ],
+        "properties": {
+          "deployment_id": {
+            "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
+          },
+          "rollback_release_id": {
+            "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
+          },
+          "rollback_of_deployment_id": {
+            "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/identifier"
+          },
+          "rollback_available": {
+            "const": true
+          },
+          "update_available": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "deployment_kind"
+        ],
+        "properties": {
+          "deployment_kind": {
+            "const": "install"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "rollback_release_id": false,
+          "rollback_of_deployment_id": false
+        }
+      }
+    }
+  ]
 }

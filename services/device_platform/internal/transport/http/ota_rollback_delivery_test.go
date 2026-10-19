@@ -112,6 +112,12 @@ func TestDeviceUpdateHTTPMarksAuthorizedRollback(t *testing.T) {
 	if envelope.Data["schema_version"] != domain.OTAReleaseSchemaVersion {
 		t.Fatalf("schema_version = %v", envelope.Data["schema_version"])
 	}
+	if envelope.Data["deployment_id"] != deployment.ID {
+		t.Fatalf("deployment_id = %v", envelope.Data["deployment_id"])
+	}
+	if envelope.Data["deployment_kind"] != "rollback" {
+		t.Fatalf("deployment_kind = %v", envelope.Data["deployment_kind"])
+	}
 	if envelope.Data["rollback_available"] != true {
 		t.Fatalf("rollback_available = %v", envelope.Data["rollback_available"])
 	}

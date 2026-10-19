@@ -222,6 +222,22 @@ func TestDeviceUpdateResponseIncludesSchemaVersion(t *testing.T) {
 	}
 }
 
+func TestDeviceUpdateResponseUsesInstallKindForNormalDeployment(t *testing.T) {
+	t.Parallel()
+	payload := otaDeviceUpdatePayload(
+		"device-1",
+		"queued",
+		"1.0.0",
+		domain.DeviceRelease{Version: "1.1.0"},
+		&domain.Deployment{ID: "deployment-install-1"},
+		true,
+		false,
+	)
+	if payload["deployment_kind"] != "install" {
+		t.Fatalf("deployment_kind = %v", payload["deployment_kind"])
+	}
+}
+
 func TestDeviceEventAcceptsFirmwarePayloadAndCompletesRollback(t *testing.T) {
 	t.Parallel()
 	handler, repository := newDeviceEventHandlerForTest(t)

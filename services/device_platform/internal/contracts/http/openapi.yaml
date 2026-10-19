@@ -23551,6 +23551,11 @@ components:
           format: date-time
         deployment_id:
           type: string
+        deployment_kind:
+          type: string
+          enum:
+            - install
+            - rollback
         progress_percent:
           type: integer
           minimum: 0

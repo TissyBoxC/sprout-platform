@@ -263,13 +263,17 @@ func (handler adminHandler) createParent(
 		writeAuthServiceError(response, request, err)
 		return
 	}
-	handler.recordAdminAudit(
+	payloadResponse := accountResponse(account, summary)
+	if err := handler.recordAdminAudit(
 		request,
 		account.ID,
 		"admin.family.created",
 		map[string]any{"scope": "family"},
-	)
-	writeSuccess(response, request, http.StatusCreated, accountResponse(account, summary))
+	); err != nil {
+		writeAuditNotice(response, request, payloadResponse)
+		return
+	}
+	writeSuccess(response, request, http.StatusCreated, payloadResponse)
 }
 
 // retryParentAIAccount repairs the dependent AI account for an existing
@@ -315,17 +319,7 @@ func (handler adminHandler) retryParentAIAccount(
 		writeError(response, request, http.StatusInternalServerError, "service_error", "家长 AI 账号没有开通，请稍后重试")
 		return
 	}
-	handler.recordAdminAudit(
-		request,
-		account.ID,
-		"admin.family.ai_account.created",
-		map[string]any{
-			"status":            summary.Status,
-			"balance_usd":       summary.BalanceUSD,
-			"concurrency_limit": summary.ConcurrencyLimit,
-		},
-	)
-	writeSuccess(response, request, http.StatusOK, map[string]any{
+	payloadResponse := map[string]any{
 		"ai_account": map[string]any{
 			"status":            summary.Status,
 			"balance_usd":       summary.BalanceUSD,
@@ -335,7 +329,21 @@ func (handler adminHandler) retryParentAIAccount(
 			"allowed_models":    summary.AllowedModels,
 			"provider_ready":    summary.ProviderReady,
 		},
-	})
+	}
+	if err := handler.recordAdminAudit(
+		request,
+		account.ID,
+		"admin.family.ai_account.created",
+		map[string]any{
+			"status":            summary.Status,
+			"balance_usd":       summary.BalanceUSD,
+			"concurrency_limit": summary.ConcurrencyLimit,
+		},
+	); err != nil {
+		writeAuditNotice(response, request, payloadResponse)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, payloadResponse)
 }
 
 // updateParentProfile lets an operator correct guardian-editable profile
@@ -371,13 +379,7 @@ func (handler adminHandler) updateParentProfile(
 		writeAuthServiceError(response, request, err)
 		return
 	}
-	handler.recordAdminAudit(
-		request,
-		account.ID,
-		"admin.family.profile.updated",
-		map[string]any{"scope": "profile"},
-	)
-	writeSuccess(response, request, http.StatusOK, map[string]any{
+	payloadResponse := map[string]any{
 		"account": map[string]any{
 			"parent_account_id":    account.ID,
 			"display_name":         account.DisplayName,
@@ -385,7 +387,17 @@ func (handler adminHandler) updateParentProfile(
 			"child_nickname":       account.ChildNickname,
 			"child_birthday":       account.ChildBirthday,
 		},
-	})
+	}
+	if err := handler.recordAdminAudit(
+		request,
+		account.ID,
+		"admin.family.profile.updated",
+		map[string]any{"scope": "profile"},
+	); err != nil {
+		writeAuditNotice(response, request, payloadResponse)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, payloadResponse)
 }
 
 // resetParentPassword replaces one family's password. The repository revokes
@@ -415,15 +427,17 @@ func (handler adminHandler) resetParentPassword(
 		writeAuthServiceError(response, request, err)
 		return
 	}
-	handler.recordAdminAudit(
+	payloadResponse := map[string]any{"password_reset": true}
+	if err := handler.recordAdminAudit(
 		request,
 		parentAccountID,
 		"admin.family.password.reset",
 		map[string]any{"scope": "credential"},
-	)
-	writeSuccess(response, request, http.StatusOK, map[string]any{
-		"password_reset": true,
-	})
+	); err != nil {
+		writeAuditNotice(response, request, payloadResponse)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, payloadResponse)
 }
 
 // listParentDevices returns the bound devices of one family together with
@@ -487,15 +501,17 @@ func (handler adminHandler) unbindParentDevice(
 		writeDeviceBindingError(response, request, err)
 		return
 	}
-	handler.recordAdminAudit(
+	payloadResponse := map[string]any{"unbound": true}
+	if err := handler.recordAdminAudit(
 		request,
 		parentAccountID,
 		"admin.family.device_binding.revoked",
 		map[string]any{"device_id": deviceID},
-	)
-	writeSuccess(response, request, http.StatusOK, map[string]any{
-		"unbound": true,
-	})
+	); err != nil {
+		writeAuditNotice(response, request, payloadResponse)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, payloadResponse)
 }
 
 // listFamilyChildren returns the child profiles of one guardian, including
@@ -846,7 +862,8 @@ func (handler adminHandler) updateAIAccount(
 		writeError(response, request, http.StatusBadGateway, "provider_error", "暂时无法更新 AI 服务，请稍后重试")
 		return
 	}
-	handler.recordAdminAudit(
+	payloadResponse := aiAccountAdminResponse(account)
+	if err := handler.recordAdminAudit(
 		request,
 		account.ParentAccountID,
 		"admin.family.ai_account.updated",
@@ -855,8 +872,11 @@ func (handler adminHandler) updateAIAccount(
 			"balance_usd":       account.BalanceUSD,
 			"concurrency_limit": account.ConcurrencyLimit,
 		},
-	)
-	writeSuccess(response, request, http.StatusOK, aiAccountAdminResponse(account))
+	); err != nil {
+		writeAuditNotice(response, request, payloadResponse)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, payloadResponse)
 }
 
 func (handler adminHandler) recordAdminAudit(
@@ -864,17 +884,38 @@ func (handler adminHandler) recordAdminAudit(
 	targetAccountID string,
 	action string,
 	detail map[string]any,
-) {
-	if handler.auditService == nil || request == nil {
-		return
+) error {
+	if handler.auditService == nil {
+		return errors.New(auditActionUnavailable)
 	}
-	actorAccountID, _ := authenticatedAccountID(request)
-	_ = handler.auditService.RecordAudit(
+	if request == nil {
+		return errors.New("audit request unavailable")
+	}
+	actorAccountID, ok := authenticatedAccountID(request)
+	if !ok {
+		return errors.New(auditActionUnauthenticated)
+	}
+	return handler.auditService.RecordAudit(
 		request.Context(),
 		actorAccountID,
 		targetAccountID,
 		action,
 		detail,
+	)
+}
+
+func writeAuditNotice(
+	response http.ResponseWriter,
+	request *http.Request,
+	data any,
+) {
+	writeSuccessWithNotice(
+		response,
+		request,
+		http.StatusAccepted,
+		data,
+		"audit_write_failed",
+		"操作已经保存，但安全记录没有完成。请联系管理员核对后再继续。",
 	)
 }
 

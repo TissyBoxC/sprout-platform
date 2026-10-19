@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -219,6 +220,92 @@ func TestRequireAdminPermissionGrantsWildcard(t *testing.T) {
 
 	if !reached {
 		t.Fatal("the wildcard must grant every capability")
+	}
+}
+
+func TestAuditAfterSuccessReturnsAcceptedNoticeWithoutLosingData(t *testing.T) {
+	handler, token := newPermissionMiddlewareWithAudit(
+		t,
+		&authdomain.ParentAccount{
+			ID:               "admin-1",
+			Role:             authdomain.RoleAdmin,
+			Status:           "active",
+			AdminPermissions: []string{authdomain.AdminPermissionWildcard},
+		},
+		failingAudit{},
+	)
+	request := authenticatedRequest(token)
+	request.Method = http.MethodPost
+	request.URL.Path = "/api/v1/admin/example"
+	recorder := httptest.NewRecorder()
+
+	handler.auditAfterSuccess(
+		"admin.example.updated",
+		func(response http.ResponseWriter, request *http.Request) {
+			writeSuccess(
+				response,
+				request,
+				http.StatusOK,
+				map[string]any{"updated": true},
+			)
+		},
+	)(recorder, request)
+
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want accepted: %s", recorder.Code, recorder.Body.String())
+	}
+	var envelope struct {
+		Data   map[string]any `json:"data"`
+		Error  any            `json:"error"`
+		Notice *struct {
+			Code string `json:"code"`
+		} `json:"notice"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if envelope.Data["updated"] != true ||
+		envelope.Error != nil ||
+		envelope.Notice == nil ||
+		envelope.Notice.Code != "audit_write_failed" {
+		t.Fatalf("unexpected response: %s", recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "audit storage unavailable") {
+		t.Fatal("internal audit error leaked into the response")
+	}
+}
+
+func TestAuditAfterSuccessForwardsMarkedStreamingWriter(t *testing.T) {
+	handler := authHandler{audit: failingAudit{}}
+	request := httptest.NewRequest(http.MethodPost, "/large-upload", nil)
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		authenticatedAccountKey{},
+		"admin-1",
+	))
+	recorder := httptest.NewRecorder()
+	called := false
+
+	handler.auditAfterSuccess(
+		"admin.upload.completed",
+		func(response http.ResponseWriter, _ *http.Request) {
+			called = true
+			if _, ok := response.(*bufferedResponseRecorder); ok {
+				t.Fatal("streaming-marked response was buffered")
+			}
+			response.WriteHeader(http.StatusCreated)
+			_, _ = response.Write([]byte(`{"uploaded":true}`))
+		},
+	)(wrapStreamingResponseWriter(recorder), request)
+
+	if !called {
+		t.Fatal("streaming handler was not called")
+	}
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", recorder.Code)
+	}
+	if body := recorder.Body.String(); body != `{"uploaded":true}` {
+		t.Fatalf("body = %q", body)
 	}
 }
 

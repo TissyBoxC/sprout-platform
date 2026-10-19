@@ -82,21 +82,28 @@ func (handler adminPermissionHandler) update(
 		writeAdminPermissionError(response, request, err)
 		return
 	}
-	handler.recordPermissionUpdate(request, updated)
-	writeSuccess(response, request, http.StatusOK, map[string]any{
+	payloadResponse := map[string]any{
 		"account": adminPermissionAccountResponse(updated),
-	})
+	}
+	if err := handler.recordPermissionUpdate(request, updated); err != nil {
+		writeAuditNotice(response, request, payloadResponse)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, payloadResponse)
 }
 
 func (handler adminPermissionHandler) recordPermissionUpdate(
 	request *http.Request,
 	account authdomain.AdminPermissionAccount,
-) {
+) error {
 	if handler.audit == nil {
-		return
+		return errors.New(auditActionUnavailable)
 	}
-	actorAccountID, _ := authenticatedAccountID(request)
-	_ = handler.audit.RecordAudit(
+	actorAccountID, ok := authenticatedAccountID(request)
+	if !ok {
+		return errors.New(auditActionUnauthenticated)
+	}
+	return handler.audit.RecordAudit(
 		request.Context(),
 		actorAccountID,
 		account.AccountID,

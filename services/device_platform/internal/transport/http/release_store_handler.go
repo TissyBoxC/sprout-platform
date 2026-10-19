@@ -47,6 +47,7 @@ func (handler adminHandler) uploadReleaseFile(
 	response http.ResponseWriter,
 	request *http.Request,
 ) {
+	response = wrapStreamingResponseWriter(response)
 	setLargeUploadDeadline(response)
 	request.Body = http.MaxBytesReader(
 		response,

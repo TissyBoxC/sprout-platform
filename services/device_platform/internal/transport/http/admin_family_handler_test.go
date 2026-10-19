@@ -111,7 +111,10 @@ func TestUpdateParentProfileHandlerPassesEditableFields(t *testing.T) {
 	parentService := &stubAdminParentService{
 		account: &authdomain.ParentAccount{ID: "parent-001"},
 	}
-	handler := adminHandler{parentService: parentService}
+	handler := adminHandler{
+		parentService: parentService,
+		auditService:  &recordingAudit{},
+	}
 	request := httptest.NewRequest(
 		http.MethodPut,
 		"/api/v1/admin/families/parent-001/profile",
@@ -121,6 +124,11 @@ func TestUpdateParentProfileHandlerPassesEditableFields(t *testing.T) {
 		),
 	)
 	request.SetPathValue("parent_account_id", "parent-001")
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		authenticatedAccountKey{},
+		"admin-001",
+	))
 	recorder := httptest.NewRecorder()
 
 	handler.updateParentProfile(recorder, request)
@@ -233,7 +241,10 @@ func TestListParentDevicesHandlerReportsServiceUnavailableWithoutRuntime(t *test
 
 func TestUnbindParentDeviceHandlerVerifiesFamilyScope(t *testing.T) {
 	deviceService := &stubAdminDeviceManagementService{}
-	handler := adminHandler{deviceBindingService: deviceService}
+	handler := adminHandler{
+		deviceBindingService: deviceService,
+		auditService:         &recordingAudit{},
+	}
 	request := httptest.NewRequest(
 		http.MethodDelete,
 		"/api/v1/admin/families/parent-001/devices/sprout_device_001",
@@ -241,6 +252,11 @@ func TestUnbindParentDeviceHandlerVerifiesFamilyScope(t *testing.T) {
 	)
 	request.SetPathValue("parent_account_id", "parent-001")
 	request.SetPathValue("device_id", "sprout_device_001")
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		authenticatedAccountKey{},
+		"admin-001",
+	))
 	recorder := httptest.NewRecorder()
 
 	handler.unbindParentDevice(recorder, request)

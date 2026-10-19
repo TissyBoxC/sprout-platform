@@ -103,6 +103,11 @@ func TestAdminPermissionUpdatePersistsAndAudits(t *testing.T) {
 		strings.NewReader(`{"permissions":["content.read"]}`),
 	)
 	request.SetPathValue("account_id", "admin-2")
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		authenticatedAccountKey{},
+		"admin-001",
+	))
 	recorder := httptest.NewRecorder()
 
 	handler.update(recorder, request)
@@ -136,6 +141,56 @@ func TestAdminPermissionUpdateRejectsUnknownPermission(t *testing.T) {
 
 	if recorder.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnprocessableEntity)
+	}
+}
+
+func TestAdminPermissionUpdateAuditFailureReturnsAcceptedNotice(t *testing.T) {
+	service := &stubPermissionService{updated: authdomain.AdminPermissionAccount{
+		AccountID:   "admin-2",
+		Email:       "review@sprout.local",
+		DisplayName: "内容审核",
+		Status:      "active",
+		Permissions: []string{authdomain.AdminPermissionContentRead},
+	}}
+	handler := adminPermissionHandler{service: service, audit: failingAudit{}}
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/admin/permissions/admin-2",
+		strings.NewReader(`{"permissions":["content.read"]}`),
+	)
+	request.SetPathValue("account_id", "admin-2")
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		authenticatedAccountKey{},
+		"admin-001",
+	))
+	recorder := httptest.NewRecorder()
+
+	handler.update(recorder, request)
+
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want accepted: %s", recorder.Code, recorder.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Account struct {
+				AccountID string `json:"account_id"`
+			} `json:"account"`
+		} `json:"data"`
+		Notice *struct {
+			Code string `json:"code"`
+		} `json:"notice"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if envelope.Data.Account.AccountID != "admin-2" ||
+		envelope.Notice == nil ||
+		envelope.Notice.Code != "audit_write_failed" {
+		t.Fatalf("unexpected audit failure response: %s", recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "audit storage unavailable") {
+		t.Fatal("internal audit error leaked into the response")
 	}
 }
 

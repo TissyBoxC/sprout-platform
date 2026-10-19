@@ -548,21 +548,40 @@ func (handler authHandler) auditAfterSuccess(
 			next(response, request)
 			return
 		}
-		recorder := &statusRecorder{ResponseWriter: response, status: http.StatusOK}
-		next(recorder, request)
-		if recorder.status < http.StatusOK || recorder.status >= http.StatusMultipleChoices {
+		if _, preservesStreaming := response.(auditPreservesWriter); preservesStreaming {
+			next(response, request)
 			return
 		}
-		actorAccountID, _ := authenticatedAccountID(request)
-		_ = handler.audit.RecordAudit(
-			request.Context(),
-			actorAccountID,
-			"",
-			action,
-			map[string]any{
-				"route": request.Method + " " + request.URL.Path,
-			},
-		)
+		recorder := newBufferedResponseRecorder()
+		next(recorder, request)
+		if recorder.status < http.StatusOK || recorder.status >= http.StatusMultipleChoices {
+			recorder.flushTo(response)
+			return
+		}
+		actorAccountID, ok := authenticatedAccountID(request)
+		var auditErr error
+		if !ok {
+			auditErr = errors.New(auditActionUnauthenticated)
+		} else {
+			auditErr = handler.audit.RecordAudit(
+				request.Context(),
+				actorAccountID,
+				"",
+				action,
+				map[string]any{
+					"route": request.Method + " " + request.URL.Path,
+				},
+			)
+		}
+		if auditErr != nil {
+			writeAuditNotice(
+				response,
+				request,
+				recorder.decodedBody(),
+			)
+			return
+		}
+		recorder.flushTo(response)
 	}
 }
 
@@ -825,6 +844,23 @@ func bearerToken(request *http.Request) (string, bool) {
 
 func writeSuccess(response http.ResponseWriter, request *http.Request, status int, data any) {
 	httpapi.WriteSuccess(response, request, status, data)
+}
+
+func writeSuccessWithNotice(
+	response http.ResponseWriter,
+	request *http.Request,
+	status int,
+	data any,
+	code string,
+	message string,
+) {
+	httpapi.WriteSuccessWithNotice(
+		response,
+		request,
+		status,
+		data,
+		httpapi.NoticeBody{Code: code, Message: message},
+	)
 }
 
 func writeError(response http.ResponseWriter, request *http.Request, status int, code string, message string) {

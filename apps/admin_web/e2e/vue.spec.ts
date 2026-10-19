@@ -1030,6 +1030,14 @@ test('manages a family AI account, profile, password, and bound devices', async 
   await expect(page.getByRole('heading', { name: '家长资料' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'AI 服务' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'AI 用量核对' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '家庭成员与邀请' })).toBeVisible()
+  await expect(page.getByText('守护者', { exact: true })).toBeVisible()
+  await expect(page.getByText('查看者', { exact: true })).toBeVisible()
+  await expect(
+    page.getByText(
+      '管理员不能代替家长创建邀请、调整成员角色或移除成员，以免把管理员自己的家庭误当成家长家庭。',
+    ),
+  ).toBeVisible()
   await expect(page.getByRole('heading', { name: '绑定设备' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '账号安全' })).toBeVisible()
   await expect(page.getByText('正在读取可用模型…')).toHaveCount(0)

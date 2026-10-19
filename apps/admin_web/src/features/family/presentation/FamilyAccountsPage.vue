@@ -12,6 +12,10 @@ import {
   type UpdateAdminFamilyAiAccountInput,
   type UpdateAdminFamilyProfileInput,
 } from '@/features/family/application/familyAccountStore'
+import {
+  adminCanProxyFamilyWrites,
+  familyRoleBoundaries,
+} from '@/features/family/domain/familyMembershipBoundary'
 
 const store = useFamilyAccountStore()
 const isCreateOpen = ref(false)
@@ -1123,6 +1127,47 @@ function emptySectionFeedback(): {
                 </ul>
                 <p v-else class="field-hint">这段时间没有按模型的调用记录。</p>
               </template>
+            </section>
+
+            <section class="detail-card">
+              <div class="section-heading">
+                <div>
+                  <h3>家庭成员与邀请</h3>
+                  <p>家长可邀请另一位家长共同照看，也可为只读查看设置成员。</p>
+                </div>
+              </div>
+
+              <p class="field-hint">
+                为避免管理员误操作自己的家庭，管理端暂不代理家长的邀请列表、角色修改和移除操作。家长账号所有者可通过家长端管理邀请；本页只展示家庭账号的当前管理范围。
+              </p>
+
+              <ul class="device-list">
+                <li
+                  v-for="role in familyRoleBoundaries"
+                  :key="role.role"
+                >
+                  <div class="device-list-header">
+                    <strong>{{ role.label }}</strong>
+                    <span
+                      :class="[
+                        'status',
+                        role.role === 'owner' ? 'active' : undefined,
+                      ]"
+                    >
+                      {{ role.availability }}
+                    </span>
+                  </div>
+                  <p class="device-meta">{{ role.description }}</p>
+                </li>
+              </ul>
+
+              <p
+                v-if="!adminCanProxyFamilyWrites"
+                class="warning-message"
+                role="note"
+              >
+                管理员不能代替家长创建邀请、调整成员角色或移除成员，以免把管理员自己的家庭误当成家长家庭。
+              </p>
             </section>
 
             <section class="detail-card">

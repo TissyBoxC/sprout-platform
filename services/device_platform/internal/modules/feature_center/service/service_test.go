@@ -612,6 +612,7 @@ func TestDefaultRegistryCoversRequiredFeatures(t *testing.T) {
 	required := []string{
 		"auth",
 		"parent_account",
+		"family_membership",
 		"ai_account",
 		"child_profile",
 		"parent_policy",
@@ -698,6 +699,7 @@ func TestDefaultRegistryActiveFeaturesHaveHealthAndReadOnlyReason(t *testing.T) 
 	required := []string{
 		"auth",
 		"parent_account",
+		"family_membership",
 		"ai_account",
 		"child_profile",
 		"parent_policy",
@@ -745,6 +747,8 @@ func TestDefaultRegistryMetricsHaveVerifiableSource(t *testing.T) {
 	repositoryMetrics := map[string]struct{}{
 		"active_auth_session_count":             {},
 		"active_parent_count":                   {},
+		"family_member_count":                   {},
+		"family_pending_invitation_count":       {},
 		"active_ai_account_count":               {},
 		"child_profile_count":                   {},
 		"policy_update_count":                   {},

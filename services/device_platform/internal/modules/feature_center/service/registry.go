@@ -21,6 +21,12 @@ func DefaultRegistry() []Definition {
 		readOnlyFeatureDef("parent_account", "家长账号", "家长资料、密码与账号状态管理。", "identity", "账号平台",
 			"家长资料、密码和状态在家长账号页面逐项管理，功能中心只提供能力状态和统计。",
 			metrics("active_parent_count", "有效家长数", "个")),
+		readOnlyFeatureDef("family_membership", "家庭成员与邀请", "家庭成员角色、邀请与跨家庭访问边界。", "family", "家庭平台",
+			"成员角色和邀请在家长账号详情中按目标家庭管理，功能中心只提供能力状态和统计。",
+			metrics(
+				"family_member_count", "家庭成员", "人",
+				"family_pending_invitation_count", "待接受邀请", "个",
+			)),
 		featureDef("ai_account", "AI 账号", "家长 AI 账号的额度、并发与模型配置。", "ai", "AI 服务", true,
 			configFields(
 				numberField("default_balance_usd", "默认额度", float64(0), true, true, ""),

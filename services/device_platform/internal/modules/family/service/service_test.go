@@ -34,6 +34,8 @@ type fakeRepository struct {
 	mu           sync.Mutex
 	members      map[string]domain.Member
 	invitations  map[string]domain.Invitation
+	identities   map[string]domain.AccountIdentity
+	revisions    map[string]int64
 	audits       []domain.AuditEvent
 	auditErr     error
 	acceptCalls  int
@@ -85,6 +87,8 @@ func newFakeRepository() *fakeRepository {
 	return &fakeRepository{
 		members:     map[string]domain.Member{},
 		invitations: map[string]domain.Invitation{},
+		identities:  map[string]domain.AccountIdentity{},
+		revisions:   map[string]int64{},
 	}
 }
 
@@ -105,6 +109,13 @@ func (r *fakeRepository) CreateMember(_ context.Context, member domain.Member) e
 		}
 	}
 	r.members[key] = member
+	if _, exists := r.identities[member.UserID]; !exists {
+		r.identities[member.UserID] = domain.AccountIdentity{
+			AccountID: member.UserID,
+			Role:      "parent",
+			Status:    "active",
+		}
+	}
 	return nil
 }
 
@@ -116,11 +127,18 @@ func (r *fakeRepository) UpdateMemberRole(_ context.Context, member domain.Membe
 		return domain.ErrMemberNotFound
 	}
 	r.members[key] = member
+	if _, exists := r.identities[member.UserID]; !exists {
+		r.identities[member.UserID] = domain.AccountIdentity{
+			AccountID: member.UserID,
+			Role:      "parent",
+			Status:    "active",
+		}
+	}
 	return nil
 }
 
 func (r *fakeRepository) UpdateMemberRoleWithAudit(
-	ctx context.Context,
+	_ context.Context,
 	member domain.Member,
 	audit domain.AuditEvent,
 ) error {
@@ -129,12 +147,36 @@ func (r *fakeRepository) UpdateMemberRoleWithAudit(
 	if r.auditErr != nil {
 		return r.auditErr
 	}
-	r.audits = append(r.audits, audit)
 	key := memberKey(member.FamilyID, member.UserID)
 	if _, exists := r.members[key]; !exists {
 		return domain.ErrMemberNotFound
 	}
 	r.members[key] = member
+	r.audits = append(r.audits, audit)
+	return nil
+}
+
+func (r *fakeRepository) UpdateMemberRoleWithAuditRevision(
+	_ context.Context,
+	member domain.Member,
+	audit domain.AuditEvent,
+	expectedRevision int64,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.auditErr != nil {
+		return r.auditErr
+	}
+	if err := r.checkRevisionLocked(member.FamilyID, expectedRevision); err != nil {
+		return err
+	}
+	key := memberKey(member.FamilyID, member.UserID)
+	if _, exists := r.members[key]; !exists {
+		return domain.ErrMemberNotFound
+	}
+	r.members[key] = member
+	r.audits = append(r.audits, audit)
+	r.revisions[member.FamilyID] = expectedRevision + 1
 	return nil
 }
 
@@ -166,6 +208,48 @@ func (r *fakeRepository) DeleteMemberWithAudit(
 	}
 	delete(r.members, key)
 	r.audits = append(r.audits, audit)
+	return nil
+}
+
+func (r *fakeRepository) DeleteMemberWithAuditRevision(
+	_ context.Context,
+	familyID string,
+	userID string,
+	audit domain.AuditEvent,
+	expectedRevision int64,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.auditErr != nil {
+		return r.auditErr
+	}
+	if err := r.checkRevisionLocked(familyID, expectedRevision); err != nil {
+		return err
+	}
+	key := memberKey(familyID, userID)
+	if _, exists := r.members[key]; !exists {
+		return domain.ErrMemberNotFound
+	}
+	delete(r.members, key)
+	r.audits = append(r.audits, audit)
+	r.revisions[familyID] = expectedRevision + 1
+	return nil
+}
+
+func (r *fakeRepository) checkRevisionLocked(
+	familyID string,
+	expectedRevision int64,
+) error {
+	if expectedRevision < 1 {
+		return domain.ErrRevisionConflict
+	}
+	current, ok := r.revisions[familyID]
+	if !ok {
+		current = 1
+	}
+	if current != expectedRevision {
+		return domain.ErrRevisionConflict
+	}
 	return nil
 }
 
@@ -211,6 +295,20 @@ func (r *fakeRepository) CreateInvitation(
 	invitation domain.Invitation,
 	audit domain.AuditEvent,
 ) error {
+	return r.CreateInvitationRevision(
+		context.Background(),
+		invitation,
+		audit,
+		-1,
+	)
+}
+
+func (r *fakeRepository) CreateInvitationRevision(
+	_ context.Context,
+	invitation domain.Invitation,
+	audit domain.AuditEvent,
+	expectedRevision int64,
+) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.auditErr != nil {
@@ -223,16 +321,16 @@ func (r *fakeRepository) CreateInvitation(
 			return domain.ErrInvitationState
 		}
 	}
-	r.audits = append(r.audits, audit)
-	r.invitations[invitation.ID] = invitation
-	return nil
-}
-
-func (r *fakeRepository) recordAudit(audit domain.AuditEvent) error {
-	if r.auditErr != nil {
-		return r.auditErr
+	if expectedRevision >= 0 {
+		if err := r.checkRevisionLocked(invitation.FamilyID, expectedRevision); err != nil {
+			return err
+		}
 	}
 	r.audits = append(r.audits, audit)
+	r.invitations[invitation.ID] = invitation
+	if expectedRevision >= 0 {
+		r.revisions[invitation.FamilyID] = expectedRevision + 1
+	}
 	return nil
 }
 
@@ -300,6 +398,54 @@ func (r *fakeRepository) UpdateInvitationState(
 	return nil
 }
 
+func (r *fakeRepository) UpdateInvitationStateWithAudit(
+	_ context.Context,
+	familyID string,
+	invitationID string,
+	status string,
+	audit domain.AuditEvent,
+) error {
+	return r.UpdateInvitationStateWithAuditRevision(
+		context.Background(),
+		familyID,
+		invitationID,
+		status,
+		audit,
+		-1,
+	)
+}
+
+func (r *fakeRepository) UpdateInvitationStateWithAuditRevision(
+	_ context.Context,
+	familyID string,
+	invitationID string,
+	status string,
+	audit domain.AuditEvent,
+	expectedRevision int64,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.auditErr != nil {
+		return r.auditErr
+	}
+	if expectedRevision >= 0 {
+		if err := r.checkRevisionLocked(familyID, expectedRevision); err != nil {
+			return err
+		}
+	}
+	invitation, ok := r.invitations[invitationID]
+	if !ok || invitation.FamilyID != familyID || invitation.Status != domain.InvitationPending {
+		return domain.ErrInvitationState
+	}
+	invitation.Status = status
+	r.invitations[invitationID] = invitation
+	r.audits = append(r.audits, audit)
+	if expectedRevision >= 0 {
+		r.revisions[familyID] = expectedRevision + 1
+	}
+	return nil
+}
+
 func (r *fakeRepository) AcceptInvitation(
 	ctx context.Context,
 	member domain.Member,
@@ -330,6 +476,46 @@ func (r *fakeRepository) AcceptInvitation(
 	return nil
 }
 
+func (r *fakeRepository) ParentIdentity(
+	_ context.Context,
+	accountID string,
+) (domain.AccountIdentity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	identity, ok := r.identities[accountID]
+	if !ok {
+		return domain.AccountIdentity{}, domain.ErrAccountNotFound
+	}
+	return identity, nil
+}
+
+func (r *fakeRepository) AccountIdentities(
+	_ context.Context,
+	accountIDs []string,
+) (map[string]domain.AccountIdentity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make(map[string]domain.AccountIdentity, len(accountIDs))
+	for _, accountID := range accountIDs {
+		if identity, ok := r.identities[accountID]; ok {
+			result[accountID] = identity
+		}
+	}
+	return result, nil
+}
+
+func (r *fakeRepository) MembershipRevision(
+	_ context.Context,
+	familyID string,
+) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if revision, ok := r.revisions[familyID]; ok {
+		return revision, nil
+	}
+	return 1, nil
+}
+
 func newService(t *testing.T, repository *fakeRepository, now time.Time) *Service {
 	t.Helper()
 	service, err := New(Options{
@@ -340,6 +526,19 @@ func newService(t *testing.T, repository *fakeRepository, now time.Time) *Servic
 		t.Fatalf("create service: %v", err)
 	}
 	return service
+}
+
+func addParentIdentity(
+	repository *fakeRepository,
+	accountID string,
+	displayName string,
+) {
+	repository.identities[accountID] = domain.AccountIdentity{
+		AccountID:   accountID,
+		DisplayName: displayName,
+		Role:        "parent",
+		Status:      "active",
+	}
 }
 
 func TestPendingInvitationsForAccountMatchesNormalizedEmail(t *testing.T) {
@@ -392,6 +591,316 @@ func TestPendingInvitationsForAccountRejectsInvalidEmail(t *testing.T) {
 		"not-an-email",
 	); !errors.Is(err, domain.ErrInvalidInvitation) {
 		t.Fatalf("err = %v, want ErrInvalidInvitation", err)
+	}
+}
+
+func TestAdminMembersRequireTargetParentAndReturnIdentity(t *testing.T) {
+	repository := newFakeRepository()
+	service := newService(t, repository, time.Date(2026, time.October, 13, 9, 0, 0, 0, time.UTC))
+	addParentIdentity(repository, "family-1", "家庭账号")
+	addParentIdentity(repository, "owner-1", "林家长")
+	if _, err := service.BootstrapOwner(context.Background(), "family-1", "owner-1"); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	members, revision, err := service.AdminMembers(context.Background(), "family-1")
+	if err != nil {
+		t.Fatalf("admin members: %v", err)
+	}
+	if len(members) != 1 || members[0].Account.DisplayName != "林家长" {
+		t.Fatalf("unexpected admin members: %+v", members)
+	}
+	if revision != 1 {
+		t.Fatalf("revision = %d, want initial 1", revision)
+	}
+
+	repository.identities["admin-1"] = domain.AccountIdentity{
+		AccountID: "admin-1",
+		Role:      "admin",
+		Status:    "active",
+	}
+	if _, _, err := service.AdminMembers(context.Background(), "admin-1"); !errors.Is(err, domain.ErrAccountNotParent) {
+		t.Fatalf("administrator target err = %v, want ErrAccountNotParent", err)
+	}
+	if _, _, err := service.AdminMembers(context.Background(), "missing"); !errors.Is(err, domain.ErrAccountNotFound) {
+		t.Fatalf("missing target err = %v, want ErrAccountNotFound", err)
+	}
+}
+
+func TestAdminInvitationAndMemberMutationsAuditAdministrator(t *testing.T) {
+	repository := newFakeRepository()
+	now := time.Date(2026, time.October, 13, 9, 0, 0, 0, time.UTC)
+	service := newService(t, repository, now)
+	addParentIdentity(repository, "family-1", "家庭账号")
+	addParentIdentity(repository, "owner-1", "林家长")
+	if _, err := service.BootstrapOwner(context.Background(), "family-1", "owner-1"); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	repository.members[memberKey("family-1", "member-1")] = domain.Member{
+		ID:       "member-row-1",
+		FamilyID: "family-1",
+		UserID:   "member-1",
+		Role:     domain.RoleViewer,
+	}
+	repository.identities["member-1"] = domain.AccountIdentity{
+		AccountID: "member-1",
+		Role:      "parent",
+		Status:    "active",
+	}
+
+	invitation, err := service.AdminCreateInvitation(
+		context.Background(),
+		"family-1",
+		"admin-1",
+		"guardian@example.com",
+		domain.RoleGuardian,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("admin create invitation: %v", err)
+	}
+	if invitation.InvitedByUserID != "owner-1" {
+		t.Fatalf("invitation inviter = %q, want target owner", invitation.InvitedByUserID)
+	}
+	if _, err := service.AdminUpdateMemberRole(
+		context.Background(),
+		"family-1",
+		"admin-1",
+		"member-1",
+		domain.RoleGuardian,
+		2,
+	); err != nil {
+		t.Fatalf("admin update role: %v", err)
+	}
+	if err := service.AdminRevokeInvitation(
+		context.Background(),
+		"family-1",
+		"admin-1",
+		invitation.ID,
+		3,
+	); err != nil {
+		t.Fatalf("admin revoke invitation: %v", err)
+	}
+	if err := service.AdminRemoveMember(
+		context.Background(),
+		"family-1",
+		"admin-1",
+		"member-1",
+		4,
+	); err != nil {
+		t.Fatalf("admin remove member: %v", err)
+	}
+
+	repository.mu.Lock()
+	audits := append([]domain.AuditEvent(nil), repository.audits...)
+	repository.mu.Unlock()
+	if len(audits) != 4 {
+		t.Fatalf("audits = %d, want create, role, revoke and remove", len(audits))
+	}
+	for _, audit := range audits {
+		if audit.TargetAccountID == "" {
+			t.Fatalf("unexpected administrator audit: %+v", audit)
+		}
+		if _, leaked := audit.Detail["email"]; leaked {
+			t.Fatalf("audit detail must not contain invitation email: %+v", audit.Detail)
+		}
+	}
+	actions := map[string]bool{}
+	for _, audit := range audits {
+		actions[audit.Action] = true
+		if audit.Action == domain.AuditAdminInvitationCreated ||
+			audit.Action == domain.AuditAdminInvitationRevoked ||
+			audit.Action == domain.AuditAdminMemberRoleUpdated ||
+			audit.Action == domain.AuditAdminMemberRemoved {
+			if audit.ActorAccountID != "admin-1" {
+				t.Fatalf("administrator mutation audit actor = %q", audit.ActorAccountID)
+			}
+		}
+	}
+	for _, action := range []string{
+		domain.AuditAdminInvitationCreated,
+		domain.AuditAdminMemberRoleUpdated,
+		domain.AuditAdminInvitationRevoked,
+		domain.AuditAdminMemberRemoved,
+	} {
+		if !actions[action] {
+			t.Fatalf("missing audit action %q in %+v", action, audits)
+		}
+	}
+}
+
+func TestAdminOwnerMembershipCannotBeChangedOrRemoved(t *testing.T) {
+	repository := newFakeRepository()
+	service := newService(t, repository, time.Date(2026, time.October, 13, 9, 0, 0, 0, time.UTC))
+	addParentIdentity(repository, "family-1", "家庭账号")
+	addParentIdentity(repository, "owner-1", "")
+	if _, err := service.BootstrapOwner(context.Background(), "family-1", "owner-1"); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	if _, err := service.AdminUpdateMemberRole(
+		context.Background(), "family-1", "admin-1", "owner-1", domain.RoleViewer, 1,
+	); !errors.Is(err, domain.ErrLastOwner) {
+		t.Fatalf("owner role err = %v, want ErrLastOwner", err)
+	}
+	if err := service.AdminRemoveMember(
+		context.Background(), "family-1", "admin-1", "owner-1", 1,
+	); !errors.Is(err, domain.ErrLastOwner) {
+		t.Fatalf("owner removal err = %v, want ErrLastOwner", err)
+	}
+}
+
+func TestAdminMutationsRejectStaleRevisionWithoutChangingState(t *testing.T) {
+	repository := newFakeRepository()
+	service := newService(t, repository, time.Date(2026, time.October, 13, 9, 0, 0, 0, time.UTC))
+	addParentIdentity(repository, "family-1", "家庭账号")
+	addParentIdentity(repository, "owner-1", "林家长")
+	if _, err := service.BootstrapOwner(context.Background(), "family-1", "owner-1"); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	repository.members[memberKey("family-1", "member-1")] = domain.Member{
+		ID:       "member-row-1",
+		FamilyID: "family-1",
+		UserID:   "member-1",
+		Role:     domain.RoleViewer,
+	}
+	repository.revisions["family-1"] = 2
+
+	if _, err := service.AdminUpdateMemberRole(
+		context.Background(),
+		"family-1",
+		"admin-1",
+		"member-1",
+		domain.RoleGuardian,
+		1,
+	); !errors.Is(err, domain.ErrRevisionConflict) {
+		t.Fatalf("stale role update err = %v, want ErrRevisionConflict", err)
+	}
+	if _, err := service.AdminCreateInvitation(
+		context.Background(),
+		"family-1",
+		"admin-1",
+		"guardian@example.com",
+		domain.RoleGuardian,
+		1,
+	); !errors.Is(err, domain.ErrRevisionConflict) {
+		t.Fatalf("stale invitation err = %v, want ErrRevisionConflict", err)
+	}
+
+	repository.mu.Lock()
+	role := repository.members[memberKey("family-1", "member-1")].Role
+	invitationCount := len(repository.invitations)
+	revision := repository.revisions["family-1"]
+	auditCount := len(repository.audits)
+	repository.mu.Unlock()
+	if role != domain.RoleViewer || invitationCount != 0 || revision != 2 || auditCount != 0 {
+		t.Fatalf(
+			"stale writes changed state: role=%s invitations=%d revision=%d audits=%d",
+			role,
+			invitationCount,
+			revision,
+			auditCount,
+		)
+	}
+}
+
+func TestAdminMutationsRejectRecordsFromAnotherFamily(t *testing.T) {
+	repository := newFakeRepository()
+	service := newService(
+		t,
+		repository,
+		time.Date(2026, time.October, 13, 9, 0, 0, 0, time.UTC),
+	)
+	addParentIdentity(repository, "family-1", "林家长")
+	addParentIdentity(repository, "family-2", "周家长")
+	if _, err := service.BootstrapOwner(
+		context.Background(),
+		"family-1",
+		"owner-1",
+	); err != nil {
+		t.Fatalf("bootstrap family-1: %v", err)
+	}
+	if _, err := service.BootstrapOwner(
+		context.Background(),
+		"family-2",
+		"owner-2",
+	); err != nil {
+		t.Fatalf("bootstrap family-2: %v", err)
+	}
+	repository.members[memberKey("family-1", "owner-1")] = domain.Member{
+		ID:       "member-owner-1",
+		FamilyID: "family-1",
+		UserID:   "owner-1",
+		Role:     domain.RoleOwner,
+	}
+	repository.members[memberKey("family-2", "owner-2")] = domain.Member{
+		ID:       "member-owner-2",
+		FamilyID: "family-2",
+		UserID:   "owner-2",
+		Role:     domain.RoleOwner,
+	}
+	repository.members[memberKey("family-2", "member-2")] = domain.Member{
+		ID:       "member-row-2",
+		FamilyID: "family-2",
+		UserID:   "member-2",
+		Role:     domain.RoleViewer,
+	}
+	repository.invitations["invitation-2"] = domain.Invitation{
+		ID:       "invitation-2",
+		FamilyID: "family-2",
+		Email:    "other@example.com",
+		Role:     domain.RoleGuardian,
+		Status:   domain.InvitationPending,
+	}
+
+	if _, err := service.AdminUpdateMemberRole(
+		context.Background(),
+		"family-1",
+		"admin-1",
+		"member-2",
+		domain.RoleGuardian,
+		1,
+	); !errors.Is(err, domain.ErrMemberNotFound) {
+		t.Fatalf("cross-family role err = %v, want ErrMemberNotFound", err)
+	}
+	if err := service.AdminRemoveMember(
+		context.Background(),
+		"family-1",
+		"admin-1",
+		"member-2",
+		1,
+	); !errors.Is(err, domain.ErrMemberNotFound) {
+		t.Fatalf("cross-family remove err = %v, want ErrMemberNotFound", err)
+	}
+	if err := service.AdminRevokeInvitation(
+		context.Background(),
+		"family-1",
+		"admin-1",
+		"invitation-2",
+		1,
+	); !errors.Is(err, domain.ErrInvitationState) {
+		t.Fatalf("cross-family revoke err = %v, want ErrInvitationState", err)
+	}
+
+	repository.mu.Lock()
+	role := repository.members[memberKey("family-2", "member-2")].Role
+	status := repository.invitations["invitation-2"].Status
+	revisionOne := repository.revisions["family-1"]
+	revisionTwo := repository.revisions["family-2"]
+	auditCount := len(repository.audits)
+	repository.mu.Unlock()
+	if role != domain.RoleViewer ||
+		status != domain.InvitationPending ||
+		revisionOne != 0 ||
+		revisionTwo != 0 ||
+		auditCount != 0 {
+		t.Fatalf(
+			"cross-family attempt changed state: role=%s status=%s "+
+				"family1_revision=%d family2_revision=%d audits=%d",
+			role,
+			status,
+			revisionOne,
+			revisionTwo,
+			auditCount,
+		)
 	}
 }
 

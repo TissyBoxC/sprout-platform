@@ -55,6 +55,13 @@ type Repository interface {
 		invitationID string,
 		status string,
 	) error
+	UpdateInvitationStateWithAudit(
+		ctx context.Context,
+		familyID string,
+		invitationID string,
+		status string,
+		audit domain.AuditEvent,
+	) error
 	AcceptInvitation(
 		ctx context.Context,
 		member domain.Member,
@@ -62,6 +69,18 @@ type Repository interface {
 		invitationID string,
 		audit domain.AuditEvent,
 	) error
+	ParentIdentity(
+		ctx context.Context,
+		accountID string,
+	) (domain.AccountIdentity, error)
+	AccountIdentities(
+		ctx context.Context,
+		accountIDs []string,
+	) (map[string]domain.AccountIdentity, error)
+	MembershipRevision(
+		ctx context.Context,
+		familyID string,
+	) (int64, error)
 }
 
 // PostgresRepository is the PostgreSQL-backed family repository.
@@ -120,6 +139,23 @@ func (r *PostgresRepository) UpdateMemberRoleWithAudit(
 	member domain.Member,
 	audit domain.AuditEvent,
 ) error {
+	return r.UpdateMemberRoleWithAuditRevision(
+		ctx,
+		member,
+		audit,
+		-1,
+	)
+}
+
+// UpdateMemberRoleWithAuditRevision updates a role, writes its audit, and
+// advances the family membership revision in one transaction. expectedRevision
+// < 0 disables the revision check for the guardian self-service path.
+func (r *PostgresRepository) UpdateMemberRoleWithAuditRevision(
+	ctx context.Context,
+	member domain.Member,
+	audit domain.AuditEvent,
+	expectedRevision int64,
+) error {
 	transaction, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin family role audit transaction: %w", err)
@@ -149,6 +185,16 @@ func (r *PostgresRepository) UpdateMemberRoleWithAudit(
 	if err := insertAudit(ctx, transaction, audit); err != nil {
 		return err
 	}
+	if expectedRevision >= 0 {
+		if err := advanceMembershipRevision(
+			ctx,
+			transaction,
+			member.FamilyID,
+			expectedRevision,
+		); err != nil {
+			return err
+		}
+	}
 	if err := transaction.Commit(ctx); err != nil {
 		return fmt.Errorf("commit family role audit transaction: %w", err)
 	}
@@ -162,6 +208,24 @@ func (r *PostgresRepository) DeleteMemberWithAudit(
 	familyID string,
 	userID string,
 	audit domain.AuditEvent,
+) error {
+	return r.DeleteMemberWithAuditRevision(
+		ctx,
+		familyID,
+		userID,
+		audit,
+		-1,
+	)
+}
+
+// DeleteMemberWithAuditRevision removes a member, writes its audit, and
+// advances the family membership revision atomically.
+func (r *PostgresRepository) DeleteMemberWithAuditRevision(
+	ctx context.Context,
+	familyID string,
+	userID string,
+	audit domain.AuditEvent,
+	expectedRevision int64,
 ) error {
 	transaction, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -182,6 +246,16 @@ func (r *PostgresRepository) DeleteMemberWithAudit(
 	}
 	if err := insertAudit(ctx, transaction, audit); err != nil {
 		return err
+	}
+	if expectedRevision >= 0 {
+		if err := advanceMembershipRevision(
+			ctx,
+			transaction,
+			familyID,
+			expectedRevision,
+		); err != nil {
+			return err
+		}
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return fmt.Errorf("commit family removal audit transaction: %w", err)
@@ -333,11 +407,112 @@ func (r *PostgresRepository) MemberByUser(
 	return member, true, nil
 }
 
+// ParentIdentity loads one parent account's safe management projection. It is
+// intentionally limited to identity, display name and activation state so the
+// family module never exposes credentials or contact details.
+func (r *PostgresRepository) ParentIdentity(
+	ctx context.Context,
+	accountID string,
+) (domain.AccountIdentity, error) {
+	var identity domain.AccountIdentity
+	if err := r.pool.QueryRow(ctx, `
+		SELECT id, display_name, role, status
+		FROM parent_accounts
+		WHERE id = $1
+	`, accountID).Scan(
+		&identity.AccountID,
+		&identity.DisplayName,
+		&identity.Role,
+		&identity.Status,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.AccountIdentity{}, domain.ErrAccountNotFound
+		}
+		return domain.AccountIdentity{}, fmt.Errorf("read parent identity: %w", err)
+	}
+	return identity, nil
+}
+
+// AccountIdentities loads safe display projections for a bounded set of
+// member accounts. Missing accounts are omitted so callers can keep the stable
+// member row and show only its account ID.
+func (r *PostgresRepository) AccountIdentities(
+	ctx context.Context,
+	accountIDs []string,
+) (map[string]domain.AccountIdentity, error) {
+	identities := make(map[string]domain.AccountIdentity, len(accountIDs))
+	if len(accountIDs) == 0 {
+		return identities, nil
+	}
+	if len(accountIDs) > 200 {
+		return nil, domain.ErrInvalidMember
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, display_name, role, status
+		FROM parent_accounts
+		WHERE id = ANY($1::uuid[])
+	`, accountIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list parent identities: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var identity domain.AccountIdentity
+		if err := rows.Scan(
+			&identity.AccountID,
+			&identity.DisplayName,
+			&identity.Role,
+			&identity.Status,
+		); err != nil {
+			return nil, fmt.Errorf("scan parent identity: %w", err)
+		}
+		identities[identity.AccountID] = identity
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate parent identities: %w", err)
+	}
+	return identities, nil
+}
+
+// MembershipRevision returns the family's current membership revision. An
+// absent row is the initial revision 1; the row is created on the first write
+// together with the expected-revision check.
+func (r *PostgresRepository) MembershipRevision(
+	ctx context.Context,
+	familyID string,
+) (int64, error) {
+	var revision int64
+	err := r.pool.QueryRow(ctx, `
+		SELECT revision
+		FROM family_membership_revisions
+		WHERE family_id = $1
+	`, familyID).Scan(&revision)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 1, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read family membership revision: %w", err)
+	}
+	return revision, nil
+}
+
 // CreateInvitation inserts one pending invitation.
 func (r *PostgresRepository) CreateInvitation(
 	ctx context.Context,
 	invitation domain.Invitation,
 	audit domain.AuditEvent,
+) error {
+	return r.CreateInvitationRevision(ctx, invitation, audit, -1)
+}
+
+// CreateInvitationRevision inserts an invitation and its audit and, when
+// expectedRevision is non-negative, checks and advances the shared membership
+// revision in the same transaction.
+func (r *PostgresRepository) CreateInvitationRevision(
+	ctx context.Context,
+	invitation domain.Invitation,
+	audit domain.AuditEvent,
+	expectedRevision int64,
 ) error {
 	transaction, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -369,6 +544,16 @@ func (r *PostgresRepository) CreateInvitation(
 	}
 	if err := insertAudit(ctx, transaction, audit); err != nil {
 		return err
+	}
+	if expectedRevision >= 0 {
+		if err := advanceMembershipRevision(
+			ctx,
+			transaction,
+			invitation.FamilyID,
+			expectedRevision,
+		); err != nil {
+			return err
+		}
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return fmt.Errorf("commit family invitation audit transaction: %w", err)
@@ -467,6 +652,69 @@ func (r *PostgresRepository) UpdateInvitationState(
 	invitationID string,
 	status string,
 ) error {
+	return r.updateInvitationState(ctx, familyID, invitationID, status, nil)
+}
+
+// UpdateInvitationStateWithAudit moves one invitation to a new lifecycle state
+// and writes its audit record in the same transaction. The audit failure rolls
+// back the state change, which prevents an operator action from succeeding
+// without a security record.
+func (r *PostgresRepository) UpdateInvitationStateWithAudit(
+	ctx context.Context,
+	familyID string,
+	invitationID string,
+	status string,
+	audit domain.AuditEvent,
+) error {
+	return r.updateInvitationState(ctx, familyID, invitationID, status, &audit)
+}
+
+// UpdateInvitationStateWithAuditRevision is the admin revoke write. It checks
+// the expected revision, records the audit and advances the revision in the
+// same transaction as the invitation state change.
+func (r *PostgresRepository) UpdateInvitationStateWithAuditRevision(
+	ctx context.Context,
+	familyID string,
+	invitationID string,
+	status string,
+	audit domain.AuditEvent,
+	expectedRevision int64,
+) error {
+	return r.updateInvitationStateRevision(
+		ctx,
+		familyID,
+		invitationID,
+		status,
+		&audit,
+		expectedRevision,
+	)
+}
+
+func (r *PostgresRepository) updateInvitationState(
+	ctx context.Context,
+	familyID string,
+	invitationID string,
+	status string,
+	audit *domain.AuditEvent,
+) error {
+	return r.updateInvitationStateRevision(
+		ctx,
+		familyID,
+		invitationID,
+		status,
+		audit,
+		-1,
+	)
+}
+
+func (r *PostgresRepository) updateInvitationStateRevision(
+	ctx context.Context,
+	familyID string,
+	invitationID string,
+	status string,
+	audit *domain.AuditEvent,
+	expectedRevision int64,
+) error {
 	transaction, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin revoke family invitation: %w", err)
@@ -488,6 +736,21 @@ func (r *PostgresRepository) UpdateInvitationState(
 	}
 	if tag.RowsAffected() == 0 {
 		return classifyFailedInvitationUpdate(ctx, transaction, familyID, invitationID)
+	}
+	if audit != nil {
+		if err := insertAudit(ctx, transaction, *audit); err != nil {
+			return err
+		}
+	}
+	if expectedRevision >= 0 {
+		if err := advanceMembershipRevision(
+			ctx,
+			transaction,
+			familyID,
+			expectedRevision,
+		); err != nil {
+			return err
+		}
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return fmt.Errorf("commit revoke family invitation: %w", err)
@@ -582,6 +845,37 @@ func classifyFailedInvitationUpdate(
 		return domain.ErrInvitationState
 	}
 	return domain.ErrInvitationConcurrent
+}
+
+// advanceMembershipRevision compares the client's expected revision with the
+// persisted row and increments it. A missing row represents revision 1, so the
+// first write with expectedRevision 1 creates revision 2. A stale expectation
+// fails with ErrRevisionConflict and rolls the surrounding transaction back.
+func advanceMembershipRevision(
+	ctx context.Context,
+	executor auditInserter,
+	familyID string,
+	expectedRevision int64,
+) error {
+	if expectedRevision < 1 {
+		return domain.ErrRevisionConflict
+	}
+	tag, err := executor.Exec(ctx, `
+		INSERT INTO family_membership_revisions (
+			family_id, revision, updated_at
+		) VALUES ($1, 2, NOW())
+		ON CONFLICT (family_id) DO UPDATE
+		SET revision = family_membership_revisions.revision + 1,
+		    updated_at = NOW()
+		WHERE family_membership_revisions.revision = $2
+	`, familyID, expectedRevision)
+	if err != nil {
+		return fmt.Errorf("advance family membership revision: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrRevisionConflict
+	}
+	return nil
 }
 
 type auditInserter interface {

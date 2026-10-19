@@ -36,16 +36,24 @@ var (
 	// accept. The caller must reload the invitation before deciding the next
 	// user-visible state.
 	ErrInvitationConcurrent = errors.New("family invitation changed concurrently")
+	ErrAccountNotFound      = errors.New("family account not found")
+	ErrAccountNotParent     = errors.New("account is not a parent")
+	ErrRevisionConflict     = errors.New("family membership revision conflict")
 	ErrReadinessUnavailable = errors.New("family readiness is unavailable")
 )
 
 // Security audit action names. They are stable operator-facing identifiers and
 // never contain invitation emails, credentials, or child data.
 const (
-	AuditInvitationCreated  = "family.invitation.created"
-	AuditInvitationAccepted = "family.invitation.accepted"
-	AuditMemberRoleUpdated  = "family.member.role_updated"
-	AuditMemberRemoved      = "family.member.removed"
+	AuditInvitationCreated      = "family.invitation.created"
+	AuditInvitationAccepted     = "family.invitation.accepted"
+	AuditInvitationRevoked      = "family.invitation.revoked"
+	AuditMemberRoleUpdated      = "family.member.role_updated"
+	AuditMemberRemoved          = "family.member.removed"
+	AuditAdminInvitationCreated = "admin.family.invitation.created"
+	AuditAdminInvitationRevoked = "admin.family.invitation.revoked"
+	AuditAdminMemberRoleUpdated = "admin.family.member.role_updated"
+	AuditAdminMemberRemoved     = "admin.family.member.removed"
 )
 
 // AuditEvent is one safe family security audit record. Detail must contain
@@ -153,6 +161,27 @@ type Member struct {
 	Role      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// AccountIdentity is the safe account projection used by management views.
+// It never contains credentials, phone numbers, or guardian consent data.
+type AccountIdentity struct {
+	AccountID   string
+	DisplayName string
+	Role        string
+	Status      string
+}
+
+// AdminFamily is one target family plus its safe account projection.
+type AdminFamily struct {
+	Account AccountIdentity
+	Members []AdminMember
+}
+
+// AdminMember is one membership row with its safe account projection.
+type AdminMember struct {
+	Member
+	Account AccountIdentity
 }
 
 // Invitation is one pending or resolved request to join a family.

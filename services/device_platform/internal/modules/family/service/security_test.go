@@ -34,6 +34,55 @@ func TestCreateInvitationAuditFailureDoesNotPersistInvitation(t *testing.T) {
 	}
 }
 
+func TestAdminInvitationRevokeAuditFailureDoesNotPersist(t *testing.T) {
+	repository := newFakeRepository()
+	now := time.Date(2026, time.October, 13, 9, 0, 0, 0, time.UTC)
+	service := newService(t, repository, now)
+	addParentIdentity(repository, "family-1", "家庭账号")
+	addParentIdentity(repository, "owner-1", "林家长")
+	if _, err := service.BootstrapOwner(context.Background(), "family-1", "owner-1"); err != nil {
+		t.Fatalf("bootstrap owner: %v", err)
+	}
+	invitation, err := service.CreateInvitation(
+		context.Background(),
+		"family-1",
+		"owner-1",
+		"guardian@example.com",
+		domain.RoleGuardian,
+	)
+	if err != nil {
+		t.Fatalf("create invitation: %v", err)
+	}
+	repository.auditErr = errors.New("audit unavailable")
+	if err := service.AdminRevokeInvitation(
+		context.Background(),
+		"family-1",
+		"admin-1",
+		invitation.ID,
+		1,
+	); err == nil {
+		t.Fatal("expected admin revoke audit failure")
+	}
+	stored, ok, err := repository.Invitation(
+		context.Background(),
+		"family-1",
+		invitation.ID,
+	)
+	if err != nil || !ok {
+		t.Fatalf("reload invitation: ok=%v err=%v", ok, err)
+	}
+	if stored.Status != domain.InvitationPending {
+		t.Fatalf("invitation changed despite audit failure: %+v", stored)
+	}
+	revision, err := repository.MembershipRevision(context.Background(), "family-1")
+	if err != nil {
+		t.Fatalf("read revision: %v", err)
+	}
+	if revision != 1 {
+		t.Fatalf("revision changed despite audit failure: %d", revision)
+	}
+}
+
 func TestMemberMutationsCarryAuditAndFailAtomically(t *testing.T) {
 	repository := newFakeRepository()
 	now := time.Date(2026, time.October, 13, 9, 0, 0, 0, time.UTC)

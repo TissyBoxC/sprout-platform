@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	authdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
 	"github.com/google/uuid"
@@ -27,11 +28,24 @@ type Repository interface {
 		member domain.Member,
 		audit domain.AuditEvent,
 	) error
+	UpdateMemberRoleWithAuditRevision(
+		ctx context.Context,
+		member domain.Member,
+		audit domain.AuditEvent,
+		expectedRevision int64,
+	) error
 	DeleteMemberWithAudit(
 		ctx context.Context,
 		familyID string,
 		userID string,
 		audit domain.AuditEvent,
+	) error
+	DeleteMemberWithAuditRevision(
+		ctx context.Context,
+		familyID string,
+		userID string,
+		audit domain.AuditEvent,
+		expectedRevision int64,
 	) error
 	Members(ctx context.Context, familyID string) ([]domain.Member, error)
 	Member(ctx context.Context, familyID string, userID string) (domain.Member, bool, error)
@@ -41,6 +55,12 @@ type Repository interface {
 		ctx context.Context,
 		invitation domain.Invitation,
 		audit domain.AuditEvent,
+	) error
+	CreateInvitationRevision(
+		ctx context.Context,
+		invitation domain.Invitation,
+		audit domain.AuditEvent,
+		expectedRevision int64,
 	) error
 	Invitation(
 		ctx context.Context,
@@ -58,6 +78,21 @@ type Repository interface {
 		invitationID string,
 		status string,
 	) error
+	UpdateInvitationStateWithAudit(
+		ctx context.Context,
+		familyID string,
+		invitationID string,
+		status string,
+		audit domain.AuditEvent,
+	) error
+	UpdateInvitationStateWithAuditRevision(
+		ctx context.Context,
+		familyID string,
+		invitationID string,
+		status string,
+		audit domain.AuditEvent,
+		expectedRevision int64,
+	) error
 	AcceptInvitation(
 		ctx context.Context,
 		member domain.Member,
@@ -65,6 +100,18 @@ type Repository interface {
 		invitationID string,
 		audit domain.AuditEvent,
 	) error
+	ParentIdentity(
+		ctx context.Context,
+		accountID string,
+	) (domain.AccountIdentity, error)
+	AccountIdentities(
+		ctx context.Context,
+		accountIDs []string,
+	) (map[string]domain.AccountIdentity, error)
+	MembershipRevision(
+		ctx context.Context,
+		familyID string,
+	) (int64, error)
 }
 
 // Service owns family membership and invitations.
@@ -311,11 +358,21 @@ func (s *Service) RevokeInvitation(
 	if invitationID == "" {
 		return domain.ErrInvalidInvitation
 	}
-	return s.repository.UpdateInvitationState(
+	return s.repository.UpdateInvitationStateWithAudit(
 		ctx,
 		familyID,
 		invitationID,
 		domain.InvitationRevoked,
+		domain.AuditEvent{
+			ID:             uuid.NewString(),
+			ActorAccountID: actor.UserID,
+			Action:         domain.AuditInvitationRevoked,
+			Detail: map[string]any{
+				"family_id":     familyID,
+				"invitation_id": invitationID,
+			},
+			CreatedAt: s.clock.Now().UTC(),
+		},
 	)
 }
 
@@ -569,4 +626,288 @@ func (s *Service) ownerUserID(
 		}
 	}
 	return "", domain.ErrLastOwner
+}
+
+// AdminMembers lists one target family's roster. It is separate from Members
+// because administrators are not members of the target family and therefore
+// must never pass through the acting-member authorization path.
+func (s *Service) AdminMembers(
+	ctx context.Context,
+	familyID string,
+) ([]domain.AdminMember, int64, error) {
+	if _, err := s.requireAdminFamily(ctx, familyID); err != nil {
+		return nil, 0, err
+	}
+	revision, err := s.repository.MembershipRevision(ctx, familyID)
+	if err != nil {
+		return nil, 0, err
+	}
+	members, err := s.repository.Members(ctx, familyID)
+	if err != nil {
+		return nil, 0, err
+	}
+	ids := make([]string, 0, len(members))
+	for _, member := range members {
+		ids = append(ids, member.UserID)
+	}
+	identities, err := s.repository.AccountIdentities(ctx, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	result := make([]domain.AdminMember, 0, len(members))
+	for _, member := range members {
+		identity, ok := identities[member.UserID]
+		if !ok {
+			identity = domain.AccountIdentity{AccountID: member.UserID}
+		}
+		result = append(result, domain.AdminMember{
+			Member:  member,
+			Account: identity,
+		})
+	}
+	return result, revision, nil
+}
+
+// AdminInvitations lists one target family's invitations. The email is only
+// returned to an administrator with the family read capability.
+func (s *Service) AdminInvitations(
+	ctx context.Context,
+	familyID string,
+) ([]domain.Invitation, int64, error) {
+	if _, err := s.requireAdminFamily(ctx, familyID); err != nil {
+		return nil, 0, err
+	}
+	revision, err := s.repository.MembershipRevision(ctx, familyID)
+	if err != nil {
+		return nil, 0, err
+	}
+	invitations, err := s.repository.Invitations(ctx, familyID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return invitations, revision, nil
+}
+
+// AdminCreateInvitation creates an invitation on behalf of a target family's
+// owner. The audit records the administrator as actor, not the owner, and the
+// invitation's invited_by_user_id stays a valid family account.
+func (s *Service) AdminCreateInvitation(
+	ctx context.Context,
+	familyID string,
+	adminAccountID string,
+	email string,
+	role string,
+	expectedRevision int64,
+) (domain.Invitation, error) {
+	adminAccountID = strings.TrimSpace(adminAccountID)
+	if adminAccountID == "" {
+		return domain.Invitation{}, domain.ErrInvalidMember
+	}
+	if _, err := s.requireAdminFamily(ctx, familyID); err != nil {
+		return domain.Invitation{}, err
+	}
+	ownerUserID, err := s.ownerUserID(ctx, familyID)
+	if err != nil {
+		return domain.Invitation{}, err
+	}
+	normalizedEmail := domain.NormalizeEmail(email)
+	if err := domain.ValidateInviteEmail(normalizedEmail); err != nil {
+		return domain.Invitation{}, err
+	}
+	if err := domain.ValidateInviteRole(role); err != nil {
+		return domain.Invitation{}, err
+	}
+	now := s.clock.Now().UTC()
+	invitation := domain.Invitation{
+		ID:              uuid.NewString(),
+		FamilyID:        familyID,
+		Email:           normalizedEmail,
+		Role:            role,
+		Status:          domain.InvitationPending,
+		InvitedByUserID: ownerUserID,
+		CreatedAt:       now,
+		ExpiresAt:       now.Add(domain.InvitationTTLHours * time.Hour),
+	}
+	if err := s.repository.CreateInvitationRevision(
+		ctx,
+		invitation,
+		domain.AuditEvent{
+			ID:              uuid.NewString(),
+			ActorAccountID:  adminAccountID,
+			TargetAccountID: familyID,
+			Action:          domain.AuditAdminInvitationCreated,
+			Detail: map[string]any{
+				"family_id":     familyID,
+				"invitation_id": invitation.ID,
+				"role":          invitation.Role,
+				"expires_at":    invitation.ExpiresAt.UTC().Format(time.RFC3339),
+				"scope":         "administrator",
+			},
+			CreatedAt: now,
+		},
+		expectedRevision,
+	); err != nil {
+		return domain.Invitation{}, err
+	}
+	return invitation, nil
+}
+
+// AdminRevokeInvitation revokes one invitation for a target family and writes
+// the operator audit in the repository transaction.
+func (s *Service) AdminRevokeInvitation(
+	ctx context.Context,
+	familyID string,
+	adminAccountID string,
+	invitationID string,
+	expectedRevision int64,
+) error {
+	adminAccountID = strings.TrimSpace(adminAccountID)
+	invitationID = strings.TrimSpace(invitationID)
+	if adminAccountID == "" || invitationID == "" {
+		return domain.ErrInvalidInvitation
+	}
+	if _, err := s.requireAdminFamily(ctx, familyID); err != nil {
+		return err
+	}
+	return s.repository.UpdateInvitationStateWithAuditRevision(
+		ctx,
+		familyID,
+		invitationID,
+		domain.InvitationRevoked,
+		domain.AuditEvent{
+			ID:              uuid.NewString(),
+			ActorAccountID:  adminAccountID,
+			TargetAccountID: familyID,
+			Action:          domain.AuditAdminInvitationRevoked,
+			Detail: map[string]any{
+				"family_id":     familyID,
+				"invitation_id": invitationID,
+				"scope":         "administrator",
+			},
+			CreatedAt: s.clock.Now().UTC(),
+		},
+		expectedRevision,
+	)
+}
+
+// AdminUpdateMemberRole changes one non-owner member role in a target family.
+func (s *Service) AdminUpdateMemberRole(
+	ctx context.Context,
+	familyID string,
+	adminAccountID string,
+	targetUserID string,
+	role string,
+	expectedRevision int64,
+) (domain.Member, error) {
+	adminAccountID = strings.TrimSpace(adminAccountID)
+	targetUserID = strings.TrimSpace(targetUserID)
+	if adminAccountID == "" || targetUserID == "" {
+		return domain.Member{}, domain.ErrInvalidMember
+	}
+	if role != domain.RoleGuardian && role != domain.RoleViewer {
+		return domain.Member{}, domain.ErrInvalidMember
+	}
+	if _, err := s.requireAdminFamily(ctx, familyID); err != nil {
+		return domain.Member{}, err
+	}
+	target, ok, err := s.repository.Member(ctx, familyID, targetUserID)
+	if err != nil {
+		return domain.Member{}, err
+	}
+	if !ok {
+		return domain.Member{}, domain.ErrMemberNotFound
+	}
+	if target.Role == domain.RoleOwner {
+		return domain.Member{}, domain.ErrLastOwner
+	}
+	target.Role = role
+	target.UpdatedAt = s.clock.Now().UTC()
+	if err := s.repository.UpdateMemberRoleWithAuditRevision(
+		ctx,
+		target,
+		domain.AuditEvent{
+			ID:              uuid.NewString(),
+			ActorAccountID:  adminAccountID,
+			TargetAccountID: target.UserID,
+			Action:          domain.AuditAdminMemberRoleUpdated,
+			Detail: map[string]any{
+				"family_id":   familyID,
+				"member_id":   target.ID,
+				"target_role": target.Role,
+				"scope":       "administrator",
+			},
+			CreatedAt: target.UpdatedAt,
+		},
+		expectedRevision,
+	); err != nil {
+		return domain.Member{}, err
+	}
+	return target, nil
+}
+
+// AdminRemoveMember removes one non-owner member from a target family. The
+// owner row is immutable through the management path so the family cannot be
+// left without an owner.
+func (s *Service) AdminRemoveMember(
+	ctx context.Context,
+	familyID string,
+	adminAccountID string,
+	targetUserID string,
+	expectedRevision int64,
+) error {
+	adminAccountID = strings.TrimSpace(adminAccountID)
+	targetUserID = strings.TrimSpace(targetUserID)
+	if adminAccountID == "" || targetUserID == "" {
+		return domain.ErrInvalidMember
+	}
+	if _, err := s.requireAdminFamily(ctx, familyID); err != nil {
+		return err
+	}
+	target, ok, err := s.repository.Member(ctx, familyID, targetUserID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return domain.ErrMemberNotFound
+	}
+	if target.Role == domain.RoleOwner {
+		return domain.ErrLastOwner
+	}
+	return s.repository.DeleteMemberWithAuditRevision(
+		ctx,
+		familyID,
+		targetUserID,
+		domain.AuditEvent{
+			ID:              uuid.NewString(),
+			ActorAccountID:  adminAccountID,
+			TargetAccountID: target.UserID,
+			Action:          domain.AuditAdminMemberRemoved,
+			Detail: map[string]any{
+				"family_id":   familyID,
+				"member_id":   target.ID,
+				"target_role": target.Role,
+				"scope":       "administrator",
+			},
+			CreatedAt: s.clock.Now().UTC(),
+		},
+		expectedRevision,
+	)
+}
+
+func (s *Service) requireAdminFamily(
+	ctx context.Context,
+	familyID string,
+) (domain.AccountIdentity, error) {
+	familyID = strings.TrimSpace(familyID)
+	if familyID == "" {
+		return domain.AccountIdentity{}, domain.ErrAccountNotFound
+	}
+	identity, err := s.repository.ParentIdentity(ctx, familyID)
+	if err != nil {
+		return domain.AccountIdentity{}, err
+	}
+	if identity.Role != authdomain.RoleParent {
+		return domain.AccountIdentity{}, domain.ErrAccountNotParent
+	}
+	return identity, nil
 }

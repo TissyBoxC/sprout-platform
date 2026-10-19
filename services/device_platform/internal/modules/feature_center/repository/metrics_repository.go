@@ -82,6 +82,14 @@ func (r *MetricsRepository) FeatureMetrics(
 			"SELECT COUNT(*) FROM parent_accounts WHERE role = 'parent' AND status = 'active'",
 			"active_parent_count",
 		)
+	case "family_membership":
+		return r.pair(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM family_members),
+				(SELECT COUNT(*) FROM family_invitations WHERE status = 'pending')`,
+			"family_member_count",
+			"family_pending_invitation_count",
+		)
 	case "ai_account":
 		return r.scalar(ctx,
 			"SELECT COUNT(*) FROM ai_accounts WHERE status = 'active'",

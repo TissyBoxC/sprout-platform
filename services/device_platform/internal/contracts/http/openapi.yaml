@@ -8423,6 +8423,305 @@ paths:
                 $ref: "#/components/schemas/ResponseEnvelope"
         "500":
           $ref: "#/components/responses/ChildServiceError"
+  /api/v1/admin/families/{parent_account_id}/members:
+    get:
+      summary: List one target family's members with the membership revision
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ParentAccountId"
+      responses:
+        "200":
+          description: Family members and current membership revision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminFamilyMembersEnvelope"
+        "400":
+          description: Missing parent account id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Target parent account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Target account is not a parent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/FamilyServiceError"
+  /api/v1/admin/families/{parent_account_id}/members/{user_id}:
+    put:
+      summary: Update one non-owner family member role
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ParentAccountId"
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - $ref: "#/components/parameters/IfMatchMembershipRevision"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminFamilyRoleRequest"
+      responses:
+        "200":
+          description: Member role updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilyMemberEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Target family or member not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Membership revision conflict or owner protection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid target account or role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "428":
+          description: Membership revision header is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/FamilyServiceError"
+    delete:
+      summary: Remove one non-owner family member
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ParentAccountId"
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - $ref: "#/components/parameters/IfMatchMembershipRevision"
+      responses:
+        "200":
+          description: Member removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilyRemovedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Target family or member not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Membership revision conflict or owner protection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid target account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "428":
+          description: Membership revision header is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/FamilyServiceError"
+  /api/v1/admin/families/{parent_account_id}/invitations:
+    get:
+      summary: List one target family's invitations with the membership revision
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ParentAccountId"
+      responses:
+        "200":
+          description: Family invitations and current membership revision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminFamilyInvitationsEnvelope"
+        "400":
+          description: Missing parent account id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Target parent account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Target account is not a parent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/FamilyServiceError"
+    post:
+      summary: Invite one guardian or viewer to a target family
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ParentAccountId"
+        - $ref: "#/components/parameters/IfMatchMembershipRevision"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminFamilyInvitationRequest"
+      responses:
+        "201":
+          description: Invitation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilyInvitationEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Target parent account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Membership revision conflict or duplicate pending invitation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid target account, email or role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "428":
+          description: Membership revision header is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/FamilyServiceError"
+  /api/v1/admin/families/{parent_account_id}/invitations/{invitation_id}:
+    delete:
+      summary: Revoke one pending invitation from a target family
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/ParentAccountId"
+        - name: invitation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - $ref: "#/components/parameters/IfMatchMembershipRevision"
+      responses:
+        "200":
+          description: Invitation revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilyRevokedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Target family or invitation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Membership revision conflict or invitation already resolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid target account or expired invitation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "428":
+          description: Membership revision header is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/FamilyServiceError"
   /api/v1/admin/families/{parent_account_id}/usage-reports:
     get:
       summary: List one family's daily usage reports
@@ -10502,6 +10801,14 @@ components:
       scheme: bearer
       bearerFormat: device-session-token
   parameters:
+    IfMatchMembershipRevision:
+      name: If-Match
+      in: header
+      required: true
+      description: Current `membership_revision` returned by the member or invitation list endpoint.
+      schema:
+        type: string
+        pattern: '^"?[1-9][0-9]*"?$'
     UserId:
       name: user_id
       in: path
@@ -11353,6 +11660,124 @@ components:
         role:
           $ref: "#/components/schemas/FamilyRole"
     FamilyInvitationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+        - role
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        role:
+          $ref: "#/components/schemas/FamilyInvitationRole"
+    AdminFamilyMember:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - family_id
+        - user_id
+        - role
+        - created_at
+        - updated_at
+        - display_name
+        - account_role
+        - account_status
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        family_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        role:
+          $ref: "#/components/schemas/FamilyRole"
+        display_name:
+          type: string
+          maxLength: 128
+        account_role:
+          type: string
+          enum:
+            - parent
+            - admin
+            - unknown
+        account_status:
+          type: string
+          enum:
+            - active
+            - disabled
+            - unknown
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    AdminFamilyMembersEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - family_id
+                - membership_revision
+                - members
+              properties:
+                family_id:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                membership_revision:
+                  type: integer
+                  minimum: 1
+                members:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/AdminFamilyMember"
+    AdminFamilyInvitationsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - family_id
+                - membership_revision
+                - invitations
+              properties:
+                family_id:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                membership_revision:
+                  type: integer
+                  minimum: 1
+                invitations:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/FamilyInvitation"
+    AdminFamilyRoleRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - role
+      properties:
+        role:
+          $ref: "#/components/schemas/FamilyRole"
+    AdminFamilyInvitationRequest:
       type: object
       additionalProperties: false
       required:

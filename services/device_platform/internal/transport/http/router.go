@@ -324,6 +324,9 @@ func NewRouter(options RouterOptions) http.Handler {
 				service:       options.FamilyService,
 				accountReader: authHandler,
 			}
+			adminFamilyMembershipHandler := adminFamilyMembershipHandler{
+				service: options.FamilyService,
+			}
 			mux.HandleFunc(
 				"GET /api/v1/family/members",
 				authHandler.requireAuthentication(
@@ -388,6 +391,48 @@ func NewRouter(options RouterOptions) http.Handler {
 						familydomain.ActionFamilyRead,
 						familyHandler.capability,
 					),
+				),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/admin/families/{parent_account_id}/members",
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionFamilyRead,
+					adminFamilyMembershipHandler.listMembers,
+				),
+			)
+			mux.HandleFunc(
+				"PUT /api/v1/admin/families/{parent_account_id}/members/{user_id}",
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionFamilyManage,
+					adminFamilyMembershipHandler.updateMemberRole,
+				),
+			)
+			mux.HandleFunc(
+				"DELETE /api/v1/admin/families/{parent_account_id}/members/{user_id}",
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionFamilyManage,
+					adminFamilyMembershipHandler.removeMember,
+				),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/admin/families/{parent_account_id}/invitations",
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionFamilyRead,
+					adminFamilyMembershipHandler.listInvitations,
+				),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/admin/families/{parent_account_id}/invitations",
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionFamilyManage,
+					adminFamilyMembershipHandler.createInvitation,
+				),
+			)
+			mux.HandleFunc(
+				"DELETE /api/v1/admin/families/{parent_account_id}/invitations/{invitation_id}",
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionFamilyManage,
+					adminFamilyMembershipHandler.revokeInvitation,
 				),
 			)
 		}

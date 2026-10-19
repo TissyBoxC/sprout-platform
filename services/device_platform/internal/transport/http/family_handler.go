@@ -82,6 +82,44 @@ type familyService interface {
 		familyID string,
 		actorUserID string,
 	) (familydomain.Capability, error)
+	AdminMembers(
+		ctx context.Context,
+		familyID string,
+	) ([]familydomain.AdminMember, int64, error)
+	AdminInvitations(
+		ctx context.Context,
+		familyID string,
+	) ([]familydomain.Invitation, int64, error)
+	AdminCreateInvitation(
+		ctx context.Context,
+		familyID string,
+		adminAccountID string,
+		email string,
+		role string,
+		expectedRevision int64,
+	) (familydomain.Invitation, error)
+	AdminRevokeInvitation(
+		ctx context.Context,
+		familyID string,
+		adminAccountID string,
+		invitationID string,
+		expectedRevision int64,
+	) error
+	AdminUpdateMemberRole(
+		ctx context.Context,
+		familyID string,
+		adminAccountID string,
+		targetUserID string,
+		role string,
+		expectedRevision int64,
+	) (familydomain.Member, error)
+	AdminRemoveMember(
+		ctx context.Context,
+		familyID string,
+		adminAccountID string,
+		targetUserID string,
+		expectedRevision int64,
+	) error
 }
 
 type familyHandler struct {
@@ -425,6 +463,20 @@ func familyInvitationResponse(invitation *familydomain.Invitation) map[string]an
 		"created_at":         invitation.CreatedAt,
 		"expires_at":         invitation.ExpiresAt,
 		"accepted_at":        invitation.AcceptedAt,
+	}
+}
+
+func familyAdminMemberResponse(member *familydomain.AdminMember) map[string]any {
+	return map[string]any{
+		"id":             member.ID,
+		"family_id":      member.FamilyID,
+		"user_id":        member.UserID,
+		"role":           member.Role,
+		"created_at":     member.CreatedAt,
+		"updated_at":     member.UpdatedAt,
+		"display_name":   member.Account.DisplayName,
+		"account_role":   member.Account.Role,
+		"account_status": member.Account.Status,
 	}
 }
 

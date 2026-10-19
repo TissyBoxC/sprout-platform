@@ -379,6 +379,12 @@ func Run() error {
 				return string(readiness.State)
 			},
 		),
+		"family_membership": serviceReadinessProbe(
+			familyMembershipService.Readiness,
+			func(readiness familydomain.Readiness) string {
+				return string(readiness.State)
+			},
+		),
 		"child_profile": serviceReadinessProbe(
 			childProfileService.Readiness,
 			func(readiness childdomain.Readiness) string {

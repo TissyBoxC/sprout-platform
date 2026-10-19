@@ -284,6 +284,103 @@ func (s *familyTestService) Capability(
 	}, nil
 }
 
+func (s *familyTestService) AdminMembers(
+	_ context.Context,
+	familyID string,
+) ([]familydomain.AdminMember, int64, error) {
+	members := make([]familydomain.AdminMember, 0, len(s.members))
+	for _, member := range s.members {
+		if member.FamilyID == familyID {
+			members = append(members, familydomain.AdminMember{
+				Member: member,
+				Account: familydomain.AccountIdentity{
+					AccountID: member.UserID,
+					Role:      "parent",
+					Status:    "active",
+				},
+			})
+		}
+	}
+	return members, 1, nil
+}
+
+func (s *familyTestService) AdminInvitations(
+	_ context.Context,
+	familyID string,
+) ([]familydomain.Invitation, int64, error) {
+	invitations := make([]familydomain.Invitation, 0, len(s.invitations))
+	for _, invitation := range s.invitations {
+		if invitation.FamilyID == familyID {
+			invitations = append(invitations, invitation)
+		}
+	}
+	return invitations, 1, nil
+}
+
+func (s *familyTestService) AdminCreateInvitation(
+	_ context.Context,
+	familyID string,
+	_ string,
+	email string,
+	role string,
+	_ int64,
+) (familydomain.Invitation, error) {
+	invitation := familydomain.Invitation{
+		ID:       "admin-invitation-1",
+		FamilyID: familyID,
+		Email:    familydomain.NormalizeEmail(email),
+		Role:     role,
+		Status:   familydomain.InvitationPending,
+	}
+	s.invitations[invitation.ID] = invitation
+	return invitation, nil
+}
+
+func (s *familyTestService) AdminRevokeInvitation(
+	_ context.Context,
+	_ string,
+	_ string,
+	_ string,
+	_ int64,
+) error {
+	return nil
+}
+
+func (s *familyTestService) AdminUpdateMemberRole(
+	_ context.Context,
+	familyID string,
+	_ string,
+	targetUserID string,
+	role string,
+	_ int64,
+) (familydomain.Member, error) {
+	member, ok := s.members[targetUserID]
+	if !ok || member.FamilyID != familyID {
+		return familydomain.Member{}, familydomain.ErrMemberNotFound
+	}
+	if member.Role == familydomain.RoleOwner {
+		return familydomain.Member{}, familydomain.ErrLastOwner
+	}
+	member.Role = role
+	s.members[targetUserID] = member
+	return member, nil
+}
+
+func (s *familyTestService) AdminRemoveMember(
+	_ context.Context,
+	familyID string,
+	_ string,
+	targetUserID string,
+	_ int64,
+) error {
+	member, ok := s.members[targetUserID]
+	if !ok || member.FamilyID != familyID {
+		return familydomain.ErrMemberNotFound
+	}
+	delete(s.members, targetUserID)
+	return nil
+}
+
 type familyTestAccountReader struct {
 	emails map[string]string
 }
@@ -373,8 +470,8 @@ func TestFamilyCapabilityReportsOwner(t *testing.T) {
 	}
 	var envelope struct {
 		Data struct {
-			OwnerUserID string `json:"owner_user_id"`
-			MemberCount int    `json:"member_count"`
+			OwnerUserID string          `json:"owner_user_id"`
+			MemberCount int             `json:"member_count"`
 			Permissions map[string]bool `json:"permissions"`
 		} `json:"data"`
 	}

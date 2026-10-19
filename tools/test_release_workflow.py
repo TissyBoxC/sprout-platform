@@ -352,6 +352,30 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    if 'if [[ -n "${RELEASE_UPLOAD_TOKEN:-}" ]]; then' not in configure_block:
+        print(
+            "partial SFTP configuration must keep the authenticated management API usable",
+            file=sys.stderr,
+        )
+        return 1
+    if (
+        'echo "sftp_configured=false" >> "$GITHUB_OUTPUT"' not in configure_block
+        or "using the management API only" not in configure_block
+    ):
+        print(
+            "partial SFTP configuration must disable only the fallback",
+            file=sys.stderr,
+        )
+        return 1
+    if (
+        "SFTP fallback is partially configured and no management API token is available."
+        not in configure_block
+    ):
+        print(
+            "partial SFTP configuration must fail closed without the management API",
+            file=sys.stderr,
+        )
+        return 1
     if 'if [[ ! "$SFTP_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]*$ ]]' not in configure_block:
         print(
             "SFTP configuration must reject unsafe host values",

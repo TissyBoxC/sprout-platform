@@ -175,7 +175,7 @@ Sub2API 的 `TOTP_ENCRYPTION_KEY` 必须是 64 位十六进制字符串，不能
 
 SFTP 回退严格分为三种状态：
 
-1. 四个 `SPROUT_DOWNLOAD_SFTP_*` Secrets 全部为空：SFTP 未配置是合法状态，
+1. 所有 `SPROUT_DOWNLOAD_SFTP_*` Secrets 全部为空：SFTP 未配置是合法状态，
    发布流水线只使用管理 API。
 2. 任意一个 SFTP Secret 已配置：私钥、主机、端口、用户和固定主机公钥
    `SPROUT_DOWNLOAD_SFTP_KNOWN_HOSTS` 必须同时齐全；端口
@@ -190,6 +190,10 @@ SFTP 回退严格分为三种状态：
 `known_hosts` 记录；非 22 端口使用 `[主机]:端口`。发布重试会先校验已存在的
 SFTP 文件，只补传缺失或内容不一致的工件；不得用运行时主机密钥扫描替代固定
 记录。
+
+如果旧部署已经配置了前四项、但尚未补 `SPROUT_DOWNLOAD_SFTP_KNOWN_HOSTS`，
+只要 `SPROUT_RELEASE_UPLOAD_TOKEN` 有效，新工作流会关闭 SFTP 回退并仅使用管理
+API 发布；没有管理 API 令牌时仍会失败关闭，必须补齐固定主机公钥后才能继续。
 
 `SPROUT_RELEASE_UPLOAD_TOKEN` 是发布流水线专用令牌。它只能调用
 `/internal/v1/release-files` 和 `/internal/v1/release-index/refresh`，

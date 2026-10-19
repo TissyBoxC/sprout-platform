@@ -443,7 +443,7 @@ jobs:
           if not expected_hosts.intersection(provided_hosts):
               raise SystemExit(
                   "SPROUT_DOWNLOAD_SFTP_KNOWN_HOSTS does not pin the configured "
-                  f"SFTP endpoint host={host} port={port}"
+                  "SFTP host and port"
               )
           print(f"validated pinned SFTP host key for {sorted(expected_hosts)[0]}")
           PY

@@ -237,8 +237,8 @@ def verify_production_contract(
     for fragment in (
         'known_hosts="$RUNNER_TEMP/sprout-sftp/known_hosts"',
         "SPROUT_DOWNLOAD_SFTP_KNOWN_HOSTS contains no host key entries",
-        "does not pin the configured",
-        'f"SFTP endpoint host={host} port={port}"',
+        '"SPROUT_DOWNLOAD_SFTP_KNOWN_HOSTS does not pin the configured "\n'
+        '        "SFTP host and port"',
         'ssh-keygen -F "$host_query" -f "$known_hosts"',
     ):
         if fragment not in configure_run:

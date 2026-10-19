@@ -60,6 +60,7 @@ type CurrentDeviceUpdate struct {
 	Deployment      domain.Deployment
 	UpdateAvailable bool
 	CurrentVersion  string
+	Rollback        bool
 }
 
 // New creates the OTA service.
@@ -585,7 +586,9 @@ func (s *Service) DeviceCurrentVersion(
 }
 
 // CurrentDeviceUpdate returns the newest in-progress or terminal deployment
-// for a device. Callers fall back to DeviceUpdate when there is none.
+// for a device. A rollback deployment is marked explicitly and resolves the
+// authorized target release instead of a newer forward release. Callers fall
+// back to DeviceUpdate when there is none.
 func (s *Service) CurrentDeviceUpdate(
 	ctx context.Context,
 	deviceID string,
@@ -610,7 +613,12 @@ func (s *Service) CurrentDeviceUpdate(
 	case domain.DeploymentStatusSucceeded, domain.DeploymentStatusRolledBack:
 		return nil, domain.ErrNoUpdateAvailable
 	}
-	release, err := s.repository.GetRelease(ctx, deployment.ReleaseID)
+	targetReleaseID := strings.TrimSpace(deployment.ReleaseID)
+	isRollback := strings.TrimSpace(deployment.RollbackReleaseID) != ""
+	if isRollback {
+		targetReleaseID = strings.TrimSpace(deployment.RollbackReleaseID)
+	}
+	release, err := s.repository.GetRelease(ctx, targetReleaseID)
 	if err != nil {
 		return nil, err
 	}
@@ -618,11 +626,21 @@ func (s *Service) CurrentDeviceUpdate(
 	if err != nil {
 		return nil, err
 	}
+	if isRollback {
+		if strings.TrimSpace(deployment.RollbackOfDeploymentID) == "" {
+			return nil, domain.ErrRollbackNotAllowed
+		}
+		if release.Status != domain.ReleaseStatusPublished ||
+			release.HardwareRevision != device.HardwareRevision {
+			return nil, domain.ErrRollbackNotAllowed
+		}
+	}
 	return &CurrentDeviceUpdate{
 		Release:         *release,
 		Deployment:      deployment,
 		UpdateAvailable: deployment.Status != domain.DeploymentStatusFailed,
 		CurrentVersion:  device.CurrentVersion,
+		Rollback:        isRollback,
 	}, nil
 }
 

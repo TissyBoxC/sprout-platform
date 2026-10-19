@@ -1305,6 +1305,160 @@ func TestCurrentDeviceUpdateReturnsActiveDeployment(t *testing.T) {
 	if !current.UpdateAvailable {
 		t.Fatal("queued deployment must be exposed as an available update")
 	}
+	if current.Rollback {
+		t.Fatal("normal deployment must not be marked as a rollback")
+	}
+}
+
+func TestCurrentDeviceUpdateMarksAuthorizedRollback(t *testing.T) {
+	t.Parallel()
+	repository := newFakeRepository()
+	repository.device = &domain.DeviceContext{
+		DeviceID:         "device-1",
+		HardwareRevision: "sprout-v1",
+		CurrentVersion:   "1.3.0",
+	}
+	target := fakePublishedRelease("00000000-0000-4000-8000-000000000010", "1.2.0")
+	repository.releases[target.ID] = target
+	original := fakePublishedRelease("00000000-0000-4000-8000-000000000011", "1.3.0")
+	repository.releases[original.ID] = original
+	deployment := &domain.Deployment{
+		ID:                     "00000000-0000-4000-8000-000000000012",
+		ReleaseID:              target.ID,
+		RollbackReleaseID:      target.ID,
+		RollbackOfDeploymentID: "00000000-0000-4000-8000-000000000013",
+		DeviceID:               "device-1",
+		Status:                 domain.DeploymentStatusQueued,
+		RequestID:              "rollback-authorized",
+		RecordVersion:          1,
+	}
+	repository.deployments[deployment.ID] = deployment
+	otaService, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	current, err := otaService.CurrentDeviceUpdate(
+		context.Background(),
+		"device-1",
+	)
+	if err != nil {
+		t.Fatalf("current device update: %v", err)
+	}
+	if !current.Rollback {
+		t.Fatal("authorized rollback must be marked as a rollback")
+	}
+	if current.Release.ID != target.ID {
+		t.Fatalf("release id = %q, want rollback target %q", current.Release.ID, target.ID)
+	}
+	if current.Release.Version != target.Version {
+		t.Fatalf(
+			"target version = %q, want %q",
+			current.Release.Version,
+			target.Version,
+		)
+	}
+	if current.Deployment.RollbackReleaseID != target.ID ||
+		current.Deployment.RollbackOfDeploymentID != deployment.RollbackOfDeploymentID {
+		t.Fatalf("rollback metadata = %#v", current.Deployment)
+	}
+}
+
+func TestCurrentDeviceUpdatePrefersRollbackTargetOverNewerRelease(t *testing.T) {
+	t.Parallel()
+	repository := newFakeRepository()
+	repository.device = &domain.DeviceContext{
+		DeviceID:         "device-1",
+		HardwareRevision: "sprout-v1",
+		CurrentVersion:   "1.4.0",
+	}
+	target := fakePublishedRelease("00000000-0000-4000-8000-000000000020", "1.2.0")
+	repository.releases[target.ID] = target
+	newer := fakePublishedRelease("00000000-0000-4000-8000-000000000021", "1.4.0")
+	repository.releases[newer.ID] = newer
+	repository.deployments["00000000-0000-4000-8000-000000000022"] = &domain.Deployment{
+		ID:                     "00000000-0000-4000-8000-000000000022",
+		ReleaseID:              target.ID,
+		RollbackReleaseID:      target.ID,
+		RollbackOfDeploymentID: "00000000-0000-4000-8000-000000000023",
+		DeviceID:               "device-1",
+		Status:                 domain.DeploymentStatusQueued,
+		RequestID:              "rollback-before-newer-release",
+		RecordVersion:          1,
+	}
+	otaService, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	current, err := otaService.CurrentDeviceUpdate(
+		context.Background(),
+		"device-1",
+	)
+	if err != nil {
+		t.Fatalf("current device update: %v", err)
+	}
+	if current.Release.ID != target.ID || current.Release.Version != "1.2.0" {
+		t.Fatalf(
+			"release = %s@%s, want rollback target %s@%s",
+			current.Release.ID,
+			current.Release.Version,
+			target.ID,
+			target.Version,
+		)
+	}
+}
+
+func TestCurrentDeviceUpdateRejectsUnpublishedRollbackTarget(t *testing.T) {
+	t.Parallel()
+	repository := newFakeRepository()
+	repository.device = &domain.DeviceContext{
+		DeviceID:         "device-1",
+		HardwareRevision: "sprout-v1",
+		CurrentVersion:   "1.3.0",
+	}
+	target := fakePublishedRelease("00000000-0000-4000-8000-000000000010", "1.2.0")
+	target.Status = domain.ReleaseStatusDraft
+	repository.releases[target.ID] = target
+	repository.deployments["00000000-0000-4000-8000-000000000012"] = &domain.Deployment{
+		ID:                     "00000000-0000-4000-8000-000000000012",
+		ReleaseID:              target.ID,
+		RollbackReleaseID:      target.ID,
+		RollbackOfDeploymentID: "00000000-0000-4000-8000-000000000013",
+		DeviceID:               "device-1",
+		Status:                 domain.DeploymentStatusQueued,
+		RequestID:              "rollback-draft",
+		RecordVersion:          1,
+	}
+	otaService, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	if _, err := otaService.CurrentDeviceUpdate(
+		context.Background(),
+		"device-1",
+	); !errors.Is(err, domain.ErrRollbackNotAllowed) {
+		t.Fatalf("expected unpublished rollback target rejection, got %v", err)
+	}
+}
+
+func fakePublishedRelease(id string, version string) *domain.Release {
+	return &domain.Release{
+		ID:                 id,
+		Version:            version,
+		Channel:            domain.ChannelStable,
+		HardwareRevision:   "sprout-v1",
+		MinSourceVersion:   "1.0.0",
+		ArtifactURL:        "https://download.clarkhub.cn/firmware/" + version + ".bin",
+		ArtifactKey:        "firmware/" + version + ".bin",
+		SHA256:             strings.Repeat("a", 64),
+		SizeBytes:          1024,
+		SignatureKeyID:     "firmware-prod-2026",
+		SignatureAlgorithm: "ed25519",
+		Signature:          strings.Repeat("A", 86) + "==",
+		RollbackAllowed:    true,
+		Status:             domain.ReleaseStatusPublished,
+		Target:             domain.Target{Scope: domain.TargetScopeAll},
+		RecordVersion:      1,
+	}
 }
 
 func TestRollbackDeploymentRequiresAllowedRelease(t *testing.T) {

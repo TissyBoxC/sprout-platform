@@ -104,7 +104,10 @@ paths:
       description: |
         The device session token identifies the owner and the path device id
         must match that owner. The response contains the same immutable
-        release manifest the device will verify before downloading.
+        release manifest the device will verify before downloading. A pending
+        rollback deployment uses status rollback_available,
+        rollback_available=true, target_version set to the authorized target,
+        and both rollback IDs.
       security:
         - deviceSession: []
       parameters:

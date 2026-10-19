@@ -204,9 +204,9 @@ func (handler otaHandler) deviceUpdate(
 			current.Release.DeviceManifest(),
 			current.CurrentVersion,
 			&current.Deployment,
-			currentDeviceUpdateStatus(current),
+			string(current.Deployment.Status),
 			current.UpdateAvailable,
-			current.Rollback,
+			true,
 		)
 		return
 	}
@@ -429,9 +429,9 @@ func (handler otaHandler) statusForGuardian(
 		current.Release.DeviceManifest(),
 		current.CurrentVersion,
 		&current.Deployment,
-		currentDeviceUpdateStatus(current),
+		string(current.Deployment.Status),
 		current.UpdateAvailable,
-		current.Rollback,
+		true,
 	)
 }
 
@@ -1029,16 +1029,6 @@ func (handler otaHandler) writeCurrentDeviceUpdate(
 	})
 }
 
-func currentDeviceUpdateStatus(current *otaservice.CurrentDeviceUpdate) string {
-	if current == nil {
-		return "up_to_date"
-	}
-	if current.Rollback {
-		return "rollback_available"
-	}
-	return string(current.Deployment.Status)
-}
-
 func (handler otaHandler) currentVersion(
 	request *http.Request,
 	deviceID string,
@@ -1064,6 +1054,31 @@ func (handler otaHandler) writeDeviceUpdate(
 	updateAvailable bool,
 	rollbackAvailable bool,
 ) {
+	writeSuccess(
+		response,
+		request,
+		http.StatusOK,
+		otaDeviceUpdatePayload(
+			deviceID,
+			status,
+			currentVersion,
+			release,
+			deployment,
+			updateAvailable,
+			rollbackAvailable,
+		),
+	)
+}
+
+func otaDeviceUpdatePayload(
+	deviceID string,
+	status string,
+	currentVersion string,
+	release domain.DeviceRelease,
+	deployment *domain.Deployment,
+	updateAvailable bool,
+	rollbackAvailable bool,
+) map[string]any {
 	currentVersion = strings.TrimSpace(currentVersion)
 	payload := map[string]any{
 		"schema_version":     domain.OTAReleaseSchemaVersion,
@@ -1091,7 +1106,7 @@ func (handler otaHandler) writeDeviceUpdate(
 			payload["error_message"] = deployment.FailureMessage
 		}
 	}
-	writeSuccess(response, request, http.StatusOK, payload)
+	return payload
 }
 
 func otaDeviceReleaseResponse(release domain.DeviceRelease) map[string]any {

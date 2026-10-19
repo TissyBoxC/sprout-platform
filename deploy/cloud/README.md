@@ -5,7 +5,7 @@
 
 当前部署基线：
 
-- 平台版本：`0.24.0`
+- 平台版本：`0.26.0`
 - Sub2API 版本：`0.2.20`
 - `SPROUT_PLATFORM_VERSION` 同时控制四个平台镜像：`device_platform`、
   `voice_gateway`、`admin_web` 和 `upgrade_worker`

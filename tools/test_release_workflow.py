@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ipaddress
+import ast
 import re
 import sys
 from pathlib import Path
@@ -158,6 +159,29 @@ def verify_pinned_host_contract() -> None:
         raise AssertionError("pinned known_hosts validation accepted an unsafe document")
 
 
+def verify_embedded_python_contract(workflow: dict[object, object]) -> None:
+    for step_name in (
+        "Stage release candidate artifacts",
+        "Configure SFTP fallback",
+    ):
+        step = step_by_name(workflow, step_name)
+        script = step.get("run")
+        if not isinstance(script, str):
+            raise AssertionError(f"{step_name} is missing its shell script")
+        for match in re.finditer(
+            r"<<'(?P<marker>PY)'\r?\n(?P<body>.*?)\r?\n(?P=marker)",
+            script,
+            re.DOTALL,
+        ):
+            body = match.group("body")
+            try:
+                ast.parse(body)
+            except SyntaxError as error:
+                raise AssertionError(
+                    f"{step_name} embedded Python is invalid: {error}"
+                ) from error
+
+
 def verify_production_contract(
     root: Path,
     workflow: dict[object, object],
@@ -297,6 +321,11 @@ def main() -> int:
     parsed = yaml.safe_load(workflow)
     if not isinstance(parsed, dict):
         print("release workflow must parse as a YAML mapping", file=sys.stderr)
+        return 1
+    try:
+        verify_embedded_python_contract(parsed)
+    except AssertionError as error:
+        print(str(error), file=sys.stderr)
         return 1
     checkout = step_by_name(parsed, "Check out repository history")
     checkout_options = checkout.get("with")
@@ -559,8 +588,8 @@ def main() -> int:
         return 1
     if (
         'remote_manifest = (\n'
-        '                    f"releases/{version}/{candidate_channel}/manifest.json"\n'
-        '                )'
+        '                  f"releases/{version}/{candidate_channel}/manifest.json"\n'
+        '              )'
         not in upload_block
     ):
         print(

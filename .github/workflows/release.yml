@@ -551,70 +551,70 @@ jobs:
               "$download_base_url" \
               "${{ steps.detect.outputs.version }}" \
               "$candidate_channel" <<'PY'
-            import sys
-            import urllib.parse
-            import urllib.request
-            from pathlib import Path
+          import sys
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
 
-            from tools import upload_release_artifacts_http as uploader
+          from tools import upload_release_artifacts_http as uploader
 
-            (
-                api_base_url,
-                token,
-                manifest_path,
-                artifact_root,
-                download_base_url,
-                version,
-                candidate_channel,
-            ) = sys.argv[1:8]
-            manifest = uploader.load_manifest(Path(manifest_path))
-            if manifest.get("version") != version:
-                raise SystemExit("candidate manifest version does not match the release")
-            artifact_root = Path(artifact_root)
-            for artifact in manifest["artifacts"]:
-                if not isinstance(artifact, dict):
-                    raise SystemExit("candidate artifact is not an object")
-                source = artifact_root / str(artifact["relative_path"])
-                if not source.is_file():
-                    raise SystemExit(f"candidate artifact is missing: {source}")
-                body, boundary = uploader.multipart_body(
-                    {
-                        "version": version,
-                        "channel": candidate_channel,
-                        "platform": str(artifact["platform"]),
-                        "kind": str(artifact["kind"]),
-                        "filename": str(artifact["file_name"]),
-                        "overwrite": "false",
-                    },
-                    source,
-                )
-                request = urllib.request.Request(
-                    urllib.parse.urljoin(
-                        api_base_url.rstrip("/") + "/",
-                        "api/v1/release-publication/files",
-                    ),
-                    data=body,
-                    method="POST",
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": f"multipart/form-data; boundary={boundary}",
-                        "Content-Length": str(len(body)),
-                    },
-                )
-                try:
-                    uploader.request_json(request, f"stage {artifact['file_name']}")
-                except uploader.UploadError as error:
-                    if "HTTP 409" not in str(error):
-                        raise
-                    uploader.verify_remote_artifact(
-                        public_base_url=f"{download_base_url}/{version}/{candidate_channel}",
-                        version=version,
-                        channel=candidate_channel,
-                        relative_path=str(artifact["relative_path"]),
-                        source=source,
-                        artifact=artifact,
-                    )
-            print(f"staged {len(manifest['artifacts'])} artifacts without publishing the index")
+          (
+              api_base_url,
+              token,
+              manifest_path,
+              artifact_root,
+              download_base_url,
+              version,
+              candidate_channel,
+          ) = sys.argv[1:8]
+          manifest = uploader.load_manifest(Path(manifest_path))
+          if manifest.get("version") != version:
+              raise SystemExit("candidate manifest version does not match the release")
+          artifact_root = Path(artifact_root)
+          for artifact in manifest["artifacts"]:
+              if not isinstance(artifact, dict):
+                  raise SystemExit("candidate artifact is not an object")
+              source = artifact_root / str(artifact["relative_path"])
+              if not source.is_file():
+                  raise SystemExit(f"candidate artifact is missing: {source}")
+              body, boundary = uploader.multipart_body(
+                  {
+                      "version": version,
+                      "channel": candidate_channel,
+                      "platform": str(artifact["platform"]),
+                      "kind": str(artifact["kind"]),
+                      "filename": str(artifact["file_name"]),
+                      "overwrite": "false",
+                  },
+                  source,
+              )
+              request = urllib.request.Request(
+                  urllib.parse.urljoin(
+                      api_base_url.rstrip("/") + "/",
+                      "api/v1/release-publication/files",
+                  ),
+                  data=body,
+                  method="POST",
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Content-Type": f"multipart/form-data; boundary={boundary}",
+                      "Content-Length": str(len(body)),
+                  },
+              )
+              try:
+                  uploader.request_json(request, f"stage {artifact['file_name']}")
+              except uploader.UploadError as error:
+                  if "HTTP 409" not in str(error):
+                      raise
+                  uploader.verify_remote_artifact(
+                      public_base_url=f"{download_base_url}/{version}/{candidate_channel}",
+                      version=version,
+                      channel=candidate_channel,
+                      relative_path=str(artifact["relative_path"]),
+                      source=source,
+                      artifact=artifact,
+                  )
+          print(f"staged {len(manifest['artifacts'])} artifacts without publishing the index")
           PY
           }
 
@@ -630,83 +630,83 @@ jobs:
               "$SFTP_USER" \
               "$RUNNER_TEMP/sprout-sftp/id_ed25519" \
               "$RUNNER_TEMP/sprout-sftp/known_hosts" <<'PY'
-            import sys
-            from pathlib import Path
+          import sys
+          from pathlib import Path
 
-            import hashlib
+          import hashlib
 
-            from tools import upload_release_artifacts as uploader
+          from tools import upload_release_artifacts as uploader
 
-            (
-                dist_dir,
-                manifest_path,
-                download_base_url,
-                version,
-                candidate_channel,
-                host,
-                port,
-                user,
-                private_key,
-                known_hosts,
-            ) = sys.argv[1:11]
-            manifest = uploader.load_manifest(Path(manifest_path))
-            if manifest.get("version") != version:
-                raise SystemExit("candidate manifest version does not match the release")
-            batch_file = Path(known_hosts).parent / "release-candidate-upload.batch"
-            try:
-                lines = [
-                    "-mkdir releases",
-                    f"-mkdir releases/{version}",
-                    f"-mkdir releases/{version}/{candidate_channel}",
-                ]
-                artifact_root = Path(dist_dir) / "releases" / version / "stable"
-                artifact_count = 0
-                for artifact in manifest.get("artifacts", []):
-                    if not isinstance(artifact, dict):
-                        raise SystemExit("candidate artifact is not an object")
-                    relative = uploader.build_artifact_relative_path(artifact)
-                    artifact_count += 1
-                    source = artifact_root / relative
-                    if not source.is_file():
-                        raise SystemExit(f"candidate artifact is missing: {source}")
-                    remote_path = f"releases/{version}/{candidate_channel}/{relative}"
-                    lines.append(
-                        f"-mkdir {uploader.shell_quote(str(Path(remote_path).parent.as_posix()))}"
-                    )
-                    if not uploader.remote_file_matches(
-                        host=host,
-                        port=int(port),
-                        user=user,
-                        private_key=Path(private_key),
-                        known_hosts=Path(known_hosts),
-                        remote_path=remote_path,
-                        expected_size=source.stat().st_size,
-                        expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
-                    ):
-                        lines.append(
-                            f"put {uploader.shell_quote(str(source))} "
-                            f"{uploader.shell_quote(remote_path)}"
-                        )
-                if artifact_count == 0:
-                    raise SystemExit("candidate manifest contains no artifacts")
-                remote_manifest = (
-                    f"releases/{version}/{candidate_channel}/manifest.json"
-                )
-                lines.append(
-                    f"put {uploader.shell_quote(manifest_path)} "
-                    f"{uploader.shell_quote(remote_manifest)}"
-                )
-                batch_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-                uploader.run_sftp(
-                    batch_file=batch_file,
-                    host=host,
-                    port=int(port),
-                    user=user,
-                    private_key=Path(private_key),
-                    known_hosts=Path(known_hosts),
-                )
-            finally:
-                batch_file.unlink(missing_ok=True)
+          (
+              dist_dir,
+              manifest_path,
+              download_base_url,
+              version,
+              candidate_channel,
+              host,
+              port,
+              user,
+              private_key,
+              known_hosts,
+          ) = sys.argv[1:11]
+          manifest = uploader.load_manifest(Path(manifest_path))
+          if manifest.get("version") != version:
+              raise SystemExit("candidate manifest version does not match the release")
+          batch_file = Path(known_hosts).parent / "release-candidate-upload.batch"
+          try:
+              lines = [
+                  "-mkdir releases",
+                  f"-mkdir releases/{version}",
+                  f"-mkdir releases/{version}/{candidate_channel}",
+              ]
+              artifact_root = Path(dist_dir) / "releases" / version / "stable"
+              artifact_count = 0
+              for artifact in manifest.get("artifacts", []):
+                  if not isinstance(artifact, dict):
+                      raise SystemExit("candidate artifact is not an object")
+                  relative = uploader.build_artifact_relative_path(artifact)
+                  artifact_count += 1
+                  source = artifact_root / relative
+                  if not source.is_file():
+                      raise SystemExit(f"candidate artifact is missing: {source}")
+                  remote_path = f"releases/{version}/{candidate_channel}/{relative}"
+                  lines.append(
+                      f"-mkdir {uploader.shell_quote(str(Path(remote_path).parent.as_posix()))}"
+                  )
+                  if not uploader.remote_file_matches(
+                      host=host,
+                      port=int(port),
+                      user=user,
+                      private_key=Path(private_key),
+                      known_hosts=Path(known_hosts),
+                      remote_path=remote_path,
+                      expected_size=source.stat().st_size,
+                      expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+                  ):
+                      lines.append(
+                          f"put {uploader.shell_quote(str(source))} "
+                          f"{uploader.shell_quote(remote_path)}"
+                      )
+              if artifact_count == 0:
+                  raise SystemExit("candidate manifest contains no artifacts")
+              remote_manifest = (
+                  f"releases/{version}/{candidate_channel}/manifest.json"
+              )
+              lines.append(
+                  f"put {uploader.shell_quote(manifest_path)} "
+                  f"{uploader.shell_quote(remote_manifest)}"
+              )
+              batch_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+              uploader.run_sftp(
+                  batch_file=batch_file,
+                  host=host,
+                  port=int(port),
+                  user=user,
+                  private_key=Path(private_key),
+                  known_hosts=Path(known_hosts),
+              )
+          finally:
+              batch_file.unlink(missing_ok=True)
           PY
           }
 

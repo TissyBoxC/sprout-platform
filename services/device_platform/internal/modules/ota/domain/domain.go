@@ -638,6 +638,7 @@ func CanTransitionDeployment(from DeploymentStatus, to DeploymentStatus) bool {
 	case DeploymentStatusPendingVerify:
 		return to == DeploymentStatusSucceeded ||
 			to == DeploymentStatusFailed ||
+			to == DeploymentStatusInstalling ||
 			to == DeploymentStatusRolledBack
 	case DeploymentStatusFailed:
 		return to == DeploymentStatusQueued || to == DeploymentStatusRolledBack
@@ -979,7 +980,9 @@ func StatusForEvent(eventType EventType) DeploymentStatus {
 	case EventTypeFailed:
 		return DeploymentStatusFailed
 	case EventTypeRollbackStarted:
-		return DeploymentStatusRolledBack
+		// Rollback installation is still in progress; only the explicit
+		// rolled_back event may move the deployment to its terminal state.
+		return DeploymentStatusInstalling
 	case EventTypeRolledBack:
 		return DeploymentStatusRolledBack
 	default:

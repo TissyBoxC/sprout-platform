@@ -69,6 +69,7 @@ type otaReleaseMutation struct {
 }
 
 type otaDeviceEventRequest struct {
+	SchemaVersion   string         `json:"schema_version"`
 	EventID         string         `json:"event_id"`
 	DeploymentID    string         `json:"deployment_id"`
 	ReleaseID       string         `json:"release_id"`
@@ -81,6 +82,8 @@ type otaDeviceEventRequest struct {
 	Message         string         `json:"message"`
 	Detail          map[string]any `json:"detail"`
 	OccurredAt      string         `json:"occurred_at"`
+	FirmwareVersion string         `json:"firmware_version"`
+	ArtifactSHA256  string         `json:"artifact_sha256"`
 }
 
 type otaInstallRequest struct {
@@ -201,9 +204,9 @@ func (handler otaHandler) deviceUpdate(
 			current.Release.DeviceManifest(),
 			current.CurrentVersion,
 			&current.Deployment,
-			string(current.Deployment.Status),
+			currentDeviceUpdateStatus(current),
 			current.UpdateAvailable,
-			true,
+			current.Rollback,
 		)
 		return
 	}
@@ -217,6 +220,7 @@ func (handler otaHandler) deviceUpdate(
 			currentVersion = ""
 		}
 		writeSuccess(response, request, http.StatusOK, map[string]any{
+			"schema_version":     domain.OTAReleaseSchemaVersion,
 			"device_id":          deviceID,
 			"status":             "up_to_date",
 			"current_version":    currentVersion,
@@ -231,6 +235,7 @@ func (handler otaHandler) deviceUpdate(
 		return
 	}
 	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"schema_version":     domain.OTAReleaseSchemaVersion,
 		"device_id":          deviceID,
 		"status":             "available",
 		"update_available":   true,
@@ -251,6 +256,20 @@ func (handler otaHandler) recordDeviceEvent(
 	}
 	var payload otaDeviceEventRequest
 	if err := decodeJSON(request, &payload); err != nil {
+		writeError(
+			response,
+			request,
+			http.StatusBadRequest,
+			"invalid_request",
+			"设备更新信息不完整",
+		)
+		return
+	}
+	if strings.TrimSpace(payload.SchemaVersion) != "1.0.0" ||
+		strings.TrimSpace(payload.DeploymentID) == "" ||
+		strings.TrimSpace(payload.ReleaseID) == "" ||
+		payload.Sequence <= 0 ||
+		!domain.ValidVersion(payload.FirmwareVersion) {
 		writeError(
 			response,
 			request,
@@ -410,9 +429,9 @@ func (handler otaHandler) statusForGuardian(
 		current.Release.DeviceManifest(),
 		current.CurrentVersion,
 		&current.Deployment,
-		string(current.Deployment.Status),
+		currentDeviceUpdateStatus(current),
 		current.UpdateAvailable,
-		true,
+		current.Rollback,
 	)
 }
 
@@ -1000,6 +1019,7 @@ func (handler otaHandler) writeCurrentDeviceUpdate(
 ) {
 	currentVersion := handler.currentVersion(request, deviceID)
 	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"schema_version":     domain.OTAReleaseSchemaVersion,
 		"device_id":          deviceID,
 		"status":             "up_to_date",
 		"current_version":    currentVersion,
@@ -1007,6 +1027,16 @@ func (handler otaHandler) writeCurrentDeviceUpdate(
 		"rollback_available": false,
 		"checked_at":         time.Now().UTC(),
 	})
+}
+
+func currentDeviceUpdateStatus(current *otaservice.CurrentDeviceUpdate) string {
+	if current == nil {
+		return "up_to_date"
+	}
+	if current.Rollback {
+		return "rollback_available"
+	}
+	return string(current.Deployment.Status)
 }
 
 func (handler otaHandler) currentVersion(
@@ -1036,6 +1066,7 @@ func (handler otaHandler) writeDeviceUpdate(
 ) {
 	currentVersion = strings.TrimSpace(currentVersion)
 	payload := map[string]any{
+		"schema_version":     domain.OTAReleaseSchemaVersion,
 		"device_id":          deviceID,
 		"status":             status,
 		"current_version":    currentVersion,

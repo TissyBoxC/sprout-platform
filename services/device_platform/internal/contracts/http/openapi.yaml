@@ -23428,13 +23428,15 @@ components:
     OTAEventType:
       type: string
       enum:
-        - download_started
-        - download_progress
-        - download_completed
-        - verification_completed
-        - install_started
-        - install_completed
+        - started
+        - downloading
+        - downloaded
+        - validated
+        - installing
+        - pending_verify
+        - succeeded
         - failed
+        - rollback_started
         - rolled_back
     OTADeviceRelease:
       type: object
@@ -23520,6 +23522,7 @@ components:
       type: object
       additionalProperties: false
       required:
+        - schema_version
         - device_id
         - status
         - current_version
@@ -23527,6 +23530,9 @@ components:
         - rollback_available
         - checked_at
       properties:
+        schema_version:
+          type: string
+          const: "1.0.0"
         device_id:
           $ref: "#/components/schemas/DeviceIdParameter"
         status:
@@ -23574,11 +23580,19 @@ components:
       type: object
       additionalProperties: false
       required:
+        - schema_version
         - event_id
         - deployment_id
+        - release_id
         - event_type
         - sequence
+        - progress_percent
+        - occurred_at
+        - firmware_version
       properties:
+        schema_version:
+          type: string
+          const: "1.0.0"
         event_id:
           type: string
           minLength: 1
@@ -23589,13 +23603,15 @@ components:
           maxLength: 128
         release_id:
           type: string
+          minLength: 1
           maxLength: 128
         event_type:
           $ref: "#/components/schemas/OTAEventType"
         sequence:
           type: integer
           format: int64
-          minimum: 0
+          minimum: 1
+          maximum: 9007199254740991
         progress_percent:
           type: integer
           minimum: 0
@@ -23613,13 +23629,19 @@ components:
           maxLength: 128
         message:
           type: string
-          maxLength: 512
+          maxLength: 1000
         detail:
           type: object
           additionalProperties: true
         occurred_at:
           type: string
           format: date-time
+        firmware_version:
+          type: string
+          pattern: '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$'
+        artifact_sha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
     OTADeviceEventResultEnvelope:
       allOf:
         - $ref: "#/components/schemas/ResponseEnvelope"

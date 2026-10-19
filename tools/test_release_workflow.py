@@ -25,7 +25,7 @@ REQUIRED_FRAGMENTS = (
     "upload_release_artifacts.py",
     "Configure SFTP fallback",
     "sftp_configured=false",
-    "SFTP fallback is partially configured",
+    "SFTP fallback is partially configured.",
     "SFTP_HOST must be a hostname or IP address",
     "SFTP_USER contains unsupported characters",
     "is not a readable private key",
@@ -382,27 +382,32 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    if 'if [[ -n "${RELEASE_UPLOAD_TOKEN:-}" ]]; then' not in configure_block:
+    if 'if [[ -n "${RELEASE_UPLOAD_TOKEN:-}" ]]; then' in configure_block:
         print(
-            "partial SFTP configuration must keep the authenticated management API usable",
+            "partial SFTP configuration must not silently fall back to the management API",
+            file=sys.stderr,
+        )
+        return 1
+    partial_start = configure_block.index(
+        'if [[ "${#missing[@]}" -ne 0 ]]'
+    )
+    partial_end = configure_block.index(
+        'if [[ ! "$SFTP_PORT"',
+        partial_start,
+    )
+    partial_block = configure_block[partial_start:partial_end]
+    if 'echo "sftp_configured=false" >> "$GITHUB_OUTPUT"' in partial_block:
+        print(
+            "partial SFTP configuration must not publish through a different transport",
             file=sys.stderr,
         )
         return 1
     if (
-        'echo "sftp_configured=false" >> "$GITHUB_OUTPUT"' not in configure_block
-        or "using the management API only" not in configure_block
-    ):
-        print(
-            "partial SFTP configuration must disable only the fallback",
-            file=sys.stderr,
-        )
-        return 1
-    if (
-        "SFTP fallback is partially configured and no management API token is available."
+        "Configure all five variables or remove all of them."
         not in configure_block
     ):
         print(
-            "partial SFTP configuration must fail closed without the management API",
+            "partial SFTP configuration must fail closed",
             file=sys.stderr,
         )
         return 1

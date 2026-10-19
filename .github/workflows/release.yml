@@ -331,12 +331,7 @@ jobs:
           fi
 
           if [[ "${#missing[@]}" -ne 0 ]]; then
-            if [[ -n "${RELEASE_UPLOAD_TOKEN:-}" ]]; then
-              echo "::warning::SFTP fallback is partially configured; using the management API only. Missing: ${missing[*]}"
-              echo "sftp_configured=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "SFTP fallback is partially configured and no management API token is available. Missing: ${missing[*]}" >&2
+            echo "SFTP fallback is partially configured. Configure all five variables or remove all of them. Missing: ${missing[*]}" >&2
             exit 1
           fi
 

@@ -44,8 +44,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--version", required=True)
     parser.add_argument("--channel", default="stable")
     parser.add_argument("--manifest", required=True, type=Path)
+    parser.add_argument("--public-base-url", required=True)
     parser.add_argument("--title", default="")
     parser.add_argument("--published-at", default="")
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="verify and skip an identical artifact already present on a retry",
+    )
     return parser.parse_args()
 
 
@@ -145,7 +151,9 @@ def upload_artifact(
     version: str,
     channel: str,
     artifact: dict[str, Any],
-) -> None:
+    public_base_url: str,
+    skip_existing: bool,
+) -> bool:
     platform = str(artifact["platform"])
     kind = str(artifact["kind"])
     file_name = str(artifact["file_name"])
@@ -177,7 +185,114 @@ def upload_artifact(
             "Content-Length": str(len(body)),
         },
     )
-    request_json(request, f"upload {file_name}")
+    try:
+        request_json(request, f"upload {file_name}")
+    except UploadError as error:
+        if not skip_existing or "HTTP 409" not in str(error):
+            raise
+        verify_remote_artifact(
+            public_base_url=public_base_url,
+            version=version,
+            channel=channel,
+            relative_path=relative_path,
+            source=source,
+            artifact=artifact,
+        )
+        print(f"verified existing {file_name}")
+        return False
+    return True
+
+
+def verify_remote_artifact(
+    *,
+    public_base_url: str,
+    version: str,
+    channel: str,
+    relative_path: str,
+    source: Path,
+    artifact: dict[str, Any],
+) -> None:
+    expected_size = artifact.get("size_bytes")
+    expected_sha256 = artifact.get("sha256")
+    if expected_size is None:
+        expected_size = source.stat().st_size
+    if expected_sha256 is None:
+        expected_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
+    if (
+        not isinstance(expected_size, int)
+        or isinstance(expected_size, bool)
+        or expected_size <= 0
+        or not isinstance(expected_sha256, str)
+        or len(expected_sha256) != 64
+    ):
+        raise UploadError("existing artifact verification metadata is invalid")
+    url = (
+        public_base_url.rstrip("/")
+        + "/"
+        + urllib.parse.quote(version, safe="")
+        + "/"
+        + urllib.parse.quote(channel, safe="")
+        + "/"
+        + urllib.parse.quote(relative_path, safe="/._-~!$&()*+,;=:@")
+    )
+    request = urllib.request.Request(url, method="GET")
+    last_error: Exception | None = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            ) as response:
+                content_length = response.headers.get("Content-Length")
+                if content_length is not None:
+                    try:
+                        declared_size = int(content_length)
+                    except ValueError as error:
+                        raise UploadError(
+                            "existing artifact has an invalid Content-Length"
+                        ) from error
+                    if declared_size != expected_size:
+                        raise UploadError(
+                            "existing artifact size does not match the manifest"
+                        )
+                digest = hashlib.sha256()
+                received = 0
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    received += len(chunk)
+                    if received > expected_size:
+                        raise UploadError(
+                            "existing artifact exceeds its manifest size"
+                        )
+                    digest.update(chunk)
+            if (
+                received != expected_size
+                or digest.hexdigest() != expected_sha256
+            ):
+                raise UploadError(
+                    "existing artifact checksum or size does not match"
+                )
+            return
+        except UploadError:
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            reason = getattr(error, "reason", error)
+            last_error = UploadError(
+                f"verify existing artifact network error: {reason}"
+            )
+        if attempt < MAX_ATTEMPTS:
+            delay = RETRY_BACKOFF_SECONDS * attempt
+            print(
+                f"verify existing artifact attempt {attempt} failed "
+                f"({last_error}); retrying in {delay}s",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+    raise last_error if last_error is not None else UploadError(
+        "failed to verify an existing artifact"
+    )
 
 
 def refresh_index(
@@ -221,17 +336,25 @@ def main() -> None:
     artifacts = manifest.get("artifacts")
     if not artifacts:
         raise UploadError("release manifest contains no artifacts")
+    uploaded_count = 0
+    skipped_count = 0
     for artifact in artifacts:
         if not isinstance(artifact, dict):
             raise UploadError("release manifest artifact is not an object")
-        upload_artifact(
+        uploaded = upload_artifact(
             api_base_url=args.api_base_url,
             token=args.token,
             dist_dir=args.dist,
             version=args.version,
             channel=args.channel,
             artifact=artifact,
+            public_base_url=args.public_base_url,
+            skip_existing=args.skip_existing,
         )
+        if uploaded:
+            uploaded_count += 1
+        else:
+            skipped_count += 1
     refresh_index(
         api_base_url=args.api_base_url,
         token=args.token,
@@ -240,7 +363,10 @@ def main() -> None:
         title=args.title,
         published_at=args.published_at,
     )
-    print(f"published {len(artifacts)} release artifacts through the management API")
+    print(
+        f"published {uploaded_count} release artifacts; "
+        f"verified {skipped_count} existing artifacts"
+    )
 
 
 if __name__ == "__main__":

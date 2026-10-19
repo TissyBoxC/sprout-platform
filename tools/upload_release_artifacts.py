@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -97,6 +98,14 @@ def build_upload_batch(
     version: str,
     channel: str,
     remote_root: str,
+    *,
+    manifest_path: Path | None = None,
+    verify_existing: bool = False,
+    host: str | None = None,
+    port: int | None = None,
+    user: str | None = None,
+    private_key: Path | None = None,
+    known_hosts: Path | None = None,
 ) -> str:
     lines = [
         "-mkdir releases",
@@ -118,14 +127,55 @@ def build_upload_batch(
             raise FileNotFoundError(f"release artifact is missing: {source}")
         remote_path = f"{remote_root.rstrip('/')}/{version}/{channel}/{relative}"
         lines.append(f"-mkdir {Path(remote_path).parent.as_posix()}")
-        lines.append(f"put {shell_quote(str(source))} {shell_quote(remote_path)}")
+        if verify_existing:
+            if (
+                host is None
+                or port is None
+                or user is None
+                or private_key is None
+                or known_hosts is None
+            ):
+                raise ValueError("existing artifact verification requires SFTP settings")
+            expected_size = artifact.get("size_bytes")
+            expected_sha256 = artifact.get("sha256")
+            if (
+                not isinstance(expected_size, int)
+                or expected_size <= 0
+                or not isinstance(expected_sha256, str)
+                or len(expected_sha256) != 64
+            ):
+                raise ValueError("release artifact checksum metadata is invalid")
+            if not remote_file_matches(
+                host=host,
+                port=port,
+                user=user,
+                private_key=private_key,
+                known_hosts=known_hosts,
+                remote_path=remote_path,
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
+            ):
+                lines.append(
+                    f"put {shell_quote(str(source))} "
+                    f"{shell_quote(remote_path)}"
+                )
+        else:
+            lines.append(
+                f"put {shell_quote(str(source))} {shell_quote(remote_path)}"
+            )
         uploaded_paths.add(relative)
 
     if not uploaded_paths:
         raise ValueError("release manifest contains no uploadable artifacts")
 
-    remote_manifest = f"{remote_root.rstrip('/')}/{version}/{channel}/manifest.json"
-    lines.append(f"put {shell_quote(str(manifest_path))} {shell_quote(remote_manifest)}")
+    if manifest_path is not None:
+        remote_manifest = (
+            f"{remote_root.rstrip('/')}/{version}/{channel}/manifest.json"
+        )
+        lines.append(
+            f"put {shell_quote(str(manifest_path))} "
+            f"{shell_quote(remote_manifest)}"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -262,6 +312,61 @@ def remove_remote_file(
     )
 
 
+def remote_file_matches(
+    *,
+    host: str,
+    port: int,
+    user: str,
+    private_key: Path,
+    known_hosts: Path,
+    remote_path: str,
+    expected_size: int,
+    expected_sha256: str,
+) -> bool:
+    local_file = known_hosts.parent / (
+        "verify-" + hashlib.sha256(remote_path.encode("utf-8")).hexdigest()[:16]
+    )
+    try:
+        download_remote_file(
+            host=host,
+            port=port,
+            user=user,
+            private_key=private_key,
+            known_hosts=known_hosts,
+            remote_path=remote_path,
+            local_path=local_file,
+        )
+    except RuntimeError as error:
+        detail = str(error).lower()
+        if "no such file" in detail or "not found" in detail:
+            return False
+        raise
+    try:
+        if local_file.stat().st_size != expected_size:
+            return False
+        digest = hashlib.sha256()
+        with local_file.open("rb") as input_file:
+            for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest() == expected_sha256
+    finally:
+        local_file.unlink(missing_ok=True)
+
+
+def local_file_matches(
+    local_path: Path,
+    expected_size: int,
+    expected_sha256: str,
+) -> bool:
+    if not local_path.is_file() or local_path.stat().st_size != expected_size:
+        return False
+    digest = hashlib.sha256()
+    with local_path.open("rb") as input_file:
+        for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest() == expected_sha256
+
+
 def write_index_candidate(
     *,
     local_index_path: Path,
@@ -300,18 +405,25 @@ def main() -> None:
     if manifest.get("version") != args.version or manifest.get("channel") != args.channel:
         raise ValueError("release manifest version or channel does not match the upload")
 
+    batch_file = args.known_hosts.parent / "release-upload.batch"
     artifact_batch = build_upload_batch(
         manifest=manifest,
         dist_dir=args.dist,
         version=args.version,
         channel=args.channel,
         remote_root=args.remote_root.as_posix(),
+        manifest_path=args.manifest,
+        verify_existing=True,
+        host=args.host,
+        port=args.port,
+        user=args.user,
+        private_key=args.private_key,
+        known_hosts=args.known_hosts,
     )
-    batch_file = args.known_hosts.parent / "release-upload.batch"
-    batch_file.write_text(artifact_batch, encoding="utf-8")
     local_index_path = args.known_hosts.parent / "index.json"
     remote_index_path = f"{args.index_root.as_posix().rstrip('/')}/index.json"
     try:
+        batch_file.write_text(artifact_batch, encoding="utf-8")
         run_sftp(
             batch_file=batch_file,
             host=args.host,

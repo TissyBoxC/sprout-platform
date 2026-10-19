@@ -70,6 +70,101 @@ class UploadReleaseArtifactsTest(unittest.TestCase):
                         local_path=root / "index.json",
                     )
 
+    def test_existing_verified_sftp_artifact_is_not_uploaded_again(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            source = root / "dist/releases/0.9.0/stable/android/apk/app.apk"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"apk bytes")
+            manifest = {
+                "version": "0.9.0",
+                "channel": "stable",
+                "artifacts": [
+                    {
+                        "platform": "android",
+                        "kind": "apk",
+                        "file_name": "app.apk",
+                        "relative_path": "android/apk/app.apk",
+                        "size_bytes": len(b"apk bytes"),
+                        "sha256": __import__("hashlib").sha256(b"apk bytes").hexdigest(),
+                    }
+                ],
+            }
+            with mock.patch.object(
+                upload_release_artifacts,
+                "remote_file_matches",
+                return_value=True,
+            ) as verify:
+                batch = upload_release_artifacts.build_upload_batch(
+                    manifest=manifest,
+                    dist_dir=root / "dist",
+                    version="0.9.0",
+                    channel="stable",
+                    remote_root="releases",
+                    manifest_path=root / "manifest.json",
+                    verify_existing=True,
+                    host="example.com",
+                    port=2022,
+                    user="sprout-release",
+                    private_key=root / "id_ed25519",
+                    known_hosts=root / "known_hosts",
+                )
+
+        self.assertEqual(batch.count("put "), 1)
+        self.assertIn("manifest.json'", batch)
+        verify.assert_called_once()
+
+    def test_partial_sftp_retry_uploads_only_missing_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            artifacts = []
+            for name in ("a.apk", "b.apk"):
+                source = root / f"dist/releases/0.9.0/stable/android/apk/{name}"
+                source.parent.mkdir(parents=True, exist_ok=True)
+                content = name.encode("utf-8")
+                source.write_bytes(content)
+                artifacts.append(
+                    {
+                        "platform": "android",
+                        "kind": "apk",
+                        "file_name": name,
+                        "relative_path": f"android/apk/{name}",
+                        "size_bytes": len(content),
+                        "sha256": __import__("hashlib")
+                        .sha256(content)
+                        .hexdigest(),
+                    }
+                )
+            manifest = {
+                "version": "0.9.0",
+                "channel": "stable",
+                "artifacts": artifacts,
+            }
+            with mock.patch.object(
+                upload_release_artifacts,
+                "remote_file_matches",
+                side_effect=[True, False],
+            ):
+                batch = upload_release_artifacts.build_upload_batch(
+                    manifest=manifest,
+                    dist_dir=root / "dist",
+                    version="0.9.0",
+                    channel="stable",
+                    remote_root="releases",
+                    manifest_path=root / "manifest.json",
+                    verify_existing=True,
+                    host="example.com",
+                    port=2022,
+                    user="sprout-release",
+                    private_key=root / "id_ed25519",
+                    known_hosts=root / "known_hosts",
+                )
+
+        self.assertNotIn("a.apk'", batch)
+        self.assertIn("b.apk'", batch)
+        self.assertEqual(batch.count("put "), 2)
+        self.assertIn("manifest.json'", batch)
+
 
 if __name__ == "__main__":
     unittest.main()

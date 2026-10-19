@@ -24,6 +24,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Detect version change
         id: detect
@@ -39,18 +40,52 @@ jobs:
           fi
 
           tag="v$version"
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $tag already exists and is immutable; refusing to rebuild it." >&2
-            exit 1
+          release_exists=false
+          tag_exists=false
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            tag_exists=true
           fi
+          if gh release view "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json tagName,targetCommitish \
+              > "$RUNNER_TEMP/existing-release.json" 2>/dev/null; then
+            release_exists=true
+            python3 - "$RUNNER_TEMP/existing-release.json" "$tag" "$GITHUB_SHA" <<'PY'
+          import json
+          import sys
 
-          if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
-            echo "Git tag $tag already exists and is immutable; refusing to replace it." >&2
-            exit 1
+          path, expected_tag, expected_commit = sys.argv[1:4]
+          with open(path, encoding="utf-8") as input_file:
+              release = json.load(input_file)
+          if release.get("tagName") != expected_tag:
+              raise SystemExit("existing GitHub release has an unexpected tag")
+          target = str(release.get("targetCommitish", ""))
+          if target != expected_commit:
+              raise SystemExit(
+                  "existing GitHub release targets a different commit"
+              )
+          PY
+          elif [[ "$tag_exists" == "true" ]]; then
+            actual_tag_commit="$(
+              git ls-remote --tags origin \
+                "refs/tags/$tag" "refs/tags/$tag^{}" \
+                | awk -v direct="refs/tags/$tag" -v peeled="refs/tags/$tag^{}" '
+                  $2 == direct { direct_sha = $1 }
+                  $2 == peeled { peeled_sha = $1 }
+                  END { print (peeled_sha != "" ? peeled_sha : direct_sha) }
+                '
+            )"
+            if [[ "$actual_tag_commit" != "$GITHUB_SHA" ]]; then
+              echo "Tag $tag points at another commit; refusing to replace it." >&2
+              exit 1
+            fi
+            release_exists=false
+            echo "Tag $tag already points at the release commit; recovery will attach its GitHub Release."
           fi
           echo "should_release=true" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "release_exists=$release_exists" >> "$GITHUB_OUTPUT"
           echo "Preparing release $tag."
 
       - name: Load public endpoints
@@ -262,6 +297,9 @@ jobs:
             --public-base-url "$download_base_url" \
             --title "如此萌屋平台 ${{ steps.detect.outputs.version }}"
 
+      # SPROUT_DOWNLOAD_SFTP_KNOWN_HOSTS is a pinned known_hosts document, not
+      # an address to be discovered at release time. It must contain an exact
+      # host or [host]:port entry with the SFTP server's public host key.
       - name: Configure SFTP fallback
         id: configure_sftp_fallback
         if: steps.detect.outputs.should_release == 'true'
@@ -271,11 +309,12 @@ jobs:
           SFTP_HOST: ${{ secrets.SPROUT_DOWNLOAD_SFTP_HOST }}
           SFTP_PORT: ${{ secrets.SPROUT_DOWNLOAD_SFTP_PORT }}
           SFTP_USER: ${{ secrets.SPROUT_DOWNLOAD_SFTP_USER }}
+          SFTP_KNOWN_HOSTS: ${{ secrets.SPROUT_DOWNLOAD_SFTP_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
           configured=0
           missing=()
-          for name in SFTP_PRIVATE_KEY SFTP_HOST SFTP_PORT SFTP_USER; do
+          for name in SFTP_PRIVATE_KEY SFTP_HOST SFTP_PORT SFTP_USER SFTP_KNOWN_HOSTS; do
             if [[ -n "${!name:-}" ]]; then
               configured=$((configured + 1))
             else
@@ -318,9 +357,110 @@ jobs:
             echo "DOWNLOAD_PUBLISH_IMMUTABLE must remain true for versioned releases." >&2
             exit 1
           fi
-          timeout 30 ssh-keyscan -p "$SFTP_PORT" -H "$SFTP_HOST" \
-            > "$RUNNER_TEMP/sprout-sftp/known_hosts"
-          test -s "$RUNNER_TEMP/sprout-sftp/known_hosts"
+          known_hosts="$RUNNER_TEMP/sprout-sftp/known_hosts"
+          printf '%s\n' "$SFTP_KNOWN_HOSTS" > "$known_hosts"
+          chmod 600 "$known_hosts"
+          python3 - "$known_hosts" "$SFTP_HOST" "$SFTP_PORT" <<'PY'
+          import ipaddress
+          import sys
+          from pathlib import Path
+
+          known_hosts_path, host, raw_port = sys.argv[1:4]
+          port = int(raw_port)
+          lines = Path(known_hosts_path).read_text(encoding="utf-8").splitlines()
+          entries = []
+          for line_number, line in enumerate(lines, start=1):
+              stripped = line.strip()
+              if not stripped or stripped.startswith("#"):
+                  continue
+              if stripped.startswith(("@", "!")) or "*" in stripped or "?" in stripped:
+                  raise SystemExit(
+                      f"known_hosts line {line_number} contains unsupported marker, wildcard, or negation"
+                  )
+              fields = stripped.split()
+              if len(fields) not in (3, 4):
+                  raise SystemExit(f"known_hosts line {line_number} is not a standard host key entry")
+              hosts, key_type, key_value = fields[-3:]
+              if any(
+                  host_name.startswith(("!", "*", "|"))
+                  or any(character in host_name for character in ("*", "?"))
+                  for host_name in hosts.split(",")
+              ):
+                  raise SystemExit(
+                    f"known_hosts line {line_number} contains a wildcard, negation, or hash"
+                  )
+              if not (
+                  key_type.startswith(("ssh-", "ecdsa-", "sk-", "rsa-sha2-"))
+              ):
+                  raise SystemExit(
+                      f"known_hosts line {line_number} uses an unsupported key type: {key_type}"
+                  )
+              if len(key_value) < 32:
+                  raise SystemExit(f"known_hosts line {line_number} has an invalid key value")
+              entries.append(hosts.split(","))
+          if not entries:
+              raise SystemExit("SPROUT_DOWNLOAD_SFTP_KNOWN_HOSTS contains no host key entries")
+
+          normalized_host = host
+          try:
+              address = ipaddress.ip_address(host)
+              normalized_host = address.compressed.lower()
+          except ValueError:
+              normalized_host = host.lower()
+          expected_hosts = {
+              normalized_host,
+              f"[{normalized_host}]:{port}" if ":" in normalized_host else f"{normalized_host}:{port}",
+          }
+          if port == 22:
+              expected_hosts.add(f"[{normalized_host}]" if ":" in normalized_host else normalized_host)
+
+          def normalize_known_host(host_name):
+              host_name = host_name.rstrip(".").lower()
+              if host_name.startswith("[") and "]:" in host_name:
+                  address_text, port_text = host_name[1:].split("]:", 1)
+                  try:
+                      return f"[{ipaddress.ip_address(address_text).compressed}]:{port_text}"
+                  except ValueError:
+                      return host_name
+              if host_name.startswith("[") and host_name.endswith("]"):
+                  try:
+                      return f"[{ipaddress.ip_address(host_name[1:-1]).compressed}]"
+                  except ValueError:
+                      return host_name
+              return host_name
+
+          provided_hosts = {
+              normalize_known_host(host_name)
+              for entry in entries
+              for host_name in entry
+          }
+          if not expected_hosts.intersection(provided_hosts):
+              raise SystemExit(
+                  "SPROUT_DOWNLOAD_SFTP_KNOWN_HOSTS does not pin the configured SFTP host and port"
+              )
+          print(f"validated pinned SFTP host key for {sorted(expected_hosts)[0]}")
+          PY
+          if [[ "$SFTP_PORT" == "22" ]]; then
+            if [[ "$SFTP_HOST" == *:* ]]; then
+              host_query="[$SFTP_HOST]"
+            else
+              host_query="$SFTP_HOST"
+            fi
+          else
+            if [[ "$SFTP_HOST" == *:* ]]; then
+              host_query="[$SFTP_HOST]:$SFTP_PORT"
+            else
+              host_query="$SFTP_HOST:$SFTP_PORT"
+            fi
+          fi
+          if ! ssh-keygen -F "$host_query" -f "$known_hosts" | grep -Eq '^[^#[:space:]]'; then
+            echo "SPROUT_DOWNLOAD_SFTP_KNOWN_HOSTS does not contain an exact entry for $host_query." >&2
+            exit 1
+          fi
+          if ! ssh-keygen -F "$host_query" -l -f "$known_hosts" >/dev/null 2>&1; then
+            echo "SPROUT_DOWNLOAD_SFTP_KNOWN_HOSTS host key cannot be parsed." >&2
+            exit 1
+          fi
           echo "sftp_configured=true" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GitHub Container Registry
@@ -373,7 +513,7 @@ jobs:
             --file deploy/cloud/upgrade_worker/Dockerfile \
             .
 
-      - name: Publish release artifacts
+      - name: Stage release candidate artifacts
         id: upload_release
         if: steps.detect.outputs.should_release == 'true'
         shell: bash
@@ -390,123 +530,458 @@ jobs:
           set -euo pipefail
           api_base_url="${API_BASE_URL:-https://api.clarkhub.cn}"
           download_base_url="${DOWNLOAD_BASE_URL:-https://download.clarkhub.cn}"
-          published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          candidate_channel="candidate-${{ github.run_id }}-${{ github.run_attempt }}"
+          if [[ "${DOWNLOAD_PUBLISH_IMMUTABLE:-true}" != "true" ]]; then
+            echo "DOWNLOAD_PUBLISH_IMMUTABLE must remain true for candidate staging." >&2
+            exit 1
+          fi
 
-          publish_via_management_api() {
-            python3 tools/upload_release_artifacts_http.py \
-              --api-base-url "$api_base_url" \
-              --token "$RELEASE_UPLOAD_TOKEN" \
-              --dist dist \
-              --version "${{ steps.detect.outputs.version }}" \
-              --channel stable \
-              --manifest "dist/releases/${{ steps.detect.outputs.version }}/stable/manifest.json" \
-              --title "如此萌屋平台 ${{ steps.detect.outputs.version }}" \
-              --published-at "$published_at"
+          stage_via_management_api() {
+            python3 - \
+              "$api_base_url" \
+              "$RELEASE_UPLOAD_TOKEN" \
+              "dist/releases/${{ steps.detect.outputs.version }}/stable/manifest.json" \
+              "dist/releases/${{ steps.detect.outputs.version }}/stable" \
+              "$download_base_url" \
+              "${{ steps.detect.outputs.version }}" \
+              "$candidate_channel" <<'PY'
+            import hashlib
+            import sys
+            import urllib.parse
+            import urllib.request
+            from pathlib import Path
+
+            from tools import upload_release_artifacts_http as uploader
+
+            (
+                api_base_url,
+                token,
+                manifest_path,
+                artifact_root,
+                download_base_url,
+                version,
+                candidate_channel,
+            ) = sys.argv[1:8]
+            manifest = uploader.load_manifest(Path(manifest_path))
+            if manifest.get("version") != version:
+                raise SystemExit("candidate manifest version does not match the release")
+            artifact_root = Path(artifact_root)
+            for artifact in manifest["artifacts"]:
+                if not isinstance(artifact, dict):
+                    raise SystemExit("candidate artifact is not an object")
+                source = artifact_root / str(artifact["relative_path"])
+                if not source.is_file():
+                    raise SystemExit(f"candidate artifact is missing: {source}")
+                body, boundary = uploader.multipart_body(
+                    {
+                        "version": version,
+                        "channel": candidate_channel,
+                        "platform": str(artifact["platform"]),
+                        "kind": str(artifact["kind"]),
+                        "filename": str(artifact["file_name"]),
+                        "overwrite": "false",
+                    },
+                    source,
+                )
+                request = urllib.request.Request(
+                    urllib.parse.urljoin(
+                        api_base_url.rstrip("/") + "/",
+                        "api/v1/release-publication/files",
+                    ),
+                    data=body,
+                    method="POST",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": f"multipart/form-data; boundary={boundary}",
+                        "Content-Length": str(len(body)),
+                    },
+                )
+                try:
+                    uploader.request_json(request, f"stage {artifact['file_name']}")
+                except uploader.UploadError as error:
+                    if "HTTP 409" not in str(error):
+                        raise
+                    uploader.verify_remote_artifact(
+                        public_base_url=f"{download_base_url}/{version}/{candidate_channel}",
+                        version=version,
+                        channel=candidate_channel,
+                        relative_path=str(artifact["relative_path"]),
+                        source=source,
+                        artifact=artifact,
+                    )
+            print(f"staged {len(manifest['artifacts'])} artifacts without publishing the index")
+            PY
           }
 
-          publish_via_sftp() {
-            python3 tools/upload_release_artifacts.py \
-              --dist dist \
-              --version "${{ steps.detect.outputs.version }}" \
-              --channel stable \
-              --host "$SFTP_HOST" \
-              --port "$SFTP_PORT" \
-              --user "$SFTP_USER" \
-              --private-key "$RUNNER_TEMP/sprout-sftp/id_ed25519" \
-              --known-hosts "$RUNNER_TEMP/sprout-sftp/known_hosts" \
-              --remote-root releases \
-              --index-root releases \
-              --manifest "dist/releases/${{ steps.detect.outputs.version }}/stable/manifest.json" \
-              --public-base-url "$download_base_url" \
-              --title "如此萌屋平台 ${{ steps.detect.outputs.version }}" \
-              --published-at "$published_at"
+          stage_via_sftp() {
+            python3 - \
+              "dist" \
+              "dist/releases/${{ steps.detect.outputs.version }}/stable/manifest.json" \
+              "$download_base_url" \
+              "${{ steps.detect.outputs.version }}" \
+              "$candidate_channel" \
+              "$SFTP_HOST" \
+              "$SFTP_PORT" \
+              "$SFTP_USER" \
+              "$RUNNER_TEMP/sprout-sftp/id_ed25519" \
+              "$RUNNER_TEMP/sprout-sftp/known_hosts" <<'PY'
+            import sys
+            from pathlib import Path
+
+            from tools import upload_release_artifacts as uploader
+
+            (
+                dist_dir,
+                manifest_path,
+                download_base_url,
+                version,
+                candidate_channel,
+                host,
+                port,
+                user,
+                private_key,
+                known_hosts,
+            ) = sys.argv[1:11]
+            manifest = uploader.load_manifest(Path(manifest_path))
+            if manifest.get("version") != version:
+                raise SystemExit("candidate manifest version does not match the release")
+            batch_file = Path(known_hosts).parent / "release-candidate-upload.batch"
+            try:
+                lines = [
+                    "-mkdir releases",
+                    f"-mkdir releases/{version}",
+                    f"-mkdir releases/{version}/{candidate_channel}",
+                ]
+                artifact_root = Path(dist_dir) / "releases" / version / "stable"
+                artifact_count = 0
+                for artifact in manifest.get("artifacts", []):
+                    if not isinstance(artifact, dict):
+                        raise SystemExit("candidate artifact is not an object")
+                    relative = uploader.build_artifact_relative_path(artifact)
+                    artifact_count += 1
+                    source = artifact_root / relative
+                    if not source.is_file():
+                        raise SystemExit(f"candidate artifact is missing: {source}")
+                    remote_path = f"releases/{version}/{candidate_channel}/{relative}"
+                    lines.append(
+                        f"-mkdir {uploader.shell_quote(str(Path(remote_path).parent.as_posix()))}"
+                    )
+                    if not uploader.remote_file_matches(
+                        host=host,
+                        port=int(port),
+                        user=user,
+                        private_key=Path(private_key),
+                        known_hosts=Path(known_hosts),
+                        remote_path=remote_path,
+                        expected_size=source.stat().st_size,
+                        expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+                    ):
+                        lines.append(
+                            f"put {uploader.shell_quote(str(source))} "
+                            f"{uploader.shell_quote(remote_path)}"
+                        )
+                if artifact_count == 0:
+                    raise SystemExit("candidate manifest contains no artifacts")
+                remote_manifest = (
+                    f"releases/{version}/{candidate_channel}/manifest.json"
+                )
+                lines.append(
+                    f"put {uploader.shell_quote(manifest_path)} "
+                    f"{uploader.shell_quote(remote_manifest)}"
+                )
+                batch_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                uploader.run_sftp(
+                    batch_file=batch_file,
+                    host=host,
+                    port=int(port),
+                    user=user,
+                    private_key=Path(private_key),
+                    known_hosts=Path(known_hosts),
+                )
+            finally:
+                batch_file.unlink(missing_ok=True)
+            PY
           }
 
           if [[ -z "${RELEASE_UPLOAD_TOKEN:-}" ]]; then
             if [[ "${SFTP_CONFIGURED:-false}" == "true" ]]; then
               echo "Management API token is not configured; using the validated SFTP fallback."
-              publish_via_sftp
+              stage_via_sftp
               exit 0
             fi
             echo "Neither SPROUT_RELEASE_UPLOAD_TOKEN nor a complete SFTP fallback is configured." >&2
             exit 1
           fi
 
-          if publish_via_management_api; then
+          if stage_via_management_api; then
             exit 0
           fi
 
           if [[ "${SFTP_CONFIGURED:-false}" == "true" ]]; then
             echo "::warning::Management API publication failed; retrying through the SFTP fallback."
-            publish_via_sftp
+            stage_via_sftp
             exit 0
           fi
 
           echo "Management API publication failed and no validated SFTP fallback is configured." >&2
           exit 1
 
-      - name: Verify published download service
-        id: verify_download
+      - name: Verify staged download candidate
+        id: verify_download_candidate
         if: steps.detect.outputs.should_release == 'true'
         shell: bash
         env:
           DOWNLOAD_BASE_URL: ${{ steps.endpoints.outputs.download_url }}
+          CANDIDATE_CHANNEL: candidate-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
           download_base_url="${DOWNLOAD_BASE_URL:-https://download.clarkhub.cn}"
+          current_index="$RUNNER_TEMP/download-index-before-candidate.json"
           curl --fail --silent --show-error --retry 8 --retry-delay 3 \
-            "$download_base_url/index.json" > "$RUNNER_TEMP/download-index.json"
-          python3 - "$RUNNER_TEMP/download-index.json" "${{ steps.detect.outputs.version }}" <<'PY'
-          import json
+            --max-filesize 4194304 \
+            "$download_base_url/index.json" > "$current_index"
+          index_sha256="$(sha256sum "$current_index" | cut -d ' ' -f 1)"
+          python3 - "$download_base_url" <<'PY'
           import sys
+          from urllib.parse import urlsplit
 
-          index_path, version = sys.argv[1], sys.argv[2]
-          with open(index_path, encoding="utf-8") as input_file:
-              index = json.load(input_file)
-          releases = [release for release in index.get("releases", []) if release.get("version") == version]
-          if not releases:
-              raise SystemExit(f"release {version} is missing from the download index")
+          raw = sys.argv[1]
+          if not raw or any(ord(character) < 0x21 or ord(character) > 0x7E for character in raw):
+              raise SystemExit("download base URL must contain printable ASCII only")
+          if any(character in raw for character in ("?", "#", "@", "\\", "%")):
+              raise SystemExit("download base URL must not contain query, fragment, userinfo, escape, or backslash characters")
+          try:
+              parsed = urlsplit(raw)
+              port = parsed.port
+          except ValueError as error:
+              raise SystemExit(f"download base URL is malformed: {error}") from error
+          if (
+              parsed.scheme != "https"
+              or not raw.startswith("https://")
+              or not parsed.hostname
+              or parsed.username is not None
+              or parsed.password is not None
+              or parsed.query
+              or parsed.fragment
+          ):
+              raise SystemExit("download base URL must be a canonical HTTPS origin")
+          if port is not None and not 1 <= port <= 65535:
+              raise SystemExit("download base URL port is out of range")
+          segments = parsed.path.split("/")[1:] if parsed.path not in ("", "/") else []
+          if any(segment in ("", ".", "..") for segment in segments):
+              raise SystemExit("download base URL path must not contain empty or traversal segments")
+          if parsed.path.endswith("/"):
+              raise SystemExit("download base URL must not end with a slash")
           PY
           python3 - "${{ github.workspace }}/dist/releases/${{ steps.detect.outputs.version }}/stable/manifest.json" \
-            "$download_base_url" <<'PY'
+            "$download_base_url" \
+            "$CANDIDATE_CHANNEL" \
+            "${{ steps.detect.outputs.version }}" <<'PY'
           import hashlib
           import json
+          import os
           import sys
+          import urllib.error
+          import urllib.parse
           import urllib.request
+          from urllib.parse import urlsplit
 
-          manifest_path, base_url = sys.argv[1], sys.argv[2].rstrip("/")
+          manifest_path, base_url, candidate_channel, version = sys.argv[1:5]
+          base_url = base_url.rstrip("/")
+          if not candidate_channel.startswith("candidate-"):
+              raise SystemExit("candidate channel is not isolated")
           with open(manifest_path, encoding="utf-8") as input_file:
-              manifest = json.load(input_file)
+              payload = json.load(input_file)
+          if payload.get("version") != version or payload.get("channel") != "stable":
+              raise SystemExit("release manifest does not match the candidate")
+          for artifact in payload.get("artifacts", []):
+              artifact["url"] = (
+                  f"{base_url}/{version}/{candidate_channel}/"
+                  f"{artifact['relative_path']}"
+              )
+          manifest = payload
+          parsed_base = urlsplit(base_url)
+          if (
+              parsed_base.scheme != "https"
+              or not parsed_base.hostname
+              or parsed_base.username is not None
+              or parsed_base.password is not None
+              or parsed_base.query
+              or parsed_base.fragment
+          ):
+              raise SystemExit("download base URL must be a canonical HTTPS origin")
+          expected_origin = (
+              parsed_base.scheme,
+              parsed_base.hostname.lower(),
+              parsed_base.port or 443,
+          )
+
+          def validate_download_url(url, label):
+              if any(ord(character) < 0x21 or ord(character) > 0x7E for character in url):
+                  raise SystemExit(f"{label} must contain printable ASCII only")
+              if any(character in url for character in ("?", "#", "\\", "%")):
+                  raise SystemExit(f"{label} must not contain query, fragment, escape, or backslash characters")
+              parsed = urlsplit(url)
+              if (
+                  parsed.scheme != expected_origin[0]
+                  or (parsed.hostname or "").lower() != expected_origin[1]
+                  or (parsed.port or 443) != expected_origin[2]
+              ):
+                  raise SystemExit(f"{label} is outside the configured download origin: {url}")
+              if parsed.username is not None or parsed.password is not None:
+                  raise SystemExit(f"{label} must not contain user information")
+              if parsed.query or parsed.fragment:
+                  raise SystemExit(f"{label} must not contain a query or fragment")
+              if not parsed.path.startswith(parsed_base.path.rstrip("/") + "/"):
+                  raise SystemExit(f"{label} is outside the configured download path: {url}")
+              segments = parsed.path.split("/")[1:]
+              if any(segment in ("", ".", "..") for segment in segments):
+                  raise SystemExit(f"{label} path contains an empty or traversal segment")
+              return parsed.geturl()
+
+          MAX_DOWNLOAD_INDEX_BYTES = 4 * 1024 * 1024
+
+          class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+                  target = urllib.parse.urljoin(request.full_url, new_url)
+                  validate_download_url(target, "download redirect target")
+                  return super().redirect_request(
+                      request,
+                      file_pointer,
+                      code,
+                      message,
+                      headers,
+                      target,
+                  )
+
+          download_opener = urllib.request.build_opener(SafeRedirectHandler())
+
+          def open_validated(url, label):
+              validate_download_url(url, label)
+              response = download_opener.open(url, timeout=60)
+              final_url = validate_download_url(
+                  response.geturl(),
+                  f"{label} final target",
+              )
+              if final_url != validate_download_url(url, label):
+                  response.close()
+                  raise SystemExit(f"{label} was redirected unexpectedly: {url}")
+              return response
+
+          if os.path.getsize(manifest_path) > MAX_DOWNLOAD_INDEX_BYTES:
+              raise SystemExit("release manifest is too large")
           for artifact in manifest["artifacts"]:
-              with urllib.request.urlopen(artifact["url"], timeout=60) as response:
-                  remote_digest = hashlib.sha256(response.read()).hexdigest()
+              expected_size = artifact.get("size_bytes")
+              if not isinstance(expected_size, int) or expected_size <= 0:
+                  raise SystemExit(
+                      f"artifact size is missing or invalid: {artifact.get('url')}"
+                  )
+              artifact_url = str(artifact.get("url", ""))
+              response = open_validated(artifact_url, "artifact URL")
+              with response:
+                  content_length = response.headers.get("Content-Length")
+                  if content_length is not None:
+                      try:
+                          declared_size = int(content_length)
+                      except ValueError as error:
+                          raise SystemExit(
+                              f"artifact has an invalid Content-Length: {artifact_url}"
+                          ) from error
+                      if declared_size != expected_size:
+                          raise SystemExit(
+                              f"artifact size does not match the manifest: {artifact_url}"
+                          )
+                  digest = hashlib.sha256()
+                  received = 0
+                  try:
+                      while True:
+                          chunk = response.read(1024 * 1024)
+                          if not chunk:
+                              break
+                          received += len(chunk)
+                          if received > expected_size:
+                              raise SystemExit(
+                                  f"artifact exceeds its manifest size: {artifact_url}"
+                              )
+                          digest.update(chunk)
+                  except (OSError, urllib.error.URLError) as error:
+                      raise SystemExit(
+                          f"artifact download failed: {artifact_url}: {error}"
+                      ) from error
+                  if received != expected_size:
+                      raise SystemExit(
+                          f"artifact shorter than its manifest size: {artifact_url}"
+                      )
+                  remote_digest = digest.hexdigest()
               if remote_digest != artifact["sha256"]:
                   raise SystemExit(f"checksum mismatch: {artifact['url']}")
           print(f"verified {len(manifest['artifacts'])} download artifacts")
           PY
-          python3 - "$download_base_url/index.json" \
-            "${{ steps.detect.outputs.version }}" <<'PY'
+          python3 - "$current_index" \
+            "${{ steps.detect.outputs.version }}" \
+            "$download_base_url" \
+            "$index_sha256" <<'PY'
+          import hashlib
           import json
+          import os
           import sys
           import urllib.request
+          from urllib.parse import urlsplit
 
-          index_url, version = sys.argv[1], sys.argv[2]
-          with urllib.request.urlopen(index_url, timeout=60) as response:
-              index = json.load(response)
+          MAX_INDEX_BYTES = 4 * 1024 * 1024
+          index_path, version, base_url, expected_index_sha256 = (
+              sys.argv[1],
+              sys.argv[2],
+              sys.argv[3].rstrip("/"),
+              sys.argv[4],
+          )
+
+          def load_index_bytes(payload):
+              if len(payload) > MAX_INDEX_BYTES:
+                  raise SystemExit("download index is too large")
+              return json.loads(payload.decode("utf-8"))
+
+          with open(index_path, "rb") as input_file:
+              before_payload = input_file.read()
+          if hashlib.sha256(before_payload).hexdigest() != expected_index_sha256:
+              raise SystemExit("candidate index checksum does not match")
+          before = load_index_bytes(before_payload)
+          with urllib.request.urlopen(f"{base_url}/index.json", timeout=60) as response:
+              after = load_index_bytes(response.read(MAX_INDEX_BYTES + 1))
+
+          def matching_release(index):
+              matches = [
+                  release
+                  for release in index.get("releases", [])
+                  if isinstance(release, dict) and release.get("version") == version
+              ]
+              if len(matches) > 1:
+                  raise SystemExit(f"download index contains duplicate {version} releases")
+              return matches[0] if matches else None
+
+          if matching_release(before) != matching_release(after):
+              raise SystemExit("candidate staging changed the public release index")
+
           matches = [
               release
-              for release in index.get("releases", [])
-              if release.get("version") == version
+              for release in after.get("releases", [])
+              if isinstance(release, dict) and release.get("version") == version
           ]
-          expected_release = (
-              f"https://download.clarkhub.cn/releases/{version}/stable/manifest.json"
-          )
-          if len(matches) != 1:
-              raise SystemExit(
-                  f"download index must contain exactly one {version} release"
-              )
-          if str(matches[0].get("manifest_url", "")) != expected_release:
-              raise SystemExit("download index points at an unexpected release manifest")
+          if matches:
+              expected_release = f"{base_url}/{version}/stable/manifest.json"
+              manifest_url = str(matches[0].get("manifest_url", ""))
+              parsed_base = urlsplit(base_url)
+              parsed_manifest = urlsplit(manifest_url)
+              if any(character in manifest_url for character in ("?", "#", "@", "\\", "%")):
+                  raise SystemExit("download index manifest URL contains unsafe characters")
+              if (
+                  parsed_manifest.scheme != parsed_base.scheme
+                  or (parsed_manifest.hostname or "").lower()
+                  != (parsed_base.hostname or "").lower()
+                  or (parsed_manifest.port or 443) != (parsed_base.port or 443)
+                  or manifest_url != expected_release
+              ):
+                  raise SystemExit("download index points at an unexpected release manifest")
           PY
 
       - name: Create immutable GitHub release
@@ -516,16 +991,32 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.detect.outputs.tag }}
           RELEASE_VERSION: ${{ steps.detect.outputs.version }}
+          RELEASE_EXISTS: ${{ steps.detect.outputs.release_exists }}
         shell: bash
         run: |
           set -euo pipefail
-          gh release create "$RELEASE_TAG" dist/github-assets/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "如此萌屋平台 $RELEASE_VERSION" \
-            --notes-file release-notes.md
+          if [[ "$RELEASE_EXISTS" == "true" ]]; then
+            echo "Release $RELEASE_TAG already exists; continuing recovery checks."
+            exit 0
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" dist/github-assets/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --draft \
+              --title "如此萌屋平台 $RELEASE_VERSION" \
+              --notes-file release-notes.md
+          else
+            gh release create "$RELEASE_TAG" dist/github-assets/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --draft \
+              --title "如此萌屋平台 $RELEASE_VERSION" \
+              --notes-file release-notes.md
+          fi
 
-      - name: Verify GitHub release assets
+      - name: Recover and verify GitHub release assets
+        id: verify_github_release
         if: steps.detect.outputs.should_release == 'true'
         shell: bash
         env:
@@ -534,19 +1025,73 @@ jobs:
         run: |
           set -euo pipefail
           expected="$(find dist/github-assets -maxdepth 1 -type f -printf '%f\n' | sort)"
-          actual="$(gh release view "$RELEASE_TAG" \
+          rm -rf "$RUNNER_TEMP/github-release-assets"
+          mkdir -p "$RUNNER_TEMP/github-release-assets"
+          read_assets() {
+            gh release view "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json assets \
+              > "$RUNNER_TEMP/release-assets.json"
+            python3 - "$RUNNER_TEMP/release-assets.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as input_file:
+              release = json.load(input_file)
+          assets = release.get("assets")
+          if not isinstance(assets, list):
+              raise SystemExit("GitHub release asset list is invalid")
+          names = []
+          for asset in assets:
+              if not isinstance(asset, dict) or not isinstance(asset.get("name"), str):
+                  raise SystemExit("GitHub release asset metadata is invalid")
+              names.append(asset["name"])
+          if len(names) != len(set(names)):
+              raise SystemExit("GitHub release contains duplicate assets")
+          print("\n".join(sorted(names)))
+          PY
+          }
+          actual="$(read_assets)"
+          if [[ "$actual" != "$expected" ]]; then
+            missing="$(comm -23 <(printf '%s\n' "$expected") <(printf '%s\n' "$actual"))"
+            extra="$(comm -13 <(printf '%s\n' "$expected") <(printf '%s\n' "$actual"))"
+            if [[ -n "$extra" ]]; then
+              echo "GitHub release contains unexpected assets; refusing to modify an immutable release." >&2
+              printf '%s\n' "$extra" >&2
+              exit 1
+            fi
+            while IFS= read -r asset; do
+              if [[ -z "$asset" ]]; then
+                continue
+              fi
+              gh release upload "$RELEASE_TAG" "dist/github-assets/$asset" \
+                --repo "$GITHUB_REPOSITORY"
+            done <<< "$missing"
+            read_assets > "$RUNNER_TEMP/release-assets-after.json"
+            printf '%s\n' "$expected" > "$RUNNER_TEMP/release-assets-expected.json"
+            if ! diff -u "$RUNNER_TEMP/release-assets-expected.json" \
+                "$RUNNER_TEMP/release-assets-after.json"; then
+              echo "GitHub release assets remain incomplete after recovery upload." >&2
+              exit 1
+            fi
+          fi
+          is_draft="$(gh release view "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --json assets \
-            --jq '.assets[].name' | sort)"
-          if [[ "$expected" != "$actual" ]]; then
-            echo "GitHub release assets do not match the verified build." >&2
-            diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") >&2 || true
-            exit 1
+            --json isDraft \
+            --jq '.isDraft')"
+          if [[ "$is_draft" == "true" ]]; then
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft=false
+            gh release view "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json isDraft \
+              --jq '.isDraft' | grep -qx 'false'
           fi
           gh release download "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
+            --clobber \
             --dir "$RUNNER_TEMP/github-release-assets"
-          cp dist/SHA256SUMS "$RUNNER_TEMP/github-release-assets/SHA256SUMS"
           (cd "$RUNNER_TEMP/github-release-assets" && sha256sum -c SHA256SUMS)
 
       - name: Verify candidate images before promotion
@@ -566,12 +1111,207 @@ jobs:
             sprout-upgrade-worker; do
             source="ghcr.io/$owner/$image:$CANDIDATE_TAG"
             if docker buildx imagetools inspect "ghcr.io/$owner/$image:$RELEASE_VERSION" >/dev/null 2>&1; then
-              echo "Version tag already exists and cannot be replaced: $image:$RELEASE_VERSION" >&2
+              echo "Verified immutable image already exists: $image:$RELEASE_VERSION"
+            else
+              docker buildx imagetools inspect "$source" >/dev/null
+              echo "verified candidate $source"
+            fi
+          done
+
+      - name: Promote verified release candidate
+        id: promote_release
+        if: steps.detect.outputs.should_release == 'true'
+        shell: bash
+        env:
+          RELEASE_UPLOAD_TOKEN: ${{ secrets.SPROUT_RELEASE_UPLOAD_TOKEN }}
+          API_BASE_URL: ${{ steps.endpoints.outputs.api_url }}
+          DOWNLOAD_BASE_URL: ${{ steps.endpoints.outputs.download_url }}
+          SFTP_HOST: ${{ secrets.SPROUT_DOWNLOAD_SFTP_HOST }}
+          SFTP_PORT: ${{ secrets.SPROUT_DOWNLOAD_SFTP_PORT }}
+          SFTP_USER: ${{ secrets.SPROUT_DOWNLOAD_SFTP_USER }}
+          SFTP_CONFIGURED: ${{ steps.configure_sftp_fallback.outputs.sftp_configured }}
+        run: |
+          set -euo pipefail
+          api_base_url="${API_BASE_URL:-https://api.clarkhub.cn}"
+          download_base_url="${DOWNLOAD_BASE_URL:-https://download.clarkhub.cn}"
+          published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          candidate_channel="candidate-${{ github.run_id }}-${{ github.run_attempt }}"
+          publication_verified=false
+
+          echo "Promoting verified candidate $candidate_channel to stable."
+
+          if [[ -n "${RELEASE_UPLOAD_TOKEN:-}" ]]; then
+            python3 tools/upload_release_artifacts_http.py \
+              --api-base-url "$api_base_url" \
+              --public-base-url "$download_base_url" \
+              --token "$RELEASE_UPLOAD_TOKEN" \
+              --dist dist \
+              --version "${{ steps.detect.outputs.version }}" \
+              --channel stable \
+              --manifest "dist/releases/${{ steps.detect.outputs.version }}/stable/manifest.json" \
+              --title "如此萌屋平台 ${{ steps.detect.outputs.version }}" \
+              --published-at "$published_at" \
+              --skip-existing
+            publication_verified=true
+          else
+            if [[ "${SFTP_CONFIGURED:-false}" != "true" ]]; then
+              echo "No validated publication path is available for the stable release." >&2
               exit 1
             fi
-            docker buildx imagetools inspect "$source" >/dev/null
-            echo "verified $source"
-          done
+            python3 tools/upload_release_artifacts.py \
+              --dist dist \
+              --version "${{ steps.detect.outputs.version }}" \
+              --channel stable \
+              --host "$SFTP_HOST" \
+              --port "$SFTP_PORT" \
+              --user "$SFTP_USER" \
+              --private-key "$RUNNER_TEMP/sprout-sftp/id_ed25519" \
+              --known-hosts "$RUNNER_TEMP/sprout-sftp/known_hosts" \
+              --remote-root releases \
+              --index-root releases \
+              --manifest "dist/releases/${{ steps.detect.outputs.version }}/stable/manifest.json" \
+              --public-base-url "$download_base_url" \
+              --title "如此萌屋平台 ${{ steps.detect.outputs.version }}" \
+              --published-at "$published_at"
+            publication_verified=true
+          fi
+
+          if [[ "$publication_verified" != "true" ]]; then
+            echo "Release publication did not complete." >&2
+            exit 1
+          fi
+          python3 - "${{ github.workspace }}/dist/releases/${{ steps.detect.outputs.version }}/stable/manifest.json" \
+            "$download_base_url" <<'PY'
+          import hashlib
+          import json
+          import sys
+          import urllib.parse
+          import urllib.request
+          from urllib.parse import urlsplit
+
+          manifest_path, base_url = sys.argv[1], sys.argv[2].rstrip("/")
+          parsed_base = urlsplit(base_url)
+
+          def validate_target(candidate, label):
+              parsed = urlsplit(candidate)
+              if (
+                  parsed.scheme != parsed_base.scheme
+                  or (parsed.hostname or "").lower() != (parsed_base.hostname or "").lower()
+                  or (parsed.port or 443) != (parsed_base.port or 443)
+                  or parsed.username is not None
+                  or parsed.password is not None
+                  or parsed.query
+                  or parsed.fragment
+                  or any(character in candidate for character in ("\\", "%"))
+              ):
+                  raise SystemExit(f"{label} is outside the configured download origin")
+              return candidate
+
+          class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+                  target = urllib.parse.urljoin(request.full_url, new_url)
+                  validate_target(target, "published artifact redirect")
+                  return super().redirect_request(
+                      request, file_pointer, code, message, headers, target
+                  )
+
+          opener = urllib.request.build_opener(SafeRedirectHandler())
+          with open(manifest_path, encoding="utf-8") as input_file:
+              manifest = json.load(input_file)
+          for artifact in manifest.get("artifacts", []):
+              artifact_url = validate_target(artifact["url"], "published artifact URL")
+              expected_size = artifact.get("size_bytes")
+              if not isinstance(expected_size, int) or expected_size <= 0:
+                  raise SystemExit("published artifact has an invalid size")
+              with opener.open(artifact_url, timeout=60) as response:
+                  validate_target(response.geturl(), "published artifact final target")
+                  content_length = response.headers.get("Content-Length")
+                  if content_length is not None and int(content_length) != expected_size:
+                      raise SystemExit("published artifact Content-Length does not match")
+                  digest = hashlib.sha256()
+                  received = 0
+                  while True:
+                      chunk = response.read(1024 * 1024)
+                      if not chunk:
+                          break
+                      received += len(chunk)
+                      if received > expected_size:
+                          raise SystemExit("published artifact exceeds its manifest size")
+                      digest.update(chunk)
+                  if received != expected_size or digest.hexdigest() != artifact.get("sha256"):
+                      raise SystemExit("published artifact checksum or size does not match")
+          PY
+
+          python3 - "$download_base_url/index.json" \
+            "${{ steps.detect.outputs.version }}" \
+            "$download_base_url" <<'PY'
+          import json
+          import sys
+          import urllib.parse
+          import urllib.request
+          from urllib.parse import urlsplit
+
+          index_url, version, base_url = sys.argv[1], sys.argv[2], sys.argv[3].rstrip("/")
+          parsed_index = urlsplit(index_url)
+          parsed_base = urlsplit(base_url)
+          if (
+              parsed_index.scheme != "https"
+              or parsed_base.scheme != "https"
+              or (parsed_index.hostname or "").lower()
+              != (parsed_base.hostname or "").lower()
+              or (parsed_index.port or 443) != (parsed_base.port or 443)
+          ):
+              raise SystemExit("download index is outside the configured origin")
+
+          def validate_download_target(candidate, label):
+              parsed = urlsplit(candidate)
+              if (
+                  parsed.scheme != parsed_base.scheme
+                  or (parsed.hostname or "").lower() != (parsed_base.hostname or "").lower()
+                  or (parsed.port or 443) != (parsed_base.port or 443)
+                  or parsed.username is not None
+                  or parsed.password is not None
+                  or parsed.query
+                  or parsed.fragment
+                  or any(character in candidate for character in ("\\", "%"))
+              ):
+                  raise SystemExit(f"{label} is outside the configured download origin")
+              if not parsed.path.startswith(parsed_base.path.rstrip("/") + "/"):
+                  raise SystemExit(f"{label} is outside the configured download path")
+              if any(segment in ("", ".", "..") for segment in parsed.path.split("/")[1:]):
+                  raise SystemExit(f"{label} contains an unsafe path segment")
+              return candidate
+
+          class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+                  target = urllib.parse.urljoin(request.full_url, new_url)
+                  validate_download_target(target, "published download redirect")
+                  return super().redirect_request(
+                      request, file_pointer, code, message, headers, target
+                  )
+
+          opener = urllib.request.build_opener(SafeRedirectHandler())
+          validate_download_target(index_url, "download index")
+          with opener.open(index_url, timeout=60) as response:
+              validate_download_target(response.geturl(), "download index final target")
+              payload = bytearray()
+              while True:
+                  chunk = response.read(64 * 1024)
+                  if not chunk:
+                      break
+                  payload.extend(chunk)
+                  if len(payload) > 4 * 1024 * 1024:
+                      raise SystemExit("download index is too large")
+          index = json.loads(payload.decode("utf-8"))
+          matches = [
+              release
+              for release in index.get("releases", [])
+              if isinstance(release, dict) and release.get("version") == version
+          ]
+          expected_manifest = f"{base_url}/{version}/stable/manifest.json"
+          if len(matches) != 1 or matches[0].get("manifest_url") != expected_manifest:
+              raise SystemExit("published download index does not expose the verified release")
+          PY
 
       - name: Promote verified images
         if: steps.detect.outputs.should_release == 'true'
@@ -589,9 +1329,11 @@ jobs:
             sprout-admin-web \
             sprout-upgrade-worker; do
             source="ghcr.io/$owner/$image:$CANDIDATE_TAG"
-            docker buildx imagetools create \
-              --tag "ghcr.io/$owner/$image:$RELEASE_VERSION" \
-              "$source"
+            if ! docker buildx imagetools inspect "ghcr.io/$owner/$image:$RELEASE_VERSION" >/dev/null 2>&1; then
+              docker buildx imagetools create \
+                --tag "ghcr.io/$owner/$image:$RELEASE_VERSION" \
+                "$source"
+            fi
             docker buildx imagetools create \
               --tag "ghcr.io/$owner/$image:latest" \
               "ghcr.io/$owner/$image:$RELEASE_VERSION"

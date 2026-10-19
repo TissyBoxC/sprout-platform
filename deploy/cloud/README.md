@@ -3,6 +3,15 @@
 这是一套与本地开发栈分离的云端部署包。云端只拉取 GitHub Release 发布的
 镜像，不在服务器上编译 Go、Flutter 或 Vue。
 
+当前部署基线：
+
+- 平台版本：`0.24.0`
+- Sub2API 版本：`0.2.20`
+- `SPROUT_PLATFORM_VERSION` 同时控制四个平台镜像：`device_platform`、
+  `voice_gateway`、`admin_web` 和 `upgrade_worker`
+- `.env` 必须固定版本号，禁止填写 `latest`；`latest` 只用于镜像发布流水线
+  在全部工件和四个版本镜像校验通过后的推广标签
+
 ## 1. 目录结构
 
 ```text
@@ -164,11 +173,35 @@ Sub2API 的 `TOTP_ENCRYPTION_KEY` 必须是 64 位十六进制字符串，不能
 受控内部发布接口上传，不需要公网开放 SFTP；如果管理端暂时不可达，才使用
 `SPROUT_DOWNLOAD_SFTP_*` Secrets 执行离线回退上传。
 
+SFTP 回退严格分为三种状态：
+
+1. 四个 `SPROUT_DOWNLOAD_SFTP_*` Secrets 全部为空：SFTP 未配置是合法状态，
+   发布流水线只使用管理 API。
+2. 任意一个 SFTP Secret 已配置：私钥、主机、端口、用户和固定主机公钥
+   `SPROUT_DOWNLOAD_SFTP_KNOWN_HOSTS` 必须同时齐全；端口
+   必须是 `1` 到 `65535`，主机和用户必须通过格式校验，私钥必须能被
+   `ssh-keygen` 解析，固定 `known_hosts` 必须精确包含配置主机与端口。任一
+   校验失败都让发布失败关闭，不会继续写下载站。
+3. 五个变量齐全且校验通过：管理 API 令牌存在时优先使用管理 API，失败后才
+   回退到已经验证的 SFTP 通道；没有管理 API 令牌时直接使用 SFTP。
+
+固定主机公钥写入 GitHub Secret `SPROUT_DOWNLOAD_SFTP_KNOWN_HOSTS`，内容取自
+服务器 `download/sftp/ssh_host_ed25519_key.pub`，格式为一行标准
+`known_hosts` 记录；非 22 端口使用 `[主机]:端口`。发布重试会先校验已存在的
+SFTP 文件，只补传缺失或内容不一致的工件；不得用运行时主机密钥扫描替代固定
+记录。
+
 `SPROUT_RELEASE_UPLOAD_TOKEN` 是发布流水线专用令牌。它只能调用
 `/internal/v1/release-files` 和 `/internal/v1/release-index/refresh`，
 不能读取家长账号、设备状态或 AI 凭据。将同一个值写入服务器 `.env` 和
 GitHub Secret `SPROUT_RELEASE_UPLOAD_TOKEN`。发布工作流会先写入不可变
 版本目录，最后原子替换 `index.json`，因此管理端和客户端不会读取到半成品版本。
+
+发布流水线发布四个同版本平台镜像（`device_platform`、`voice_gateway`、
+`admin_web`、`upgrade_worker`）。版本化镜像先推送到 GHCR；只有下载工件、
+GitHub Release 资产及校验和全部验证成功，并且四个版本镜像都能被
+`docker buildx imagetools inspect` 读取后，工作流才会把 `latest` 指向它们。
+生产 `.env` 始终使用明确版本，不使用流水线推广的 `latest`。
 
 在 1Panel 中为 `download.clarkhub.cn` 创建 HTTPS 反向代理，上游为
 `http://127.0.0.1:8085`。Nginx 已关闭目录枚举，根路径返回 `404`，单个版本
@@ -373,6 +406,12 @@ docker compose --env-file .env up -d --force-recreate mqtt device_platform
 | --- | --- | --- |
 | `SPROUT_REDIS_PASSWORD` | Redis 密码，被平台、语音网关和 sub2api 共用 | 32 位以上随机值 |
 
+完整云端服务包括 `postgres`、`redis`、`mqtt`、`sub2api`、
+`device_platform`、`voice_gateway`、`admin_web`、`download_init`、
+`download_ftp`、`download_http`、`upgrade_worker`。其中
+`download_init` 是一次性卷初始化任务；`postgres`、`redis`、`mqtt` 及下载
+组件只做检测，不纳入管理端自动升级。
+
 ### 服务端口与监听地址
 
 | 变量 | 作用 | 生产建议 |
@@ -404,7 +443,7 @@ docker compose --env-file .env up -d --force-recreate mqtt device_platform
 
 | 变量 | 作用 | 生产建议 |
 | --- | --- | --- |
-| `SPROUT_PLATFORM_VERSION` | 平台三个镜像的版本 | 固定为 GitHub Release 版本，不用 `latest` |
+| `SPROUT_PLATFORM_VERSION` | 四个平台镜像的版本：`device_platform`、`voice_gateway`、`admin_web`、`upgrade_worker` | 固定为 GitHub Release 版本，不用 `latest` |
 | `SPROUT_SUB2API_VERSION` | AI 网关镜像版本 | 固定为 GitHub Release 版本 |
 
 ### 服务间共享密钥
@@ -513,13 +552,13 @@ cd /opt/1panel/apps/sprout/deploy/cloud
 chmod 600 .env
 
 # 推荐：脚本会先备份两个数据库，再切换版本、拉取镜像、重建并检查健康状态。
- ./scripts/upgrade-cloud.sh 0.10.0 0.2.16
+./scripts/upgrade-cloud.sh 0.24.0 0.2.20
 ```
 
 省略第二个参数时保留当前 Sub2API 版本：
 
 ```bash
- ./scripts/upgrade-cloud.sh 0.10.0
+./scripts/upgrade-cloud.sh 0.24.0
 ```
 
 脚本会执行以下检查与操作：
@@ -531,16 +570,16 @@ chmod 600 .env
    `SHA256SUMS`。
 4. 在同一个目录中写入版本元数据，并用同目录临时文件原子替换 `.env` 中的
    `SPROUT_PLATFORM_VERSION` 和 `SPROUT_SUB2API_VERSION`。
-5. 只拉取平台和 AI 网关版本化镜像，然后执行
+5. 拉取四个平台版本化镜像和 Sub2API 版本化镜像，然后执行
    `docker compose up -d --remove-orphans`。
-6. 运行 `scripts/check-stack.sh`，逐个检查设备平台、语音网关、Sub2API 和
-   管理端。
+6. 运行 `scripts/check-stack.sh`，检查 PostgreSQL、Redis、MQTT、Sub2API、
+   设备平台、语音网关、管理端、下载服务和 `upgrade_worker`。
 
 如备份需要放到独立磁盘或加密目录，可在执行前覆盖默认位置：
 
 ```bash
 SPROUT_CLOUD_BACKUP_DIR=/srv/sprout-backups \
-  ./scripts/upgrade-cloud.sh 0.10.0 0.2.16
+  ./scripts/upgrade-cloud.sh 0.24.0 0.2.20
 ```
 
 备份目录包含儿童和业务数据，必须限制权限、通过加密通道同步到异地，并在
@@ -623,7 +662,32 @@ docker compose down -v
 `SPROUT_DOWNLOAD_PUBLIC_URL` 不是 Secret，集中维护在
 `deploy/public-endpoints.env`。
 
-### 5.3 品牌级服务版本管理与自动升级
+<a id="feature-center"></a>
+
+### 5.3 功能中心与硬件验收边界
+
+管理端“功能中心”是当前和后续产品、平台能力的统一登记入口。每项功能必须登记
+稳定 ID、所属服务、生命周期、配置项、真实健康探针和只读指标；仅有一个页面、
+目录或接口占位不能被登记为完成。
+
+- 健康状态只来自服务运行时探针、持久化状态或明确的“未配置”。`unknown`、
+  `unavailable`、探针超时和过期快照都要保留为真实状态，不能显示为健康。
+- 可编辑配置由后端按 schema 校验并限制取值范围。密码、密钥和令牌只返回
+  “已配置/未配置”，不回传明文，也不写入日志或审计正文。
+- 配置带版本号，两个管理员同时编辑时后提交的过期版本返回冲突，界面必须要求
+  重新加载，不能静默覆盖。
+- 配置修改和手动检查都记录管理员、时间、动作和结果；只读指标展示实时运营数据，
+  不提供写入入口。
+- 新增能力时必须同时完成 registry、schema、health probe、迁移（如需要）、测试、
+  管理端契约与页面登记。依赖未配置或不可用时必须失败关闭或显示降级，不能伪造成功。
+
+云端发布、容器健康和功能中心为 `healthy` 只证明软件服务可用，不代表设备硬件
+闭环。摄像头 sensor/framebuffer、屏幕与触摸、二维码配网展示、电池、蜂窝、
+电机、定位、Secure Boot eFuse 烧录、生产签名密钥、真实双分区 OTA、断电恢复和
+回滚台架仍必须在目标板卡与生产流程中验收。未完成这些验证时，不能把对应能力
+描述为量产闭环。
+
+### 5.4 品牌级服务版本管理与自动升级
 
 管理端的“系统设置 → 服务版本”是品牌级运维入口，不是“初芽”单个产品的功能页面。
 它管理整个“如此萌屋”品牌在服务器上的运行组件，因此升级对象使用服务标识，而不是
@@ -635,6 +699,12 @@ docker compose down -v
 | `device_platform` | 设备平台 | 平台版本镜像 |
 | `voice_gateway` | 语音网关 | 平台版本镜像 |
 | `admin_web` | 品牌管理端 | 平台版本镜像 |
+
+`upgrade_worker` 与上述三个平台服务共用 `SPROUT_PLATFORM_VERSION`，因此在
+服务版本目录中显示当前版本和仓库最新版本，但它只做观测，不能把自身加入自动
+升级目标。自动重建正在执行升级任务的 worker 会中断升级并丢失执行上下文。
+`upgrade_worker` 的升级必须由发布驱动的受控重建流程完成，或在确认没有运行中
+任务后由人工执行。
 
 `postgres`、`redis`、`mqtt` 以及 `download_init`、`download_ftp`、`download_http`
 只做状态检测，不会被自动升级。基础设施升级涉及数据兼容、停机窗口和证书，必须
@@ -682,7 +752,7 @@ docker compose down -v
 {
   "id": "operation-id",
   "target_service": "device_platform",
-  "target_version": "0.10.0",
+  "target_version": "0.24.0",
   "requested_at": "2026-10-03T10:00:00Z",
   "requested_by": "admin-account-id"
 }
@@ -789,7 +859,7 @@ docker compose --env-file .env logs --tail=200 sub2api
 ./scripts/upgrade-service.sh admin_web
 ```
 
-### 5.4 云端一键升级
+### 5.5 云端一键升级
 
 代码推送到 `main` 并等待 GitHub Actions 完成中文 Release 后，在服务器执行：
 
@@ -798,7 +868,7 @@ cd /opt/1panel/apps/sprout
 git pull --ff-only
 cd deploy/cloud
 chmod 600 .env
-./scripts/upgrade-cloud.sh 0.10.0 0.2.16
+./scripts/upgrade-cloud.sh 0.24.0 0.2.20
 ```
 
 脚本会先备份两个数据库，再原子切换镜像版本、拉取发布镜像、重建服务并检查
@@ -806,7 +876,7 @@ chmod 600 .env
 版本号，不允许只更新其中一侧。只升级平台服务时可省略 Sub2API 版本参数：
 
 ```bash
-./scripts/upgrade-cloud.sh 0.10.0
+./scripts/upgrade-cloud.sh 0.24.0
 ```
 
 脚本不会自动删除数据卷，也不会在失败时自动恢复数据库。失败输出会保留旧版本

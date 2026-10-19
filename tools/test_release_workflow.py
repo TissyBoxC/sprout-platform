@@ -503,6 +503,24 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    sftp_stage_start = upload_block.index("stage_via_sftp() {")
+    sftp_stage_end = upload_block.index(
+        "if [[ -z \"${RELEASE_UPLOAD_TOKEN:-}\" ]]",
+        sftp_stage_start,
+    )
+    sftp_stage = upload_block[sftp_stage_start:sftp_stage_end]
+    if not re.search(r"(?m)^\s+import hashlib$", sftp_stage):
+        print(
+            "candidate SFTP staging must import hashlib before hashing artifacts",
+            file=sys.stderr,
+        )
+        return 1
+    if "hashlib.sha256(source.read_bytes()).hexdigest()" not in sftp_stage:
+        print(
+            "candidate SFTP staging must verify existing artifacts by digest",
+            file=sys.stderr,
+        )
+        return 1
     if 'remote_path = f"releases/{version}/{candidate_channel}/{relative}"' not in upload_block:
         print(
             "candidate staging must write only to the isolated candidate channel",

@@ -34,16 +34,34 @@ tooling. Firmware and the AI gateway fork remain independent repositories.
 
 ## Current Status
 
-The repository version is `0.16.0` and is in the foundation-layer phase where
-recording, playback, wake, device interaction, and the content library are closed loops. Status is
-based on an accepted end-to-end capability, not on the presence of a directory,
-interface, or placeholder file.
+The repository version is `0.24.0`. Accounts, families, devices, content,
+voice, notifications, OTA, the admin Feature Center, and cloud service-version
+management have software-level closed loops. Capabilities that still depend on
+physical hardware, production keys, or bench validation remain `[Partial]`.
+Status is based on an accepted end-to-end capability, not on the presence of a
+directory, interface, or placeholder file.
 
 | Marker | Meaning |
 | --- | --- |
 | `[Implemented]` | The capability, error paths, authorization or privacy controls, and relevant tests exist. |
 | `[Partial]` | A runnable skeleton, contract, or single-side capability exists, but the end-to-end flow is incomplete. |
 | `[Not implemented]` | No acceptance-ready business implementation exists yet. Only planning, directories, or empty interfaces are present. |
+
+Hardware boundary after the documentation audit:
+
+- Code, contracts, and policy layers do not prove a hardware loop. Camera
+  sensor/framebuffer capture, QR provisioning on a display, real screen and
+  touch drivers, battery and cellular modules, motors, and positioning modules
+  still require validation on the target board.
+- The production configuration enables Secure Boot V2, Flash Encryption, OTA
+  rollback, and anti-rollback, but eFuse provisioning, signing-key custody,
+  production image flashing, real dual-slot OTA, power-loss recovery, and
+  rollback bench tests have not been validated in this repository. Do not
+  describe the secure-boot or OTA hardware path as production-verified.
+- The current `esp32-s3-n16r8-production` configuration does not enable display
+  policy, touch input, battery, cellular, motion, wearable location, or family
+  linkage. Platform APIs and console pages for those capabilities do not make
+  the default production firmware hardware-complete.
 
 ## Complete Feature Inventory
 
@@ -64,45 +82,45 @@ order and never removes a capability.
 | P0-07 | Content | Content library, stories, nursery rhymes, poetry, English, encyclopedia, bedtime, age tiers | `[Implemented]` | The platform supports content drafts, review submission, approval or rejection, publishing, withdrawal, archival, and review history, verifies the asset SHA-256 on publish, and advances an atomic catalog revision; the parent app syncs incrementally by age tier and category, verifies downloads, caches packages, and removes withdrawn items; the admin console exposes the full content workflow; the firmware pulls the incremental device manifest with its session token, resumes downloads, verifies SHA-256, commits packages atomically to SPIFFS, and plays them at ambient priority. |
 | P0-08 | Connectivity | `network_manager`, `device_provisioning`, `time_sync`, `cloud_auth`, `offline_fallback`, `provisioning_reporter`, `device_runtime_reporter` | `[Implemented]` | On top of BLE provisioning, device binding, time sync, network quality, and cloud authentication, firmware `provisioning_reporter` records provisioning start, Wi-Fi configuration, binding, time sync, reconnect, and auth-recovery steps into a bounded event buffer persisted across reboots and reports them in the heartbeat; the `offline_fallback` pending-telemetry counter is now NVS-persisted and clears only after authentication recovers and a heartbeat is accepted. The platform adds a provisioning-event audit table, `GET /api/v1/admin/devices/{device_id}/provisioning`, and `POST /api/v1/admin/devices/{device_id}/sessions/revoke`, and returns the current provisioning state, Wi-Fi configuration flag, session state, and last provisioned time from the runtime endpoints; the parent app renders staged provisioning progress, session-expiry prompts, and offline empty states, and the admin console provides a provisioning timeline and revoke action. Operator commands are published at QoS 1 as `device.command` to `sprout/v1/devices/{device_id}/commands` after they are persisted, with the authenticated HTTP poll as the broker-outage fallback and a shared idempotency key on `request_id`; the platform subscribes to `sprout/v1/devices/+/commands/ack` and applies acknowledgements through the same single-write idempotent path, while firmware `device_mqtt` uses mutual-TLS client certificates to subscribe to `sprout/v1/devices/{device_id}/commands`, parses commands against the shared contract, executes them through the same idempotent runtime path, and publishes acknowledgements at QoS 1 on `.../commands/ack`, keeping authenticated HTTP polling as the fallback when MQTT credentials are absent or the broker is unreachable. |
 | P0-09 | Parent control | `parent_link`, `parent_policy`, `usage_report` | `[Implemented]` | On top of family-bound devices, the platform derives one effective policy from every child policy using most-restrictive aggregation (category intersection, minimum daily duration and volume, union of blocked periods) with a per-family revision, and the guardian update path carries `policy_version` for optimistic concurrency and returns 409 on a stale write. Devices read that policy with their session token and never regress to a lower revision. Firmware adds a `parent_control_runtime` gate (stable reasons: disabled period, category denied, daily limit reached, time untrusted) and a `usage_ledger` that handles cross-midnight rollover, day reset, reboot/power-loss durability, clock rollback, offline accumulation, and idempotent per-device-per-date upload, actually blocking wake, voice sessions, content download, and playback and re-syncing `child_prompt_profile` after refresh. The platform adds `device_usage_daily` plus `POST /api/v1/devices/{device_id}/runtime/usage`, `GET /api/v1/usage-reports`, and `GET /api/v1/admin/families/{parent_account_id}/usage-reports`, and filters the content catalog by the effective policy. The voice gateway consumes a production `content_policy` resolver with a per-device cache to enforce age tier, category allowlist, and crisis-intent handling server-side. The parent app gains a usage report view (trend, categories, blocked reasons, per-device breakdown, remaining allowance, conflict and unsaved-change prompts) and the admin console gains a read-only usage report view that distinguishes "not set" from a read failure. |
-| P0-10 | Security and privacy | `privacy_guard`, `content_filter`, `transport_security`, platform and voice security modules | `[Partial]` | Mutual MQTT TLS, certificate validation, request labels, log redaction, secure defaults, and contract validation exist. Identity, authorization, moderation, deletion, and consent flows remain incomplete. |
-| P0-11 | OTA | `ota_manager`, `ota_download`, `ota_validate`, `ota_rollback` | `[Not implemented]` | Package management, signature validation, canary release, download, install, rollback, and version statistics are missing. |
+| P0-10 | Security and privacy | `privacy_guard`, `content_filter`, `transport_security`, `security_posture`, platform and voice security modules | `[Partial]` | Authentication, sessions, short-lived device tokens, administrator RBAC, per-route audit, input/output moderation, crisis intervention, deletion, consent withdrawal, and production secure-boot/flash-encryption posture checks are implemented and tested. eFuse provisioning, signing-key custody, production image flashing, debug-interface lockdown on finished units, and physical-device penetration testing remain incomplete. |
+| P0-11 | OTA | `ota_manager`, `ota_download`, `ota_validate`, `ota_rollback` | `[Partial]` | The platform implements draft, publish, pause, withdraw, signature validation, canary rollout, deployment statistics, and verification of the real artifact on the shared download volume. Firmware implements chunked download, SHA-256 and signature validation, dual-slot installation, resumable transfer, stable failure codes, rollback, and anti-rollback configuration. Unified manifest policy fields, platform-authorized downgrade handling, real-network upgrades, power-loss recovery, dual-slot rollback, and eFuse version-increment bench tests are still required before claiming a hardware OTA loop. |
 | P0-12 | Device interaction | Buttons, LED, prompt tones, volume, factory reset, status feedback | `[Implemented]` | Button gestures, LED state, local tones, guardian volume limits, protected local and remote factory reset, interaction reporting, and idempotent command acknowledgement are implemented. |
 
 ### P1 Mainstream Capabilities
 
 | ID | Capability | Modules | Status | Current state |
 | --- | --- | --- | --- | --- |
-| P1-01 | Voice enhancement | Full duplex, far-field pickup, continuous conversation | `[Not implemented]` | Only VAD and audio base directories exist. Full duplex, echo cancellation, far-field pickup, and continuous conversation are missing. |
-| P1-02 | Content operations | Packages, themes, updates, favorites, playback history | `[Not implemented]` | Package lifecycle, themes, incremental updates, favorites, and playback history are missing. |
+| P1-01 | Voice enhancement | Full duplex, far-field pickup, continuous conversation | `[Implemented]` | Firmware duplex capture, echo reference, barge-in, playback cleanup, and bounded voice-quality telemetry are implemented; the voice gateway maintains a continuity window and exposes bounded quality snapshots; guardian policy and the console expose the corresponding settings. Acoustic and far-field performance still requires a physical-room bench test. |
+| P1-02 | Content operations | Packages, themes, updates, favorites, playback history | `[Implemented]` | Favorites, playback history, theme-package lifecycle, incremental catalog revisions, resumable transfers, SHA-256 verification, and optional firmware persistence modules are implemented with parent and admin UI. |
 | P1-03 | Companionship | Emotion response, encouragement, growth records, habit reminders, long-term memory | `[Implemented]` | The platform adds a family-scoped companionship module: growth records (`GET/POST /api/v1/companionship/growth-records`, `DELETE .../{record_id}`, filtered by child/category/limit/before) and habit reminders (`GET/POST /api/v1/companionship/habit-reminders`, `PUT/DELETE .../{reminder_id}`, `HH:MM` time, ISO Monday–Sunday weekdays, empty set expands to every day), all family-scoped and validated into migration `0027`. The parent app adds a "Companionship" page to record milestones/encouragement/habits/emotions, filter the timeline by child, delete records, and edit reminders with a time picker, weekday chips and an enable toggle. Firmware adds `companionship` (bounded encouragement reply keyed to emotion, the local fallback when the AI reply is unavailable), `growth_record` (bounded persisted growth-record cache with per-child deletion), `habit_reminder` (bounded persisted reminder cache with a pure `habit_reminder_due_at` scheduler), and `long_term_memory` (writes only after guardian authorization, revoking clears every memory, per-entry and per-child deletion, `recall`/`list` return nothing without authorization). |
 | P1-04 | English learning | Words, sentences, speaking practice, pronunciation feedback | `[Implemented]` | The platform adds an English learning module (migration `0028`): a lesson catalog grouped by age tier (`age_3_4/age_5_6/age_7_8`) with words (phonetic, translation, example) and sentence patterns (pattern, prompt, model answer), read-only to guardians (`GET /api/v1/english/lessons`, `GET .../lessons/{lesson_id}`); practice progress is family-scoped (`GET /api/v1/english/progress` returns per-lesson passed items, best and average scores plus per-item best scores, and `GET /api/v1/english/attempts`), while the device reports attempts with its session token (`POST /api/v1/devices/{device_id}/english/attempts`). Scores are clamped to 0-100 and the pass flag is derived from a 60-point threshold so a client cannot claim a pass it did not earn. The parent app adds an "English" page to browse lessons by age tier, open a lesson to review its words and sentences, show per-item best scores and overall completion, and filter progress by child. Firmware adds the `english_course` module, which persists a bounded lesson catalog (words and sentence patterns per lesson) and a local practice log with pronunciation scores, supporting lesson upsert/remove, attempt recording, and per-item best-score rollup so practice continues offline and reports back. |
 | P1-05 | Parent app | Remote messages, playback requests, device status, content recommendations | `[Implemented]` | The remote message inbox with unread badge and timed on-device display, device status and firmware updates, on-demand playback (guardian `GET/POST /api/v1/playback/requests`, a status machine that drives device-side `acknowledge/complete`, and the `playback_request` firmware cache drained in order), and content recommendations (`GET /api/v1/content/recommendations`, ranked by favourite and recent categories, the child's age tier, and freshness while excluding already-favourited or played packages, surfaced as a "为你推荐" carousel with one-tap download under 内容管理) are all complete. |
 | P1-06 | Local fallback | Offline stories, local commands, cached playback | `[Implemented]` | Firmware covers the offline grace window with recovery detection, offline content (`offline_content`, including cache corruption verification and rebuild), local commands, cached playback, and offline usage records (`usage_ledger` with a bounded pending queue that backfills idempotently per device and date). The platform adds local commands (migration `0030`: guardian `GET/PUT/DELETE /api/v1/local-commands`, device `GET /api/v1/devices/{device_id}/local-commands`) and a content offline download policy (migration `0031`: a platform-wide singleton cache cap and TTL via guardian `GET/PUT /api/v1/content/offline-policy`, device `GET /api/v1/devices/{device_id}/content/offline-policy`, plus a device applied-revision acknowledgement and a guardian view of lagging devices). All three surfaces have UI: "本地指令" and "离线下载" in the parent app, and "离线下载策略" in the admin console, which reads/writes the policy and shows each family's applied device revisions. Post-recovery backfill is served by the existing device usage upload keyed by `report_date`. |
 | P1-07 | Diagnostics | System diagnostics, logs, crashes, network quality, temperature | `[Implemented]` | Firmware reports boot, module-failure, recovery, crash, and temperature events; the platform validates and aggregates them with retention windows, and the admin console offers diagnostic queries, crash views, windowed trends, and network-quality threshold alerts. The guardian app shows only an actionable stability hint. Crashes remain bounded, redacted signatures with no raw memory or backtraces. |
-| P1-08 | Camera | Capture, object recognition, picture-book recognition, photo Q&A | `[Implemented]` | Firmware capture/vision components, privacy-gated consent, the voice-gateway vision pipeline (model calls, content safety, short-lived storage), platform task/result APIs, and parent/admin pages are all wired. |
+| P1-08 | Camera | Capture, object recognition, picture-book recognition, photo Q&A | `[Partial]` | Privacy-gated visual-task state machines, the voice-gateway vision pipeline, platform task/result APIs, and parent/admin pages are present. The firmware still lacks a real sensor/framebuffer capture provider, and the production capability does not enable the camera, so capture and recognition cannot be accepted on hardware. |
 
 ### P2 Differentiated Capabilities
 
 | ID | Capability | Modules | Status | Current state |
 | --- | --- | --- | --- | --- |
-| P2-01 | Display | Expressions, animation, point-to-read, video playback | `[Implemented]` | Firmware screen component (fixed expression and animation catalogs, point-to-read entry store, policy-clamped video profile and playback state machine), platform screen module (policy, device capability and status, point-to-read dictionary, and video playback APIs), parent app settings page, and admin statistics page are implemented; point-to-read entries are bounded and de-duplicated by term, video parameters are clamped to the policy ceiling, and out-of-range values are rejected. |
-| P2-02 | Eye-care display | Brightness, color temperature, distance, duration policy | `[Implemented]` | Firmware eye-care policy component, platform policy and status APIs, parent app settings page, and admin statistics page are implemented. |
-| P2-03 | Touch | Tap, swipe, gestures, haptic feedback | `[Implemented]` | Firmware touch configuration and gesture recognition, platform input module, parent app touch settings page, and admin statistics page are implemented. |
-| P2-04 | Cellular | eSIM, data usage, remote wake, connectivity switching | `[Implemented]` | Firmware cellular and eSIM policy component, platform connectivity module, parent app cellular settings page, and admin statistics page are implemented. |
-| P2-05 | Battery | Charging, estimation, low power, deep sleep | `[Implemented]` | Firmware battery and low-power policy component, platform power policy and status APIs, parent app battery settings page, and admin statistics page are implemented. |
-| P2-06 | Motion | Motors, servos, walking, dancing, tail actions | `[Implemented]` | Firmware motion and motor safety component, platform motion policy and status APIs, parent app motion settings page, and admin statistics page are implemented. |
-| P2-07 | Form factors | Capability sets for multiple physical forms | `[Implemented]` | Firmware capability-composed form-factor profile, platform form-factor capability and status APIs, parent app viewer page, and admin statistics page are implemented. Technical names never bind to a character or appearance. |
-| P2-08 | Video companionship | Video calls, remote companionship | `[Implemented]` | Firmware call-session component, platform video companionship (contacts, call state, device status, and statistics APIs), parent app page, and admin statistics page are implemented; media negotiation and codecs stay at the call gateway. |
-| P2-09 | Wearables and location | Location, calling, geofence, SOS | `[Implemented]` | Firmware wearable-location component (policy, geofence evaluation, SOS latch), platform wearable module (location permission, precision, geofence, emergency contacts, and SOS APIs), parent app settings page, and admin statistics page are implemented; revoking the permission stops sampling/upload and clears positions, and SOS syncs device, platform, parent app, and admin audit. |
-| P2-10 | Multi-device | Family linkage, device mesh, content sync | `[Implemented]` | Firmware family-linkage component, platform device-mesh module (groups, membership, routed messages, content sync and conflict handling APIs), parent app multi-device page, and admin statistics page are implemented; same-version conflicts are surfaced instead of being silently overwritten. |
+| P2-01 | Display | Expressions, animation, point-to-read, video playback | `[Partial]` | Screen policy, point-to-read storage, clamped video profiles, playback state, platform APIs, parent settings, and admin statistics exist. The production configuration does not enable the screen component or display capability, and real LVGL panel rendering has not been accepted on hardware. |
+| P2-02 | Eye-care display | Brightness, color temperature, distance, duration policy | `[Partial]` | Policy, status reporting, and UI exist; real brightness, color-temperature, distance sensing, and duration enforcement have not been validated on target hardware. |
+| P2-03 | Touch | Tap, swipe, gestures, haptic feedback | `[Partial]` | Platform policy, status, and UI exist; the production configuration does not enable touch capability, and the real controller, gestures, and haptics remain unverified. |
+| P2-04 | Cellular | eSIM, data usage, remote wake, connectivity switching | `[Partial]` | Policy, status, and UI exist; cellular capability is disabled in production, and the eSIM/modem, data accounting, and network switching have no physical loop yet. |
+| P2-05 | Battery | Charging, estimation, low power, deep sleep | `[Partial]` | Policy, status, and UI exist; battery capability is disabled in production, and charging, fuel gauge, low-power, and sleep behavior require power-board tests. |
+| P2-06 | Motion | Motors, servos, walking, dancing, tail actions | `[Partial]` | Motion policy, safety gates, and UI exist; motion capability is disabled in production, and motors, servos, limits, and emergency stop require mechanical/electrical bench validation. |
+| P2-07 | Form factors | Capability sets for multiple physical forms | `[Partial]` | The platform can describe form factors with capability sets and non-character names; physical module combinations, structural safety, and SKU-level acceptance are incomplete. |
+| P2-08 | Video companionship | Video calls, remote companionship | `[Partial]` | Contacts, call state, device status, parent UI, and admin views are wired; real audio/video codecs, media gateway, weak-network handling, and device-side calling are not hardware-verified. |
+| P2-09 | Wearables and location | Location, calling, geofence, SOS | `[Partial]` | Location policy, geofence, SOS state, and audit APIs exist; production does not enable the wearable-location module or a real positioning modem, so accuracy, geofence, SOS, and compliance remain unverified. |
+| P2-10 | Multi-device | Family linkage, device mesh, content sync | `[Partial]` | Device groups, membership, routed messages, and content-sync APIs exist; production does not enable family linkage, and multi-device networking, offline conflicts, and cross-device consistency still need bench validation. |
 
 ### Layer Coverage
 
 | Layer | Scope | Status | Notes |
 | --- | --- | --- | --- |
-| Foundation | Provisioning, wake, recording/playback, AI conversation, content, parent control, OTA | `[Partial]` | Audio capture, playback, wake, device interaction, AI conversation, and the content library exist. Parent control and OTA remain incomplete. |
-| Mainstream | Continuous conversation, content operations, companionship, English, remote messages, offline fallback, diagnostics, camera | `[Partial]` | Continuous conversation enhancement, content operations, companionship, remote messages, device status, and device firmware updates are usable; English, offline fallback, diagnostics enhancement, and camera remain incomplete. |
-| Differentiated | Display, touch, eye care, cellular, battery, motion, video, location, multi-device | `[Implemented]` | Display, touch, eye care, cellular, battery, motion, video companionship, wearables/location, and multi-device all close the loop across firmware, platform, parent app, and admin console. |
+| Foundation | Provisioning, wake, recording/playback, AI conversation, content, parent control, OTA | `[Partial]` | Audio, wake, device interaction, AI conversation, content, and parent control have software loops. OTA has platform, firmware, parent, and admin code, but real dual-slot upgrade, power-loss recovery, rollback, and eFuse checks remain unverified. |
+| Mainstream | Continuous conversation, content operations, companionship, English, remote messages, offline fallback, diagnostics, camera | `[Partial]` | Continuous conversation, content operations, companionship, English, remote messages, offline fallback, and diagnostics have three-surface implementations. Camera lacks a real sensor/framebuffer provider and cannot be claimed as a hardware loop. |
+| Differentiated | Display, touch, eye care, cellular, battery, motion, video, location, multi-device | `[Partial]` | Policy and status surfaces exist in the platform, parent app, and admin console; production firmware does not enable the corresponding hardware capabilities, so real panel, touch, modem, power, motor, location, and multi-device validation remain. |
 
 ### Supporting Modules
 
@@ -113,12 +131,12 @@ order and never removes a capability.
 | `playback_queue` | Manage playback priority, interruption, and resume | `[Implemented]` | Both firmware and the voice gateway queue by priority with preemption, unplayed-tail resume, pause, and cleanup; safety prompt tones cannot be interrupted or muted. |
 | `volume_control` | Enforce guardian volume ceiling and local mute | `[Implemented]` | Supports volume 0 to 100, policy-ceiling clamping, persistence, mute, and saturating PCM gain. |
 | `prompt_tone` | Generate local wake, capture, network, and safety prompt tones | `[Implemented]` | Generates nine local prompt tones, plays them by priority when a queue is available, and keeps safety prompt tones at the highest priority. |
-| `alarm_reminder` | Scheduled reminders, alarms, and routines | `[Not implemented]` | Time synchronization, reminder scheduling, and parent configuration are missing. |
-| `bluetooth_audio` | Bluetooth speaker mode and pairing | `[Not implemented]` | Bluetooth audio, pairing, mode switching, and playback priority are missing. |
-| `learning_visualization` | Touch-screen learning content and visual feedback | `[Not implemented]` | Learning visualization, course linkage, and display interaction are missing. |
+| `alarm_reminder` | Scheduled reminders, alarms, and routines | `[Implemented]` | Time-based alarms, snooze, weekday expansion, bounded persistence, device reporting, platform APIs, and parent UI are implemented. |
+| `bluetooth_audio` | Bluetooth speaker mode and pairing | `[Partial]` | Policy, adapter state machine, capability/statistics APIs, admin UI, and firmware schema gating exist; real radio, pairing, codec switching, reconnect, and audio routing remain unverified. |
+| `learning_visualization` | Touch-screen learning content and visual feedback | `[Partial]` | Policy, state machine, bounded device status, parent settings, and admin statistics exist; production touch/display capabilities are disabled, so visual and touch behavior is not hardware-verified. |
 | `long_term_memory` | Guardian-authorized long-term companionship memory | `[Implemented]` | Writes only after explicit guardian authorization; revoking authorization erases every memory, and `recall`/`list`/`count` return nothing without consent; minimized storage dedupes by child+key, supports per-entry and per-child deletion, persists a single binary envelope, and starts from an empty unauthorized state when the blob is missing or corrupt. |
-| `image_privacy` | Local image processing and upload consent | `[Not implemented]` | Local preprocessing, guardian consent, upload minimization, and deletion are missing. |
-| `video_session` | Video-call and remote-companionship media session | `[Not implemented]` | Media negotiation, codecs, poor-network handling, and device indication are missing. |
+| `image_privacy` | Local image processing and upload consent | `[Partial]` | Policy, guardian consent, upload gating, bounded status, and aggregate metrics exist; real local preprocessing and camera capture remain incomplete. |
+| `video_session` | Video-call and remote-companionship media session | `[Partial]` | Session state, guardian/child consent gates, policy, status reporting, and admin statistics exist; real capture, codecs, media gateway, weak-network handling, and device-side indication remain unverified. |
 
 ### Engineering Foundation
 
@@ -127,26 +145,42 @@ whether later modules can be added, removed, and regression-tested independently
 
 | Capability | Status | Current state |
 | --- | --- | --- |
-| Shared contracts and generated types | `[Partial]` | Identity, family, child, device, content, OTA, policy, event, MQTT, error, and UI-text schemas exist with Dart/TypeScript generated types. Business API contracts are not fully frozen. |
+| Shared contracts and generated types | `[Implemented]` | Identity, family, child, device, content, OTA, policy, event, MQTT, error, and UI-text schemas exist with Dart/TypeScript generated types and contract-drift gates. |
 | Contract validation and CI | `[Implemented]` | Platform CI validates local deployment, contracts, generated types, Go services, Vue admin, and Flutter parent app. |
 | Automated release | `[Implemented]` | Changing `VERSION` creates a Chinese release with Go binaries, admin-web artifacts, and contract archives. External repositories release independently. |
-| Docker Compose | `[Implemented]` | Supports PostgreSQL, Redis, MQTT/TLS, optional `sub2api`, `device_platform`, and `voice_gateway`. Business capabilities remain incomplete. |
+| Docker Compose | `[Implemented]` | Local compose supports PostgreSQL, Redis, MQTT/TLS, optional `sub2api`, `device_platform`, `voice_gateway`, and the local version-state worker. Cloud compose supports PostgreSQL, Redis, MQTT, Sub2API, device platform, voice gateway, admin web, read-only download, SFTP fallback, and `upgrade_worker`. |
 | Request labels, logging, and redaction | `[Implemented]` | Services use request IDs, trace fields, access logs, and sensitive-field redaction. |
-| Remote UI text | `[Partial]` | The UI-text contract, platform module skeleton, and admin page exist. Publishing, cache, version, and firmware consumption are incomplete. |
-| Brand service version management | `[Implemented]` | The admin console lists every image's current and repository-latest version and can upgrade platform services and the AI gateway individually or in a batch; self-upgrade runs in a separate executor so an admin restart does not interrupt the task, and infrastructure images are only checked, never auto-upgraded. |
-| `sub2api_fork` customization | `[Not implemented]` | The fork retains upstream behavior. Tenant labels, child policy, internal API, call auditing, and configuration prefix are not customized. |
+| Remote UI text | `[Implemented]` | Contract, draft/publish lifecycle, Ed25519 signature validation, incremental sync, admin review/publish UI, and firmware application/fallback are implemented. |
+| Feature Center | `[Implemented]` | A typed registry covers product and platform capabilities with validated editable settings, read-only metrics, authoritative health probes, optimistic concurrency, audit records, and unavailable/unknown states that are not presented as healthy. |
+| Brand service version management | `[Implemented]` | The admin console lists every managed image's current and repository-latest version in service rows and can upgrade platform services and the AI gateway individually or in a batch; `upgrade_worker` is observed as part of the platform catalog, self-upgrade runs outside the admin container, and infrastructure images are only checked, never auto-upgraded. |
+| `sub2api_fork` customization | `[Implemented]` | The fork keeps upstream behavior while adding strict tenant labels, child model/parameter policy, internal usage and policy APIs, redacted model-call auditing, and `sprout.*`/`SPROUT_` configuration prefixes; all custom behavior defaults off. |
+
+### Feature Center
+
+The admin console's Feature Center is the single registry for current and future
+product and platform capabilities. Each entry has a stable `lower_snake_case`
+ID, Chinese display name, category, owning service, lifecycle status,
+configuration schema, authoritative health probe, and read-only metrics.
+Editable values are validated by the backend; secrets reveal only configured or
+unconfigured state. Config versions provide optimistic concurrency and a stale
+write must reload. Configuration changes and manual checks record the
+administrator, timestamp, and audit action. Health comes from a runtime probe,
+persisted state, or an explicit not-configured result. `unknown`, `unavailable`,
+and stale observations are never presented as healthy. See
+[cloud deployment](deploy/cloud/README.md#feature-center) for operations and
+troubleshooting.
 
 ## System Composition
 
 | Project | Audience | Responsibility | Status |
 | --- | --- | --- | --- |
-| `apps/parent_app` | Parents and guardians | Login, family, child, device, policy, reports, remote messages, content, OTA | `[Partial]` |
-| `apps/admin_web` | Platform operations and administrators | Accounts, families, children, devices, content, AI gateway, OTA, audit, monitoring | `[Partial]` |
-| `services/device_platform` | Platform internal | Parent and device APIs, device transport, content, policy, OTA, telemetry, audit | `[Partial]` |
-| `services/voice_gateway` | Platform internal | Realtime voice, ASR, TTS, content safety, `sub2api`, usage recording | `[Partial]` |
+| `apps/parent_app` | Parents and guardians | Login, family, child, device, policy, reports, remote messages, content, QR binding, software updates, OTA | `[Implemented]` |
+| `apps/admin_web` | Brand operators and administrators | Accounts, families, children, devices, content, AI gateway, OTA, Feature Center, downloads, service versions, audit, monitoring | `[Implemented]` |
+| `services/device_platform` | Platform internal | Parent and device APIs, device transport, content, policy, OTA, telemetry, Feature Center, audit | `[Implemented]` |
+| `services/voice_gateway` | Platform internal | Realtime voice, ASR, TTS, content safety, `sub2api`, usage recording | `[Implemented]` |
 | `services/sub2api_fork` | AI infrastructure | Model credentials, routing, quota, rate limits, billing, provider compatibility | `[Partial]` |
 | `firmware` | Device | Wake, recording, playback, session, cache, network, policy, OTA | `[Partial]` |
-| `packages/contracts` | Cross-project | HTTP, event, MQTT, capability, and UI-text contracts | `[Partial]` |
+| `packages/contracts` | Cross-project | HTTP, event, MQTT, capability, and UI-text contracts | `[Implemented]` |
 
 ## Boundaries
 
@@ -569,13 +603,24 @@ The platform repository contains:
 - `.github/workflows/ci.yml`: validates deployment files, contracts, generated
   types, Go services, the Vue admin console, and the Flutter parent app.
 - `.github/workflows/release.yml`: watches `VERSION` on `main`, builds the Go
-  services, admin assets, and contract archive, generates Chinese release notes,
-  and creates a GitHub Release.
+  services, admin assets, Android APK, and contract archive, generates Chinese
+  release notes, verifies download and GitHub assets, and only then promotes the
+  four matching GHCR images to `latest`.
 
 Release the platform by changing only the root `VERSION` file in `X.Y.Z` format,
 then committing and pushing to `main`. The workflow creates and uses the tag.
 The firmware and `sprout-sub2api-fork` repositories run their own CI and release
 workflows.
+
+The release pipeline uses `SPROUT_RELEASE_UPLOAD_TOKEN` to publish through the
+management API. SFTP is optional: when all five `SPROUT_DOWNLOAD_SFTP_*`
+secrets are empty, only the management API is used. If any SFTP secret is
+configured, all five are required and the workflow validates the private key
+and an exact pinned `known_hosts` entry for the configured host and port before
+writing release files. A partial configuration fails closed. The workflow
+inspects all four versioned images
+(`device-platform`, `voice-gateway`, `admin-web`, and `upgrade-worker`) before
+moving `latest`.
 
 ## Modularity Rules
 

@@ -537,7 +537,7 @@ jobs:
           fi
 
           stage_via_management_api() {
-            python3 - \
+          python3 - \
               "$api_base_url" \
               "$RELEASE_UPLOAD_TOKEN" \
               "dist/releases/${{ steps.detect.outputs.version }}/stable/manifest.json" \
@@ -545,7 +545,6 @@ jobs:
               "$download_base_url" \
               "${{ steps.detect.outputs.version }}" \
               "$candidate_channel" <<'PY'
-            import hashlib
             import sys
             import urllib.parse
             import urllib.request
@@ -610,11 +609,11 @@ jobs:
                         artifact=artifact,
                     )
             print(f"staged {len(manifest['artifacts'])} artifacts without publishing the index")
-            PY
+          PY
           }
 
           stage_via_sftp() {
-            python3 - \
+          python3 - \
               "dist" \
               "dist/releases/${{ steps.detect.outputs.version }}/stable/manifest.json" \
               "$download_base_url" \
@@ -627,6 +626,8 @@ jobs:
               "$RUNNER_TEMP/sprout-sftp/known_hosts" <<'PY'
             import sys
             from pathlib import Path
+
+            import hashlib
 
             from tools import upload_release_artifacts as uploader
 
@@ -700,7 +701,7 @@ jobs:
                 )
             finally:
                 batch_file.unlink(missing_ok=True)
-            PY
+          PY
           }
 
           if [[ -z "${RELEASE_UPLOAD_TOKEN:-}" ]]; then

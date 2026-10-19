@@ -23,10 +23,13 @@ type AssetReader interface {
 
 // Options contains content-service dependencies.
 type Options struct {
-	Repository   repository.Repository
-	AssetReader  AssetReader
-	PolicyReader ContentPolicyReader
-	Clock        clock.Clock
+	Repository                repository.Repository
+	AssetReader               AssetReader
+	PolicyReader              ContentPolicyReader
+	ReadinessReader           ReadinessReader
+	EngagementReadinessReader EngagementReadinessReader
+	ThemePackReadinessReader  ThemePackReadinessReader
+	Clock                     clock.Clock
 }
 
 // ContentPolicyReader resolves the effective family policy that constrains a
@@ -40,10 +43,13 @@ type ContentPolicyReader interface {
 
 // Service owns the content-package lifecycle.
 type Service struct {
-	repository   repository.Repository
-	assetReader  AssetReader
-	policyReader ContentPolicyReader
-	clock        clock.Clock
+	repository                repository.Repository
+	assetReader               AssetReader
+	policyReader              ContentPolicyReader
+	readinessReader           ReadinessReader
+	engagementReadinessReader EngagementReadinessReader
+	themePackReadinessReader  ThemePackReadinessReader
+	clock                     clock.Clock
 }
 
 // New creates the content service.
@@ -55,11 +61,32 @@ func New(options Options) (*Service, error) {
 	if timeSource == nil {
 		timeSource = clock.SystemClock{}
 	}
+	readinessReader := options.ReadinessReader
+	if readinessReader == nil {
+		if reader, ok := options.Repository.(ReadinessReader); ok {
+			readinessReader = reader
+		}
+	}
+	engagementReadinessReader := options.EngagementReadinessReader
+	if engagementReadinessReader == nil {
+		if reader, ok := options.Repository.(EngagementReadinessReader); ok {
+			engagementReadinessReader = reader
+		}
+	}
+	themePackReadinessReader := options.ThemePackReadinessReader
+	if themePackReadinessReader == nil {
+		if reader, ok := options.Repository.(ThemePackReadinessReader); ok {
+			themePackReadinessReader = reader
+		}
+	}
 	return &Service{
-		repository:   options.Repository,
-		assetReader:  options.AssetReader,
-		policyReader: options.PolicyReader,
-		clock:        timeSource,
+		repository:                options.Repository,
+		assetReader:               options.AssetReader,
+		policyReader:              options.PolicyReader,
+		readinessReader:           readinessReader,
+		engagementReadinessReader: engagementReadinessReader,
+		themePackReadinessReader:  themePackReadinessReader,
+		clock:                     timeSource,
 	}, nil
 }
 

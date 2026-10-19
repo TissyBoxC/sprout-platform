@@ -28,6 +28,7 @@ var (
 	ErrPracticeItemNotFound = errors.New("english practice item not found")
 	ErrChildNotFound        = errors.New("english child profile not found")
 	ErrChildFamilyMismatch  = errors.New("english child profile does not belong to family")
+	ErrReadinessUnavailable = errors.New("english learning readiness is unavailable")
 )
 
 // Age tiers reused from the child profile so the catalog matches the child's

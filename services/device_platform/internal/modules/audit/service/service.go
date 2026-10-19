@@ -10,6 +10,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/repository"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 )
 
 var (
@@ -249,6 +250,27 @@ func (s *Service) RecentCrashCount(
 		return 0, domain.ErrEventNotFound
 	}
 	return s.repository.CountRecentCrashes(ctx, deviceID)
+}
+
+// CheckReadiness reports aggregate diagnostic reporting health. The probe
+// counts active devices with a recent diagnostic payload and treats a device
+// without recent boot or provisioning evidence as degraded. An empty fleet is
+// unknown, never healthy.
+func (s *Service) CheckReadiness(
+	ctx context.Context,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	reader, ok := s.repository.(interface {
+		Readiness(
+			context.Context,
+			time.Duration,
+		) (featurehealth.DeviceCapabilityReadiness, error)
+	})
+	if !ok {
+		return featurehealth.DeviceCapabilityReadiness{
+			Status: featurehealth.StatusUnavailable,
+		}, nil
+	}
+	return reader.Readiness(ctx, 7*24*time.Hour)
 }
 
 // ValidateProvisioning normalizes one optional provisioning payload without

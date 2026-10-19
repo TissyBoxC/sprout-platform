@@ -13,9 +13,11 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_mesh/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/google/uuid"
 )
 
@@ -46,6 +48,8 @@ type Service struct {
 	repository Repository
 	clock      clock.Clock
 }
+
+const capabilityFreshness = 24 * time.Hour
 
 // Options contains device-mesh service dependencies.
 type Options struct {
@@ -355,4 +359,23 @@ func (s *Service) AdminStats(
 		windowDays = 7
 	}
 	return s.repository.AdminStats(ctx, windowDays)
+}
+
+// CheckReadiness returns aggregate multi-device health for active devices that
+// advertise multi_device.
+func (s *Service) CheckReadiness(
+	ctx context.Context,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	reader, ok := s.repository.(interface {
+		Readiness(
+			context.Context,
+			time.Duration,
+		) (featurehealth.DeviceCapabilityReadiness, error)
+	})
+	if !ok {
+		return featurehealth.DeviceCapabilityReadiness{
+			Status: featurehealth.StatusUnavailable,
+		}, nil
+	}
+	return reader.Readiness(ctx, capabilityFreshness)
 }

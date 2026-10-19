@@ -39,6 +39,7 @@ var (
 	ErrUnknownAdminPermission = errors.New("unknown administrator permission")
 	ErrRegistrationDisabled   = errors.New("registration is disabled")
 	ErrEmailLoginDisabled     = errors.New("email login is disabled")
+	ErrReadinessUnavailable   = errors.New("authentication readiness is unavailable")
 )
 
 // ErrMFAAccountLocked unwraps to ErrMFAChallengeLocked so the existing HTTP

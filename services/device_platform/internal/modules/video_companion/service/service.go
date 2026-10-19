@@ -11,9 +11,11 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/google/uuid"
 )
 
@@ -38,6 +40,8 @@ type Service struct {
 	repository Repository
 	clock      clock.Clock
 }
+
+const capabilityFreshness = 24 * time.Hour
 
 // Options contains video-companion service dependencies.
 type Options struct {
@@ -354,4 +358,23 @@ func isTerminal(state string) bool {
 	default:
 		return false
 	}
+}
+
+// CheckReadiness returns aggregate video-call health for active devices that
+// advertise the video call capability.
+func (s *Service) CheckReadiness(
+	ctx context.Context,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	reader, ok := s.repository.(interface {
+		Readiness(
+			context.Context,
+			time.Duration,
+		) (featurehealth.DeviceCapabilityReadiness, error)
+	})
+	if !ok {
+		return featurehealth.DeviceCapabilityReadiness{
+			Status: featurehealth.StatusUnavailable,
+		}, nil
+	}
+	return reader.Readiness(ctx, capabilityFreshness)
 }

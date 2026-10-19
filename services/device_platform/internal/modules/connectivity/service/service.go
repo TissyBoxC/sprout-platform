@@ -11,8 +11,10 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/connectivity/domain"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 )
 
 // Repository is the persistence surface the service depends on.
@@ -28,6 +30,8 @@ type Repository interface {
 type Service struct {
 	repository Repository
 }
+
+const capabilityFreshness = 24 * time.Hour
 
 // Options contains connectivity service dependencies.
 type Options struct {
@@ -201,4 +205,23 @@ func quotaExhausted(quotaMB, usedMB int) bool {
 		return false
 	}
 	return usedMB >= quotaMB
+}
+
+// CheckReadiness returns aggregate cellular health for active devices that
+// advertise the cellular capability.
+func (s *Service) CheckReadiness(
+	ctx context.Context,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	reader, ok := s.repository.(interface {
+		Readiness(
+			context.Context,
+			time.Duration,
+		) (featurehealth.DeviceCapabilityReadiness, error)
+	})
+	if !ok {
+		return featurehealth.DeviceCapabilityReadiness{
+			Status: featurehealth.StatusUnavailable,
+		}, nil
+	}
+	return reader.Readiness(ctx, capabilityFreshness)
 }

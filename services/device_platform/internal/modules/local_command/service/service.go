@@ -36,17 +36,28 @@ type CommandSet struct {
 
 // Service owns local command publishing and reads.
 type Service struct {
-	repository Repository
+	repository      Repository
+	readinessReader ReadinessReader
 }
 
 // Options contains local command service dependencies.
 type Options struct {
-	Repository Repository
+	Repository      Repository
+	ReadinessReader ReadinessReader
 }
 
 // New creates the local command service.
 func New(options Options) *Service {
-	return &Service{repository: options.Repository}
+	readinessReader := options.ReadinessReader
+	if readinessReader == nil {
+		if reader, ok := options.Repository.(ReadinessReader); ok {
+			readinessReader = reader
+		}
+	}
+	return &Service{
+		repository:      options.Repository,
+		readinessReader: readinessReader,
+	}
 }
 
 // List returns a family's current command set.

@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/display/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -307,4 +309,19 @@ func (r *PostgresRepository) AdminStats(
 	stats.ScreenSizeBuckets = buckets
 	stats.GeneratedAt = r.clock.Now().UTC()
 	return stats, nil
+}
+
+// Readiness aggregates active devices that advertise a display. Missing or
+// stale reports degrade the capability; invalid geometry is a fault.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	return featurehealth.ReadDeviceStateReadiness(ctx, featurehealth.DeviceStateQuery{
+		Pool:            r.pool,
+		Capability:      "display",
+		StateTable:      "display_device_status",
+		TimestampColumn: "reported_at",
+		FaultCondition:  "status.screen_width <= 0 OR status.screen_height <= 0",
+	}, freshness)
 }

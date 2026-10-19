@@ -40,18 +40,20 @@ type PackageReader interface {
 
 // Service owns playback request validation and persistence.
 type Service struct {
-	repository    repository.Repository
-	deviceReader  DeviceOwnerReader
-	packageReader PackageReader
-	timeSource    clock.Clock
+	repository      repository.Repository
+	deviceReader    DeviceOwnerReader
+	packageReader   PackageReader
+	readinessReader ReadinessReader
+	timeSource      clock.Clock
 }
 
 // Options contains playback-service dependencies.
 type Options struct {
-	Repository    repository.Repository
-	DeviceReader  DeviceOwnerReader
-	PackageReader PackageReader
-	Clock         clock.Clock
+	Repository      repository.Repository
+	DeviceReader    DeviceOwnerReader
+	PackageReader   PackageReader
+	ReadinessReader ReadinessReader
+	Clock           clock.Clock
 }
 
 // New creates the playback service.
@@ -63,11 +65,18 @@ func New(options Options) (*Service, error) {
 	if timeSource == nil {
 		timeSource = clock.SystemClock{}
 	}
+	readinessReader := options.ReadinessReader
+	if readinessReader == nil {
+		if reader, ok := options.Repository.(ReadinessReader); ok {
+			readinessReader = reader
+		}
+	}
 	return &Service{
-		repository:    options.Repository,
-		deviceReader:  options.DeviceReader,
-		packageReader: options.PackageReader,
-		timeSource:    timeSource,
+		repository:      options.Repository,
+		deviceReader:    options.DeviceReader,
+		packageReader:   options.PackageReader,
+		readinessReader: readinessReader,
+		timeSource:      timeSource,
 	}, nil
 }
 

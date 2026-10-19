@@ -73,6 +73,7 @@ type DeliveryBatch struct {
 // Service owns notification lifecycle and delivery state.
 type Service struct {
 	repository repository.Repository
+	readiness  ReadinessReader
 	commander  DeviceCommander
 	audit      auditRecorder
 	timeSource clock.Clock
@@ -80,9 +81,15 @@ type Service struct {
 	senders    map[string]DeliverySender
 }
 
+// ReadinessReader provides aggregate notification and delivery queue state.
+type ReadinessReader interface {
+	Readiness(ctx context.Context) (domain.Readiness, error)
+}
+
 // Options contains notification service dependencies.
 type Options struct {
 	Repository repository.Repository
+	Readiness  ReadinessReader
 	Commander  DeviceCommander
 	Audit      auditRecorder
 	Clock      clock.Clock
@@ -97,8 +104,15 @@ func New(options Options) (*Service, error) {
 	if timeSource == nil {
 		timeSource = clock.SystemClock{}
 	}
+	readiness := options.Readiness
+	if readiness == nil {
+		if reader, ok := options.Repository.(ReadinessReader); ok {
+			readiness = reader
+		}
+	}
 	return &Service{
 		repository: options.Repository,
+		readiness:  readiness,
 		commander:  options.Commander,
 		audit:      options.Audit,
 		timeSource: timeSource,
@@ -173,6 +187,31 @@ func (s *Service) DeliveryHealth(
 		)
 	}
 	return s.repository.DeliveryHealth(ctx)
+}
+
+// Readiness verifies that durable notification state is readable and that
+// retryable deliveries are not exhausting their budget. In-app notification
+// remains available without optional push, SMS, or email senders.
+func (s *Service) Readiness(
+	ctx context.Context,
+) (domain.Readiness, error) {
+	if s == nil || s.repository == nil {
+		return domain.Readiness{}, domain.ErrReadinessUnavailable
+	}
+	if s.readiness == nil {
+		return domain.Readiness{}, domain.ErrReadinessUnavailable
+	}
+	readiness, err := s.readiness.Readiness(ctx)
+	if err != nil {
+		return domain.Readiness{}, fmt.Errorf("read notification readiness: %w", err)
+	}
+	readiness.ConfiguredChannelCount = len(s.DeliveryChannels())
+	if readiness.ExhaustedDeliveryCount > 0 {
+		readiness.State = domain.ReadinessDegraded
+		return readiness, nil
+	}
+	readiness.State = domain.ReadinessHealthy
+	return readiness, nil
 }
 
 // ProcessPendingDeliveries drains one bounded batch for a channel.

@@ -103,6 +103,7 @@ type ConsentCommander interface {
 // Options contains privacy service dependencies.
 type Options struct {
 	Repository      repository.Repository
+	ReadinessReader ReadinessReader
 	ParentAccounts  ParentAccountReader
 	Children        ChildReader
 	Devices         DeviceReader
@@ -119,6 +120,7 @@ type Options struct {
 // Service implements the complete guardian privacy lifecycle.
 type Service struct {
 	repository      repository.Repository
+	readinessReader ReadinessReader
 	parentAccounts  ParentAccountReader
 	children        ChildReader
 	devices         DeviceReader
@@ -171,8 +173,15 @@ func New(options Options) (*Service, error) {
 			ConversationRetentionDays: 30,
 		}
 	}
+	readinessReader := options.ReadinessReader
+	if readinessReader == nil {
+		if reader, ok := options.Repository.(ReadinessReader); ok {
+			readinessReader = reader
+		}
+	}
 	return &Service{
 		repository:      options.Repository,
+		readinessReader: readinessReader,
 		parentAccounts:  options.ParentAccounts,
 		children:        options.Children,
 		devices:         options.Devices,

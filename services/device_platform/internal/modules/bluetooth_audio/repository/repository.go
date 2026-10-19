@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/bluetooth_audio/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -352,4 +354,19 @@ func (r *PostgresRepository) buckets(
 		return nil, fmt.Errorf("iterate bluetooth audio %s buckets: %w", column, err)
 	}
 	return buckets, nil
+}
+
+// Readiness aggregates active devices that advertise Bluetooth audio. An
+// adapter error, missing support, or an error disconnect reason is a fault.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	return featurehealth.ReadDeviceStateReadiness(ctx, featurehealth.DeviceStateQuery{
+		Pool:            r.pool,
+		Capability:      "bluetooth_audio",
+		StateTable:      "device_bluetooth_audio_status",
+		TimestampColumn: "reported_at",
+		FaultCondition:  "NOT status.bluetooth_supported OR status.adapter_state = 'error' OR status.last_disconnect_reason = 'error'",
+	}, freshness)
 }

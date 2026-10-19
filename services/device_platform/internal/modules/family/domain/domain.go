@@ -36,6 +36,7 @@ var (
 	// accept. The caller must reload the invitation before deciding the next
 	// user-visible state.
 	ErrInvitationConcurrent = errors.New("family invitation changed concurrently")
+	ErrReadinessUnavailable = errors.New("family readiness is unavailable")
 )
 
 // Security audit action names. They are stable operator-facing identifiers and

@@ -377,6 +377,29 @@ func (m *memoryRepository) DeliveryHealth(
 	return health, nil
 }
 
+func (m *memoryRepository) Readiness(
+	_ context.Context,
+) (domain.Readiness, error) {
+	if m.healthErr != nil {
+		return domain.Readiness{}, m.healthErr
+	}
+	readiness := domain.Readiness{
+		NotificationCount: int64(len(m.notifications)),
+	}
+	for _, delivery := range m.deliveries {
+		switch delivery.Status {
+		case domain.DeliveryStatusPending:
+			readiness.PendingDeliveryCount++
+		case domain.DeliveryStatusFailed:
+			readiness.FailedDeliveryCount++
+			if delivery.RetryCount >= 20 {
+				readiness.ExhaustedDeliveryCount++
+			}
+		}
+	}
+	return readiness, nil
+}
+
 type fakeDeliverySender struct {
 	sent int
 	err  error
@@ -1027,6 +1050,77 @@ func TestDeliveryHealthMapsRepositoryFailure(t *testing.T) {
 
 	if _, err := service.DeliveryHealth(context.Background()); err == nil {
 		t.Fatalf("expected repository failure")
+	}
+}
+
+func TestReadinessHealthyWithoutExternalSenders(t *testing.T) {
+	repo := newMemoryRepository()
+	service := newTestService(t, repo, &fakeCommander{})
+	readiness, err := service.Readiness(context.Background())
+	if err != nil {
+		t.Fatalf("readiness: %v", err)
+	}
+	if readiness.State != domain.ReadinessHealthy {
+		t.Fatalf("state = %q, want healthy", readiness.State)
+	}
+	if readiness.ConfiguredChannelCount != 0 {
+		t.Fatalf("configured channels = %d, want 0", readiness.ConfiguredChannelCount)
+	}
+}
+
+func TestReadinessHealthyWithRetryableFailedDelivery(t *testing.T) {
+	repo := newMemoryRepository()
+	repo.deliveries = append(repo.deliveries, &domain.Delivery{
+		ID:              "delivery-retryable",
+		NotificationID:  "notification-1",
+		ParentAccountID: testParentID,
+		Channel:         domain.ChannelPush,
+		Status:          domain.DeliveryStatusFailed,
+		FailureCode:     domain.DeliveryFailureProviderError,
+		RetryCount:      1,
+	})
+	service := newTestService(t, repo, &fakeCommander{})
+	readiness, err := service.Readiness(context.Background())
+	if err != nil {
+		t.Fatalf("readiness: %v", err)
+	}
+	if readiness.State != domain.ReadinessHealthy ||
+		readiness.FailedDeliveryCount != 1 ||
+		readiness.ExhaustedDeliveryCount != 0 {
+		t.Fatalf("unexpected readiness: %+v", readiness)
+	}
+}
+
+func TestReadinessDegradesWhenRetriesExhausted(t *testing.T) {
+	repo := newMemoryRepository()
+	repo.deliveries = append(repo.deliveries, &domain.Delivery{
+		ID:              "delivery-exhausted",
+		NotificationID:  "notification-1",
+		ParentAccountID: testParentID,
+		Channel:         domain.ChannelPush,
+		Status:          domain.DeliveryStatusFailed,
+		FailureCode:     domain.DeliveryFailureProviderError,
+		RetryCount:      20,
+	})
+	service := newTestService(t, repo, &fakeCommander{})
+	readiness, err := service.Readiness(context.Background())
+	if err != nil {
+		t.Fatalf("readiness: %v", err)
+	}
+	if readiness.State != domain.ReadinessDegraded {
+		t.Fatalf("state = %q, want degraded", readiness.State)
+	}
+	if readiness.ExhaustedDeliveryCount != 1 {
+		t.Fatalf("exhausted count = %d, want 1", readiness.ExhaustedDeliveryCount)
+	}
+}
+
+func TestReadinessMapsRepositoryFailure(t *testing.T) {
+	repo := newMemoryRepository()
+	repo.healthErr = errors.New("database unavailable")
+	service := newTestService(t, repo, &fakeCommander{})
+	if _, err := service.Readiness(context.Background()); err == nil {
+		t.Fatal("expected repository failure to surface")
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/telemetry/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/telemetry/repository"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 )
 
 // defaultOnlineThreshold matches the device runtime default so the operations
@@ -51,4 +52,12 @@ func (s *Service) Summary(
 	}
 	windowDays = domain.NormalizeWindow(windowDays)
 	return s.repository.Summary(ctx, windowDays, s.onlineThreshold)
+}
+
+// CheckReadiness returns the heartbeat capability health derived from active
+// device registrations and their latest runtime state.
+func (s *Service) CheckReadiness(
+	ctx context.Context,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	return s.repository.Readiness(ctx, s.onlineThreshold)
 }

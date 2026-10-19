@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/domain"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -569,6 +570,69 @@ func (r *PostgresRepository) CountRecentCrashes(
 		return 0, fmt.Errorf("count device crash events: %w", err)
 	}
 	return count, nil
+}
+
+// Readiness reports whether active devices are supplying readable diagnostic
+// evidence. A boot or provisioning event is the durable proof that the
+// heartbeat diagnostic extension is being persisted. Recent module failures
+// degrade the capability; missing or stale evidence for a registered device
+// also degrades it. Only aggregate counts leave this method.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	var facts featurehealth.DeviceCapabilityFacts
+	err := r.pool.QueryRow(ctx, `
+		WITH evidence AS (
+			SELECT device_id, MAX(reported_at) AS latest_at
+			FROM (
+				SELECT device_id, reported_at FROM device_boot_events
+				UNION ALL
+				SELECT device_id, reported_at FROM device_provisioning_events
+			) AS reported_event
+			GROUP BY device_id
+		),
+		latest_failure AS (
+			SELECT DISTINCT ON (device_id)
+				device_id,
+				reported_at AS latest_at
+			FROM device_module_failures
+			ORDER BY device_id, reported_at DESC, id DESC
+		)
+		SELECT
+			COUNT(credential.device_id),
+			COUNT(evidence.device_id),
+			COUNT(*) FILTER (
+				WHERE latest_failure.latest_at >= NOW() - ($2::int * INTERVAL '1 millisecond')
+			),
+			COUNT(*) FILTER (
+				WHERE evidence.device_id IS NOT NULL
+				  AND evidence.latest_at < NOW() - ($1::int * INTERVAL '1 millisecond')
+			)
+		FROM device_credentials AS credential
+		LEFT JOIN evidence ON evidence.device_id = credential.device_id
+		LEFT JOIN latest_failure
+		  ON latest_failure.device_id = credential.device_id
+		WHERE credential.status = 'active'
+	`, freshness.Milliseconds(), freshness.Milliseconds()).Scan(
+		&facts.ExpectedDevices,
+		&facts.ReportedDevices,
+		&facts.FaultedDevices,
+		&facts.StaleDevices,
+	)
+	if err != nil {
+		return featurehealth.DeviceCapabilityReadiness{},
+			fmt.Errorf("read diagnostic readiness: %w", err)
+	}
+	status, err := featurehealth.DeviceCapabilityStatus(facts, false)
+	if err != nil {
+		return featurehealth.DeviceCapabilityReadiness{},
+			fmt.Errorf("derive diagnostic readiness: %w", err)
+	}
+	return featurehealth.DeviceCapabilityReadiness{
+		Status: status,
+		Facts:  facts,
+	}, nil
 }
 
 // summaryHealthState derives a windowed health state from the newest failure

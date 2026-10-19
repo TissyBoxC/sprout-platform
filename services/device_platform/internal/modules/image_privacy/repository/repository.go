@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/image_privacy/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -372,4 +374,20 @@ func (r *PostgresRepository) buckets(
 		return nil, fmt.Errorf("iterate image privacy %s buckets: %w", column, err)
 	}
 	return buckets, nil
+}
+
+// Readiness aggregates active devices that advertise a camera. A device that
+// reports no camera support or an error block reason is a fault. Upload being
+// disabled is a valid privacy choice and is not treated as unhealthy.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	return featurehealth.ReadDeviceStateReadiness(ctx, featurehealth.DeviceStateQuery{
+		Pool:            r.pool,
+		Capability:      "camera",
+		StateTable:      "device_image_privacy_status",
+		TimestampColumn: "reported_at",
+		FaultCondition:  "NOT status.camera_supported OR status.last_block_reason = 'error'",
+	}, freshness)
 }

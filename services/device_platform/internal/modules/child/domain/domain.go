@@ -14,6 +14,7 @@ var (
 	ErrInvalidInterests     = errors.New("invalid child interests")
 	ErrInvalidCategories    = errors.New("invalid content categories")
 	ErrGuardianConsent      = errors.New("guardian consent is required")
+	ErrReadinessUnavailable = errors.New("child profile readiness is unavailable")
 )
 
 const (

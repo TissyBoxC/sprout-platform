@@ -10,8 +10,26 @@ import (
 )
 
 type memoryPolicyRepository struct {
-	policies map[string]*domain.Policy
-	revision int64
+	policies     map[string]*domain.Policy
+	revision     int64
+	readiness    domain.Readiness
+	readinessErr error
+}
+
+func (r *memoryPolicyRepository) Readiness(
+	_ context.Context,
+) (domain.Readiness, error) {
+	if r.readinessErr != nil {
+		return domain.Readiness{}, r.readinessErr
+	}
+	readiness := r.readiness
+	families := map[string]struct{}{}
+	for _, policy := range r.policies {
+		readiness.PolicyCount++
+		families[policy.FamilyID] = struct{}{}
+	}
+	readiness.FamilyCount = int64(len(families))
+	return readiness, nil
 }
 
 func newMemoryPolicyRepository() *memoryPolicyRepository {

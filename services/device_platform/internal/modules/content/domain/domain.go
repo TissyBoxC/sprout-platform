@@ -80,6 +80,9 @@ var (
 	ErrAssetNotFound = errors.New("content asset not found")
 	// ErrAssetChecksumMismatch reports a stored blob that no longer matches metadata.
 	ErrAssetChecksumMismatch = errors.New("content asset checksum mismatch")
+	// ErrReadinessUnavailable reports that the content capability cannot read
+	// its authoritative aggregate state.
+	ErrReadinessUnavailable = errors.New("content library readiness is unavailable")
 )
 
 var (

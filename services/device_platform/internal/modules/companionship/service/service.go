@@ -26,14 +26,16 @@ const (
 
 // Service owns companionship validation and persistence.
 type Service struct {
-	repository repository.Repository
-	timeSource clock.Clock
+	repository      repository.Repository
+	readinessReader ReadinessReader
+	timeSource      clock.Clock
 }
 
 // Options contains companionship dependencies.
 type Options struct {
-	Repository repository.Repository
-	Clock      clock.Clock
+	Repository      repository.Repository
+	ReadinessReader ReadinessReader
+	Clock           clock.Clock
 }
 
 // New creates the companionship service.
@@ -45,7 +47,17 @@ func New(options Options) (*Service, error) {
 	if timeSource == nil {
 		timeSource = clock.SystemClock{}
 	}
-	return &Service{repository: options.Repository, timeSource: timeSource}, nil
+	readinessReader := options.ReadinessReader
+	if readinessReader == nil {
+		if reader, ok := options.Repository.(ReadinessReader); ok {
+			readinessReader = reader
+		}
+	}
+	return &Service{
+		repository:      options.Repository,
+		readinessReader: readinessReader,
+		timeSource:      timeSource,
+	}, nil
 }
 
 // CreateGrowthRecord validates and stores one timeline entry.

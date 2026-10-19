@@ -18,7 +18,7 @@ import (
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
-	"github.com/jackc/pgx/v5"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 )
 
 func TestPlaceholderHealthProbeFailsCoverageValidation(t *testing.T) {
@@ -41,37 +41,104 @@ func TestPlaceholderHealthProbeFailsCoverageValidation(t *testing.T) {
 	}
 }
 
-func TestSchemaReadinessProbeReturnsUnavailableWithoutDatabase(t *testing.T) {
-	probe := schemaReadinessProbe(nil, "SELECT 1")
+func TestMapReadinessStatusRejectsUnknownVocabulary(t *testing.T) {
+	tests := []struct {
+		status string
+		want   featureCenterDomain.HealthStatus
+	}{
+		{status: "healthy", want: featureCenterDomain.HealthHealthy},
+		{status: "degraded", want: featureCenterDomain.HealthDegraded},
+		{status: "unavailable", want: featureCenterDomain.HealthUnavailable},
+		{status: "unknown", want: featureCenterDomain.HealthUnknown},
+		{status: "", want: featureCenterDomain.HealthUnavailable},
+		{status: "ready", want: featureCenterDomain.HealthUnavailable},
+	}
+	for _, test := range tests {
+		if got := mapReadinessStatus(test.status); got != test.want {
+			t.Fatalf(
+				"mapReadinessStatus(%q) = %q, want %q",
+				test.status,
+				got,
+				test.want,
+			)
+		}
+	}
+}
+
+func TestServiceReadinessProbeMapsServiceStateAndFailure(t *testing.T) {
+	probe := serviceReadinessProbe(
+		func(context.Context) (string, error) { return "degraded", nil },
+		func(status string) string { return status },
+	)
 	status, err := probe.Check(context.Background(), "auth")
 	if err != nil {
 		t.Fatalf("check probe: %v", err)
+	}
+	if status != featureCenterDomain.HealthDegraded {
+		t.Fatalf("status = %q, want degraded", status)
+	}
+
+	probe = serviceReadinessProbe(
+		func(context.Context) (string, error) {
+			return "healthy", errors.New("database read failed")
+		},
+		func(status string) string { return status },
+	)
+	status, err = probe.Check(context.Background(), "auth")
+	if err != nil {
+		t.Fatalf("check failing probe: %v", err)
 	}
 	if status != featureCenterDomain.HealthUnavailable {
 		t.Fatalf("status = %q, want unavailable", status)
 	}
 }
 
-func TestSchemaReadinessStatusReturnsUnknownForReadableStorage(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want featureCenterDomain.HealthStatus
-	}{
-		{name: "row returned", err: nil, want: featureCenterDomain.HealthUnknown},
-		{name: "empty result", err: pgx.ErrNoRows, want: featureCenterDomain.HealthUnknown},
-		{
-			name: "query failed",
-			err:  errors.New("relation does not exist"),
-			want: featureCenterDomain.HealthUnavailable,
+func TestDeviceCapabilityReadinessProbeRetainsUnknown(t *testing.T) {
+	probe := deviceCapabilityReadinessProbe(
+		func(context.Context) (featurehealth.DeviceCapabilityReadiness, error) {
+			return featurehealth.DeviceCapabilityReadiness{
+				Status: featurehealth.StatusUnknown,
+			}, nil
 		},
+	)
+	status, err := probe.Check(context.Background(), "vision")
+	if err != nil {
+		t.Fatalf("check probe: %v", err)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := schemaReadinessStatus(test.err); got != test.want {
-				t.Fatalf("status = %q, want %q", got, test.want)
-			}
-		})
+	if status != featureCenterDomain.HealthUnknown {
+		t.Fatalf("status = %q, want unknown", status)
+	}
+}
+
+func TestDeviceCapabilityReadinessProbeMapsUnavailableAndFailure(t *testing.T) {
+	probe := deviceCapabilityReadinessProbe(
+		func(context.Context) (featurehealth.DeviceCapabilityReadiness, error) {
+			return featurehealth.DeviceCapabilityReadiness{
+				Status: featurehealth.StatusUnavailable,
+			}, nil
+		},
+	)
+	status, err := probe.Check(context.Background(), "device_runtime")
+	if err != nil {
+		t.Fatalf("check unavailable probe: %v", err)
+	}
+	if status != featureCenterDomain.HealthUnavailable {
+		t.Fatalf("status = %q, want unavailable", status)
+	}
+
+	probe = deviceCapabilityReadinessProbe(
+		func(context.Context) (featurehealth.DeviceCapabilityReadiness, error) {
+			return featurehealth.DeviceCapabilityReadiness{
+				Status: featurehealth.StatusHealthy,
+			}, errors.New("query failed")
+		},
+	)
+	status, err = probe.Check(context.Background(), "device_runtime")
+	if err != nil {
+		t.Fatalf("check failing probe: %v", err)
+	}
+	if status != featureCenterDomain.HealthUnavailable {
+		t.Fatalf("status = %q, want unavailable", status)
 	}
 }
 
@@ -85,30 +152,6 @@ func TestHealthStatusRetainsAllFourStates(t *testing.T) {
 		if !status.Valid() {
 			t.Fatalf("health status %q is not valid", status)
 		}
-	}
-}
-
-func TestSchemaReadinessProbeSourceNeverFabricatesCapabilityHealth(t *testing.T) {
-	source, err := os.ReadFile(filepath.Join(".", "feature_center_probes.go"))
-	if err != nil {
-		t.Fatalf("read probe source: %v", err)
-	}
-	text := string(source)
-	start := strings.Index(text, "func schemaReadinessProbe(")
-	if start < 0 {
-		t.Fatal("schemaReadinessProbe definition not found")
-	}
-	end := strings.Index(text[start:], "\n}\n")
-	if end < 0 {
-		t.Fatal("schemaReadinessProbe body not found")
-	}
-	body := text[start : start+end+3]
-	if strings.Contains(body, "HealthHealthy") ||
-		strings.Contains(body, "HealthDegraded") {
-		t.Fatalf("schema readiness must not fabricate capability health:\n%s", body)
-	}
-	if !strings.Contains(body, "schemaReadinessStatus") {
-		t.Fatalf("schema readiness must use the explicit status mapping:\n%s", body)
 	}
 }
 

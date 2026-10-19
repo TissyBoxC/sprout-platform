@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -279,6 +280,54 @@ func (r *PostgresRepository) ListAllStatuses(
 	}
 	defer rows.Close()
 	return scanRuntimeStatuses(rows)
+}
+
+// Readiness reports heartbeat availability for every active device
+// credential. It reads aggregate counts only and never returns device
+// identifiers or runtime payloads.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	var facts featurehealth.DeviceCapabilityFacts
+	err := r.pool.QueryRow(ctx, `
+		SELECT
+			COUNT(credential.device_id),
+			COUNT(status.device_id),
+			COUNT(*) FILTER (
+				WHERE status.device_id IS NOT NULL
+				  AND (
+					status.session_state = 'revoked'
+					OR status.temperature_state = 'critical'
+				  )
+			),
+			COUNT(*) FILTER (
+				WHERE status.device_id IS NOT NULL
+				  AND status.received_at < NOW() - ($1::int * INTERVAL '1 millisecond')
+			)
+		FROM device_credentials AS credential
+		LEFT JOIN device_runtime_status AS status
+		  ON status.device_id = credential.device_id
+		WHERE credential.status = 'active'
+	`, freshness.Milliseconds()).Scan(
+		&facts.ExpectedDevices,
+		&facts.ReportedDevices,
+		&facts.FaultedDevices,
+		&facts.StaleDevices,
+	)
+	if err != nil {
+		return featurehealth.DeviceCapabilityReadiness{},
+			fmt.Errorf("read device runtime readiness: %w", err)
+	}
+	status, err := featurehealth.DeviceCapabilityStatus(facts, false)
+	if err != nil {
+		return featurehealth.DeviceCapabilityReadiness{},
+			fmt.Errorf("derive device runtime readiness: %w", err)
+	}
+	return featurehealth.DeviceCapabilityReadiness{
+		Status: status,
+		Facts:  facts,
+	}, nil
 }
 
 // CreateCommand stores one idempotent maintenance command.

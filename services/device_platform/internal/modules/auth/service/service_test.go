@@ -494,7 +494,31 @@ type memoryRepository struct {
 	challenges          map[string]*domain.MFAChallenge
 	totpCredential      *domain.TOTPCredential
 	mfaAccountFailure   *domain.MFAAccountFailureState
+	readiness           domain.Readiness
+	readinessErr        error
 	mu                  sync.Mutex
+}
+
+func (r *memoryRepository) Readiness(
+	_ context.Context,
+) (domain.Readiness, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.readinessErr != nil {
+		return domain.Readiness{}, r.readinessErr
+	}
+	readiness := r.readiness
+	if readiness.ActiveParentCount == 0 &&
+		r.account != nil &&
+		r.account.Status == "active" {
+		if r.account.Role == domain.RoleAdmin {
+			readiness.ActiveAdminCount++
+		} else {
+			readiness.ActiveParentCount++
+		}
+	}
+	readiness.ActiveSessionCount = int64(len(r.sessions))
+	return readiness, nil
 }
 
 func (r *memoryRepository) CreateParentAccount(

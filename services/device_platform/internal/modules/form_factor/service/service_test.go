@@ -4,14 +4,30 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/form_factor/domain"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 )
 
 type fakeRepository struct {
 	profiles map[string]domain.Profile
 	recorded domain.Profile
 	stats    domain.AdminStats
+}
+
+type readinessRepository struct {
+	*fakeRepository
+	freshness time.Duration
+	readiness featurehealth.DeviceCapabilityReadiness
+}
+
+func (r *readinessRepository) Readiness(
+	_ context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	r.freshness = freshness
+	return r.readiness, nil
 }
 
 func (r *fakeRepository) Record(_ context.Context, profile domain.Profile) error {
@@ -157,5 +173,44 @@ func TestAdminStatsDefaultsWindow(t *testing.T) {
 	}
 	if stats.DeviceCount != 6 {
 		t.Fatalf("unexpected stats: %+v", stats)
+	}
+}
+
+func TestCheckReadinessReturnsRepositoryHealth(t *testing.T) {
+	repository := &readinessRepository{
+		fakeRepository: &fakeRepository{},
+		readiness: featurehealth.DeviceCapabilityReadiness{
+			Status: featurehealth.StatusDegraded,
+			Facts: featurehealth.DeviceCapabilityFacts{
+				ExpectedDevices: 2,
+				ReportedDevices: 1,
+			},
+		},
+	}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	readiness, err := service.CheckReadiness(context.Background())
+	if err != nil {
+		t.Fatalf("check readiness: %v", err)
+	}
+	if readiness.Status != featurehealth.StatusDegraded ||
+		repository.freshness != capabilityFreshness {
+		t.Fatalf("readiness = %+v, freshness = %s", readiness, repository.freshness)
+	}
+}
+
+func TestCheckReadinessFailsClosedWithoutCapabilityReader(t *testing.T) {
+	service, err := New(Options{Repository: &fakeRepository{}})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	readiness, err := service.CheckReadiness(context.Background())
+	if err != nil {
+		t.Fatalf("check readiness: %v", err)
+	}
+	if readiness.Status != featurehealth.StatusUnavailable {
+		t.Fatalf("status = %q, want unavailable", readiness.Status)
 	}
 }

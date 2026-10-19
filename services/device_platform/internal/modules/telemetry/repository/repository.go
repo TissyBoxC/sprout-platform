@@ -13,6 +13,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/telemetry/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -24,6 +25,11 @@ type Repository interface {
 		windowDays int,
 		onlineThreshold time.Duration,
 	) (domain.Summary, error)
+	// Readiness returns aggregate heartbeat health for active devices.
+	Readiness(
+		ctx context.Context,
+		freshness time.Duration,
+	) (featurehealth.DeviceCapabilityReadiness, error)
 }
 
 // PostgresRepository reads fleet telemetry from the owning module tables.
@@ -128,6 +134,47 @@ func (r *PostgresRepository) Summary(
 	summary.Devices = devices
 	summary.GeneratedAt = r.clock.Now().UTC()
 	return summary, nil
+}
+
+// Readiness returns aggregate heartbeat state for active device registrations.
+// It deliberately returns counts only; no device identifier leaves the query.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	var facts featurehealth.DeviceCapabilityFacts
+	err := r.pool.QueryRow(ctx, `
+		SELECT
+			COUNT(credential.device_id),
+			COUNT(status.device_id),
+			COUNT(*) FILTER (WHERE status.temperature_state = 'critical'),
+			COUNT(*) FILTER (
+				WHERE status.device_id IS NOT NULL
+				  AND status.received_at < NOW() - ($1::int * INTERVAL '1 millisecond')
+			)
+		FROM device_credentials AS credential
+		LEFT JOIN device_runtime_status AS status
+		  ON status.device_id = credential.device_id
+		WHERE credential.status = 'active'
+	`, freshness.Milliseconds()).Scan(
+		&facts.ExpectedDevices,
+		&facts.ReportedDevices,
+		&facts.FaultedDevices,
+		&facts.StaleDevices,
+	)
+	if err != nil {
+		return featurehealth.DeviceCapabilityReadiness{},
+			fmt.Errorf("read telemetry readiness: %w", err)
+	}
+	status, err := featurehealth.DeviceCapabilityStatus(facts, false)
+	if err != nil {
+		return featurehealth.DeviceCapabilityReadiness{},
+			fmt.Errorf("derive telemetry readiness: %w", err)
+	}
+	return featurehealth.DeviceCapabilityReadiness{
+		Status: status,
+		Facts:  facts,
+	}, nil
 }
 
 // buckets returns one column's histogram over the window. The column is chosen

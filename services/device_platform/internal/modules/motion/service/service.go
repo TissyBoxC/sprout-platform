@@ -11,8 +11,10 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/domain"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 )
 
 // Repository is the persistence surface the service depends on.
@@ -28,6 +30,8 @@ type Repository interface {
 type Service struct {
 	repository Repository
 }
+
+const capabilityFreshness = 24 * time.Hour
 
 // Options contains motion service dependencies.
 type Options struct {
@@ -192,4 +196,23 @@ func (s *Service) AdminStats(
 		windowDays = 7
 	}
 	return s.repository.AdminStats(ctx, windowDays)
+}
+
+// CheckReadiness returns aggregate motion health for active devices that
+// advertise motion.
+func (s *Service) CheckReadiness(
+	ctx context.Context,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	reader, ok := s.repository.(interface {
+		Readiness(
+			context.Context,
+			time.Duration,
+		) (featurehealth.DeviceCapabilityReadiness, error)
+	})
+	if !ok {
+		return featurehealth.DeviceCapabilityReadiness{
+			Status: featurehealth.StatusUnavailable,
+		}, nil
+	}
+	return reader.Readiness(ctx, capabilityFreshness)
 }

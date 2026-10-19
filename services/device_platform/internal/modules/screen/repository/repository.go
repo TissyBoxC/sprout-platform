@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/screen/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -483,4 +485,19 @@ func (r *PostgresRepository) AdminStats(
 	stats.StateBuckets = buckets
 	stats.GeneratedAt = r.clock.Now().UTC()
 	return stats, nil
+}
+
+// Readiness aggregates active devices that advertise a display using the
+// richer screen contract.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	return featurehealth.ReadDeviceStateReadiness(ctx, featurehealth.DeviceStateQuery{
+		Pool:            r.pool,
+		Capability:      "display",
+		StateTable:      "screen_device_status",
+		TimestampColumn: "reported_at",
+		FaultCondition:  "NOT status.screen_supported OR status.video_state = 'failed'",
+	}, freshness)
 }

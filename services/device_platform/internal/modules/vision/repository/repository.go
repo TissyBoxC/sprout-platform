@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/domain"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -56,6 +57,11 @@ type Repository interface {
 		ctx context.Context,
 		since time.Time,
 	) (*domain.AdminStats, error)
+	// Readiness returns aggregate camera readiness for active devices.
+	Readiness(
+		ctx context.Context,
+		freshness time.Duration,
+	) (featurehealth.DeviceCapabilityReadiness, error)
 }
 
 // PostgresRepository stores vision metadata in the platform database.
@@ -515,6 +521,58 @@ func (r *PostgresRepository) GetAdminStats(
 		return nil, fmt.Errorf("iterate vision task types: %w", err)
 	}
 	return stats, nil
+}
+
+// Readiness uses the registered camera capability as the expected device set.
+// A recent failed task is the only explicit pipeline fault available in this
+// bounded schema; absence of tasks is not itself a fault.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	var facts featurehealth.DeviceCapabilityFacts
+	err := r.pool.QueryRow(ctx, `
+		SELECT
+			COUNT(credential.device_id),
+			COUNT(*) FILTER (WHERE latest.latest_task_at IS NOT NULL),
+			COUNT(*) FILTER (
+				WHERE latest.latest_status = 'failed'
+				  AND latest.latest_task_at >= NOW() - ($2::int * INTERVAL '1 millisecond')
+			),
+			COUNT(*) FILTER (
+				WHERE latest.latest_task_at IS NOT NULL
+				  AND latest.latest_task_at < NOW() - ($1::int * INTERVAL '1 millisecond')
+			)
+		FROM device_credentials AS credential
+		LEFT JOIN LATERAL (
+			SELECT task.status AS latest_status,
+				task.created_at AS latest_task_at
+			FROM vision_tasks AS task
+			WHERE task.device_id = credential.device_id
+			ORDER BY task.created_at DESC, task.id DESC
+			LIMIT 1
+		) AS latest ON TRUE
+		WHERE credential.status = 'active'
+		  AND 'camera' = ANY(credential.capability_set)
+	`, freshness.Milliseconds(), freshness.Milliseconds()).Scan(
+		&facts.ExpectedDevices,
+		&facts.ReportedDevices,
+		&facts.FaultedDevices,
+		&facts.StaleDevices,
+	)
+	if err != nil {
+		return featurehealth.DeviceCapabilityReadiness{},
+			fmt.Errorf("read vision readiness: %w", err)
+	}
+	status, err := featurehealth.DeviceCapabilityStatus(facts, false)
+	if err != nil {
+		return featurehealth.DeviceCapabilityReadiness{},
+			fmt.Errorf("derive vision readiness: %w", err)
+	}
+	return featurehealth.DeviceCapabilityReadiness{
+		Status: status,
+		Facts:  facts,
+	}, nil
 }
 
 var _ Repository = (*PostgresRepository)(nil)

@@ -69,14 +69,16 @@ type Repository interface {
 
 // Service owns family membership and invitations.
 type Service struct {
-	repository Repository
-	clock      clock.Clock
+	repository      Repository
+	readinessReader ReadinessReader
+	clock           clock.Clock
 }
 
 // Options contains family service dependencies.
 type Options struct {
-	Repository Repository
-	Clock      clock.Clock
+	Repository      Repository
+	ReadinessReader ReadinessReader
+	Clock           clock.Clock
 }
 
 // New creates the family service.
@@ -88,9 +90,16 @@ func New(options Options) (*Service, error) {
 	if timeSource == nil {
 		timeSource = clock.SystemClock{}
 	}
+	readinessReader := options.ReadinessReader
+	if readinessReader == nil {
+		if reader, ok := options.Repository.(ReadinessReader); ok {
+			readinessReader = reader
+		}
+	}
 	return &Service{
-		repository: options.Repository,
-		clock:      timeSource,
+		repository:      options.Repository,
+		readinessReader: readinessReader,
+		clock:           timeSource,
 	}, nil
 }
 

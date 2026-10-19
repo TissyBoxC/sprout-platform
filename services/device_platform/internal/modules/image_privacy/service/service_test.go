@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/image_privacy/domain"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 )
 
 // fakeRepository is an in-memory double so the service tests exercise the real
@@ -13,6 +15,20 @@ import (
 type fakeRepository struct {
 	policy   domain.Policy
 	statuses map[string]domain.Status
+}
+
+type readinessRepository struct {
+	*fakeRepository
+	freshness time.Duration
+	readiness featurehealth.DeviceCapabilityReadiness
+}
+
+func (r *readinessRepository) Readiness(
+	_ context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	r.freshness = freshness
+	return r.readiness, nil
 }
 
 func newFakeRepository() *fakeRepository {
@@ -357,5 +373,41 @@ func TestAdminStatsClampsWindow(t *testing.T) {
 	}
 	if stats.WindowDays != 7 {
 		t.Fatalf("window = %d, want 7", stats.WindowDays)
+	}
+}
+
+func TestCheckReadinessReturnsRepositoryHealth(t *testing.T) {
+	repository := &readinessRepository{
+		fakeRepository: newFakeRepository(),
+		readiness: featurehealth.DeviceCapabilityReadiness{
+			Status: featurehealth.StatusDegraded,
+			Facts: featurehealth.DeviceCapabilityFacts{
+				ExpectedDevices: 2,
+				ReportedDevices: 1,
+			},
+		},
+	}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	readiness, err := service.CheckReadiness(context.Background())
+	if err != nil {
+		t.Fatalf("CheckReadiness: %v", err)
+	}
+	if readiness.Status != featurehealth.StatusDegraded ||
+		repository.freshness != capabilityFreshness {
+		t.Fatalf("readiness = %+v, freshness = %s", readiness, repository.freshness)
+	}
+}
+
+func TestCheckReadinessFailsClosedWithoutCapabilityReader(t *testing.T) {
+	service, _ := newService(t)
+	readiness, err := service.CheckReadiness(context.Background())
+	if err != nil {
+		t.Fatalf("CheckReadiness: %v", err)
+	}
+	if readiness.Status != featurehealth.StatusUnavailable {
+		t.Fatalf("status = %q, want unavailable", readiness.Status)
 	}
 }

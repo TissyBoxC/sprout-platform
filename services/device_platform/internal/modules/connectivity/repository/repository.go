@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/connectivity/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -355,4 +357,19 @@ func (r *PostgresRepository) buckets(
 		return nil, fmt.Errorf("iterate connectivity %s buckets: %w", column, err)
 	}
 	return buckets, nil
+}
+
+// Readiness aggregates active devices that advertise cellular. A device that
+// advertises cellular but reports the absent eSIM state is a fault.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	return featurehealth.ReadDeviceStateReadiness(ctx, featurehealth.DeviceStateQuery{
+		Pool:            r.pool,
+		Capability:      "cellular_4g",
+		StateTable:      "device_connectivity_status",
+		TimestampColumn: "reported_at",
+		FaultCondition:  "status.esim_state = 'absent'",
+	}, freshness)
 }

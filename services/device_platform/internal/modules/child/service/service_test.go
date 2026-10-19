@@ -10,7 +10,28 @@ import (
 )
 
 type memoryChildRepository struct {
-	children map[string]*domain.Child
+	children     map[string]*domain.Child
+	readiness    domain.Readiness
+	readinessErr error
+}
+
+func (r *memoryChildRepository) Readiness(
+	_ context.Context,
+) (domain.Readiness, error) {
+	if r.readinessErr != nil {
+		return domain.Readiness{}, r.readinessErr
+	}
+	readiness := r.readiness
+	readiness.ProfileCount = int64(len(r.children))
+	families := map[string]struct{}{}
+	for _, child := range r.children {
+		families[child.FamilyID] = struct{}{}
+	}
+	readiness.FamiliesWithProfile = int64(len(families))
+	if readiness.OrphanedProfileCount == 0 {
+		readiness.PolicyCount = readiness.ProfileCount
+	}
+	return readiness, nil
 }
 
 func newMemoryChildRepository() *memoryChildRepository {

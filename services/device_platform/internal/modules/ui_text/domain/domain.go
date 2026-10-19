@@ -38,6 +38,9 @@ var (
 	ErrSignatureInvalid = errors.New("ui text signature invalid")
 	// ErrRevisionAhead reports a client cursor newer than the published revision.
 	ErrRevisionAhead = errors.New("ui text revision ahead")
+	// ErrReadinessUnavailable reports that UI text capability state cannot be
+	// read from its authoritative aggregate reader.
+	ErrReadinessUnavailable = errors.New("ui text readiness is unavailable")
 )
 
 // Status is the review and delivery lifecycle of one package version.

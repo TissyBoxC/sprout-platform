@@ -27,17 +27,28 @@ type Repository interface {
 
 // Service owns offline policy reads and publishes.
 type Service struct {
-	repository Repository
+	repository      Repository
+	readinessReader ReadinessReader
 }
 
 // Options contains offline policy service dependencies.
 type Options struct {
-	Repository Repository
+	Repository      Repository
+	ReadinessReader ReadinessReader
 }
 
 // New creates the offline policy service.
 func New(options Options) *Service {
-	return &Service{repository: options.Repository}
+	readinessReader := options.ReadinessReader
+	if readinessReader == nil {
+		if reader, ok := options.Repository.(ReadinessReader); ok {
+			readinessReader = reader
+		}
+	}
+	return &Service{
+		repository:      options.Repository,
+		readinessReader: readinessReader,
+	}
 }
 
 // Current returns the published policy or the default when none is set.

@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/learning_visualization/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -355,4 +357,20 @@ func (r *PostgresRepository) buckets(
 		return nil, fmt.Errorf("iterate learning visualization %s buckets: %w", column, err)
 	}
 	return buckets, nil
+}
+
+// Readiness aggregates active devices that advertise a display, which is the
+// hardware prerequisite for learning visualization. An unsupported surface or
+// an explicit visual error state is a fault.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	return featurehealth.ReadDeviceStateReadiness(ctx, featurehealth.DeviceStateQuery{
+		Pool:            r.pool,
+		Capability:      "display",
+		StateTable:      "device_learning_visualization_status",
+		TimestampColumn: "reported_at",
+		FaultCondition:  "NOT status.visualization_supported OR status.visual_state = 'error'",
+	}, freshness)
 }

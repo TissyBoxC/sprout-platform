@@ -23,9 +23,10 @@ const (
 
 // Service owns usage report validation, persistence, and shaping.
 type Service struct {
-	repository    repository.Repository
-	policyService usageReportPolicyService
-	timeSource    clock.Clock
+	repository      repository.Repository
+	policyService   usageReportPolicyService
+	readinessReader ReadinessReader
+	timeSource      clock.Clock
 }
 
 // usageReportPolicyService is the effective policy read surface required to
@@ -39,9 +40,10 @@ type usageReportPolicyService interface {
 
 // Options contains usage report service dependencies.
 type Options struct {
-	Repository    repository.Repository
-	PolicyService usageReportPolicyService
-	Clock         clock.Clock
+	Repository      repository.Repository
+	PolicyService   usageReportPolicyService
+	ReadinessReader ReadinessReader
+	Clock           clock.Clock
 }
 
 // New creates the usage report service.
@@ -56,10 +58,17 @@ func New(options Options) (*Service, error) {
 	if timeSource == nil {
 		timeSource = clock.SystemClock{}
 	}
+	readinessReader := options.ReadinessReader
+	if readinessReader == nil {
+		if reader, ok := options.Repository.(ReadinessReader); ok {
+			readinessReader = reader
+		}
+	}
 	return &Service{
-		repository:    options.Repository,
-		policyService: options.PolicyService,
-		timeSource:    timeSource,
+		repository:      options.Repository,
+		policyService:   options.PolicyService,
+		readinessReader: readinessReader,
+		timeSource:      timeSource,
 	}, nil
 }
 

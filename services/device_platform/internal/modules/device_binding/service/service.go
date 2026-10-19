@@ -14,6 +14,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/repository"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/google/uuid"
 )
 
@@ -431,6 +432,26 @@ func (s *Service) List(
 // method; the method deliberately does not expose a parent-scoped substitute.
 func (s *Service) ListAllForAdmin(ctx context.Context) ([]domain.Binding, error) {
 	return s.repository.ListAllBindings(ctx)
+}
+
+// CheckReadiness reports whether registered devices have a durable family
+// binding. A registered device without a binding is degraded; an empty fleet is
+// unknown. The aggregate query never exposes account or device identifiers.
+func (s *Service) CheckReadiness(
+	ctx context.Context,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	reader, ok := s.repository.(interface {
+		Readiness(
+			context.Context,
+			time.Duration,
+		) (featurehealth.DeviceCapabilityReadiness, error)
+	})
+	if !ok {
+		return featurehealth.DeviceCapabilityReadiness{
+			Status: featurehealth.StatusUnavailable,
+		}, nil
+	}
+	return reader.Readiness(ctx, s.sessionTTL)
 }
 
 // GetByDeviceID returns one durable binding for internal relay lookups.

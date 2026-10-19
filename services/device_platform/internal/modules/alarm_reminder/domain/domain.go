@@ -22,6 +22,9 @@ var (
 	ErrAlarmNotFound = errors.New("alarm reminder not found")
 	// ErrInvalidAlarmEvent reports a malformed firing acknowledgement.
 	ErrInvalidAlarmEvent = errors.New("invalid alarm reminder event")
+	// ErrReadinessUnavailable reports that alarm capability state cannot be
+	// read from its authoritative aggregate reader.
+	ErrReadinessUnavailable = errors.New("alarm reminder readiness is unavailable")
 )
 
 // Approved bounds.

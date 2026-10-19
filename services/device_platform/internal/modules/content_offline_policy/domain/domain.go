@@ -14,6 +14,9 @@ var (
 	ErrInvalidPolicy = errors.New("invalid content offline policy")
 	// ErrInvalidAcceptedRevision reports a negative reported revision.
 	ErrInvalidAcceptedRevision = errors.New("invalid accepted revision")
+	// ErrReadinessUnavailable reports that offline-content capability state
+	// cannot be read from its authoritative aggregate reader.
+	ErrReadinessUnavailable = errors.New("offline content readiness is unavailable")
 )
 
 // Approved bounds. They are deliberately conservative: a device has limited

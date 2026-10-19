@@ -27,14 +27,16 @@ const (
 
 // Service owns English learning catalog reads and progress writes.
 type Service struct {
-	repository repository.Repository
-	timeSource clock.Clock
+	repository      repository.Repository
+	readinessReader ReadinessReader
+	timeSource      clock.Clock
 }
 
 // Options contains English learning dependencies.
 type Options struct {
-	Repository repository.Repository
-	Clock      clock.Clock
+	Repository      repository.Repository
+	ReadinessReader ReadinessReader
+	Clock           clock.Clock
 }
 
 // New creates the English learning service.
@@ -46,7 +48,17 @@ func New(options Options) (*Service, error) {
 	if timeSource == nil {
 		timeSource = clock.SystemClock{}
 	}
-	return &Service{repository: options.Repository, timeSource: timeSource}, nil
+	readinessReader := options.ReadinessReader
+	if readinessReader == nil {
+		if reader, ok := options.Repository.(ReadinessReader); ok {
+			readinessReader = reader
+		}
+	}
+	return &Service{
+		repository:      options.Repository,
+		readinessReader: readinessReader,
+		timeSource:      timeSource,
+	}, nil
 }
 
 // ListLessons returns the published catalog for one age tier. An empty age

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"time"
 
@@ -26,7 +27,7 @@ func (reader ContentCatalogReader) ListCandidates(
 	ageTier string,
 ) ([]domain.Candidate, error) {
 	if reader.Repository == nil {
-		return nil, nil
+		return nil, errors.New("recommendation content repository is unavailable")
 	}
 	catalog, err := reader.Repository.Catalog(ctx, contentdomain.CatalogQuery{
 		FamilyID: familyID,
@@ -78,7 +79,7 @@ func (reader ContentSignalReader) FavoritePackageIDs(
 	familyID string,
 ) ([]string, error) {
 	if reader.Repository == nil {
-		return nil, nil
+		return nil, errors.New("content engagement repository is unavailable")
 	}
 	favorites, err := reader.Repository.ListFavorites(ctx, familyID)
 	if err != nil {
@@ -97,7 +98,7 @@ func (reader ContentSignalReader) FavoriteCategories(
 	familyID string,
 ) ([]string, error) {
 	if reader.Repository == nil {
-		return nil, nil
+		return nil, errors.New("content engagement repository is unavailable")
 	}
 	favorites, err := reader.Repository.ListFavorites(ctx, familyID)
 	if err != nil {
@@ -119,7 +120,7 @@ func (reader ContentSignalReader) recentRecords(
 	familyID string,
 ) ([]contentdomain.PlayRecord, error) {
 	if reader.Repository == nil || reader.Devices == nil {
-		return nil, nil
+		return nil, errors.New("content playback signal readers are unavailable")
 	}
 	deviceIDs, err := reader.Devices.FamilyDeviceIDs(ctx, familyID)
 	if err != nil {
@@ -213,7 +214,7 @@ func (reader BindingDeviceReader) FamilyDeviceIDs(
 	familyID string,
 ) ([]string, error) {
 	if reader.Service == nil {
-		return nil, nil
+		return nil, errors.New("device binding service is unavailable")
 	}
 	bindings, err := reader.Service.List(ctx, familyID)
 	if err != nil {

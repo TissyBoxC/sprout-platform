@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/domain"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -304,6 +306,60 @@ func (r *PostgresRepository) ListAllBindings(
 		return nil, fmt.Errorf("iterate all device bindings: %w", err)
 	}
 	return bindings, nil
+}
+
+// Readiness reports binding coverage for active device credentials. It never
+// returns a parent account or device identifier. A credential without a
+// binding is degraded because the device cannot be used by a family; an empty
+// fleet stays unknown.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	var facts featurehealth.DeviceCapabilityFacts
+	err := r.pool.QueryRow(ctx, `
+		SELECT
+			COUNT(credential.device_id),
+			COUNT(binding.device_id),
+			COUNT(*) FILTER (
+				WHERE binding.device_id IS NOT NULL
+				  AND (
+					binding.parent_account_id IS NULL
+					OR NOT EXISTS (
+						SELECT 1
+						FROM parent_accounts AS parent
+						WHERE parent.id = binding.parent_account_id
+						  AND parent.status = 'active'
+					)
+				  )
+			),
+			COUNT(*) FILTER (
+				WHERE binding.device_id IS NOT NULL
+				  AND binding.updated_at < NOW() - ($1::int * INTERVAL '1 millisecond')
+			)
+		FROM device_credentials AS credential
+		LEFT JOIN device_bindings AS binding
+		  ON binding.device_id = credential.device_id
+		WHERE credential.status = 'active'
+	`, freshness.Milliseconds()).Scan(
+		&facts.ExpectedDevices,
+		&facts.ReportedDevices,
+		&facts.FaultedDevices,
+		&facts.StaleDevices,
+	)
+	if err != nil {
+		return featurehealth.DeviceCapabilityReadiness{},
+			fmt.Errorf("read device binding readiness: %w", err)
+	}
+	status, err := featurehealth.DeviceCapabilityStatus(facts, true)
+	if err != nil {
+		return featurehealth.DeviceCapabilityReadiness{},
+			fmt.Errorf("derive device binding readiness: %w", err)
+	}
+	return featurehealth.DeviceCapabilityReadiness{
+		Status: status,
+		Facts:  facts,
+	}, nil
 }
 
 // GetByDeviceID loads the current owner of one device.

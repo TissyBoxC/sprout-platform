@@ -38,18 +38,20 @@ type auditRecorder interface {
 
 // Options contains remote UI text service dependencies.
 type Options struct {
-	Repository repository.Repository
-	Verifier   SignatureVerifier
-	Audit      auditRecorder
-	Clock      clock.Clock
+	Repository      repository.Repository
+	Verifier        SignatureVerifier
+	Audit           auditRecorder
+	ReadinessReader ReadinessReader
+	Clock           clock.Clock
 }
 
 // Service owns draft review, publication, rollback, and package delivery.
 type Service struct {
-	repository repository.Repository
-	verifier   SignatureVerifier
-	audit      auditRecorder
-	timeSource clock.Clock
+	repository      repository.Repository
+	verifier        SignatureVerifier
+	audit           auditRecorder
+	readinessReader ReadinessReader
+	timeSource      clock.Clock
 }
 
 // New creates the remote UI text service.
@@ -61,11 +63,18 @@ func New(options Options) (*Service, error) {
 	if timeSource == nil {
 		timeSource = clock.SystemClock{}
 	}
+	readinessReader := options.ReadinessReader
+	if readinessReader == nil {
+		if reader, ok := options.Repository.(ReadinessReader); ok {
+			readinessReader = reader
+		}
+	}
 	return &Service{
-		repository: options.Repository,
-		verifier:   options.Verifier,
-		audit:      options.Audit,
-		timeSource: timeSource,
+		repository:      options.Repository,
+		verifier:        options.Verifier,
+		audit:           options.Audit,
+		readinessReader: readinessReader,
+		timeSource:      timeSource,
 	}, nil
 }
 

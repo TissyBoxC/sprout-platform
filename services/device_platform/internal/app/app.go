@@ -19,22 +19,28 @@ import (
 	aiProvider "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/provider"
 	aiRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/repository"
 	aiService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/service"
+	alarmReminderDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/alarm_reminder/domain"
 	alarmReminderRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/alarm_reminder/repository"
 	alarmReminderService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/alarm_reminder/service"
 	auditRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/repository"
 	auditService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/service"
+	authdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
 	authRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/repository"
 	authService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
 	bluetoothAudioRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/bluetooth_audio/repository"
 	bluetoothAudioService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/bluetooth_audio/service"
+	childdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/domain"
 	childRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/repository"
 	childService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
+	companionshipDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/companionship/domain"
 	companionshipRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/companionship/repository"
 	companionshipService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/companionship/service"
 	connectivityRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/connectivity/repository"
 	connectivityServicePkg "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/connectivity/service"
+	contentdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/domain"
 	contentRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/repository"
 	contentService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content/service"
+	contentOfflinePolicyDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content_offline_policy/domain"
 	contentOfflinePolicyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content_offline_policy/repository"
 	contentOfflinePolicyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/content_offline_policy/service"
 	bindingRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_binding/repository"
@@ -45,8 +51,10 @@ import (
 	runtimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
 	displayRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/display/repository"
 	displayService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/display/service"
+	englishdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/domain"
 	englishRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/repository"
 	englishService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/service"
+	familydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/domain"
 	familyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/repository"
 	familyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/service"
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
@@ -60,6 +68,7 @@ import (
 	inputService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/service"
 	learningVisualizationRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/learning_visualization/repository"
 	learningVisualizationService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/learning_visualization/service"
+	localCommandDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/domain"
 	localCommandRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/repository"
 	localCommandService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
 	motionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/repository"
@@ -73,12 +82,15 @@ import (
 	otaDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/domain"
 	otaRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/repository"
 	otaService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/service"
+	policydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/domain"
 	policyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/repository"
 	policyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/parent_policy/service"
+	playbackdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/playback/domain"
 	playbackRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/playback/repository"
 	playbackService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/playback/service"
 	powerRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/power/repository"
 	powerRuntimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/power/service"
+	privacyDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/domain"
 	privacyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/repository"
 	privacyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/privacy/service"
 	recommendationService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/recommendation/service"
@@ -89,8 +101,10 @@ import (
 	serviceVersionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
 	telemetryRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/telemetry/repository"
 	telemetryService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/telemetry/service"
+	ui_textdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ui_text/domain"
 	ui_textRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ui_text/repository"
 	ui_textService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ui_text/service"
+	usageReportDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/domain"
 	usageReportRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/repository"
 	usageReportService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
 	videoCompanionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/repository"
@@ -349,143 +363,64 @@ func Run() error {
 	// command validation and OTA publication share one repository and one
 	// device eligibility policy.
 	deviceRuntimeService.SetFirmwareUpdateAuthorizer(ota)
+	// Health is assembled from the owning service rather than from a table
+	// existence query. Services that are created later start as explicit
+	// placeholders and are replaced below before ValidateHealthProbeCoverage.
 	featureCenterHealthProbes := map[string]featureCenterService.HealthProbe{
-		"auth": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM parent_accounts WHERE status = 'active' LIMIT 1",
+		"auth": serviceReadinessProbe(
+			parentAuthService.Readiness,
+			func(readiness authdomain.Readiness) string {
+				return string(readiness.State)
+			},
 		),
-		"parent_account": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM parent_accounts WHERE role = 'parent' LIMIT 1",
+		"parent_account": serviceReadinessProbe(
+			familyMembershipService.Readiness,
+			func(readiness familydomain.Readiness) string {
+				return string(readiness.State)
+			},
 		),
-		"child_profile": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM child_profiles LIMIT 1",
+		"child_profile": serviceReadinessProbe(
+			childProfileService.Readiness,
+			func(readiness childdomain.Readiness) string {
+				return string(readiness.State)
+			},
 		),
-		"parent_policy": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM parent_policies LIMIT 1",
+		"parent_policy": serviceReadinessProbe(
+			parentPolicyService.Readiness,
+			func(readiness policydomain.Readiness) string {
+				return string(readiness.State)
+			},
 		),
-		"device_diagnostics": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM device_boot_events LIMIT 1",
-		),
-		"content_library": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM content_package_versions LIMIT 1",
-		),
-		"ui_text": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM ui_text_package_versions LIMIT 1",
-		),
-		"usage_report": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM device_usage_daily LIMIT 1",
-		),
-		"telemetry": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM device_runtime_status LIMIT 1",
-		),
-		"platform_security": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM admin_totp_credentials LIMIT 1",
-		),
-		"vision": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM vision_tasks LIMIT 1",
-		),
-		"display": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM display_device_status LIMIT 1",
-		),
-		"touch": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM touch_device_status LIMIT 1",
-		),
-		"screen": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM screen_device_status LIMIT 1",
-		),
-		"connectivity": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM device_connectivity_status LIMIT 1",
-		),
-		"power": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM device_power_status LIMIT 1",
-		),
-		"motion": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM device_motion_status LIMIT 1",
-		),
-		"form_factor": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM device_form_factor LIMIT 1",
-		),
-		"video_companion": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM video_calls LIMIT 1",
-		),
-		"video_session": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM device_video_session_status LIMIT 1",
-		),
-		"wearable": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM wearable_device_status LIMIT 1",
-		),
-		"device_mesh": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM device_groups LIMIT 1",
-		),
-		"bluetooth_audio": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM device_bluetooth_audio_status LIMIT 1",
-		),
-		"learning_visualization": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM device_learning_visualization_status LIMIT 1",
-		),
-		"image_privacy": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM device_image_privacy_status LIMIT 1",
-		),
-		"english_learning": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM english_lessons LIMIT 1",
-		),
-		"alarm_reminder": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM alarm_reminders LIMIT 1",
-		),
-		"companionship": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM companionship_growth_records LIMIT 1",
-		),
-		"local_command": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM local_commands LIMIT 1",
-		),
-		"offline_content": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM content_offline_policy LIMIT 1",
-		),
-		"content_engagement": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM content_favorites LIMIT 1",
-		),
-		"content_theme_pack": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM content_theme_packs LIMIT 1",
-		),
-		"playback": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM playback_requests LIMIT 1",
-		),
-		"privacy_lifecycle": schemaReadinessProbe(
-			databaseStore.Pool(),
-			"SELECT 1 FROM parent_consent_events LIMIT 1",
-		),
+		"device_diagnostics":     placeholderHealthProbe{},
+		"content_library":        placeholderHealthProbe{},
+		"ui_text":                placeholderHealthProbe{},
+		"usage_report":           placeholderHealthProbe{},
+		"telemetry":              placeholderHealthProbe{},
+		"platform_security":      placeholderHealthProbe{},
+		"vision":                 placeholderHealthProbe{},
+		"display":                placeholderHealthProbe{},
+		"touch":                  placeholderHealthProbe{},
+		"screen":                 placeholderHealthProbe{},
+		"connectivity":           placeholderHealthProbe{},
+		"power":                  placeholderHealthProbe{},
+		"motion":                 placeholderHealthProbe{},
+		"form_factor":            placeholderHealthProbe{},
+		"video_companion":        placeholderHealthProbe{},
+		"video_session":          placeholderHealthProbe{},
+		"wearable":               placeholderHealthProbe{},
+		"device_mesh":            placeholderHealthProbe{},
+		"bluetooth_audio":        placeholderHealthProbe{},
+		"learning_visualization": placeholderHealthProbe{},
+		"image_privacy":          placeholderHealthProbe{},
+		"english_learning":       placeholderHealthProbe{},
+		"alarm_reminder":         placeholderHealthProbe{},
+		"companionship":          placeholderHealthProbe{},
+		"local_command":          placeholderHealthProbe{},
+		"offline_content":        placeholderHealthProbe{},
+		"content_engagement":     placeholderHealthProbe{},
+		"content_theme_pack":     placeholderHealthProbe{},
+		"playback":               placeholderHealthProbe{},
+		"privacy_lifecycle":      placeholderHealthProbe{},
 		"deployment_infrastructure": featureCenterService.HealthProbeFunc(
 			func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
 				if err := databaseStore.Pool().Ping(ctx); err != nil {
@@ -546,22 +481,8 @@ func Run() error {
 			voiceTokenIssuer != nil,
 			nil,
 		),
-		"device_runtime": featureCenterService.HealthProbeFunc(
-			func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
-				if _, err := deviceRuntimeService.ListAllDeviceStatuses(ctx); err != nil {
-					return featureCenterDomain.HealthDegraded, nil
-				}
-				return featureCenterDomain.HealthHealthy, nil
-			},
-		),
-		"device_binding": featureCenterService.HealthProbeFunc(
-			func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
-				if _, err := deviceBindingService.ListAllForAdmin(ctx); err != nil {
-					return featureCenterDomain.HealthDegraded, nil
-				}
-				return featureCenterDomain.HealthHealthy, nil
-			},
-		),
+		"device_runtime": placeholderHealthProbe{},
+		"device_binding": placeholderHealthProbe{},
 		"download_server": featureCenterService.HealthProbeFunc(
 			func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
 				status, err := releaseStore.IndexStatus(ctx)
@@ -698,6 +619,60 @@ func Run() error {
 	}
 	featureCenterHealthProbes["notification"] = notificationReadinessProbe(
 		notifications,
+	)
+	featureCenterHealthProbes["content_library"] = serviceReadinessProbe(
+		contentLibraryService.Readiness,
+		func(readiness contentdomain.Readiness) string {
+			return string(readiness.State)
+		},
+	)
+	featureCenterHealthProbes["content_engagement"] = serviceReadinessProbe(
+		contentLibraryService.EngagementReadiness,
+		func(readiness contentdomain.EngagementReadiness) string {
+			return string(readiness.State)
+		},
+	)
+	featureCenterHealthProbes["content_theme_pack"] = serviceReadinessProbe(
+		contentLibraryService.ThemePackReadiness,
+		func(readiness contentdomain.ThemePackReadiness) string {
+			return string(readiness.State)
+		},
+	)
+	featureCenterHealthProbes["english_learning"] = serviceReadinessProbe(
+		englishLearningService.Readiness,
+		func(readiness englishdomain.Readiness) string {
+			return string(readiness.State)
+		},
+	)
+	featureCenterHealthProbes["alarm_reminder"] = serviceReadinessProbe(
+		alarmReminder.Readiness,
+		func(readiness alarmReminderDomain.Readiness) string {
+			return string(readiness.State)
+		},
+	)
+	featureCenterHealthProbes["companionship"] = serviceReadinessProbe(
+		companionshipCompanionService.Readiness,
+		func(readiness companionshipDomain.Readiness) string {
+			return string(readiness.State)
+		},
+	)
+	featureCenterHealthProbes["local_command"] = serviceReadinessProbe(
+		localCommands.Readiness,
+		func(readiness localCommandDomain.Readiness) string {
+			return string(readiness.State)
+		},
+	)
+	featureCenterHealthProbes["offline_content"] = serviceReadinessProbe(
+		contentOfflinePolicy.Readiness,
+		func(readiness contentOfflinePolicyDomain.Readiness) string {
+			return string(readiness.State)
+		},
+	)
+	featureCenterHealthProbes["playback"] = serviceReadinessProbe(
+		playbackRequests.Readiness,
+		func(readiness playbackdomain.Readiness) string {
+			return string(readiness.State)
+		},
 	)
 	if err := featureCenterService.ValidateHealthProbeCoverage(
 		featureCenterService.DefaultRegistry(),
@@ -842,6 +817,87 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create image privacy service: %w", err)
 	}
+	featureCenterHealthProbes["ui_text"] = serviceReadinessProbe(
+		uiText.Readiness,
+		func(readiness ui_textdomain.Readiness) string {
+			return string(readiness.State)
+		},
+	)
+	featureCenterHealthProbes["usage_report"] = serviceReadinessProbe(
+		usageReports.Readiness,
+		func(readiness usageReportDomain.Readiness) string {
+			return string(readiness.State)
+		},
+	)
+	featureCenterHealthProbes["telemetry"] = deviceCapabilityReadinessProbe(
+		fleetTelemetry.CheckReadiness,
+	)
+	featureCenterHealthProbes["vision"] = deviceCapabilityReadinessProbe(
+		vision.CheckReadiness,
+	)
+	featureCenterHealthProbes["display"] = deviceCapabilityReadinessProbe(
+		display.CheckReadiness,
+	)
+	featureCenterHealthProbes["touch"] = deviceCapabilityReadinessProbe(
+		input.CheckReadiness,
+	)
+	featureCenterHealthProbes["screen"] = deviceCapabilityReadinessProbe(
+		screen.CheckReadiness,
+	)
+	featureCenterHealthProbes["connectivity"] = deviceCapabilityReadinessProbe(
+		connectivity.CheckReadiness,
+	)
+	featureCenterHealthProbes["power"] = deviceCapabilityReadinessProbe(
+		devicePower.CheckReadiness,
+	)
+	featureCenterHealthProbes["motion"] = deviceCapabilityReadinessProbe(
+		deviceMotion.CheckReadiness,
+	)
+	featureCenterHealthProbes["form_factor"] = deviceCapabilityReadinessProbe(
+		deviceFormFactor.CheckReadiness,
+	)
+	featureCenterHealthProbes["video_companion"] = deviceCapabilityReadinessProbe(
+		videoCompanion.CheckReadiness,
+	)
+	featureCenterHealthProbes["video_session"] = deviceCapabilityReadinessProbe(
+		videoSession.CheckReadiness,
+	)
+	featureCenterHealthProbes["wearable"] = deviceCapabilityReadinessProbe(
+		wearable.CheckReadiness,
+	)
+	featureCenterHealthProbes["device_mesh"] = deviceCapabilityReadinessProbe(
+		deviceMesh.CheckReadiness,
+	)
+	featureCenterHealthProbes["bluetooth_audio"] = deviceCapabilityReadinessProbe(
+		bluetoothAudio.CheckReadiness,
+	)
+	featureCenterHealthProbes["learning_visualization"] = deviceCapabilityReadinessProbe(
+		learningVisualization.CheckReadiness,
+	)
+	featureCenterHealthProbes["image_privacy"] = deviceCapabilityReadinessProbe(
+		imagePrivacy.CheckReadiness,
+	)
+	featureCenterHealthProbes["privacy_lifecycle"] = serviceReadinessProbe(
+		privacy.Readiness,
+		func(readiness privacyDomain.Readiness) string {
+			return string(readiness.State)
+		},
+	)
+	featureCenterHealthProbes["device_runtime"] = deviceCapabilityReadinessProbe(
+		deviceRuntimeService.CheckReadiness,
+	)
+	featureCenterHealthProbes["device_binding"] = deviceCapabilityReadinessProbe(
+		deviceBindingService.CheckReadiness,
+	)
+	featureCenterHealthProbes["device_diagnostics"] = deviceCapabilityReadinessProbe(
+		diagnosticService.CheckReadiness,
+	)
+	featureCenterHealthProbes["platform_security"] = serviceReadinessProbe(
+		parentAuthService.Readiness,
+		func(readiness authdomain.Readiness) string {
+			return string(readiness.State)
+		},
+	)
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),

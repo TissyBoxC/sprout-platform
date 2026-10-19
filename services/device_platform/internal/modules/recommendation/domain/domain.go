@@ -19,6 +19,9 @@ var (
 	ErrInvalidQuery = errors.New("invalid recommendation query")
 	// ErrInvalidAgeTier reports an age tier outside the approved set.
 	ErrInvalidAgeTier = errors.New("invalid recommendation age tier")
+	// ErrReadinessUnavailable reports that recommendation capability state
+	// cannot be read from its authoritative catalog reader.
+	ErrReadinessUnavailable = errors.New("recommendation readiness is unavailable")
 )
 
 // Approved age tiers mirrored from the content taxonomy.

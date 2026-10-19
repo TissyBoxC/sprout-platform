@@ -7,8 +7,9 @@ import (
 )
 
 var (
-	ErrInvalidUsageReport  = errors.New("invalid usage report")
-	ErrUsageReportNotFound = errors.New("usage report not found")
+	ErrInvalidUsageReport   = errors.New("invalid usage report")
+	ErrUsageReportNotFound  = errors.New("usage report not found")
+	ErrReadinessUnavailable = errors.New("usage report readiness is unavailable")
 )
 
 // UsageUpload is one device-local usage day uploaded by firmware.

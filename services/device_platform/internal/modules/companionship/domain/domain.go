@@ -23,6 +23,7 @@ var (
 	ErrInvalidReminderWeekday = errors.New("invalid reminder weekday")
 	ErrInvalidReminderLabel   = errors.New("invalid reminder label")
 	ErrInvalidReminderPrompt  = errors.New("invalid reminder prompt")
+	ErrReadinessUnavailable   = errors.New("companionship readiness is unavailable")
 )
 
 // Growth record categories. The set is deliberately small and stable so the

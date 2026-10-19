@@ -10,10 +10,12 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/repository"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/google/uuid"
 )
 
@@ -41,6 +43,8 @@ type Service struct {
 	deviceReader  DeviceReader
 	timeSource    clock.Clock
 }
+
+const capabilityFreshness = 24 * time.Hour
 
 // Options contains vision service dependencies.
 type Options struct {
@@ -497,4 +501,12 @@ func failureCodeIsValid(code string) bool {
 	default:
 		return false
 	}
+}
+
+// CheckReadiness returns aggregate camera-pipeline health for active devices
+// that advertise the camera capability.
+func (s *Service) CheckReadiness(
+	ctx context.Context,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	return s.repository.Readiness(ctx, capabilityFreshness)
 }

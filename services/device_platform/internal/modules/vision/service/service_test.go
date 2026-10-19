@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/vision/domain"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 )
 
 type memoryRepository struct {
@@ -14,6 +16,8 @@ type memoryRepository struct {
 	// completionAttempts counts CompleteTask calls so tests can prove a
 	// rejected task never reaches the result write.
 	completionAttempts int
+	readiness          featurehealth.DeviceCapabilityReadiness
+	readinessErr       error
 }
 
 func newMemoryRepository() *memoryRepository {
@@ -164,6 +168,13 @@ func (repository *memoryRepository) GetAdminStats(
 		TaskTypes:   make([]domain.TaskTypeCount, 0),
 	}
 	return stats, nil
+}
+
+func (repository *memoryRepository) Readiness(
+	_ context.Context,
+	_ time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	return repository.readiness, repository.readinessErr
 }
 
 type stubConsent struct {
@@ -574,6 +585,41 @@ func TestMarkDispatchedRejectsDifferentDevice(t *testing.T) {
 	}
 	if repository.tasks[task.ID].Status != domain.TaskStatusPending {
 		t.Fatal("cross-device acknowledgement changed the task status")
+	}
+}
+
+func TestCheckReadinessReturnsRepositoryHealth(t *testing.T) {
+	repository := newMemoryRepository()
+	repository.readiness = featurehealth.DeviceCapabilityReadiness{
+		Status: featurehealth.StatusDegraded,
+		Facts: featurehealth.DeviceCapabilityFacts{
+			ExpectedDevices: 2,
+			ReportedDevices: 1,
+		},
+	}
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	readiness, err := service.CheckReadiness(context.Background())
+	if err != nil {
+		t.Fatalf("CheckReadiness: %v", err)
+	}
+	if readiness.Status != featurehealth.StatusDegraded {
+		t.Fatalf("status = %q, want degraded", readiness.Status)
+	}
+}
+
+func TestCheckReadinessPropagatesRepositoryFailure(t *testing.T) {
+	wantErr := errors.New("query failed")
+	repository := newMemoryRepository()
+	repository.readinessErr = wantErr
+	service, err := New(Options{Repository: repository})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := service.CheckReadiness(context.Background()); !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
 	}
 }
 

@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,8 +11,7 @@ import (
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 )
 
 // placeholderHealthProbe is used only during assembly for probes whose real
@@ -33,36 +31,74 @@ func (placeholderHealthProbe) HealthProbeReady() bool {
 	return false
 }
 
-// schemaReadinessProbe verifies that a feature's authoritative storage is
-// deployed and queryable. Storage availability alone is not functional
-// evidence: an empty or populated table returns unknown, while a missing table
-// or failed query is unavailable. Only a capability-specific probe may report
-// healthy or degraded.
-func schemaReadinessProbe(
-	pool *pgxpool.Pool,
-	query string,
+// serviceReadinessProbe projects one service-owned readiness method into the
+// Feature Center contract. A returned error is always unavailable because an
+// unreadable authoritative source cannot support a healthy or degraded claim.
+// The method is generic over each module's readiness type while statusOf keeps
+// the module status vocabulary inside this assembly boundary.
+func serviceReadinessProbe[T any](
+	check func(context.Context) (T, error),
+	statusOf func(T) string,
 ) featureCenterService.HealthProbe {
 	return featureCenterService.HealthProbeFunc(
 		func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
-			if pool == nil {
+			if check == nil {
 				return featureCenterDomain.HealthUnavailable, nil
 			}
-			var marker int
-			return schemaReadinessStatus(
-				pool.QueryRow(ctx, query).Scan(&marker),
-			), nil
+			readiness, err := check(ctx)
+			if err != nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			return mapReadinessStatus(statusOf(readiness)), nil
 		},
 	)
 }
 
-// schemaReadinessStatus maps a schema probe result without conflating storage
-// availability with capability health. A successful query or an empty result
-// proves only that storage is readable, so both remain unknown.
-func schemaReadinessStatus(err error) featureCenterDomain.HealthStatus {
-	if err == nil || errors.Is(err, pgx.ErrNoRows) {
+// deviceCapabilityReadinessProbe projects aggregate hardware readiness. Unlike
+// the generic adapter it preserves the explicit "unknown" state used when no
+// device advertises a capability yet.
+func deviceCapabilityReadinessProbe(
+	check func(context.Context) (featurehealth.DeviceCapabilityReadiness, error),
+) featureCenterService.HealthProbe {
+	return featureCenterService.HealthProbeFunc(
+		func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+			if check == nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			readiness, err := check(ctx)
+			if err != nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			switch readiness.Status {
+			case featurehealth.StatusHealthy:
+				return featureCenterDomain.HealthHealthy, nil
+			case featurehealth.StatusDegraded:
+				return featureCenterDomain.HealthDegraded, nil
+			case featurehealth.StatusUnknown:
+				return featureCenterDomain.HealthUnknown, nil
+			default:
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+		},
+	)
+}
+
+// mapReadinessStatus keeps feature modules on one small state vocabulary. Any
+// future state must be added here and covered by tests rather than silently
+// becoming healthy through a default branch.
+func mapReadinessStatus(status string) featureCenterDomain.HealthStatus {
+	switch status {
+	case "healthy":
+		return featureCenterDomain.HealthHealthy
+	case "degraded":
+		return featureCenterDomain.HealthDegraded
+	case "unknown":
 		return featureCenterDomain.HealthUnknown
+	case "unavailable":
+		return featureCenterDomain.HealthUnavailable
+	default:
+		return featureCenterDomain.HealthUnavailable
 	}
-	return featureCenterDomain.HealthUnavailable
 }
 
 // voiceGatewayReadinessProbe checks the remote voice gateway's readiness

@@ -17,6 +17,7 @@ var (
 	ErrInvalidDeletionReason = errors.New("invalid account deletion reason")
 	ErrAccountUnavailable    = errors.New("account is unavailable")
 	ErrAuditQueryInvalid     = errors.New("invalid audit query")
+	ErrReadinessUnavailable  = errors.New("privacy readiness is unavailable")
 )
 
 const (

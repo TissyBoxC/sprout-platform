@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_mesh/domain"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 )
 
 // fixedClock returns a stable instant so the stored stamps are deterministic.
@@ -22,6 +23,20 @@ type fakeRepository struct {
 	messages map[string]domain.RoutedMessage
 	content  map[string]domain.ContentState
 	stats    domain.AdminStats
+}
+
+type readinessRepository struct {
+	*fakeRepository
+	freshness time.Duration
+	readiness featurehealth.DeviceCapabilityReadiness
+}
+
+func (r *readinessRepository) Readiness(
+	_ context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	r.freshness = freshness
+	return r.readiness, nil
 }
 
 func newFakeRepository() *fakeRepository {
@@ -187,7 +202,7 @@ func (r *fakeRepository) AdminStats(
 	return stats, nil
 }
 
-func newService(t *testing.T, repository *fakeRepository) *Service {
+func newService(t *testing.T, repository Repository) *Service {
 	t.Helper()
 	service, err := New(Options{Repository: repository, Clock: fixedClock{}})
 	if err != nil {
@@ -412,5 +427,38 @@ func TestAdminStatsWindowClamp(t *testing.T) {
 	}
 	if stats.WindowDays != 7 || stats.GroupCount != 2 {
 		t.Fatalf("unexpected stats: %+v", stats)
+	}
+}
+
+func TestCheckReadinessReturnsRepositoryHealth(t *testing.T) {
+	repository := &readinessRepository{
+		fakeRepository: newFakeRepository(),
+		readiness: featurehealth.DeviceCapabilityReadiness{
+			Status: featurehealth.StatusDegraded,
+			Facts: featurehealth.DeviceCapabilityFacts{
+				ExpectedDevices: 2,
+				ReportedDevices: 1,
+			},
+		},
+	}
+	service := newService(t, repository)
+	readiness, err := service.CheckReadiness(context.Background())
+	if err != nil {
+		t.Fatalf("check readiness: %v", err)
+	}
+	if readiness.Status != featurehealth.StatusDegraded ||
+		repository.freshness != capabilityFreshness {
+		t.Fatalf("readiness = %+v, freshness = %s", readiness, repository.freshness)
+	}
+}
+
+func TestCheckReadinessFailsClosedWithoutCapabilityReader(t *testing.T) {
+	service := newService(t, newFakeRepository())
+	readiness, err := service.CheckReadiness(context.Background())
+	if err != nil {
+		t.Fatalf("check readiness: %v", err)
+	}
+	if readiness.Status != featurehealth.StatusUnavailable {
+		t.Fatalf("status = %q, want unavailable", readiness.Status)
 	}
 }

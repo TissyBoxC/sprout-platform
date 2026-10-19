@@ -38,6 +38,7 @@ type PolicyProvisioner interface {
 type Service struct {
 	repository        repository.Repository
 	policyProvisioner PolicyProvisioner
+	readinessReader   ReadinessReader
 	timeSource        clock.Clock
 }
 
@@ -45,6 +46,7 @@ type Service struct {
 type Options struct {
 	Repository        repository.Repository
 	PolicyProvisioner PolicyProvisioner
+	ReadinessReader   ReadinessReader
 	Clock             clock.Clock
 }
 
@@ -57,9 +59,16 @@ func New(options Options) (*Service, error) {
 	if timeSource == nil {
 		timeSource = clock.SystemClock{}
 	}
+	readinessReader := options.ReadinessReader
+	if readinessReader == nil {
+		if reader, ok := options.Repository.(ReadinessReader); ok {
+			readinessReader = reader
+		}
+	}
 	return &Service{
 		repository:        options.Repository,
 		policyProvisioner: options.PolicyProvisioner,
+		readinessReader:   readinessReader,
 		timeSource:        timeSource,
 	}, nil
 }

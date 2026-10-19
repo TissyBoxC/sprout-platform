@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_mesh/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -512,4 +514,58 @@ func (r *PostgresRepository) contentBuckets(
 		return nil, fmt.Errorf("iterate content buckets: %w", err)
 	}
 	return buckets, nil
+}
+
+// Readiness treats group membership as the usable state for devices that
+// advertise multi_device. The membership timestamp is the latest join time;
+// devices without any group are missing and devices with only stale membership
+// are stale.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	var facts featurehealth.DeviceCapabilityFacts
+	err := r.pool.QueryRow(ctx, `
+		SELECT
+			COUNT(credential.device_id),
+			COUNT(*) FILTER (WHERE membership.member_count > 0),
+			COUNT(*) FILTER (
+				WHERE membership.member_count > 0 AND NOT membership.scope_valid
+			),
+			COUNT(*) FILTER (
+				WHERE membership.member_count > 0
+				  AND membership.latest_added_at < NOW() - ($1::int * INTERVAL '1 millisecond')
+			)
+		FROM device_credentials AS credential
+		LEFT JOIN LATERAL (
+			SELECT
+				COUNT(*) AS member_count,
+				MAX(member.added_at) AS latest_added_at,
+				BOOL_AND(group_record.family_id = member.family_id) AS scope_valid
+			FROM device_group_members AS member
+			LEFT JOIN device_groups AS group_record
+			  ON group_record.id = member.group_id
+			WHERE member.device_id = credential.device_id
+		) AS membership ON TRUE
+		WHERE credential.status = 'active'
+		  AND 'multi_device' = ANY(credential.capability_set)
+	`, freshness.Milliseconds()).Scan(
+		&facts.ExpectedDevices,
+		&facts.ReportedDevices,
+		&facts.FaultedDevices,
+		&facts.StaleDevices,
+	)
+	if err != nil {
+		return featurehealth.DeviceCapabilityReadiness{},
+			fmt.Errorf("read device mesh readiness: %w", err)
+	}
+	status, err := featurehealth.DeviceCapabilityStatus(facts, false)
+	if err != nil {
+		return featurehealth.DeviceCapabilityReadiness{},
+			fmt.Errorf("derive device mesh readiness: %w", err)
+	}
+	return featurehealth.DeviceCapabilityReadiness{
+		Status: status,
+		Facts:  facts,
+	}, nil
 }

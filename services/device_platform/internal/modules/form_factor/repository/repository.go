@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/form_factor/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -291,4 +293,18 @@ func (r *PostgresRepository) capabilityCounts(
 		return nil, fmt.Errorf("iterate form factor capability counts: %w", err)
 	}
 	return counts, nil
+}
+
+// Readiness aggregates every active device. A device that never reported its
+// profile, or reported an empty capability mask, degrades the capability.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	return featurehealth.ReadDeviceStateReadiness(ctx, featurehealth.DeviceStateQuery{
+		Pool:            r.pool,
+		StateTable:      "device_form_factor",
+		TimestampColumn: "reported_at",
+		FaultCondition:  "status.capability_mask = 0",
+	}, freshness)
 }

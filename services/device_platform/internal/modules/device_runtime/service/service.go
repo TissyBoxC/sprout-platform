@@ -17,6 +17,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/repository"
 	otaDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/google/uuid"
 )
 
@@ -421,6 +422,27 @@ func (s *Service) ListAllDeviceStatuses(
 		result = append(result, status)
 	}
 	return result, nil
+}
+
+// CheckReadiness reports aggregate runtime health for every active device
+// credential. A device without a heartbeat is degraded because runtime status
+// is required for the operator and guardian device lists; no registered device
+// is unknown rather than a fabricated healthy state.
+func (s *Service) CheckReadiness(
+	ctx context.Context,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	reader, ok := s.repository.(interface {
+		Readiness(
+			context.Context,
+			time.Duration,
+		) (featurehealth.DeviceCapabilityReadiness, error)
+	})
+	if !ok {
+		return featurehealth.DeviceCapabilityReadiness{
+			Status: featurehealth.StatusUnavailable,
+		}, nil
+	}
+	return reader.Readiness(ctx, s.offlineThreshold)
 }
 
 // applyRuntimeSnapshot uses the accepted runtime projection for guardian and

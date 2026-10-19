@@ -31,12 +31,54 @@ func (c *stepClock) Now() time.Time {
 }
 
 type fakeRepository struct {
-	mu          sync.Mutex
-	members     map[string]domain.Member
-	invitations map[string]domain.Invitation
-	audits      []domain.AuditEvent
-	auditErr    error
-	acceptCalls int
+	mu           sync.Mutex
+	members      map[string]domain.Member
+	invitations  map[string]domain.Invitation
+	audits       []domain.AuditEvent
+	auditErr     error
+	acceptCalls  int
+	readiness    domain.Readiness
+	readinessErr error
+}
+
+func (r *fakeRepository) Readiness(
+	_ context.Context,
+) (domain.Readiness, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.readinessErr != nil {
+		return domain.Readiness{}, r.readinessErr
+	}
+	readiness := r.readiness
+	families := map[string]int{}
+	owners := map[string]int{}
+	for _, member := range r.members {
+		families[member.FamilyID]++
+		readiness.MemberCount++
+		if member.Role == domain.RoleOwner {
+			readiness.OwnerCount++
+			owners[member.FamilyID]++
+		}
+	}
+	readiness.FamilyCount = int64(len(families))
+	if readiness.ParentAccountCount == 0 {
+		readiness.ParentAccountCount = readiness.FamilyCount
+	}
+	for familyID := range families {
+		switch owners[familyID] {
+		case 0:
+			readiness.OwnerlessFamilyCount++
+		case 1:
+		default:
+			readiness.MultiOwnerFamilyCount++
+		}
+	}
+	for _, invitation := range r.invitations {
+		if invitation.Status == domain.InvitationPending {
+			readiness.PendingInvitationCount++
+		}
+	}
+	return readiness, nil
 }
 
 func newFakeRepository() *fakeRepository {

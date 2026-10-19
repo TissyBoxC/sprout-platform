@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -329,4 +331,19 @@ func (r *PostgresRepository) AdminStats(
 	stats.PresetCoverage = presets
 	stats.GeneratedAt = r.clock.Now().UTC()
 	return stats, nil
+}
+
+// Readiness aggregates active devices that advertise a touch panel. A device
+// advertising touch but reporting no touch surface is treated as a fault.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	return featurehealth.ReadDeviceStateReadiness(ctx, featurehealth.DeviceStateQuery{
+		Pool:            r.pool,
+		Capability:      "touch",
+		StateTable:      "touch_device_status",
+		TimestampColumn: "reported_at",
+		FaultCondition:  "NOT status.touch_supported",
+	}, freshness)
 }

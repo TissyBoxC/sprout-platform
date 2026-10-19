@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/wearable/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -720,4 +722,20 @@ func (r *PostgresRepository) buckets(
 		return nil, fmt.Errorf("iterate wearable %s buckets: %w", column, err)
 	}
 	return buckets, nil
+}
+
+// Readiness aggregates active devices that advertise location. Revoked
+// permission or unknown geofence state on an advertising device degrades the
+// capability rather than claiming the hardware is healthy.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	return featurehealth.ReadDeviceStateReadiness(ctx, featurehealth.DeviceStateQuery{
+		Pool:            r.pool,
+		Capability:      "location",
+		StateTable:      "wearable_device_status",
+		TimestampColumn: "last_reported_at",
+		FaultCondition:  "NOT status.permission_granted OR status.geofence_state NOT IN ('inside', 'outside')",
+	}, freshness)
 }

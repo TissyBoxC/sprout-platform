@@ -29,6 +29,9 @@ var (
 	ErrDuplicatePhrase = errors.New("duplicate local command phrase")
 	// ErrRepositoryUnavailable reports a missing persistence dependency.
 	ErrRepositoryUnavailable = errors.New("local command repository is unavailable")
+	// ErrReadinessUnavailable reports that local-command capability state
+	// cannot be read from its authoritative aggregate reader.
+	ErrReadinessUnavailable = errors.New("local command readiness is unavailable")
 )
 
 // Approved local command actions.

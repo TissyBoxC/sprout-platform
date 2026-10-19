@@ -204,24 +204,52 @@ func TestRecommendPropagatesCatalogError(t *testing.T) {
 }
 
 func TestCheckReadinessAcceptsEmptyCatalog(t *testing.T) {
-	service := New(Options{Catalog: stubCatalog{}})
-	if err := service.CheckReadiness(context.Background()); err != nil {
-		t.Fatalf("check readiness: %v", err)
+	service := New(Options{
+		Catalog: stubCatalog{},
+		Signals: stubSignals{},
+	})
+	readiness, err := service.Readiness(context.Background())
+	if err != nil {
+		t.Fatalf("readiness: %v", err)
+	}
+	if readiness.State != domain.ReadinessHealthy || readiness.CandidateCount != 0 {
+		t.Fatalf("unexpected readiness: %+v", readiness)
 	}
 }
 
-func TestCheckReadinessMapsCatalogFailure(t *testing.T) {
+func TestReadinessMapsCatalogFailure(t *testing.T) {
 	service := New(Options{
 		Catalog: stubCatalog{err: errors.New("catalog unavailable")},
+		Signals: stubSignals{},
 	})
-	if err := service.CheckReadiness(context.Background()); err == nil {
+	if _, err := service.Readiness(context.Background()); err == nil {
 		t.Fatal("expected an error")
 	}
 }
 
-func TestCheckReadinessRejectsMissingCatalog(t *testing.T) {
+func TestReadinessRejectsMissingCatalog(t *testing.T) {
 	service := New(Options{})
-	if err := service.CheckReadiness(context.Background()); err == nil {
-		t.Fatal("expected an error")
+	if _, err := service.Readiness(context.Background()); !errors.Is(
+		err,
+		domain.ErrReadinessUnavailable,
+	) {
+		t.Fatalf("err = %v, want ErrReadinessUnavailable", err)
+	}
+}
+
+func TestReadinessDegradesWithoutSignalReader(t *testing.T) {
+	service := New(Options{Catalog: stubCatalog{}})
+	readiness, err := service.Readiness(context.Background())
+	if err != nil {
+		t.Fatalf("readiness: %v", err)
+	}
+	if readiness.State != domain.ReadinessDegraded || readiness.SignalsReady {
+		t.Fatalf("unexpected readiness: %+v", readiness)
+	}
+	if err := service.CheckReadiness(context.Background()); !errors.Is(
+		err,
+		domain.ErrReadinessUnavailable,
+	) {
+		t.Fatalf("check readiness err = %v, want ErrReadinessUnavailable", err)
 	}
 }

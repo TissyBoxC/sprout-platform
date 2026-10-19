@@ -795,6 +795,38 @@ func (r *PostgresRepository) DeliveryHealth(
 	return health, nil
 }
 
+// Readiness returns aggregate notification state without message bodies or
+// recipient identifiers. Failed deliveries include rows that have exhausted
+// their retry budget, which is a stronger degradation signal than an ordinary
+// retryable provider failure.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+) (domain.Readiness, error) {
+	if r == nil || r.pool == nil {
+		return domain.Readiness{}, fmt.Errorf("notification database is unavailable")
+	}
+	var readiness domain.Readiness
+	if err := r.pool.QueryRow(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM notifications),
+			COUNT(*) FILTER (WHERE status = 'pending'),
+			COUNT(*) FILTER (WHERE status = 'failed'),
+			COUNT(*) FILTER (WHERE status = 'failed' AND retry_count >= 20)
+		FROM notification_deliveries
+	`).Scan(
+		&readiness.NotificationCount,
+		&readiness.PendingDeliveryCount,
+		&readiness.FailedDeliveryCount,
+		&readiness.ExhaustedDeliveryCount,
+	); err != nil {
+		return domain.Readiness{}, fmt.Errorf(
+			"read notification readiness: %w",
+			err,
+		)
+	}
+	return readiness, nil
+}
+
 type rowScanner interface {
 	Scan(destinations ...any) error
 }

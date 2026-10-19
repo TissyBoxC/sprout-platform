@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/power/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -311,4 +313,19 @@ func (r *PostgresRepository) AdminStats(
 	stats.PercentageBuckets = buckets
 	stats.GeneratedAt = r.clock.Now().UTC()
 	return stats, nil
+}
+
+// Readiness aggregates active devices that advertise a battery. An unknown
+// charge state on an advertising device is a fault signal.
+func (r *PostgresRepository) Readiness(
+	ctx context.Context,
+	freshness time.Duration,
+) (featurehealth.DeviceCapabilityReadiness, error) {
+	return featurehealth.ReadDeviceStateReadiness(ctx, featurehealth.DeviceStateQuery{
+		Pool:            r.pool,
+		Capability:      "battery",
+		StateTable:      "device_power_status",
+		TimestampColumn: "reported_at",
+		FaultCondition:  "status.charge_state = 'unknown'",
+	}, freshness)
 }

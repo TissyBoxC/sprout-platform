@@ -37,9 +37,10 @@ const (
 
 // Service owns time, content, and volume restrictions.
 type Service struct {
-	repository    repository.Repository
-	voiceDefaults VoiceDefaultsReader
-	timeSource    clock.Clock
+	repository      repository.Repository
+	voiceDefaults   VoiceDefaultsReader
+	readinessReader ReadinessReader
+	timeSource      clock.Clock
 }
 
 // VoiceDefaultsReader supplies the platform-level defaults applied to a newly
@@ -60,9 +61,10 @@ type VoiceDefaults struct {
 
 // Options contains parent policy service dependencies.
 type Options struct {
-	Repository    repository.Repository
-	VoiceDefaults VoiceDefaultsReader
-	Clock         clock.Clock
+	Repository      repository.Repository
+	VoiceDefaults   VoiceDefaultsReader
+	ReadinessReader ReadinessReader
+	Clock           clock.Clock
 }
 
 // New creates the parent policy service.
@@ -74,10 +76,17 @@ func New(options Options) (*Service, error) {
 	if timeSource == nil {
 		timeSource = clock.SystemClock{}
 	}
+	readinessReader := options.ReadinessReader
+	if readinessReader == nil {
+		if reader, ok := options.Repository.(ReadinessReader); ok {
+			readinessReader = reader
+		}
+	}
 	return &Service{
-		repository:    options.Repository,
-		voiceDefaults: options.VoiceDefaults,
-		timeSource:    timeSource,
+		repository:      options.Repository,
+		voiceDefaults:   options.VoiceDefaults,
+		readinessReader: readinessReader,
+		timeSource:      timeSource,
 	}, nil
 }
 

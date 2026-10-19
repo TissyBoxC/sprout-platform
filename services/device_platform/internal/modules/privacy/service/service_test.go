@@ -28,6 +28,28 @@ type memoryRepository struct {
 	purgedExpiredAt   []time.Time
 	purgedUsageBefore []time.Time
 	nextDeletionSeq   int
+	readiness         domain.Readiness
+	readinessErr      error
+}
+
+func (r *memoryRepository) Readiness(
+	_ context.Context,
+) (domain.Readiness, error) {
+	if r.readinessErr != nil {
+		return domain.Readiness{}, r.readinessErr
+	}
+	readiness := r.readiness
+	readiness.ConsentEventCount = int64(len(r.consents))
+	readiness.ExportReceiptCount = int64(len(r.receipts))
+	for _, deletion := range r.deletions {
+		switch deletion.Status {
+		case domain.DeletionStatusPending:
+			readiness.PendingDeletionCount++
+		case domain.DeletionStatusFailed:
+			readiness.FailedDeletionCount++
+		}
+	}
+	return readiness, nil
 }
 
 func (r *memoryRepository) AppendConsentEvent(

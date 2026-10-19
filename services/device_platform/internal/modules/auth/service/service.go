@@ -64,6 +64,7 @@ type Service struct {
 	overviewReader   ParentOverviewReader
 	policyReader     RegistrationPolicyReader
 	mfaAuditor       MFAAuditor
+	readinessReader  ReadinessReader
 	timeSource       clock.Clock
 	accessTTL        time.Duration
 	refreshTTL       time.Duration
@@ -143,6 +144,7 @@ type Options struct {
 	OverviewReader         ParentOverviewReader
 	PolicyReader           RegistrationPolicyReader
 	MFAAuditor             MFAAuditor
+	ReadinessReader        ReadinessReader
 	MFAChallengeTTL        time.Duration
 	MFAMaxAttempts         int
 	MFAAccountLockDuration time.Duration
@@ -178,6 +180,12 @@ func New(options Options) (*Service, error) {
 	if timeSource == nil {
 		timeSource = clock.SystemClock{}
 	}
+	readinessReader := options.ReadinessReader
+	if readinessReader == nil {
+		if reader, ok := options.Repository.(ReadinessReader); ok {
+			readinessReader = reader
+		}
+	}
 	return &Service{
 		repository:       options.Repository,
 		tokenIssuer:      options.TokenIssuer,
@@ -188,6 +196,7 @@ func New(options Options) (*Service, error) {
 		overviewReader:   options.OverviewReader,
 		policyReader:     options.PolicyReader,
 		mfaAuditor:       options.MFAAuditor,
+		readinessReader:  readinessReader,
 		timeSource:       timeSource,
 		accessTTL:        options.AccessTTL,
 		refreshTTL:       options.RefreshTTL,

@@ -16,6 +16,7 @@ var (
 	ErrNoFamilyPolicy           = errors.New("family has no parent policy")
 	ErrPolicyVersionConflict    = errors.New("parent policy version conflict")
 	ErrInvalidVoiceConversation = errors.New("invalid voice conversation settings")
+	ErrReadinessUnavailable     = errors.New("parent policy readiness is unavailable")
 )
 
 // VoiceConversationPolicy controls the guardian-visible realtime voice

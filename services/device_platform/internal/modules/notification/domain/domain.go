@@ -18,6 +18,7 @@ var (
 	ErrNotificationExpired   = errors.New("notification is not visible")
 	ErrNotificationForbidden = errors.New("notification is not owned by this account")
 	ErrInvalidPage           = errors.New("invalid notification page request")
+	ErrReadinessUnavailable  = errors.New("notification readiness is unavailable")
 )
 
 const (

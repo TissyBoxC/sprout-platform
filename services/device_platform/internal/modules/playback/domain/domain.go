@@ -16,14 +16,15 @@ import (
 )
 
 var (
-	ErrRequestNotFound     = errors.New("playback request not found")
-	ErrInvalidRequest      = errors.New("invalid playback request")
-	ErrInvalidPackageID    = errors.New("invalid playback package id")
-	ErrInvalidDeviceID     = errors.New("invalid playback device id")
-	ErrInvalidRequestState = errors.New("invalid playback request state")
-	ErrInvalidOutcome      = errors.New("invalid playback outcome")
-	ErrInvalidNote         = errors.New("invalid playback note")
-	ErrDuplicateRequest    = errors.New("playback request already pending")
+	ErrRequestNotFound      = errors.New("playback request not found")
+	ErrInvalidRequest       = errors.New("invalid playback request")
+	ErrInvalidPackageID     = errors.New("invalid playback package id")
+	ErrInvalidDeviceID      = errors.New("invalid playback device id")
+	ErrInvalidRequestState  = errors.New("invalid playback request state")
+	ErrInvalidOutcome       = errors.New("invalid playback outcome")
+	ErrInvalidNote          = errors.New("invalid playback note")
+	ErrDuplicateRequest     = errors.New("playback request already pending")
+	ErrReadinessUnavailable = errors.New("playback readiness is unavailable")
 )
 
 // Request source: a guardian tapped a package, or the platform proposed one.

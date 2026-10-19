@@ -10,7 +10,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"strings"
 
@@ -159,17 +158,6 @@ func (s *Service) Recommend(
 		ranked = ranked[:limit]
 	}
 	return ranked, nil
-}
-
-// CheckReadiness verifies that the recommendation catalog is readable without
-// requiring a family scope or playback history. An empty catalog is healthy:
-// it is a valid first-deployment state, not a service failure.
-func (s *Service) CheckReadiness(ctx context.Context) error {
-	if s == nil || s.catalog == nil {
-		return errors.New("recommendation catalog is unavailable")
-	}
-	_, err := s.catalog.ListCandidates(ctx, "", "")
-	return err
 }
 
 func toSet(values []string) map[string]struct{} {

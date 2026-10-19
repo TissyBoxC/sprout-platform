@@ -92,6 +92,18 @@ type Repository interface {
 	) (*domain.Statistics, error)
 }
 
+const (
+	maxOTAArtifactSizeBytes    int64 = 4 * 1024 * 1024
+	publishedReleaseCatalogSQL       = ` WHERE release.status = 'published'
+		AND release.size_bytes > 0
+		AND release.size_bytes <= $1
+		AND NOT EXISTS (
+			SELECT 1
+			FROM ota_legacy_quarantined_releases AS quarantine
+			WHERE quarantine.release_id = release.id
+		)`
+)
+
 // PostgresRepository is the PostgreSQL-backed OTA repository.
 type PostgresRepository struct {
 	pool *pgxpool.Pool
@@ -864,8 +876,8 @@ func (r *PostgresRepository) ListPublishedReleases(
 	channel domain.Channel,
 	hardwareRevision string,
 ) ([]domain.Release, error) {
-	where := " WHERE release.status = 'published'"
-	arguments := make([]any, 0, 2)
+	where := publishedReleaseCatalogSQL
+	arguments := []any{maxOTAArtifactSizeBytes}
 	if channel != "" {
 		arguments = append(arguments, channel)
 		where += fmt.Sprintf(" AND release.channel = $%d", len(arguments))
@@ -889,12 +901,30 @@ func (r *PostgresRepository) ListPublishedReleases(
 		if scanErr != nil {
 			return nil, fmt.Errorf("scan published OTA release: %w", scanErr)
 		}
-		releases = append(releases, *release)
+		if eligiblePublishedCatalogRelease(release) {
+			releases = append(releases, *release)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate published OTA releases: %w", err)
 	}
 	return releases, nil
+}
+
+func validCatalogArtifactSize(size int64) bool {
+	if size <= 0 || size > maxOTAArtifactSizeBytes {
+		return false
+	}
+	return true
+}
+
+func eligiblePublishedCatalogRelease(release *domain.Release) bool {
+	if release == nil ||
+		release.Status != domain.ReleaseStatusPublished ||
+		!validCatalogArtifactSize(release.SizeBytes) {
+		return false
+	}
+	return true
 }
 
 // CreateDeployment creates an idempotent release/device assignment.

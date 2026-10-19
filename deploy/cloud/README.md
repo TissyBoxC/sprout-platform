@@ -314,6 +314,16 @@ location ^~ /api/v1/release-publication/ {
 只覆盖发布接口前缀，其余路径仍由面板生成的反向代理处理。保存后执行
 `nginx -t && nginx -s reload`；此配置不改变鉴权规则。
 
+部署后先运行只读检查：
+
+```bash
+./scripts/audit-1panel-release-upload.sh
+```
+
+输出必须包含 `release_upload_proxy=ok`。如果缺少
+`proxy_request_buffering off`、512 MB 请求体上限或 600 秒超时，流水线上传
+大文件时会超时或被连接重置。
+
 API 站点的公网根代理会覆盖全部路径，但设备的 `/internal/` 接口只允许
 Compose 内网和历史受信调用使用。发布流水线需要调用的内部上传接口已经提供
 `/api/v1/release-publication/` 公网别名，因此公网入口必须显式拒绝

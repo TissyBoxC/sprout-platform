@@ -21,6 +21,8 @@ jobs:
             tools.test_upload_release_artifacts_http
       - name: Validate download release key generation
         run: bash deploy/cloud/scripts/test-download-release-key.sh
+      - name: Validate release upload proxy audit
+        run: bash deploy/cloud/scripts/test-audit-1panel-release-upload.sh
 
   workspace-lock:
     runs-on: ubuntu-latest

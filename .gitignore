@@ -52,6 +52,9 @@ coverage/
 *.test
 *.out
 *.log
+# Locally built service binaries must never reach the repository.
+services/**/*.exe
+*.exe
 
 # Python cache and test output
 __pycache__/

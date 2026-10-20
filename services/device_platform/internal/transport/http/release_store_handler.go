@@ -68,21 +68,44 @@ func (handler adminHandler) uploadReleaseFile(
 		relativePath = strings.TrimSpace(request.FormValue("path"))
 	}
 	overwrite, _ := strconv.ParseBool(strings.TrimSpace(request.FormValue("overwrite")))
+	stagingPath := strings.TrimSpace(request.FormValue("staging_path"))
+	expectedSHA256 := strings.TrimSpace(request.FormValue("sha256"))
+	expectedSizeBytes, sizeErr := strconv.ParseInt(
+		strings.TrimSpace(request.FormValue("size_bytes")),
+		10,
+		64,
+	)
 	fileName := strings.TrimSpace(request.FormValue("filename"))
 	if fileName == "" {
 		fileName = strings.TrimSpace(request.FormValue("file_name"))
 	}
 	file, _, err := request.FormFile("file")
-	if err != nil {
+	if err != nil && stagingPath == "" {
 		writeError(response, request, http.StatusBadRequest, "missing_file", "请选择要上传的文件")
 		return
 	}
-	defer file.Close()
+	if stagingPath != "" {
+		if sizeErr != nil || expectedSizeBytes <= 0 || expectedSHA256 == "" {
+			writeError(
+				response,
+				request,
+				http.StatusUnprocessableEntity,
+				"invalid_staged_file",
+				"请提供暂存文件的大小和校验值",
+			)
+			return
+		}
+	} else {
+		defer file.Close()
+	}
 	uploaded, err := handler.releaseStoreService.UploadFile(
 		request.Context(),
 		domain.UploadInput{
 			RelativePath: relativePath,
 			Overwrite:    overwrite,
+			StagingPath:  stagingPath,
+			SHA256:       expectedSHA256,
+			SizeBytes:    expectedSizeBytes,
 			Version:      strings.TrimSpace(request.FormValue("version")),
 			Channel:      strings.TrimSpace(request.FormValue("channel")),
 			Platform:     strings.TrimSpace(request.FormValue("platform")),
@@ -180,6 +203,22 @@ func writeReleaseStoreError(
 		writeError(response, request, http.StatusNotFound, "file_not_found", "没有找到这个文件")
 	case errors.Is(err, domain.ErrFileAlreadyExists):
 		writeError(response, request, http.StatusConflict, "file_exists", "文件已经存在，请确认是否替换")
+	case errors.Is(err, domain.ErrFileImmutable):
+		writeError(
+			response,
+			request,
+			http.StatusConflict,
+			"published_file_immutable",
+			"这个文件已经用于发布，不能再替换或删除。请发布新版本并使用新的文件名。",
+		)
+	case errors.Is(err, domain.ErrArtifactMismatch):
+		writeError(
+			response,
+			request,
+			http.StatusConflict,
+			"artifact_changed",
+			"文件在校验期间发生变化，请重新上传或重新生成发布文件。",
+		)
 	case errors.Is(err, domain.ErrFileTooLarge):
 		writeError(response, request, http.StatusRequestEntityTooLarge, "file_too_large", "上传文件过大")
 	case errors.Is(err, domain.ErrReleaseNotCreated):

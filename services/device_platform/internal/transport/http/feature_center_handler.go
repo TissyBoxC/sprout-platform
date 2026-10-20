@@ -8,6 +8,7 @@ import (
 
 	featuredomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
+	operationsdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/domain"
 )
 
 // FeatureCenterService is the management-facing feature registry surface.
@@ -301,6 +302,14 @@ func writeFeatureCenterError(
 			"config_version_conflict",
 			"功能配置已被其他管理员更新，请刷新后重试",
 		)
+	case errors.Is(err, operationsdomain.ErrSettingsVersionConflict):
+		writeError(
+			response,
+			request,
+			http.StatusConflict,
+			"settings_version_conflict",
+			"系统设置已被其他管理员更新，请刷新后重试",
+		)
 	case errors.Is(err, featuredomain.ErrFeatureNotFound):
 		writeError(response, request, http.StatusNotFound, "feature_not_found", "没有找到这个功能")
 	case errors.Is(err, featuredomain.ErrFeatureReadOnly):
@@ -325,6 +334,14 @@ func writeFeatureCenterError(
 			http.StatusNotImplemented,
 			"health_check_unavailable",
 			"该功能暂未接入健康检查",
+		)
+	case errors.Is(err, featuredomain.ErrHealthSnapshotStale):
+		writeError(
+			response,
+			request,
+			http.StatusConflict,
+			"health_snapshot_stale",
+			"这项健康状态已被新的检查结果替代，请刷新后查看最新状态",
 		)
 	case errors.As(err, &auditWrite):
 		writeError(

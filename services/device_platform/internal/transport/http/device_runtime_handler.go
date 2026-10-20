@@ -252,10 +252,25 @@ func (handler deviceRuntimeHandler) listForParent(
 		return
 	}
 	result := make([]map[string]any, 0, len(statuses))
+	canManage := familydomain.Can(access.Role, familydomain.ActionDeviceManage)
 	for index := range statuses {
-		result = append(result, deviceStatusResponse(&statuses[index]))
+		result = append(
+			result,
+			deviceStatusResponseWithPermission(&statuses[index], canManage),
+		)
 	}
 	writeSuccess(response, request, http.StatusOK, map[string]any{"devices": result})
+}
+
+func deviceStatusResponseWithPermission(
+	status *domain.DeviceStatus,
+	canManage bool,
+) map[string]any {
+	projected := deviceStatusResponse(status)
+	if projected != nil {
+		projected["can_manage"] = canManage
+	}
+	return projected
 }
 
 func (handler deviceRuntimeHandler) getForParent(

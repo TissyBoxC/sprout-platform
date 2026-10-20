@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path"
@@ -55,6 +56,8 @@ type cachedInventoryDigest struct {
 type Service struct {
 	root                *os.Root
 	rootDir             string
+	staging             *os.Root
+	stagingDir          string
 	publicBaseURL       string
 	immutablePaths      map[string]struct{}
 	clock               clock.Clock
@@ -64,6 +67,7 @@ type Service struct {
 	inventoryDigestMu   sync.Mutex
 	inventoryDigests    map[string]cachedInventoryDigest
 	inventoryDigestKeys []string
+	artifactReadBarrier func([]byte)
 }
 
 type releaseDirectoryTarget struct {
@@ -92,6 +96,7 @@ type ArtifactVerification struct {
 // Options contains download-store dependencies.
 type Options struct {
 	RootDir       string
+	StagingDir    string
 	PublicBaseURL string
 	Clock         clock.Clock
 }
@@ -118,6 +123,30 @@ func New(options Options) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open download store root: %w", err)
 	}
+	stagingRoot := root
+	stagingDir := strings.TrimSpace(options.StagingDir)
+	if stagingDir != "" {
+		absoluteStaging, err := filepath.Abs(stagingDir)
+		if err != nil {
+			_ = root.Close()
+			return nil, fmt.Errorf("resolve download staging root: %w", err)
+		}
+		stagingInfo, err := os.Stat(absoluteStaging)
+		if err != nil {
+			_ = root.Close()
+			return nil, fmt.Errorf("stat download staging root: %w", err)
+		}
+		if !stagingInfo.IsDir() {
+			_ = root.Close()
+			return nil, errors.New("download staging root is not a directory")
+		}
+		stagingRoot, err = os.OpenRoot(absoluteStaging)
+		if err != nil {
+			_ = root.Close()
+			return nil, fmt.Errorf("open download staging root: %w", err)
+		}
+		stagingDir = absoluteStaging
+	}
 	timeSource := options.Clock
 	if timeSource == nil {
 		timeSource = clock.SystemClock{}
@@ -125,6 +154,8 @@ func New(options Options) (*Service, error) {
 	service := &Service{
 		root:                root,
 		rootDir:             absoluteRoot,
+		staging:             stagingRoot,
+		stagingDir:          stagingDir,
 		publicBaseURL:       strings.TrimRight(strings.TrimSpace(options.PublicBaseURL), "/"),
 		immutablePaths:      make(map[string]struct{}),
 		clock:               timeSource,
@@ -182,7 +213,13 @@ func (s *Service) Close() error {
 	if s == nil || s.root == nil {
 		return nil
 	}
-	return s.root.Close()
+	rootErr := s.root.Close()
+	if s.staging != nil && s.staging != s.root {
+		if stagingErr := s.staging.Close(); stagingErr != nil && rootErr == nil {
+			return stagingErr
+		}
+	}
+	return rootErr
 }
 
 // Inventory returns every regular file in the store. Canonical release
@@ -606,14 +643,13 @@ func (s *Service) ReadArtifact(
 		return nil, domain.ErrFileNotFound
 	}
 	hasher := sha256.New()
-	written, err := io.Copy(hasher, file)
+	written, digestBytes, err := hashArtifact(context.Background(), file, hasher, s.artifactReadBarrier)
 	if err != nil {
 		return nil, fmt.Errorf("hash release artifact: %w", err)
 	}
-	digest := hex.EncodeToString(hasher.Sum(nil))
 	return &ArtifactVerification{
 		SizeBytes: written,
-		SHA256:    digest,
+		SHA256:    hex.EncodeToString(digestBytes),
 	}, nil
 }
 
@@ -629,24 +665,22 @@ func (s *Service) UploadFile(
 	if err := ctx.Err(); err != nil {
 		return domain.File{}, err
 	}
+	if strings.TrimSpace(input.StagingPath) != "" {
+		return s.PromoteStagedFile(ctx, domain.PromoteStagedInput{
+			StagedPath:   input.StagingPath,
+			RelativePath: input.RelativePath,
+			SHA256:       input.SHA256,
+			SizeBytes:    input.SizeBytes,
+		})
+	}
 	relativePath, err := resolveUploadPath(input)
 	if err != nil {
 		return domain.File{}, err
-	}
-	if s.isImmutable(relativePath) {
-		return domain.File{}, domain.ErrFileImmutable
 	}
 	parent := path.Dir(relativePath)
 	if parent != "." {
 		if err := s.root.MkdirAll(parent, 0o775); err != nil {
 			return domain.File{}, fmt.Errorf("create download directory: %w", err)
-		}
-	}
-	if !input.Overwrite {
-		if _, err := s.root.Stat(relativePath); err == nil {
-			return domain.File{}, domain.ErrFileAlreadyExists
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return domain.File{}, err
 		}
 	}
 	temporaryName, temporary, err := s.createTemporary(parent)
@@ -677,7 +711,12 @@ func (s *Service) UploadFile(
 	if err := temporary.Close(); err != nil {
 		return domain.File{}, fmt.Errorf("close download file: %w", err)
 	}
-	if err := s.root.Rename(temporaryPath, relativePath); err != nil {
+	if err := s.commitUpload(
+		temporaryPath,
+		relativePath,
+		input.Overwrite,
+		digest.Sum(nil),
+	); err != nil {
 		return domain.File{}, fmt.Errorf("publish download file: %w", err)
 	}
 	completed = true
@@ -697,6 +736,121 @@ func (s *Service) UploadFile(
 	}, nil
 }
 
+// PromoteStagedFile verifies an SFTP staging upload and commits its bytes to
+// the public release volume under the same lock used by manual uploads and OTA
+// publication. The staging copy is retained as an audit artifact; only the
+// public commit is immutable.
+func (s *Service) PromoteStagedFile(
+	ctx context.Context,
+	input domain.PromoteStagedInput,
+) (domain.File, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.File{}, err
+	}
+	if s.staging == nil || s.staging == s.root {
+		return domain.File{}, errors.New("download staging root is not configured")
+	}
+	stagedPath, err := NormalizeFilePath(input.StagedPath)
+	if err != nil {
+		return domain.File{}, err
+	}
+	relativePath, err := NormalizeFilePath(input.RelativePath)
+	if err != nil {
+		return domain.File{}, err
+	}
+	expectedDigest := strings.ToLower(strings.TrimSpace(input.SHA256))
+	if input.SizeBytes <= 0 ||
+		len(expectedDigest) != sha256.Size*2 {
+		return domain.File{}, domain.ErrArtifactMismatch
+	}
+	if _, err := hex.DecodeString(expectedDigest); err != nil {
+		return domain.File{}, domain.ErrArtifactMismatch
+	}
+	stagedFile, err := s.staging.Open(stagedPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return domain.File{}, domain.ErrFileNotFound
+	}
+	if err != nil {
+		return domain.File{}, fmt.Errorf("open staged release artifact: %w", err)
+	}
+	defer stagedFile.Close()
+	stagedInfo, err := stagedFile.Stat()
+	if err != nil {
+		return domain.File{}, fmt.Errorf("stat staged release artifact: %w", err)
+	}
+	if !stagedInfo.Mode().IsRegular() || stagedInfo.Size() != input.SizeBytes {
+		return domain.File{}, domain.ErrArtifactMismatch
+	}
+	hasher := sha256.New()
+	written, err := io.Copy(hasher, io.LimitReader(stagedFile, input.SizeBytes+1))
+	if err != nil {
+		return domain.File{}, fmt.Errorf("hash staged release artifact: %w", err)
+	}
+	if written != input.SizeBytes ||
+		!strings.EqualFold(hex.EncodeToString(hasher.Sum(nil)), expectedDigest) {
+		return domain.File{}, domain.ErrArtifactMismatch
+	}
+	if _, err := stagedFile.Seek(0, io.SeekStart); err != nil {
+		return domain.File{}, fmt.Errorf("rewind staged release artifact: %w", err)
+	}
+	parent := path.Dir(relativePath)
+	if parent != "." {
+		if err := s.root.MkdirAll(parent, 0o775); err != nil {
+			return domain.File{}, fmt.Errorf("create download directory: %w", err)
+		}
+	}
+	temporaryName, temporary, err := s.createTemporary(parent)
+	if err != nil {
+		return domain.File{}, err
+	}
+	temporaryPath := path.Join(parent, temporaryName)
+	completed := false
+	defer func() {
+		if !completed {
+			_ = s.root.Remove(temporaryPath)
+		}
+	}()
+	publicDigest := sha256.New()
+	copied, err := io.Copy(
+		io.MultiWriter(temporary, publicDigest),
+		io.LimitReader(stagedFile, input.SizeBytes+1),
+	)
+	if err != nil {
+		_ = temporary.Close()
+		return domain.File{}, fmt.Errorf("copy staged release artifact: %w", err)
+	}
+	if copied != input.SizeBytes ||
+		!strings.EqualFold(hex.EncodeToString(publicDigest.Sum(nil)), expectedDigest) {
+		_ = temporary.Close()
+		return domain.File{}, domain.ErrArtifactMismatch
+	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return domain.File{}, fmt.Errorf("sync staged release artifact: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		return domain.File{}, fmt.Errorf("close staged release artifact: %w", err)
+	}
+	if err := s.commitUpload(temporaryPath, relativePath, true, publicDigest.Sum(nil)); err != nil {
+		return domain.File{}, fmt.Errorf("promote staged release artifact: %w", err)
+	}
+	completed = true
+	info, err := s.root.Stat(relativePath)
+	if err != nil {
+		return domain.File{}, fmt.Errorf("stat promoted release artifact: %w", err)
+	}
+	release, _ := ParseArtifactPath(relativePath)
+	return domain.File{
+		RelativePath: relativePath,
+		FileName:     path.Base(relativePath),
+		SizeBytes:    info.Size(),
+		ModifiedAt:   info.ModTime().UTC(),
+		SHA256:       hex.EncodeToString(publicDigest.Sum(nil)),
+		Release:      release,
+		DownloadURL:  s.publicURL(relativePath),
+	}, nil
+}
+
 // DeleteFile removes one file and prunes now-empty parent directories.
 func (s *Service) DeleteFile(ctx context.Context, relativePath string) error {
 	if err := ctx.Err(); err != nil {
@@ -706,7 +860,9 @@ func (s *Service) DeleteFile(ctx context.Context, relativePath string) error {
 	if err != nil {
 		return err
 	}
-	if s.isImmutable(normalized) {
+	s.inventoryDigestMu.Lock()
+	defer s.inventoryDigestMu.Unlock()
+	if _, immutable := s.immutablePaths[normalized]; immutable {
 		return domain.ErrFileImmutable
 	}
 	info, err := s.root.Stat(normalized)
@@ -725,6 +881,7 @@ func (s *Service) DeleteFile(ctx context.Context, relativePath string) error {
 		}
 		return fmt.Errorf("delete download file: %w", err)
 	}
+	delete(s.inventoryDigests, normalized)
 	// Removing empty parents keeps the console inventory free of empty
 	// directory noise. Root itself is never removed.
 	parent := path.Dir(normalized)
@@ -760,11 +917,144 @@ func (s *Service) MarkPublishedArtifact(relativePath string) error {
 	return nil
 }
 
+// VerifyAndMarkPublishedArtifact hashes the exact artifact and records its
+// immutable status while holding the same store mutex used by upload and
+// deletion commits. This closes the verify-then-mark replacement window for
+// every writer that goes through this service.
+func (s *Service) VerifyAndMarkPublishedArtifact(
+	ctx context.Context,
+	relativePath string,
+	expectedSizeBytes int64,
+	expectedSHA256 string,
+) error {
+	normalized, err := NormalizeFilePath(relativePath)
+	if err != nil {
+		return err
+	}
+	if expectedSizeBytes < 0 {
+		return domain.ErrArtifactMismatch
+	}
+	expectedDigest := strings.ToLower(strings.TrimSpace(expectedSHA256))
+	if len(expectedDigest) != sha256.Size*2 {
+		return domain.ErrArtifactMismatch
+	}
+	if _, err := hex.DecodeString(expectedDigest); err != nil {
+		return domain.ErrArtifactMismatch
+	}
+
+	s.inventoryDigestMu.Lock()
+	defer s.inventoryDigestMu.Unlock()
+	verification, err := s.readArtifactLocked(ctx, normalized)
+	if err != nil {
+		return err
+	}
+	if verification.SizeBytes != expectedSizeBytes ||
+		!strings.EqualFold(verification.SHA256, expectedDigest) {
+		return domain.ErrArtifactMismatch
+	}
+	if _, exists := s.immutablePaths[normalized]; exists {
+		return nil
+	}
+	s.immutablePaths[normalized] = struct{}{}
+	if err := s.persistImmutableIndex(); err != nil {
+		delete(s.immutablePaths, normalized)
+		return err
+	}
+	return nil
+}
+
+func (s *Service) readArtifactLocked(
+	ctx context.Context,
+	relativePath string,
+) (*ArtifactVerification, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	file, err := s.root.Open(relativePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, domain.ErrFileNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("open release artifact: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat release artifact: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, domain.ErrFileNotFound
+	}
+	written, digestBytes, err := hashArtifact(ctx, file, sha256.New(), s.artifactReadBarrier)
+	if err != nil {
+		return nil, fmt.Errorf("hash release artifact: %w", err)
+	}
+	return &ArtifactVerification{
+		SizeBytes: written,
+		SHA256:    hex.EncodeToString(digestBytes),
+	}, nil
+}
+
+func hashArtifact(
+	ctx context.Context,
+	reader io.Reader,
+	hasher hash.Hash,
+	barrier func([]byte),
+) (int64, []byte, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, nil, err
+	}
+	written, err := io.Copy(hasher, reader)
+	if err != nil {
+		return 0, nil, err
+	}
+	digestBytes := hasher.Sum(nil)
+	if barrier != nil {
+		barrier(append([]byte(nil), digestBytes...))
+	}
+	return written, digestBytes, nil
+}
+
 func (s *Service) isImmutable(relativePath string) bool {
 	s.inventoryDigestMu.Lock()
 	defer s.inventoryDigestMu.Unlock()
 	_, immutable := s.immutablePaths[relativePath]
 	return immutable
+}
+
+// commitUpload serializes the replacement with immutability publication.
+// A pre-write existence check alone is insufficient because an OTA publish
+// can mark the path immutable between the check and the final rename.
+func (s *Service) commitUpload(
+	temporaryPath string,
+	relativePath string,
+	overwrite bool,
+	uploadDigest []byte,
+) error {
+	s.inventoryDigestMu.Lock()
+	defer s.inventoryDigestMu.Unlock()
+	if _, immutable := s.immutablePaths[relativePath]; immutable {
+		verification, err := s.readArtifactLocked(context.Background(), relativePath)
+		if err != nil {
+			return err
+		}
+		if strings.EqualFold(verification.SHA256, hex.EncodeToString(uploadDigest)) {
+			return nil
+		}
+		return domain.ErrFileImmutable
+	}
+	if !overwrite {
+		if _, err := s.root.Stat(relativePath); err == nil {
+			return domain.ErrFileAlreadyExists
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	if err := s.root.Rename(temporaryPath, relativePath); err != nil {
+		return err
+	}
+	delete(s.inventoryDigests, relativePath)
+	return nil
 }
 
 // RefreshIndex regenerates one release manifest and the global index.

@@ -171,6 +171,10 @@ type releaseStoreAdminService interface {
 		input releaseStoredomain.UploadInput,
 		reader io.Reader,
 	) (releaseStoredomain.File, error)
+	PromoteStagedFile(
+		ctx context.Context,
+		input releaseStoredomain.PromoteStagedInput,
+	) (releaseStoredomain.File, error)
 	DeleteFile(ctx context.Context, relativePath string) error
 	RefreshIndex(
 		ctx context.Context,
@@ -227,9 +231,9 @@ type aiAccountDefaultsResponse struct {
 }
 
 type aiModelResponse struct {
-	ID               string `json:"id"`
-	LatencyMS        *int   `json:"latency_ms"`
-	IsRecommended    bool   `json:"is_recommended"`
+	ID            string `json:"id"`
+	LatencyMS     *int   `json:"latency_ms"`
+	IsRecommended bool   `json:"is_recommended"`
 }
 
 type createParentRequest struct {
@@ -645,8 +649,8 @@ func (handler adminHandler) listAIModels(
 			continue
 		}
 		models = append(models, aiModelResponse{
-			ID:            model.Model,
-			LatencyMS:     model.PrimaryLatencyMs,
+			ID:        model.Model,
+			LatencyMS: model.PrimaryLatencyMs,
 			IsRecommended: strings.EqualFold(
 				strings.TrimSpace(model.Model),
 				strings.TrimSpace(config.RecommendedModel),

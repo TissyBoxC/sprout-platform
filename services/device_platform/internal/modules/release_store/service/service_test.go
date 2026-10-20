@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -412,6 +413,193 @@ func TestPublishedArtifactRemainsImmutableAfterServiceRestart(t *testing.T) {
 			t.Fatal("internal immutability index leaked into inventory")
 		}
 	}
+}
+
+func TestPublishedArtifactCannotBeOverwrittenByConcurrentUpload(t *testing.T) {
+	service, _ := newTestService(t)
+	relativePath := "0.13.1/stable/esp32_s3/firmware/firmware.bin"
+	if _, err := service.UploadFile(
+		context.Background(),
+		domain.UploadInput{RelativePath: relativePath},
+		strings.NewReader("signed firmware"),
+	); err != nil {
+		t.Fatalf("seed upload: %v", err)
+	}
+
+	start := make(chan struct{})
+	var waitGroup sync.WaitGroup
+	errs := make(chan error, 2)
+	waitGroup.Add(2)
+	go func() {
+		defer waitGroup.Done()
+		<-start
+		errs <- service.MarkPublishedArtifact(relativePath)
+	}()
+	go func() {
+		defer waitGroup.Done()
+		<-start
+		_, err := service.UploadFile(
+			context.Background(),
+			domain.UploadInput{
+				RelativePath: relativePath,
+				Overwrite:    true,
+			},
+			strings.NewReader("replacement firmware"),
+		)
+		errs <- err
+	}()
+	close(start)
+	waitGroup.Wait()
+	close(errs)
+
+	errorsByOperation := make([]error, 0, 2)
+	for err := range errs {
+		errorsByOperation = append(errorsByOperation, err)
+	}
+	if len(errorsByOperation) != 2 {
+		t.Fatalf("unexpected upload/publish result count: %d", len(errorsByOperation))
+	}
+	verification, err := service.ReadArtifact(context.Background(), relativePath)
+	if err != nil {
+		t.Fatalf("read artifact after concurrent operations: %v", err)
+	}
+	if errors.Is(errorsByOperation[1], domain.ErrFileImmutable) ||
+		errors.Is(errorsByOperation[0], domain.ErrFileImmutable) {
+		if verification.SHA256 != sha256String("signed firmware") {
+			t.Fatalf("immutable artifact bytes changed: %s", verification.SHA256)
+		}
+		if _, err := service.UploadFile(
+			context.Background(),
+			domain.UploadInput{RelativePath: relativePath, Overwrite: true},
+			strings.NewReader("replacement after immutable"),
+		); !errors.Is(err, domain.ErrFileImmutable) {
+			t.Fatalf("post-publish overwrite error = %v, want immutable", err)
+		}
+		return
+	}
+	t.Fatalf("neither concurrent operation observed immutability: %+v", errorsByOperation)
+}
+
+func TestAtomicPublishChecksBytesBeforeReplacementCanCommit(t *testing.T) {
+	service, _ := newTestService(t)
+	relativePath := "0.13.2/stable/esp32_s3/firmware/firmware.bin"
+	if _, err := service.UploadFile(
+		context.Background(),
+		domain.UploadInput{RelativePath: relativePath},
+		strings.NewReader("signed firmware"),
+	); err != nil {
+		t.Fatalf("seed upload: %v", err)
+	}
+	replacementStarted := make(chan struct{})
+	replacementFinished := make(chan error, 1)
+	var startOnce sync.Once
+	service.artifactReadBarrier = func(_ []byte) {
+		startOnce.Do(func() {
+			go func() {
+				close(replacementStarted)
+				_, err := service.UploadFile(
+					context.Background(),
+					domain.UploadInput{RelativePath: relativePath, Overwrite: true},
+					strings.NewReader("replacement firmware"),
+				)
+				replacementFinished <- err
+			}()
+		})
+	}
+	if err := service.VerifyAndMarkPublishedArtifact(
+		context.Background(),
+		relativePath,
+		int64(len("signed firmware")),
+		sha256String("signed firmware"),
+	); err != nil {
+		t.Fatalf("atomic verify and mark: %v", err)
+	}
+	select {
+	case <-replacementStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("replacement upload did not reach the atomic commit")
+	}
+	select {
+	case err := <-replacementFinished:
+		if !errors.Is(err, domain.ErrFileImmutable) {
+			t.Fatalf("replacement error = %v, want immutable", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("replacement upload did not return after atomic publish")
+	}
+	verification, err := service.ReadArtifact(context.Background(), relativePath)
+	if err != nil {
+		t.Fatalf("read artifact: %v", err)
+	}
+	if verification.SHA256 != sha256String("signed firmware") {
+		t.Fatalf("artifact bytes changed: %s", verification.SHA256)
+	}
+}
+
+func TestPromoteStagedFileVerifiesBytesAndPublishesAtomically(t *testing.T) {
+	root := t.TempDir()
+	stagingRoot := t.TempDir()
+	service, err := New(Options{
+		RootDir:       root,
+		StagingDir:    stagingRoot,
+		PublicBaseURL: "https://download.example.test",
+	})
+	if err != nil {
+		t.Fatalf("create release store service: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = service.Close()
+	})
+	stagedPath := "android/apk/sprout-parent-app.apk"
+	fullStagedPath := filepath.Join(stagingRoot, filepath.FromSlash(stagedPath))
+	if err := os.MkdirAll(filepath.Dir(fullStagedPath), 0o775); err != nil {
+		t.Fatalf("create staging directory: %v", err)
+	}
+	payload := []byte("verified staged apk")
+	if err := os.WriteFile(fullStagedPath, payload, 0o664); err != nil {
+		t.Fatalf("write staged artifact: %v", err)
+	}
+	promoted, err := service.PromoteStagedFile(
+		context.Background(),
+		domain.PromoteStagedInput{
+			StagedPath:   stagedPath,
+			RelativePath: "0.14.0/stable/android/apk/sprout-parent-app.apk",
+			SHA256:       sha256String(string(payload)),
+			SizeBytes:    int64(len(payload)),
+		},
+	)
+	if err != nil {
+		t.Fatalf("promote staged artifact: %v", err)
+	}
+	if promoted.SHA256 != sha256String(string(payload)) {
+		t.Fatalf("promoted digest = %s", promoted.SHA256)
+	}
+	verification, err := service.ReadArtifact(
+		context.Background(),
+		promoted.RelativePath,
+	)
+	if err != nil {
+		t.Fatalf("read promoted artifact: %v", err)
+	}
+	if verification.SHA256 != sha256String(string(payload)) {
+		t.Fatalf("public artifact digest = %s", verification.SHA256)
+	}
+	if _, err := service.PromoteStagedFile(
+		context.Background(),
+		domain.PromoteStagedInput{
+			StagedPath:   stagedPath,
+			RelativePath: promoted.RelativePath,
+			SHA256:       sha256String("different bytes"),
+			SizeBytes:    int64(len("different bytes")),
+		},
+	); !errors.Is(err, domain.ErrArtifactMismatch) {
+		t.Fatalf("bad staged digest error = %v, want artifact mismatch", err)
+	}
+}
+
+func sha256String(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }
 
 func TestRefreshIndexMatchesPublicReleaseContract(t *testing.T) {

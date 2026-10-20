@@ -12,6 +12,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/packages/go/httpapi"
 	featuredomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
+	operationsdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/operations/domain"
 )
 
 type featureCenterTestService struct {
@@ -290,6 +291,73 @@ func TestFeatureCenterUpdateConfigMapsVersionConflict(t *testing.T) {
 	}
 	if envelope.Error == nil ||
 		envelope.Error.Code != "config_version_conflict" {
+		t.Fatalf("unexpected error envelope: %s", recorder.Body.String())
+	}
+}
+
+func TestFeatureCenterUpdateConfigMapsRuntimeSettingsConflict(t *testing.T) {
+	service := &featureCenterTestService{
+		err: &operationsdomain.SettingsVersionConflictError{
+			ExpectedVersion: 4,
+			CurrentVersion:  5,
+		},
+	}
+	handler := NewFeatureCenterHandler(service)
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/admin/feature-center/voice_conversation/config",
+		strings.NewReader(`{"values":{},"expected_version":4}`),
+	)
+	request.SetPathValue("feature", "voice_conversation")
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		authenticatedAccountKey{},
+		"admin-001",
+	))
+	recorder := httptest.NewRecorder()
+	handler.UpdateConfig(recorder, request)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", recorder.Code, recorder.Body.String())
+	}
+	var envelope struct {
+		Error *httpapi.ErrorBody `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if envelope.Error == nil || envelope.Error.Code != "settings_version_conflict" {
+		t.Fatalf("unexpected error envelope: %s", recorder.Body.String())
+	}
+}
+
+func TestFeatureCenterHealthCheckMapsStaleSnapshot(t *testing.T) {
+	service := &featureCenterTestService{
+		updateErr: featuredomain.ErrHealthSnapshotStale,
+	}
+	handler := NewFeatureCenterHandler(service)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/admin/feature-center/notification/health-check",
+		nil,
+	)
+	request.SetPathValue("feature", "notification")
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		authenticatedAccountKey{},
+		"admin-001",
+	))
+	recorder := httptest.NewRecorder()
+	handler.HealthCheck(recorder, request)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", recorder.Code, recorder.Body.String())
+	}
+	var envelope struct {
+		Error *httpapi.ErrorBody `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if envelope.Error == nil || envelope.Error.Code != "health_snapshot_stale" {
 		t.Fatalf("unexpected error envelope: %s", recorder.Body.String())
 	}
 }

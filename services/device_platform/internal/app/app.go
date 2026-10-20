@@ -336,6 +336,7 @@ func Run() error {
 	}
 	releaseStore, err := releaseStoreService.New(releaseStoreService.Options{
 		RootDir:       cfg.ReleaseStore.RootDir,
+		StagingDir:    cfg.ReleaseStore.StagingDir,
 		PublicBaseURL: cfg.ReleaseStore.PublicBaseURL,
 	})
 	if err != nil {
@@ -359,6 +360,11 @@ func Run() error {
 	})
 	if err != nil {
 		return fmt.Errorf("create OTA service: %w", err)
+	}
+	if _, ok := any(releaseStore).(otaService.PublishingArtifactVerifier); !ok {
+		return errors.New(
+			"release store must implement atomic artifact verification for OTA publication",
+		)
 	}
 	// The runtime service is created before OTA. Wire the OTA authority here so
 	// command validation and OTA publication share one repository and one

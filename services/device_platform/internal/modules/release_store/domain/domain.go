@@ -95,11 +95,26 @@ func (r *FileRelease) RegistrationKind() string {
 type UploadInput struct {
 	RelativePath string
 	Overwrite    bool
-	Version      string
-	Channel      string
-	Platform     string
-	Kind         string
-	FileName     string
+	// StagingPath optionally names a file already uploaded through the
+	// write-only SFTP staging volume. When set, the service verifies and
+	// promotes that file instead of reading the HTTP multipart body.
+	StagingPath string
+	SHA256      string
+	SizeBytes   int64
+	Version     string
+	Channel     string
+	Platform    string
+	Kind        string
+	FileName    string
+}
+
+// PromoteStagedInput describes a verified SFTP staging file that may enter
+// the public release volume.
+type PromoteStagedInput struct {
+	StagedPath   string
+	RelativePath string
+	SHA256       string
+	SizeBytes    int64
 }
 
 // IndexRefreshRequest regenerates one release manifest and the global index.

@@ -90,17 +90,40 @@ func (handler internalHandler) uploadReleaseFile(
 		relativePath = strings.TrimSpace(request.FormValue("path"))
 	}
 	overwrite, _ := strconv.ParseBool(strings.TrimSpace(request.FormValue("overwrite")))
+	stagingPath := strings.TrimSpace(request.FormValue("staging_path"))
+	expectedSHA256 := strings.TrimSpace(request.FormValue("sha256"))
+	expectedSizeBytes, sizeErr := strconv.ParseInt(
+		strings.TrimSpace(request.FormValue("size_bytes")),
+		10,
+		64,
+	)
 	file, _, err := request.FormFile("file")
-	if err != nil {
+	if err != nil && stagingPath == "" {
 		writeError(response, request, http.StatusBadRequest, "missing_file", "请提交发布文件")
 		return
 	}
-	defer file.Close()
+	if stagingPath != "" {
+		if sizeErr != nil || expectedSizeBytes <= 0 || expectedSHA256 == "" {
+			writeError(
+				response,
+				request,
+				http.StatusUnprocessableEntity,
+				"invalid_staged_file",
+				"请提供暂存文件的大小和校验值",
+			)
+			return
+		}
+	} else {
+		defer file.Close()
+	}
 	uploaded, err := handler.releaseStoreService.UploadFile(
 		request.Context(),
 		releaseStoredomain.UploadInput{
 			RelativePath: relativePath,
 			Overwrite:    overwrite,
+			StagingPath:  stagingPath,
+			SHA256:       expectedSHA256,
+			SizeBytes:    expectedSizeBytes,
 			Version:      strings.TrimSpace(request.FormValue("version")),
 			Channel:      strings.TrimSpace(request.FormValue("channel")),
 			Platform:     strings.TrimSpace(request.FormValue("platform")),

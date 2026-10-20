@@ -33,6 +33,31 @@ func (acceptingArtifactLocker) MarkPublishedArtifact(string) error {
 	return nil
 }
 
+type recordingAtomicArtifactLocker struct {
+	calls     int
+	key       string
+	sizeBytes int64
+	sha256    string
+	err       error
+}
+
+func (*recordingAtomicArtifactLocker) MarkPublishedArtifact(string) error {
+	return errors.New("legacy mark must not be used when atomic verification is available")
+}
+
+func (locker *recordingAtomicArtifactLocker) VerifyAndMarkPublishedArtifact(
+	_ context.Context,
+	artifactKey string,
+	expectedSizeBytes int64,
+	expectedSHA256 string,
+) error {
+	locker.calls += 1
+	locker.key = artifactKey
+	locker.sizeBytes = expectedSizeBytes
+	locker.sha256 = expectedSHA256
+	return locker.err
+}
+
 type capturingVerifier struct {
 	manifest []byte
 }
@@ -575,6 +600,47 @@ func TestPublishReleaseSignsEveryPolicyField(t *testing.T) {
 	}, "\n")
 	if string(verifier.manifest) != want {
 		t.Fatalf("canonical manifest mismatch:\n%s", verifier.manifest)
+	}
+}
+
+func TestPublishReleaseUsesOneAtomicArtifactVerification(t *testing.T) {
+	repository := newFakeRepository()
+	locker := &recordingAtomicArtifactLocker{}
+	service, err := New(Options{
+		Repository: repository,
+		Verifier:   acceptingVerifier{},
+		Artifacts: acceptingArtifactVerifier{
+			sizeBytes: validReleaseInput().SizeBytes,
+			sha256:    validReleaseInput().SHA256,
+		},
+		ArtifactLock: locker,
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	release, err := service.CreateReleaseDraft(context.Background(), validReleaseInput())
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+	if _, err := service.PublishRelease(
+		context.Background(),
+		release.ID,
+		"admin-1",
+		release.RecordVersion,
+	); err != nil {
+		t.Fatalf("publish release: %v", err)
+	}
+	if locker.calls != 1 ||
+		locker.key != validReleaseInput().ArtifactKey ||
+		locker.sizeBytes != validReleaseInput().SizeBytes ||
+		locker.sha256 != validReleaseInput().SHA256 {
+		t.Fatalf(
+			"atomic artifact verification calls=%d key=%q size=%d sha256=%q",
+			locker.calls,
+			locker.key,
+			locker.sizeBytes,
+			locker.sha256,
+		)
 	}
 }
 

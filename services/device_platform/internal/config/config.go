@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -158,6 +159,7 @@ type ServiceVersionConfig struct {
 // release manifests; credentials never belong here.
 type ReleaseStoreConfig struct {
 	RootDir       string
+	StagingDir    string
 	PublicBaseURL string
 }
 
@@ -214,8 +216,8 @@ func Load() (Config, error) {
 			),
 		},
 		AI: AIConfig{
-			BaseURL:            env("DEVICE_PLATFORM_SUB2API_BASE_URL", "http://127.0.0.1:8080"),
-			ServiceToken:       env("DEVICE_PLATFORM_SUB2API_SERVICE_TOKEN", ""),
+			BaseURL:      env("DEVICE_PLATFORM_SUB2API_BASE_URL", "http://127.0.0.1:8080"),
+			ServiceToken: env("DEVICE_PLATFORM_SUB2API_SERVICE_TOKEN", ""),
 			ExecutionTokenTTL: envDuration(
 				"DEVICE_PLATFORM_AI_EXECUTION_TOKEN_TTL",
 				2*time.Minute,
@@ -288,6 +290,10 @@ func Load() (Config, error) {
 			RootDir: env(
 				"DEVICE_PLATFORM_DOWNLOAD_STORE_DIR",
 				"/srv/releases",
+			),
+			StagingDir: env(
+				"DEVICE_PLATFORM_DOWNLOAD_STAGING_DIR",
+				"/srv/releases-staging",
 			),
 			PublicBaseURL: env(
 				"DEVICE_PLATFORM_DOWNLOAD_PUBLIC_BASE_URL",
@@ -380,6 +386,15 @@ func Load() (Config, error) {
 	}
 	if !strings.HasPrefix(strings.TrimSpace(cfg.ReleaseStore.RootDir), "/") {
 		return Config{}, fmt.Errorf("DEVICE_PLATFORM_DOWNLOAD_STORE_DIR must be an absolute path")
+	}
+	if !strings.HasPrefix(strings.TrimSpace(cfg.ReleaseStore.StagingDir), "/") {
+		return Config{}, fmt.Errorf("DEVICE_PLATFORM_DOWNLOAD_STAGING_DIR must be an absolute path")
+	}
+	if filepath.Clean(cfg.ReleaseStore.RootDir) ==
+		filepath.Clean(cfg.ReleaseStore.StagingDir) {
+		return Config{}, fmt.Errorf(
+			"DEVICE_PLATFORM_DOWNLOAD_STAGING_DIR must differ from DEVICE_PLATFORM_DOWNLOAD_STORE_DIR",
+		)
 	}
 	if secret := strings.TrimSpace(cfg.VoiceGateway.WSTokenSecret); secret != "" &&
 		len(secret) < 32 {

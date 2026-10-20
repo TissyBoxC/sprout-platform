@@ -8,6 +8,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ota/repository"
+	releaseStoreDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
 	"github.com/google/uuid"
 )
@@ -50,6 +51,18 @@ type ArtifactVerifier interface {
 // PublishedArtifactLocker protects the exact signed bytes after publication.
 type PublishedArtifactLocker interface {
 	MarkPublishedArtifact(artifactKey string) error
+}
+
+// PublishingArtifactVerifier combines the last-byte check with the immutable
+// transition. A separate verify-then-mark sequence would let an upload replace
+// the file between the two operations.
+type PublishingArtifactVerifier interface {
+	VerifyAndMarkPublishedArtifact(
+		ctx context.Context,
+		artifactKey string,
+		expectedSizeBytes int64,
+		expectedSHA256 string,
+	) error
 }
 
 // CurrentDeviceUpdate is the active deployment (if any) plus the release it
@@ -268,17 +281,12 @@ func (s *Service) PublishRelease(
 	); err != nil {
 		return nil, err
 	}
-	// Draft creation deliberately allows an in-flight upload, but publication
-	// must prove the exact bytes in the shared download store match the signed
-	// manifest before devices can observe the release.
-	if err := s.verifyArtifact(ctx, release); err != nil {
+	// Publication must prove the bytes and lock them in one atomic operation.
+	// Otherwise an upload can replace the artifact between verification and
+	// MarkPublishedArtifact while the signed manifest still describes the old
+	// digest.
+	if err := s.verifyAndLockArtifact(ctx, release); err != nil {
 		return nil, err
-	}
-	if s.artifactLock == nil {
-		return nil, domain.ErrArtifactUnavailable
-	}
-	if err := s.artifactLock.MarkPublishedArtifact(release.ArtifactKey); err != nil {
-		return nil, domain.ErrArtifactUnavailable
 	}
 	now := s.timeSource.Now().UTC()
 	release.SignatureStatus = domain.SignatureStatusVerified
@@ -291,6 +299,49 @@ func (s *Service) PublishRelease(
 		domain.ReleaseStatusPublished,
 		true,
 	)
+}
+
+func (s *Service) verifyAndLockArtifact(
+	ctx context.Context,
+	release *domain.Release,
+) error {
+	if release == nil || strings.TrimSpace(release.ArtifactKey) == "" {
+		return domain.ErrArtifactUnavailable
+	}
+	if atomicVerifier, ok := s.artifactLock.(PublishingArtifactVerifier); ok {
+		err := atomicVerifier.VerifyAndMarkPublishedArtifact(
+			ctx,
+			release.ArtifactKey,
+			release.SizeBytes,
+			release.SHA256,
+		)
+		return mapArtifactLockError(err)
+	}
+	// Compatibility path for external fakes and older implementations. The
+	// production assembly always uses the atomic interface, and the startup
+	// contract test prevents a silent fallback from reaching production.
+	if err := s.verifyArtifact(ctx, release); err != nil {
+		return err
+	}
+	if s.artifactLock == nil {
+		return domain.ErrArtifactUnavailable
+	}
+	return mapArtifactLockError(s.artifactLock.MarkPublishedArtifact(release.ArtifactKey))
+}
+
+func mapArtifactLockError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, domain.ErrArtifactMissing),
+		errors.Is(err, releaseStoreDomain.ErrFileNotFound):
+		return domain.ErrArtifactMissing
+	case errors.Is(err, domain.ErrArtifactMismatch),
+		errors.Is(err, releaseStoreDomain.ErrFileImmutable):
+		return domain.ErrArtifactMismatch
+	default:
+		return domain.ErrArtifactUnavailable
+	}
 }
 
 func (s *Service) verifyArtifact(

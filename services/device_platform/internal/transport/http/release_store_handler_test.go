@@ -66,6 +66,14 @@ func (service *fakeReleaseStoreAdminService) UploadFile(
 	return service.uploaded, service.err
 }
 
+func (service *fakeReleaseStoreAdminService) PromoteStagedFile(
+	ctx context.Context,
+	input releaseStoredomain.PromoteStagedInput,
+) (releaseStoredomain.File, error) {
+	service.uploadPath = input.RelativePath
+	return service.uploaded, service.err
+}
+
 func (service *fakeReleaseStoreAdminService) DeleteFile(
 	_ context.Context,
 	relativePath string,
@@ -275,6 +283,28 @@ func TestStorageDeleteRouteCapturesNestedRelativePath(t *testing.T) {
 	}
 	if service.deletedPath != "0.12.3/stable/android/apk/app.apk" {
 		t.Fatalf("unexpected deleted path: %q", service.deletedPath)
+	}
+}
+
+func TestReleaseStoreDeleteMapsImmutableFileToConflict(t *testing.T) {
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/release-files", nil)
+	response := httptest.NewRecorder()
+
+	writeReleaseStoreError(response, request, releaseStoredomain.ErrFileImmutable)
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d", http.StatusConflict, response.Code)
+	}
+	var envelope struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if envelope.Error.Code != "published_file_immutable" {
+		t.Fatalf("expected published_file_immutable, got %q", envelope.Error.Code)
 	}
 }
 

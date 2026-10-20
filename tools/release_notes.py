@@ -40,6 +40,7 @@ SECTION_TITLES = {
 
 SCOPE_TITLES = {
     "admin_web": "后台管理端",
+    "ai_gateway": "AI 服务",
     "brand": "品牌与命名",
     "ci": "持续集成",
     "contracts": "共享契约",

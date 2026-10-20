@@ -5,8 +5,15 @@ import {
   useAdminPermissionStore,
   type AdminPermissionGroup,
 } from '@/features/admin_permission/application/adminPermissionStore'
+import { useAuthStore } from '@/features/auth/application/authStore'
+import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
 
 const store = useAdminPermissionStore()
+const authStore = useAuthStore()
+// Viewing the catalogue needs admins.read; changing an assignment needs
+// admins.manage, which the backend enforces. Without this guard a read-only
+// administrator could tick boxes and only learn the limit from a generic error.
+const canManagePermissions = computed(() => authStore.can(ADMIN_PERMISSIONS.adminsManage))
 const selectedAccountId = ref('')
 
 const selectedAccount = computed(
@@ -88,6 +95,10 @@ function toggleWildcard(event: Event): void {
       </p>
     </Transition>
 
+    <p v-if="!canManagePermissions" class="readonly-notice">
+      你当前只有查看权限。可以查看每位管理员已分配的范围，修改控件已锁定。
+    </p>
+
     <div v-if="store.isLoading" class="state-panel">
       <span class="state-spinner" aria-hidden="true"></span>
       正在读取管理员权限…
@@ -138,7 +149,12 @@ function toggleWildcard(event: Event): void {
             <strong>全部管理权限</strong>
             <small>选择后可以使用全部管理功能，适合日常维护账号。</small>
           </span>
-          <input type="checkbox" :checked="selectedUsesWildcard" @change="toggleWildcard" />
+          <input
+            type="checkbox"
+            :checked="selectedUsesWildcard"
+            :disabled="!canManagePermissions"
+            @change="toggleWildcard"
+          />
         </label>
 
         <fieldset
@@ -146,7 +162,7 @@ function toggleWildcard(event: Event): void {
           :key="group.group"
           class="permission-group"
           :class="{ muted: selectedUsesWildcard }"
-          :disabled="selectedUsesWildcard"
+          :disabled="selectedUsesWildcard || !canManagePermissions"
         >
           <legend>
             {{ group.group }}
@@ -172,7 +188,8 @@ function toggleWildcard(event: Event): void {
         </p>
 
         <div class="panel-footer">
-          <p>
+          <p v-if="!canManagePermissions">你只能查看权限分配，如需调整请联系拥有权限管理权限的管理员。</p>
+          <p v-else>
             {{
               selectedUsesWildcard
                 ? '保存后该管理员可以访问全部管理功能。'
@@ -180,6 +197,7 @@ function toggleWildcard(event: Event): void {
             }}
           </p>
           <button
+            v-if="canManagePermissions"
             type="button"
             class="primary"
             :disabled="selectedIsSaving || !selectedIsDirty"
@@ -314,6 +332,18 @@ button:disabled {
   grid-template-columns: 280px minmax(0, 1fr);
   gap: 18px;
   align-items: start;
+}
+
+/* Shown in every page state so a view-only administrator learns the limit
+   before interacting with the list. */
+.readonly-notice {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid #b7def2;
+  border-radius: 14px;
+  background: #f3faff;
+  color: #27627f;
+  line-height: 1.55;
 }
 
 .account-column {

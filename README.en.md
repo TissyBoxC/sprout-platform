@@ -34,7 +34,7 @@ tooling. Firmware and the AI gateway fork remain independent repositories.
 
 ## Current Status
 
-The repository version is `0.31.3`. Accounts, families, devices, content,
+The repository version is `0.32.0`. Accounts, families, devices, content,
 voice, notifications, OTA, the admin Feature Center, and cloud service-version
 management have software-level closed loops. Capabilities that still depend on
 physical hardware, production keys, or bench validation remain `[Partial]`.
@@ -356,6 +356,10 @@ GET /readyz
 `readyz` checks PostgreSQL, Redis, and MQTT in order and returns `503` when any
 dependency is unavailable, so a container is not marked traffic-ready while
 its database or message transport is down.
+
+`healthz` reports the `version` actually injected into the running binary.
+Release images use the repository `VERSION`; local builds without an injected
+version report `dev`.
 
 ### Firmware
 

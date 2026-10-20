@@ -138,6 +138,12 @@ func Run() error {
 	)))
 	slog.SetDefault(logger)
 
+	// A misconfigured trust list must stop startup: silently falling back would
+	// either disable per-client rate limiting or trust an unintended proxy.
+	if err := platformhttp.SetTrustedProxies(cfg.HTTP.TrustedProxies); err != nil {
+		return fmt.Errorf("configure trusted proxies: %w", err)
+	}
+
 	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
 	defer runtimeCancel()
 

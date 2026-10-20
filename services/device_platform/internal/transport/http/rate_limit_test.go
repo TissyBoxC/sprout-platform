@@ -292,10 +292,64 @@ func TestRateLimiterUsesAtomicWindowAndSharedIdentityBudget(t *testing.T) {
 }
 
 func TestClientAddressUsesForwardedAddress(t *testing.T) {
+	restoreTrustedProxies(t, "10.0.0.0/8")
 	request := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
 	request.Header.Set("X-Forwarded-For", "203.0.113.10, 10.0.0.1")
 	request.RemoteAddr = "10.0.0.8:1234"
 	if got := clientAddress(request); got != "203.0.113.10" {
 		t.Fatalf("client address = %q, want forwarded address", got)
+	}
+}
+
+func TestClientAddressIgnoresForwardedHeaderFromUntrustedPeer(t *testing.T) {
+	restoreTrustedProxies(t, "10.0.0.0/8")
+	request := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+	request.Header.Set("X-Forwarded-For", "203.0.113.10")
+	request.RemoteAddr = "198.51.100.7:1234"
+
+	got := clientAddress(request)
+	if got != "198.51.100.7" {
+		t.Fatalf("client address = %q, want the immediate peer", got)
+	}
+}
+
+func TestClientAddressIgnoresForwardedHeaderWhenNoProxyTrusted(t *testing.T) {
+	restoreTrustedProxies(t)
+	request := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+	request.Header.Set("X-Forwarded-For", "203.0.113.10")
+	request.RemoteAddr = "198.51.100.7:1234"
+
+	if got := clientAddress(request); got != "198.51.100.7" {
+		t.Fatalf("client address = %q, want the immediate peer", got)
+	}
+}
+
+func TestClientAddressTakesRightmostUntrustedHop(t *testing.T) {
+	restoreTrustedProxies(t, "10.0.0.0/8")
+	request := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+	// The caller prepended a forged address; only the hop appended by this
+	// deployment's proxy may be believed.
+	request.Header.Set("X-Forwarded-For", "1.2.3.4, 203.0.113.10, 10.0.0.1")
+	request.RemoteAddr = "10.0.0.8:1234"
+
+	if got := clientAddress(request); got != "203.0.113.10" {
+		t.Fatalf("client address = %q, want the rightmost untrusted hop", got)
+	}
+}
+
+func TestSetTrustedProxiesRejectsInvalidEntry(t *testing.T) {
+	restoreTrustedProxies(t)
+	if err := SetTrustedProxies([]string{"not-an-address"}); err == nil {
+		t.Fatal("SetTrustedProxies accepted an invalid entry")
+	}
+}
+
+// restoreTrustedProxies installs a trust list for one test and resets it after.
+func restoreTrustedProxies(t *testing.T, cidrs ...string) {
+	t.Helper()
+	previous := trustedProxyNetworks
+	t.Cleanup(func() { trustedProxyNetworks = previous })
+	if err := SetTrustedProxies(cidrs); err != nil {
+		t.Fatalf("SetTrustedProxies() error = %v", err)
 	}
 }

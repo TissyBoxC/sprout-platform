@@ -35,6 +35,11 @@ type Config struct {
 type HTTPConfig struct {
 	Host string
 	Port string
+	// TrustedProxies lists the reverse proxies whose X-Forwarded-For header is
+	// believed when deriving the client address for rate limiting. It is empty
+	// by default so a directly reachable service never trusts a caller-supplied
+	// forwarding header.
+	TrustedProxies []string
 }
 
 // Address returns the HTTP listen address.
@@ -193,6 +198,10 @@ func Load() (Config, error) {
 		HTTP: HTTPConfig{
 			Host: env("DEVICE_PLATFORM_HTTP_HOST", "0.0.0.0"),
 			Port: env("DEVICE_PLATFORM_HTTP_PORT", "8081"),
+			TrustedProxies: envList(
+				"DEVICE_PLATFORM_HTTP_TRUSTED_PROXIES",
+				nil,
+			),
 		},
 		Internal: InternalAPIConfig{
 			Enabled:   envBool("DEVICE_PLATFORM_INTERNAL_API_ENABLED", false),

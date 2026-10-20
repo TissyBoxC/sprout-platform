@@ -314,6 +314,14 @@ location ^~ /api/v1/release-publication/ {
 只覆盖发布接口前缀，其余路径仍由面板生成的反向代理处理。保存后执行
 `nginx -t && nginx -s reload`；此配置不改变鉴权规则。
 
+反向代理同时决定限流如何识别客户端。平台只在**直接对端属于受信代理网段**时
+采信 `X-Forwarded-For`，否则一律使用 TCP 对端地址；这是为了防止调用方自行
+伪造该请求头绕过登录、注册、短信验证码的按客户端限流。Compose 默认把
+私有 Docker 网段设为受信（`SPROUT_DEVICE_PLATFORM_TRUSTED_PROXIES`）。如果
+反向代理不在这些网段内，请在 `deploy/cloud/.env` 中把它改成实际的代理地址或
+CIDR；保持为空表示完全不采信该请求头。格式错误会让平台拒绝启动，不会静默
+降级。
+
 部署后先运行只读检查：
 
 ```bash

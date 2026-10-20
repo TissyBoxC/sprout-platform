@@ -141,6 +141,11 @@ services:
     environment:
       DEVICE_PLATFORM_HTTP_HOST: "0.0.0.0"
       DEVICE_PLATFORM_HTTP_PORT: "8081"
+      # Only these peers may supply X-Forwarded-For for rate-limit accounting.
+      # The host reverse proxy reaches the published port from the container
+      # bridge gateway, so the private Docker ranges are trusted and public
+      # callers are never believed.
+      DEVICE_PLATFORM_HTTP_TRUSTED_PROXIES: "${SPROUT_DEVICE_PLATFORM_TRUSTED_PROXIES:-172.16.0.0/12,10.0.0.0/8,192.168.0.0/16}"
       DEVICE_PLATFORM_DATABASE_DSN: "postgres://${SPROUT_POSTGRES_USER}:${SPROUT_POSTGRES_PASSWORD}@postgres:5432/${SPROUT_DEVICE_PLATFORM_DATABASE_NAME}?sslmode=disable"
       DEVICE_PLATFORM_REDIS_ADDRESS: "redis:6379"
       DEVICE_PLATFORM_REDIS_PASSWORD: ${SPROUT_REDIS_PASSWORD}

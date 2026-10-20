@@ -62,6 +62,48 @@ type rateLimitRule struct {
 	window time.Duration
 }
 
+// trustedProxyNetworks lists the peers whose X-Forwarded-For header is believed.
+//
+// It is empty by default so a directly reachable service never trusts a caller's
+// forwarding header. Deployers set it through the router options; every entry
+// must describe a proxy they operate.
+var trustedProxyNetworks []*net.IPNet
+
+// SetTrustedProxies replaces the trusted proxy networks. An empty or invalid
+// entry list leaves header trust disabled rather than partially applied.
+func SetTrustedProxies(cidrs []string) error {
+	parsed := make([]*net.IPNet, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		trimmed := strings.TrimSpace(cidr)
+		if trimmed == "" {
+			continue
+		}
+		// A bare address means exactly one proxy host.
+		if !strings.Contains(trimmed, "/") {
+			address := net.ParseIP(trimmed)
+			if address == nil {
+				return fmt.Errorf("trusted proxy %q is not an IP address or CIDR", cidr)
+			}
+			bits := 32
+			if address.To4() == nil {
+				bits = 128
+			}
+			parsed = append(parsed, &net.IPNet{
+				IP:   address,
+				Mask: net.CIDRMask(bits, bits),
+			})
+			continue
+		}
+		_, network, err := net.ParseCIDR(trimmed)
+		if err != nil {
+			return fmt.Errorf("trusted proxy %q is not a valid CIDR: %w", cidr, err)
+		}
+		parsed = append(parsed, network)
+	}
+	trustedProxyNetworks = parsed
+	return nil
+}
+
 var (
 	loginRateLimit = rateLimitRule{
 		scope:  "login",
@@ -168,24 +210,78 @@ func clientAddress(request *http.Request) string {
 	if request == nil {
 		return "unknown"
 	}
-	// The edge proxy overwrites X-Forwarded-For. Taking the first value here
-	// keeps one abusive household from rotating source ports; deployments must
-	// not expose the service directly while trusting this header.
-	forwarded := strings.TrimSpace(strings.Split(
-		request.Header.Get("X-Forwarded-For"),
-		",",
-	)[0])
-	if forwarded != "" {
-		return forwarded
+	peer := remoteHost(request)
+	// X-Forwarded-For is caller-controlled. It may only be believed when the
+	// immediate peer is a proxy this deployment operates; otherwise an attacker
+	// rotates the header to earn a fresh rate-limit budget on every request.
+	if isTrustedProxy(peer) {
+		if forwarded := forwardedClientHost(request, peer); forwarded != "" {
+			return forwarded
+		}
 	}
-	host, _, err := net.SplitHostPort(strings.TrimSpace(request.RemoteAddr))
-	if err == nil && host != "" {
-		return host
+	if peer != "" {
+		return peer
 	}
 	if request.RemoteAddr != "" {
 		return request.RemoteAddr
 	}
 	return "unknown"
+}
+
+// remoteHost extracts the bare address of the immediate TCP peer.
+func remoteHost(request *http.Request) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(request.RemoteAddr))
+	if err == nil && host != "" {
+		return host
+	}
+	return ""
+}
+
+// forwardedClientHost walks the X-Forwarded-For chain from the right, which is
+// the end this deployment's proxies appended. The first hop that is not itself a
+// trusted proxy is the real client; entries further left were supplied by the
+// caller and must never be trusted.
+func forwardedClientHost(request *http.Request, peer string) string {
+	chain := request.Header.Values("X-Forwarded-For")
+	if len(chain) == 0 {
+		return ""
+	}
+	var hops []string
+	for _, header := range chain {
+		for _, hop := range strings.Split(header, ",") {
+			if trimmed := strings.TrimSpace(hop); trimmed != "" {
+				hops = append(hops, trimmed)
+			}
+		}
+	}
+	for index := len(hops) - 1; index >= 0; index-- {
+		hop := hops[index]
+		if !isTrustedProxy(hop) {
+			return hop
+		}
+	}
+	// The whole chain was proxied; the leftmost entry is the origin the
+	// outermost trust boundary vouched for.
+	if len(hops) > 0 {
+		return hops[0]
+	}
+	return peer
+}
+
+// isTrustedProxy reports whether an address belongs to a configured proxy.
+// An empty trust list deliberately disables header trust entirely, which is the
+// safe default for a service exposed without a reverse proxy.
+func isTrustedProxy(address string) bool {
+	parsed := net.ParseIP(strings.TrimSpace(address))
+	if parsed == nil {
+		return false
+	}
+	for _, network := range trustedProxyNetworks {
+		if network.Contains(parsed) {
+			return true
+		}
+	}
+	return false
 }
 
 func (limiter authRateLimiter) login(

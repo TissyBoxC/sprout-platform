@@ -8,6 +8,9 @@ import {
   useThemePackStore,
 } from '@/features/content/application/themePackStore'
 import { contentAgeTierLabel } from '@/features/content/application/contentLibraryStore'
+import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
+import { useAuthStore } from '@/features/auth/application/authStore'
+import { canManageContent } from '@/features/content/domain/contentPermission'
 
 interface ThemeForm {
   themeId: string
@@ -18,6 +21,10 @@ interface ThemeForm {
 }
 
 const store = useThemePackStore()
+const authStore = useAuthStore()
+const canManage = computed(() =>
+  canManageContent(authStore.can(ADMIN_PERMISSIONS.contentReview)),
+)
 
 const isEditorOpen = ref(false)
 const isEditing = ref(false)
@@ -156,9 +163,15 @@ function statusClass(status: string): string {
         <button type="button" :disabled="store.isLoading" @click="store.load">
           {{ store.isLoading ? '正在加载…' : '重新加载' }}
         </button>
-        <button type="button" class="primary" @click="openCreate">新建主题包</button>
+        <button v-if="canManage" type="button" class="primary" @click="openCreate">
+          新建主题包
+        </button>
       </div>
     </header>
+
+    <p v-if="!canManage" class="content-readonly-notice">
+      你可以查看主题包和成员内容；新建、发布与撤回由具备内容审核权限的管理员完成。
+    </p>
 
     <Transition name="toast">
       <p v-if="store.lastMessage" class="success-message" role="status">
@@ -230,7 +243,7 @@ function statusClass(status: string): string {
                 </td>
                 <td class="row-actions">
                   <button
-                    v-if="pack.status === 'draft'"
+                    v-if="canManage && pack.status === 'draft'"
                     type="button"
                     class="text-button"
                     :disabled="store.isSubmitting"
@@ -239,7 +252,7 @@ function statusClass(status: string): string {
                     编辑
                   </button>
                   <button
-                    v-if="pack.status === 'draft'"
+                    v-if="canManage && pack.status === 'draft'"
                     type="button"
                     class="text-button"
                     :disabled="store.isSubmitting"
@@ -248,7 +261,7 @@ function statusClass(status: string): string {
                     发布
                   </button>
                   <button
-                    v-if="pack.status === 'published'"
+                    v-if="canManage && pack.status === 'published'"
                     type="button"
                     class="text-button"
                     :disabled="store.isSubmitting"
@@ -257,7 +270,7 @@ function statusClass(status: string): string {
                     撤回
                   </button>
                   <button
-                    v-if="pack.status !== 'published'"
+                    v-if="canManage && pack.status !== 'published'"
                     type="button"
                     class="text-button danger"
                     :disabled="store.isSubmitting"
@@ -351,6 +364,15 @@ function statusClass(status: string): string {
   border-radius: var(--sprout-radius-card);
   background: #ffffff;
   box-shadow: 0 8px 24px rgb(194 91 128 / 5%);
+}
+
+.content-readonly-notice {
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--sprout-outline);
+  border-radius: 14px;
+  background: #fffbfc;
+  color: var(--sprout-text-muted);
 }
 
 .eyebrow {

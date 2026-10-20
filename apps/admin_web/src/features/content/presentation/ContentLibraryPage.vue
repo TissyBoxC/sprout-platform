@@ -27,6 +27,9 @@ import {
   useContentLibraryStore,
 } from '@/features/content/application/contentLibraryStore'
 import ContentAssetFields from '@/features/content/presentation/ContentAssetFields.vue'
+import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
+import { useAuthStore } from '@/features/auth/application/authStore'
+import { canManageContent } from '@/features/content/domain/contentPermission'
 
 type AssetSource = 'manual' | 'download'
 
@@ -42,6 +45,11 @@ interface DraftForm {
 }
 
 const store = useContentLibraryStore()
+const authStore = useAuthStore()
+
+const canManage = computed(() =>
+  canManageContent(authStore.can(ADMIN_PERMISSIONS.contentReview)),
+)
 
 const categories: ContentCategory[] = [
   'story',
@@ -257,29 +265,29 @@ async function confirmReject(): Promise<void> {
 }
 
 function canSubmit(version: ContentVersion | null): boolean {
-  return version?.status === 'draft'
+  return canManage.value && version?.status === 'draft'
 }
 
 function canReview(version: ContentVersion | null): boolean {
-  return version?.status === 'in_review'
+  return canManage.value && version?.status === 'in_review'
 }
 
 function canPublish(version: ContentVersion | null): boolean {
-  return version?.status === 'in_review'
+  return canManage.value && version?.status === 'in_review'
 }
 
 function canWithdraw(version: ContentVersion | null): boolean {
-  return version?.status === 'published'
+  return canManage.value && version?.status === 'published'
 }
 
 function canArchive(version: ContentVersion | null): boolean {
   // Archive is the terminal step after withdrawal; publishing again goes
   // through the review flow, so a published version must be withdrawn first.
-  return version?.status === 'withdrawn'
+  return canManage.value && version?.status === 'withdrawn'
 }
 
 function canEdit(version: ContentVersion | null): boolean {
-  return version?.status === 'draft'
+  return canManage.value && version?.status === 'draft'
 }
 
 function handleSearch(): void {
@@ -460,9 +468,15 @@ function ageTierSummary(value: ContentPackage): string {
         <button type="button" class="secondary" :disabled="store.isLoading" @click="store.load">
           {{ store.isLoading ? '正在加载…' : '重新加载' }}
         </button>
-        <button type="button" class="primary" @click="openCreate">新建内容</button>
+        <button v-if="canManage" type="button" class="primary" @click="openCreate">
+          新建内容
+        </button>
       </div>
     </header>
+
+    <p v-if="!canManage" class="content-readonly-notice">
+      你可以查看内容、版本和审核记录；新建、审核与发布由具备内容审核权限的管理员完成。
+    </p>
 
     <Transition name="toast">
       <p v-if="store.lastMessage" class="success-message" role="status">
@@ -1009,6 +1023,15 @@ function ageTierSummary(value: ContentPackage): string {
   border-radius: var(--sprout-radius-card);
   background: #ffffff;
   box-shadow: 0 8px 24px rgb(194 91 128 / 5%);
+}
+
+.content-readonly-notice {
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--sprout-outline);
+  border-radius: 14px;
+  background: #fffbfc;
+  color: var(--sprout-text-muted);
 }
 
 .eyebrow {

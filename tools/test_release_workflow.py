@@ -3,10 +3,11 @@
 
 from __future__ import annotations
 
-import ipaddress
 import ast
+import ipaddress
 import re
 import sys
+import unittest
 from pathlib import Path
 
 try:
@@ -22,7 +23,7 @@ REQUIRED_FRAGMENTS = (
     "Stage release candidate artifacts",
     "SPROUT_RELEASE_UPLOAD_TOKEN",
     "upload_release_artifacts_http.py",
-    "upload_release_artifacts.py",
+    "upload_release_artifacts as uploader",
     "Configure SFTP fallback",
     "sftp_configured=false",
     "SFTP fallback is partially configured.",
@@ -212,14 +213,20 @@ def verify_production_contract(
     if not isinstance(services, dict):
         raise AssertionError("cloud Compose file has no services mapping")
     sftp_volumes = services.get("download_ftp", {}).get("volumes", [])
-    expected_mount_suffix = "/releases"
+    expected_mount_suffix = "/staging"
     if not any(
         isinstance(volume, str)
-        and volume.startswith("sprout_download_data:/home/")
+        and volume.startswith("sprout_download_staging:/home/")
         and volume.endswith(expected_mount_suffix)
         for volume in sftp_volumes
     ):
-        raise AssertionError("candidate SFTP path is not rooted in the download volume")
+        raise AssertionError("candidate SFTP path is not rooted in the isolated staging volume")
+    if any(
+        isinstance(volume, str)
+        and volume.startswith("sprout_download_data:")
+        for volume in sftp_volumes
+    ):
+        raise AssertionError("SFTP must not mount the public download volume")
     nginx_volumes = services.get("download_http", {}).get("volumes", [])
     if "sprout_download_data:/srv/releases:ro" not in nginx_volumes:
         raise AssertionError("download HTTP service is not rooted in the download volume")
@@ -253,8 +260,12 @@ def verify_production_contract(
         raise AssertionError("management upload does not send the candidate channel")
     if 'artifact_root = Path(dist_dir) / "releases" / version / "stable"' not in upload_run:
         raise AssertionError("candidate staging must read the verified stable manifest")
-    if 'remote_path = f"releases/{version}/{candidate_channel}/{relative}"' not in upload_run:
+    if 'remote_path = f"{staging_root}/{relative}"' not in upload_run:
         raise AssertionError("SFTP staging does not isolate the candidate channel")
+    if 'staging_root = f"staging/{version}/{candidate_channel}"' not in upload_run:
+        raise AssertionError("SFTP staging is not rooted in the isolated staging area")
+    if "candidate_path = candidate_root / \"payload\" / relative" not in upload_run:
+        raise AssertionError("SFTP staging does not retain a local verified candidate copy")
     if 'public_base_url=f"{download_base_url}/{version}/{candidate_channel}"' not in upload_run:
         raise AssertionError("candidate upload cannot verify a persisted response-loss retry")
     if "except uploader.UploadError as error:" not in upload_run:
@@ -459,21 +470,68 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    token_guard = 'if [[ -z "${RELEASE_UPLOAD_TOKEN:-}" ]]; then'
+    token_guard_position = upload_block.find(token_guard)
+    if token_guard_position < 0:
+        print(
+            "release upload must fail closed when the management API token is absent",
+            file=sys.stderr,
+        )
+        return 1
+    first_stage_position = min(
+        position
+        for position in (
+            upload_block.find("stage_via_management_api() {"),
+            upload_block.find("stage_via_sftp() {"),
+        )
+        if position >= 0
+    )
+    if token_guard_position > first_stage_position:
+        print(
+            "release upload must reject a missing API token before staging any file",
+            file=sys.stderr,
+        )
+        return 1
     if 'SFTP_CONFIGURED' not in upload_block:
         print(
             "release upload must use the validated SFTP configuration result",
             file=sys.stderr,
         )
         return 1
-    if 'Neither SPROUT_RELEASE_UPLOAD_TOKEN nor a complete SFTP fallback is configured.' not in upload_block:
+    if (
+        "SPROUT_RELEASE_UPLOAD_TOKEN is required because only the management API "
+        "can publish staged files. SFTP-only publication is not supported."
+        not in upload_block
+    ):
         print(
-            "release upload must fail when neither publication path is usable",
+            "release upload must explain that SFTP-only publication is unsupported",
             file=sys.stderr,
         )
         return 1
     if 'stage_via_sftp()' not in upload_block:
         print(
             "release upload must retain the validated SFTP fallback",
+            file=sys.stderr,
+        )
+        return 1
+    promote_staging = step_by_name(
+        parsed,
+        "Promote SFTP staging through the release service",
+    )
+    promote_staging_run = promote_staging.get("run")
+    if not isinstance(promote_staging_run, str):
+        print(
+            "SFTP promotion must contain a shell script",
+            file=sys.stderr,
+        )
+        return 1
+    if (
+        "SPROUT_RELEASE_UPLOAD_TOKEN must be configured before SFTP staging; "
+        "staged files can only be promoted through the management API."
+        not in promote_staging_run
+    ):
+        print(
+            "SFTP promotion must explain that promotion requires the API token",
             file=sys.stderr,
         )
         return 1
@@ -606,9 +664,9 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    if 'remote_path = f"releases/{version}/{candidate_channel}/{relative}"' not in upload_block:
+    if 'remote_path = f"{staging_root}/{relative}"' not in upload_block:
         print(
-            "candidate staging must write only to the isolated candidate channel",
+            "candidate SFTP staging must write only to the isolated staging area",
             file=sys.stderr,
         )
         return 1
@@ -619,9 +677,7 @@ def main() -> int:
         )
         return 1
     if (
-        'remote_manifest = (\n'
-        '                  f"releases/{version}/{candidate_channel}/manifest.json"\n'
-        '              )'
+        'remote_manifest = f"{staging_root}/manifest.json"'
         not in upload_block
     ):
         print(
@@ -642,8 +698,6 @@ def main() -> int:
         '--public-base-url "$download_base_url"',
         "--skip-existing",
         "--channel stable",
-        "--index-root releases",
-        "upload_release_artifacts.py",
         "upload_release_artifacts_http.py",
         "published download index does not expose the verified release",
     ):
@@ -662,6 +716,40 @@ def main() -> int:
     if '--version "${{ steps.detect.outputs.version }}"' not in promote_release_run:
         print(
             "stable publication must use the released version",
+            file=sys.stderr,
+        )
+        return 1
+    if "SPROUT_RELEASE_UPLOAD_TOKEN is required to promote the verified candidate." not in promote_release_run:
+        print(
+            "stable publication must require an API token before promotion",
+            file=sys.stderr,
+        )
+        return 1
+    for forbidden_fragment in (
+        "--remote-root releases",
+        "--index-root releases",
+        "upload_release_artifacts.py",
+    ):
+        if forbidden_fragment in promote_release_run:
+            print(
+                "stable publication must not write the public release directory over SFTP",
+                file=sys.stderr,
+            )
+            return 1
+    promote_guard = (
+        'if [[ -z "${RELEASE_UPLOAD_TOKEN:-}" ]]; then'
+    )
+    promote_guard_position = promote_release_run.find(promote_guard)
+    promote_command_position = promote_release_run.find(
+        "upload_release_artifacts_http.py"
+    )
+    if (
+        promote_guard_position < 0
+        or promote_command_position < 0
+        or promote_guard_position > promote_command_position
+    ):
+        print(
+            "stable promotion must reject a missing token before publishing",
             file=sys.stderr,
         )
         return 1
@@ -766,5 +854,15 @@ def main() -> int:
     return 0
 
 
+class ReleaseWorkflowContractTest(unittest.TestCase):
+    def test_release_workflow_contract(self) -> None:
+        original_argv = sys.argv
+        try:
+            sys.argv = ["test_release_workflow.py"]
+            self.assertEqual(main(), 0)
+        finally:
+            sys.argv = original_argv
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    unittest.main()

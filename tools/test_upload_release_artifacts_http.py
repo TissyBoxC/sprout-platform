@@ -51,6 +51,27 @@ class UploadReleaseArtifactsHTTPTest(unittest.TestCase):
             self.assertIn(b'filename="resource.bin"', body)
             self.assertTrue(boundary)
 
+    def test_multipart_body_can_reference_a_verified_staging_file(self) -> None:
+        body, boundary = upload_release_artifacts_http.multipart_body(
+            {
+                "version": "0.12.4",
+                "channel": "stable",
+                "platform": "android",
+                "kind": "client",
+                "filename": "app.apk",
+                "relative_path": "0.12.4/stable/android/apk/app.apk",
+                "staging_path": "0.12.4/stable/android/apk/app.apk",
+                "size_bytes": "2048",
+                "sha256": "a" * 64,
+            }
+        )
+
+        self.assertTrue(boundary)
+        self.assertIn(b'name="staging_path"', body)
+        self.assertIn(b'name="size_bytes"', body)
+        self.assertIn(b'name="sha256"', body)
+        self.assertNotIn(b'name="file"', body)
+
     def test_main_uploads_every_artifact_then_refreshes_index(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

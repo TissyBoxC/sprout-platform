@@ -182,6 +182,7 @@ services:
       DEVICE_PLATFORM_NOTIFICATION_EMAIL_ENDPOINT: "${SPROUT_NOTIFICATION_EMAIL_ENDPOINT:-}"
       DEVICE_PLATFORM_NOTIFICATION_EMAIL_TOKEN: "${SPROUT_NOTIFICATION_EMAIL_TOKEN:-}"
       DEVICE_PLATFORM_DOWNLOAD_STORE_DIR: "/srv/releases"
+      DEVICE_PLATFORM_DOWNLOAD_STAGING_DIR: "/srv/releases-staging"
       DEVICE_PLATFORM_DOWNLOAD_PUBLIC_BASE_URL: "${SPROUT_DOWNLOAD_PUBLIC_BASE_URL}"
       DEVICE_PLATFORM_SERVICE_VERSION_STATE_DIR: "${SPROUT_SERVICE_VERSION_STATE_DIR:-/var/lib/sprout-upgrades}"
       DEVICE_PLATFORM_SERVICE_VERSION_UPGRADE_EXECUTION: "true"
@@ -189,6 +190,7 @@ services:
     volumes:
       - ./mosquitto/certs/device:/run/sprout/mqtt:ro
       - sprout_upgrade_data:${SPROUT_SERVICE_VERSION_STATE_DIR:-/var/lib/sprout-upgrades}
+      - sprout_download_staging:/srv/releases-staging
       - sprout_download_data:/srv/releases
     depends_on:
       postgres:
@@ -282,10 +284,10 @@ services:
       [
         "sh",
         "-c",
-        "chown -R ${SPROUT_DOWNLOAD_SFTP_UID}:${SPROUT_DOWNLOAD_SFTP_GID} /srv/releases && find /srv/releases -type d -exec chmod 2775 {} + && find /srv/releases -type f -exec chmod 664 {} +",
+        "chown -R ${SPROUT_DOWNLOAD_SFTP_UID}:${SPROUT_DOWNLOAD_SFTP_GID} /srv/releases-staging && find /srv/releases-staging -type d -exec chmod 2775 {} + && find /srv/releases-staging -type f -exec chmod 664 {} +",
       ]
     volumes:
-      - sprout_download_data:/srv/releases
+      - sprout_download_staging:/srv/releases-staging
     restart: "no"
 
   download_ftp:
@@ -297,7 +299,7 @@ services:
     command:
       - "${SPROUT_DOWNLOAD_SFTP_USER}::${SPROUT_DOWNLOAD_SFTP_UID}:${SPROUT_DOWNLOAD_SFTP_GID}"
     volumes:
-      - sprout_download_data:/home/${SPROUT_DOWNLOAD_SFTP_USER}/releases
+      - sprout_download_staging:/home/${SPROUT_DOWNLOAD_SFTP_USER}/staging
       - "${SPROUT_DOWNLOAD_SFTP_AUTHORIZED_KEYS_DIR}:/home/${SPROUT_DOWNLOAD_SFTP_USER}/.ssh/keys:ro"
       - ./download/sftp/sshd_config:/etc/ssh/sshd_config:ro
       - ./download/sftp/ssh_host_ed25519_key:/etc/ssh/ssh_host_ed25519_key:ro
@@ -408,5 +410,8 @@ volumes:
   sprout_mqtt_data:
   sprout_mqtt_log:
   sprout_sub2api_data:
+  # SFTP is a staging transport. Only device_platform may promote staged bytes
+  # into the immutable public download volume.
+  sprout_download_staging:
   sprout_download_data:
   sprout_upgrade_data:

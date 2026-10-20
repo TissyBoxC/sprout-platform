@@ -540,6 +540,10 @@ jobs:
             echo "DOWNLOAD_PUBLISH_IMMUTABLE must remain true for candidate staging." >&2
             exit 1
           fi
+          if [[ -z "${RELEASE_UPLOAD_TOKEN:-}" ]]; then
+            echo "SPROUT_RELEASE_UPLOAD_TOKEN is required because only the management API can publish staged files. SFTP-only publication is not supported." >&2
+            exit 1
+          fi
 
           stage_via_management_api() {
           python3 - \
@@ -618,6 +622,7 @@ jobs:
           }
 
           stage_via_sftp() {
+          rm -f "$RUNNER_TEMP/sprout-sftp-candidate.json"
           python3 - \
               "dist" \
               "dist/releases/${{ steps.detect.outputs.version }}/stable/manifest.json" \
@@ -653,10 +658,15 @@ jobs:
               raise SystemExit("candidate manifest version does not match the release")
           batch_file = Path(known_hosts).parent / "release-candidate-upload.batch"
           try:
+              staging_root = f"staging/{version}/{candidate_channel}"
+              candidate_root = Path(known_hosts).parent / "sftp-candidate"
+              if candidate_root.exists():
+                  import shutil
+                  shutil.rmtree(candidate_root)
+              (candidate_root / "payload").mkdir(parents=True)
               lines = [
-                  "-mkdir releases",
-                  f"-mkdir releases/{version}",
-                  f"-mkdir releases/{version}/{candidate_channel}",
+                  "-mkdir staging",
+                  f"-mkdir {staging_root}",
               ]
               artifact_root = Path(dist_dir) / "releases" / version / "stable"
               artifact_count = 0
@@ -668,7 +678,7 @@ jobs:
                   source = artifact_root / relative
                   if not source.is_file():
                       raise SystemExit(f"candidate artifact is missing: {source}")
-                  remote_path = f"releases/{version}/{candidate_channel}/{relative}"
+                  remote_path = f"{staging_root}/{relative}"
                   lines.append(
                       f"-mkdir {uploader.shell_quote(str(Path(remote_path).parent.as_posix()))}"
                   )
@@ -686,11 +696,12 @@ jobs:
                           f"put {uploader.shell_quote(str(source))} "
                           f"{uploader.shell_quote(remote_path)}"
                       )
+                  candidate_path = candidate_root / "payload" / relative
+                  candidate_path.parent.mkdir(parents=True, exist_ok=True)
+                  candidate_path.write_bytes(source.read_bytes())
               if artifact_count == 0:
                   raise SystemExit("candidate manifest contains no artifacts")
-              remote_manifest = (
-                  f"releases/{version}/{candidate_channel}/manifest.json"
-              )
+              remote_manifest = f"{staging_root}/manifest.json"
               lines.append(
                   f"put {uploader.shell_quote(manifest_path)} "
                   f"{uploader.shell_quote(remote_manifest)}"
@@ -707,19 +718,11 @@ jobs:
           finally:
               batch_file.unlink(missing_ok=True)
           PY
+          echo "transport=sftp" >> "$GITHUB_OUTPUT"
           }
 
-          if [[ -z "${RELEASE_UPLOAD_TOKEN:-}" ]]; then
-            if [[ "${SFTP_CONFIGURED:-false}" == "true" ]]; then
-              echo "Management API token is not configured; using the validated SFTP fallback."
-              stage_via_sftp
-              exit 0
-            fi
-            echo "Neither SPROUT_RELEASE_UPLOAD_TOKEN nor a complete SFTP fallback is configured." >&2
-            exit 1
-          fi
-
           if stage_via_management_api; then
+            echo "transport=api" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -731,6 +734,84 @@ jobs:
 
           echo "Management API publication failed and no validated SFTP fallback is configured." >&2
           exit 1
+
+      - name: Promote SFTP staging through the release service
+        id: promote_sftp_staging
+        if: steps.detect.outputs.should_release == 'true' && steps.upload_release.outputs.transport == 'sftp'
+        shell: bash
+        env:
+          RELEASE_UPLOAD_TOKEN: ${{ secrets.SPROUT_RELEASE_UPLOAD_TOKEN }}
+          API_BASE_URL: ${{ steps.endpoints.outputs.api_url }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${RELEASE_UPLOAD_TOKEN:-}" ]]; then
+            echo "SPROUT_RELEASE_UPLOAD_TOKEN must be configured before SFTP staging; staged files can only be promoted through the management API." >&2
+            exit 1
+          fi
+          python3 - \
+            "${API_BASE_URL:-https://api.clarkhub.cn}" \
+            "$RELEASE_UPLOAD_TOKEN" \
+            "dist/releases/${{ steps.detect.outputs.version }}/stable/manifest.json" \
+            "candidate-${{ github.run_id }}-${{ github.run_attempt }}" \
+            "${{ steps.detect.outputs.version }}" \
+            "$RUNNER_TEMP/sprout-sftp/sftp-candidate/payload" <<'PY'
+          import hashlib
+          import sys
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          from tools import upload_release_artifacts as sftp_uploader
+          from tools import upload_release_artifacts_http as uploader
+
+          (
+              api_base_url,
+              token,
+              manifest_path,
+              candidate_channel,
+              version,
+              candidate_root,
+          ) = sys.argv[1:7]
+          manifest = sftp_uploader.load_manifest(Path(manifest_path))
+          candidate_root = Path(candidate_root)
+          for artifact in manifest["artifacts"]:
+              if not isinstance(artifact, dict):
+                  raise SystemExit("candidate artifact is not an object")
+              relative = sftp_uploader.build_artifact_relative_path(artifact)
+              source = candidate_root / relative
+              if not source.is_file():
+                  raise SystemExit(f"candidate artifact is missing: {source}")
+              payload = source.read_bytes()
+              body, boundary = uploader.multipart_body(
+                  {
+                      "version": version,
+                      "channel": candidate_channel,
+                      "platform": str(artifact["platform"]),
+                      "kind": str(artifact["kind"]),
+                      "filename": str(artifact["file_name"]),
+                      "relative_path": f"{version}/{candidate_channel}/{relative}",
+                      "staging_path": f"{version}/{candidate_channel}/{relative}",
+                      "size_bytes": str(len(payload)),
+                      "sha256": hashlib.sha256(payload).hexdigest(),
+                      "overwrite": "false",
+                  },
+              )
+              request = urllib.request.Request(
+                  urllib.parse.urljoin(
+                      api_base_url.rstrip("/") + "/",
+                      "api/v1/release-publication/files",
+                  ),
+                  data=body,
+                  method="POST",
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Content-Type": f"multipart/form-data; boundary={boundary}",
+                      "Content-Length": str(len(body)),
+                  },
+              )
+              uploader.request_json(request, f"promote {artifact['file_name']}")
+          print(f"promoted {len(manifest['artifacts'])} staged artifacts")
+          PY
 
       - name: Verify staged download candidate
         id: verify_download_candidate
@@ -1132,60 +1213,31 @@ jobs:
           RELEASE_UPLOAD_TOKEN: ${{ secrets.SPROUT_RELEASE_UPLOAD_TOKEN }}
           API_BASE_URL: ${{ steps.endpoints.outputs.api_url }}
           DOWNLOAD_BASE_URL: ${{ steps.endpoints.outputs.download_url }}
-          SFTP_HOST: ${{ secrets.SPROUT_DOWNLOAD_SFTP_HOST }}
-          SFTP_PORT: ${{ secrets.SPROUT_DOWNLOAD_SFTP_PORT }}
-          SFTP_USER: ${{ secrets.SPROUT_DOWNLOAD_SFTP_USER }}
-          SFTP_CONFIGURED: ${{ steps.configure_sftp_fallback.outputs.sftp_configured }}
         run: |
           set -euo pipefail
           api_base_url="${API_BASE_URL:-https://api.clarkhub.cn}"
           download_base_url="${DOWNLOAD_BASE_URL:-https://download.clarkhub.cn}"
           published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           candidate_channel="candidate-${{ github.run_id }}-${{ github.run_attempt }}"
-          publication_verified=false
+
+          if [[ -z "${RELEASE_UPLOAD_TOKEN:-}" ]]; then
+            echo "SPROUT_RELEASE_UPLOAD_TOKEN is required to promote the verified candidate. SFTP-only publication is not supported." >&2
+            exit 1
+          fi
 
           echo "Promoting verified candidate $candidate_channel to stable."
 
-          if [[ -n "${RELEASE_UPLOAD_TOKEN:-}" ]]; then
-            python3 tools/upload_release_artifacts_http.py \
-              --api-base-url "$api_base_url" \
-              --public-base-url "$download_base_url" \
-              --token "$RELEASE_UPLOAD_TOKEN" \
-              --dist dist \
-              --version "${{ steps.detect.outputs.version }}" \
-              --channel stable \
-              --manifest "dist/releases/${{ steps.detect.outputs.version }}/stable/manifest.json" \
-              --title "如此萌屋平台 ${{ steps.detect.outputs.version }}" \
-              --published-at "$published_at" \
-              --skip-existing
-            publication_verified=true
-          else
-            if [[ "${SFTP_CONFIGURED:-false}" != "true" ]]; then
-              echo "No validated publication path is available for the stable release." >&2
-              exit 1
-            fi
-            python3 tools/upload_release_artifacts.py \
-              --dist dist \
-              --version "${{ steps.detect.outputs.version }}" \
-              --channel stable \
-              --host "$SFTP_HOST" \
-              --port "$SFTP_PORT" \
-              --user "$SFTP_USER" \
-              --private-key "$RUNNER_TEMP/sprout-sftp/id_ed25519" \
-              --known-hosts "$RUNNER_TEMP/sprout-sftp/known_hosts" \
-              --remote-root releases \
-              --index-root releases \
-              --manifest "dist/releases/${{ steps.detect.outputs.version }}/stable/manifest.json" \
-              --public-base-url "$download_base_url" \
-              --title "如此萌屋平台 ${{ steps.detect.outputs.version }}" \
-              --published-at "$published_at"
-            publication_verified=true
-          fi
-
-          if [[ "$publication_verified" != "true" ]]; then
-            echo "Release publication did not complete." >&2
-            exit 1
-          fi
+          python3 tools/upload_release_artifacts_http.py \
+            --api-base-url "$api_base_url" \
+            --public-base-url "$download_base_url" \
+            --token "$RELEASE_UPLOAD_TOKEN" \
+            --dist dist \
+            --version "${{ steps.detect.outputs.version }}" \
+            --channel stable \
+            --manifest "dist/releases/${{ steps.detect.outputs.version }}/stable/manifest.json" \
+            --title "如此萌屋平台 ${{ steps.detect.outputs.version }}" \
+            --published-at "$published_at" \
+            --skip-existing
           python3 - "${{ github.workspace }}/dist/releases/${{ steps.detect.outputs.version }}/stable/manifest.json" \
             "$download_base_url" <<'PY'
           import hashlib

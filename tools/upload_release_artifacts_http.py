@@ -67,10 +67,10 @@ def load_manifest(manifest_path: Path) -> dict[str, Any]:
 
 def multipart_body(
     fields: dict[str, str],
-    file_path: Path,
+    file_path: Path | None = None,
 ) -> tuple[bytes, str]:
     boundary = "----sprout-release-" + hashlib.sha256(
-        str(file_path).encode("utf-8")
+        str(file_path or fields).encode("utf-8")
     ).hexdigest()[:24]
     chunks: list[bytes] = []
     for name, value in fields.items():
@@ -80,17 +80,18 @@ def multipart_body(
         )
         chunks.append(value.encode("utf-8"))
         chunks.append(b"\r\n")
-    chunks.append(f"--{boundary}\r\n".encode("utf-8"))
-    filename = file_path.name.replace('"', "")
-    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    chunks.append(
-        (
-            f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
-            f"Content-Type: {content_type}\r\n\r\n"
-        ).encode("utf-8")
-    )
-    chunks.append(file_path.read_bytes())
-    chunks.append(b"\r\n")
+    if file_path is not None:
+        chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+        filename = file_path.name.replace('"', "")
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        chunks.append(
+            (
+                f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+                f"Content-Type: {content_type}\r\n\r\n"
+            ).encode("utf-8")
+        )
+        chunks.append(file_path.read_bytes())
+        chunks.append(b"\r\n")
     chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
     return b"".join(chunks), boundary
 

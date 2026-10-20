@@ -165,9 +165,10 @@ func TestFeatureCenterConfigAuditFailureReturnsSavedFeature(t *testing.T) {
 func TestFeatureCenterListUsesSuccessEnvelope(t *testing.T) {
 	service := &featureCenterTestService{
 		features: []featuredomain.Feature{{
-			ID:     "voice_gateway",
-			Name:   "语音网关",
-			Health: featuredomain.HealthUnknown,
+			ID:           "voice_gateway",
+			Name:         "语音网关",
+			Health:       featuredomain.HealthUnknown,
+			MetricsState: featuredomain.MetricsStateUnavailable,
 		}},
 	}
 	handler := NewFeatureCenterHandler(service)
@@ -195,6 +196,30 @@ func TestFeatureCenterListUsesSuccessEnvelope(t *testing.T) {
 		len(envelope.Data.Features) != 1 ||
 		envelope.Error != nil {
 		t.Fatalf("unexpected envelope: %s", recorder.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Features []map[string]any `json:"features"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode feature projection: %v", err)
+	}
+	if payload.Data.Features[0]["metrics_state"] != "unavailable" {
+		t.Fatalf(
+			"metrics_state = %#v, want unavailable",
+			payload.Data.Features[0]["metrics_state"],
+		)
+	}
+}
+
+func TestFeatureCenterMetricsStateFallsBackForUnknownValue(t *testing.T) {
+	payload := featureCenterFeatureResponse(&featuredomain.Feature{
+		ID:           "voice_gateway",
+		MetricsState: featuredomain.MetricsState("unexpected"),
+	})
+	if payload["metrics_state"] != featuredomain.MetricsStateNotConfigured {
+		t.Fatalf("metrics_state = %#v, want not_configured", payload["metrics_state"])
 	}
 }
 

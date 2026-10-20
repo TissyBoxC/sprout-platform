@@ -96,8 +96,12 @@ func (handler *FeatureCenterHandler) List(
 		writeFeatureCenterError(response, request, err)
 		return
 	}
+	projected := make([]map[string]any, 0, len(features))
+	for index := range features {
+		projected = append(projected, featureCenterFeatureResponse(&features[index]))
+	}
 	writeSuccess(response, request, http.StatusOK, map[string]any{
-		"features": features,
+		"features": projected,
 	})
 }
 
@@ -223,6 +227,10 @@ func featureCenterFeatureResponse(
 	if feature == nil {
 		return nil
 	}
+	metricsState := feature.MetricsState
+	if !metricsState.Valid() {
+		metricsState = featuredomain.MetricsStateNotConfigured
+	}
 	return map[string]any{
 		"id":                feature.ID,
 		"name":              feature.Name,
@@ -237,6 +245,7 @@ func featureCenterFeatureResponse(
 		"config_schema":     feature.ConfigSchema,
 		"values":            feature.Values,
 		"read_only_metrics": feature.ReadOnlyMetrics,
+		"metrics_state":     metricsState,
 		"read_only_reason":  feature.ReadOnlyReason,
 		"secret_configured": configuredSecrets(feature.Values),
 		"updated_at":        feature.UpdatedAt,

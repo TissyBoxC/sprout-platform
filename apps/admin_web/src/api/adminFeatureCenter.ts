@@ -1,6 +1,10 @@
 import axios, { type AxiosInstance } from 'axios'
 
 import { createHttpClient } from '@/api/httpClient'
+import {
+  normalizeMetricsState,
+  type FeatureMetricsState,
+} from '@/features/feature_center/domain/metricsState'
 
 export type FeatureCenterStatus = 'enabled' | 'disabled' | 'maintenance' | 'unknown'
 
@@ -76,6 +80,7 @@ export interface FeatureCenterFeature {
    * an unavailable state rather than pretending no metrics were reported.
    */
   metricsReported: boolean
+  metricsState: FeatureMetricsState
   health: FeatureHealth
   healthSource: string
   readOnlyReason: string
@@ -236,7 +241,7 @@ function parseMutationResult(value: unknown): FeatureCenterMutationResult {
   }
 }
 
-function toNullableFeature(value: unknown): FeatureCenterFeature | null {
+export function toNullableFeature(value: unknown): FeatureCenterFeature | null {
   const record = recordValue(value)
   const id = stringValue(record.id ?? record.key ?? record.feature_id ?? record.featureId).trim()
   if (!id) {
@@ -342,7 +347,10 @@ function toNullableFeature(value: unknown): FeatureCenterFeature | null {
     config,
     configSchema,
     secretConfigured,
-    ...parseMetricsAvailability(metricsSource(record)),
+    ...parseMetricsAvailability(
+      metricsSource(record),
+      record.metrics_state ?? record.metricsState,
+    ),
     health: healthValue({
       status: rawHealthStatus,
       checked_at:
@@ -689,14 +697,23 @@ function parseMetrics(value: unknown): FeatureMetric[] {
   return flattenMetrics(recordValue(value))
 }
 
-function parseMetricsAvailability(value: unknown): {
+function parseMetricsAvailability(
+  value: unknown,
+  stateValue: unknown,
+): {
   metrics: FeatureMetric[]
   metricsReported: boolean
+  metricsState: FeatureMetricsState
 } {
   const hasMetricsField = value !== undefined && value !== null
+  const metricsState = normalizeMetricsState(stateValue, hasMetricsField)
   return {
     metrics: parseMetrics(value),
-    metricsReported: hasMetricsField,
+    metricsReported:
+      metricsState === 'available' || metricsState === 'not_reported'
+        ? hasMetricsField
+        : false,
+    metricsState,
   }
 }
 

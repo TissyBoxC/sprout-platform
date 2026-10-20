@@ -24291,6 +24291,13 @@ components:
         - service_runtime
         - database_state
         - not_configured
+    FeatureCenterMetricsState:
+      type: string
+      enum:
+        - not_configured
+        - available
+        - unavailable
+        - not_reported
     FeatureCenterStatus:
       type: string
       enum:
@@ -24425,6 +24432,7 @@ components:
         - config_schema
         - values
         - read_only_metrics
+        - metrics_state
         - secret_configured
       properties:
         id:
@@ -24464,6 +24472,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FeatureCenterMetric"
+        metrics_state:
+          $ref: "#/components/schemas/FeatureCenterMetricsState"
         read_only_reason:
           type: string
         secret_configured:

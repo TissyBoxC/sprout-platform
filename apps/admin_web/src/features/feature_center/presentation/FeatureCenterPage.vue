@@ -25,11 +25,15 @@ const metricsAllUnavailable = computed(
 const metricsUnavailable = computed(
   () =>
     selectedFeature.value !== null &&
-    (!selectedFeature.value.metricsReported || metricsAllUnavailable.value),
+    (selectedFeature.value.metricsState === 'unavailable' ||
+      selectedFeature.value.metricsState === 'not_reported' ||
+      !selectedFeature.value.metricsReported ||
+      metricsAllUnavailable.value),
 )
 const hasMetricsField = computed(
   () =>
     selectedFeature.value !== null &&
+    selectedFeature.value.metricsState !== 'not_configured' &&
     (selectedFeature.value.metrics.length > 0 || !selectedFeature.value.metricsReported),
 )
 

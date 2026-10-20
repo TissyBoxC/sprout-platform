@@ -14,6 +14,7 @@ import {
 import { mapApiError, type ApiError } from '@/api/apiError'
 import { createHttpClient } from '@/api/httpClient'
 import { useAuthStore } from '@/features/auth/application/authStore'
+import { canRunFeatureHealthCheck } from '@/features/feature_center/domain/healthPermission'
 import { canApplyMutationResult } from '@/features/feature_center/domain/mutationGuard'
 
 export interface FeatureCenterFilters {
@@ -153,7 +154,11 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
   )
 
   const canCheckHealth = computed(
-    () => authStore.canManageFeatureCenter && isDetailReady.value && selectedFeature.value !== null,
+    () => canRunFeatureHealthCheck(
+      authStore.canReadFeatureCenter,
+      isDetailReady.value,
+      selectedFeature.value !== null,
+    ),
   )
 
   const isDirty = computed(() => {

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -527,5 +528,48 @@ func TestCoverageValidationRunsAfterEveryProbeIsResolved(t *testing.T) {
 				"assignment at offset %d; placeholders would fail startup",
 			validationAt, lastAssignmentAt,
 		)
+	}
+}
+
+// TestRouterReceivesEveryConstructedService guards against a service being
+// created, health-probed and then never handed to the transport. Such a
+// service looks fully wired in tests that exercise it directly while the HTTP
+// surface silently answers 404, which is exactly how the billing routes went
+// missing in a release. The check is textual because the failure is an absent
+// field, not a behaviour a unit test can observe.
+func TestRouterReceivesEveryConstructedService(t *testing.T) {
+	source, err := os.ReadFile("app.go")
+	if err != nil {
+		t.Fatalf("read app.go: %v", err)
+	}
+	body := string(source)
+
+	optionsAt := strings.Index(body, "platformhttp.RouterOptions{")
+	if optionsAt < 0 {
+		t.Fatal("RouterOptions literal not found in app.go")
+	}
+	routerOptions := body[optionsAt:]
+
+	// Every service constructed with `X, err := <pkg>.New(` must appear in the
+	// router options, either directly or through a wrapper such as Billing.
+	// Outbound clients share that constructor shape but are deliberately absent
+	// from the transport surface, so they are named here instead of guessed.
+	outbound := map[string]bool{"aiClient": true, "mqttClient": true}
+	constructed := regexp.MustCompile(`(?m)^\t([a-zA-Z][a-zA-Z0-9]*), err := [a-zA-Z0-9_]+\.New\(`)
+	for _, match := range constructed.FindAllStringSubmatch(body[:optionsAt], -1) {
+		name := match[1]
+		if outbound[name] {
+			continue
+		}
+		if !strings.Contains(routerOptions, " "+name+",\n") &&
+			!strings.Contains(routerOptions, " "+name+"{") &&
+			!strings.Contains(routerOptions, "{ "+name+" }") &&
+			!strings.Contains(routerOptions, ": "+name+",\n") &&
+			!strings.Contains(routerOptions, ": "+name+"{") {
+			t.Errorf(
+				"service %q is constructed but never passed to RouterOptions",
+				name,
+			)
+		}
 	}
 }

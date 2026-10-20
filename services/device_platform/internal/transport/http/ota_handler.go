@@ -101,8 +101,16 @@ func (handler otaHandler) registerRoutes(
 	if handler.service == nil {
 		return
 	}
-	mux.HandleFunc("GET /api/v1/devices/{device_id}/ota", handler.deviceUpdate)
-	mux.HandleFunc("POST /api/v1/devices/{device_id}/ota/events", handler.recordDeviceEvent)
+	// Device routes authenticate the device session at the router boundary so a
+	// handler cannot be reached unauthenticated by accident.
+	mux.HandleFunc(
+		"GET /api/v1/devices/{device_id}/ota",
+		requireDeviceSession(handler.deviceSessions, handler.deviceUpdate),
+	)
+	mux.HandleFunc(
+		"POST /api/v1/devices/{device_id}/ota/events",
+		requireDeviceSession(handler.deviceSessions, handler.recordDeviceEvent),
+	)
 	if requireAdmin == nil {
 		return
 	}

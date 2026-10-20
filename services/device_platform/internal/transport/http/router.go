@@ -600,11 +600,11 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/english/attempts",
-					deviceEnglishHandler.recordAttempt,
+					requireDeviceSession(options.BindingService, deviceEnglishHandler.recordAttempt),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/english/lessons",
-					deviceEnglishHandler.listLessons,
+					requireDeviceSession(options.BindingService, deviceEnglishHandler.listLessons),
 				)
 			}
 		}
@@ -669,15 +669,15 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/playback/requests",
-					devicePlaybackHandler.listPending,
+					requireDeviceSession(options.BindingService, devicePlaybackHandler.listPending),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/playback/requests/{request_id}/acknowledge",
-					devicePlaybackHandler.acknowledge,
+					requireDeviceSession(options.BindingService, devicePlaybackHandler.acknowledge),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/playback/requests/{request_id}/complete",
-					devicePlaybackHandler.complete,
+					requireDeviceSession(options.BindingService, devicePlaybackHandler.complete),
 				)
 			}
 		}
@@ -759,7 +759,7 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/local-commands",
-					deviceLocalCommandHandler.listForDevice,
+					requireDeviceSession(options.BindingService, deviceLocalCommandHandler.listForDevice),
 				)
 			}
 		}
@@ -819,11 +819,11 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/content/offline-policy",
-					deviceOfflinePolicyHandler.currentForDevice,
+					requireDeviceSession(options.BindingService, deviceOfflinePolicyHandler.currentForDevice),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/content/offline-policy/acknowledgement",
-					deviceOfflinePolicyHandler.acknowledgeForDevice,
+					requireDeviceSession(options.BindingService, deviceOfflinePolicyHandler.acknowledgeForDevice),
 				)
 			}
 		}
@@ -837,11 +837,11 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/display/status",
-					deviceDisplayHandler.reportStatus,
+					requireDeviceSession(options.BindingService, deviceDisplayHandler.reportStatus),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/display/policy",
-					deviceDisplayHandler.devicePolicy,
+					requireDeviceSession(options.BindingService, deviceDisplayHandler.devicePolicy),
 				)
 			}
 		}
@@ -855,11 +855,11 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/screen/status",
-					deviceScreenHandler.reportStatus,
+					requireDeviceSession(options.BindingService, deviceScreenHandler.reportStatus),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/screen/policy",
-					deviceScreenHandler.devicePolicy,
+					requireDeviceSession(options.BindingService, deviceScreenHandler.devicePolicy),
 				)
 			}
 		}
@@ -873,11 +873,11 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/touch/status",
-					deviceInputHandler.reportStatus,
+					requireDeviceSession(options.BindingService, deviceInputHandler.reportStatus),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/touch/policy",
-					deviceInputHandler.devicePolicy,
+					requireDeviceSession(options.BindingService, deviceInputHandler.devicePolicy),
 				)
 			}
 		}
@@ -891,11 +891,11 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/connectivity/status",
-					deviceConnectivityHandler.reportStatus,
+					requireDeviceSession(options.BindingService, deviceConnectivityHandler.reportStatus),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/connectivity/policy",
-					deviceConnectivityHandler.devicePolicy,
+					requireDeviceSession(options.BindingService, deviceConnectivityHandler.devicePolicy),
 				)
 			}
 		}
@@ -909,11 +909,11 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/power/status",
-					devicePowerHandler.reportStatus,
+					requireDeviceSession(options.BindingService, devicePowerHandler.reportStatus),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/power/policy",
-					devicePowerHandler.devicePolicy,
+					requireDeviceSession(options.BindingService, devicePowerHandler.devicePolicy),
 				)
 			}
 		}
@@ -927,11 +927,11 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/motion/status",
-					deviceMotionHandler.reportStatus,
+					requireDeviceSession(options.BindingService, deviceMotionHandler.reportStatus),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/motion/policy",
-					deviceMotionHandler.devicePolicy,
+					requireDeviceSession(options.BindingService, deviceMotionHandler.devicePolicy),
 				)
 			}
 		}
@@ -945,7 +945,7 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/form-factor/report",
-					deviceFormFactorHandler.report,
+					requireDeviceSession(options.BindingService, deviceFormFactorHandler.report),
 				)
 			}
 		}
@@ -959,7 +959,7 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/video-companion/status",
-					deviceVideoHandler.reportStatus,
+					requireDeviceSession(options.BindingService, deviceVideoHandler.reportStatus),
 				)
 			}
 		}
@@ -973,11 +973,11 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/video-session/policy",
-					deviceVideoSessionHandler.devicePolicy,
+					requireDeviceSession(options.BindingService, deviceVideoSessionHandler.devicePolicy),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/video-session/status",
-					deviceVideoSessionHandler.reportStatus,
+					requireDeviceSession(options.BindingService, deviceVideoSessionHandler.reportStatus),
 				)
 			}
 		}
@@ -991,11 +991,11 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/alarm-reminders",
-					deviceAlarmReminderHandler.schedule,
+					requireDeviceSession(options.BindingService, deviceAlarmReminderHandler.schedule),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/alarm-reminders/{alarm_id}/events",
-					deviceAlarmReminderHandler.reportEvent,
+					requireDeviceSession(options.BindingService, deviceAlarmReminderHandler.reportEvent),
 				)
 			}
 		}
@@ -1011,11 +1011,11 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/bluetooth-audio/policy",
-					deviceBluetoothAudioHandler.devicePolicy,
+					requireDeviceSession(options.BindingService, deviceBluetoothAudioHandler.devicePolicy),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/bluetooth-audio/status",
-					deviceBluetoothAudioHandler.reportStatus,
+					requireDeviceSession(options.BindingService, deviceBluetoothAudioHandler.reportStatus),
 				)
 			}
 		}
@@ -1031,11 +1031,11 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/learning-visualization/policy",
-					deviceLearningVisualizationHandler.devicePolicy,
+					requireDeviceSession(options.BindingService, deviceLearningVisualizationHandler.devicePolicy),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/learning-visualization/status",
-					deviceLearningVisualizationHandler.reportStatus,
+					requireDeviceSession(options.BindingService, deviceLearningVisualizationHandler.reportStatus),
 				)
 			}
 		}
@@ -1051,11 +1051,11 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/image-privacy/policy",
-					deviceImagePrivacyHandler.devicePolicy,
+					requireDeviceSession(options.BindingService, deviceImagePrivacyHandler.devicePolicy),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/image-privacy/status",
-					deviceImagePrivacyHandler.reportStatus,
+					requireDeviceSession(options.BindingService, deviceImagePrivacyHandler.reportStatus),
 				)
 			}
 		}
@@ -1069,15 +1069,15 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/wearable/location",
-					deviceWearableHandler.reportLocation,
+					requireDeviceSession(options.BindingService, deviceWearableHandler.reportLocation),
 				)
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/wearable/policy",
-					deviceWearableHandler.devicePolicy,
+					requireDeviceSession(options.BindingService, deviceWearableHandler.devicePolicy),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/wearable/sos",
-					deviceWearableHandler.reportSOS,
+					requireDeviceSession(options.BindingService, deviceWearableHandler.reportSOS),
 				)
 			}
 		}
@@ -1204,15 +1204,15 @@ func NewRouter(options RouterOptions) http.Handler {
 			)
 			mux.HandleFunc(
 				"POST /api/v1/devices/{device_id}/runtime/heartbeat",
-				runtimeHandler.recordHeartbeat,
+				requireDeviceSession(options.BindingService, runtimeHandler.recordHeartbeat),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/devices/{device_id}/runtime/commands",
-				runtimeHandler.listDeviceCommands,
+				requireDeviceSession(options.BindingService, runtimeHandler.listDeviceCommands),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/devices/{device_id}/runtime/parent-policy",
-				runtimeHandler.getParentPolicy,
+				requireDeviceSession(options.BindingService, runtimeHandler.getParentPolicy),
 			)
 			if options.VisionService != nil {
 				deviceVisionHandler := deviceVisionHandler{
@@ -1222,19 +1222,19 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/vision/tasks/pending",
-					deviceVisionHandler.listPendingTasks,
+					requireDeviceSession(options.BindingService, deviceVisionHandler.listPendingTasks),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/vision/tasks/{task_id}/acknowledge",
-					deviceVisionHandler.acknowledgeTask,
+					requireDeviceSession(options.BindingService, deviceVisionHandler.acknowledgeTask),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/vision/tasks/{task_id}/status",
-					deviceVisionHandler.reportStatus,
+					requireDeviceSession(options.BindingService, deviceVisionHandler.reportStatus),
 				)
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/vision/results",
-					deviceVisionHandler.reportResult,
+					requireDeviceSession(options.BindingService, deviceVisionHandler.reportResult),
 				)
 			}
 			if options.UsageReportService != nil {
@@ -1244,12 +1244,12 @@ func NewRouter(options RouterOptions) http.Handler {
 				}
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/runtime/usage",
-					usageHandler.recordDeviceUsage,
+					requireDeviceSession(options.BindingService, usageHandler.recordDeviceUsage),
 				)
 			}
 			mux.HandleFunc(
 				"POST /api/v1/devices/{device_id}/runtime/commands/{command_id}/ack",
-				runtimeHandler.acknowledgeCommand,
+				requireDeviceSession(options.BindingService, runtimeHandler.acknowledgeCommand),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/admin/devices",
@@ -2720,27 +2720,27 @@ func NewRouter(options RouterOptions) http.Handler {
 			}
 			mux.HandleFunc(
 				"GET /api/v1/devices/{device_id}/content/catalog",
-				deviceHandler.catalog,
+				requireDeviceSession(options.BindingService, deviceHandler.catalog),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/devices/{device_id}/content/packages/{package_id}/download",
-				deviceHandler.download,
+				requireDeviceSession(options.BindingService, deviceHandler.download),
 			)
 			mux.HandleFunc(
 				"POST /api/v1/devices/{device_id}/content/playback",
-				deviceHandler.recordPlayback,
+				requireDeviceSession(options.BindingService, deviceHandler.recordPlayback),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/devices/{device_id}/content/playback",
-				deviceHandler.listPlayHistory,
+				requireDeviceSession(options.BindingService, deviceHandler.listPlayHistory),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/devices/{device_id}/content/favorites",
-				deviceHandler.listFavorites,
+				requireDeviceSession(options.BindingService, deviceHandler.listFavorites),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/devices/{device_id}/content/theme-packs",
-				deviceHandler.listThemePacks,
+				requireDeviceSession(options.BindingService, deviceHandler.listThemePacks),
 			)
 		}
 	}
@@ -2770,11 +2770,11 @@ func NewRouter(options RouterOptions) http.Handler {
 			}
 			mux.HandleFunc(
 				"GET /api/v1/devices/{device_id}/ui-text/packages",
-				deviceHandler.published,
+				requireDeviceSession(options.BindingService, deviceHandler.published),
 			)
 			mux.HandleFunc(
 				"GET /api/v1/devices/{device_id}/ui-text/packages/{package_id}/{language}/{platform}",
-				deviceHandler.publishedPackage,
+				requireDeviceSession(options.BindingService, deviceHandler.publishedPackage),
 			)
 		}
 	}

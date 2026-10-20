@@ -94,6 +94,10 @@
     "expires_at": {
       "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
     },
+    "content_category": {
+      "description": "Content category the session declares for session_start and wake_detected. Optional so firmware that predates the field still connects; when omitted the gateway applies only the age-tier prompt and never treats a restricted category as approved.",
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/content_category"
+    },
     "reason": {
       "type": "string",
       "minLength": 1,

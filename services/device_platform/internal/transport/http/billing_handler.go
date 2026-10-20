@@ -67,6 +67,11 @@ type billingHandler struct {
 
 // newBillingHandler builds the billing HTTP handler. A nil service disables
 // every route it owns.
+//
+// A typed-nil concrete service is normalised to a true nil interface here. The
+// call site passes *billingservice.Service, so an unwired RouterOptions yields
+// an interface holding a nil pointer, which compares unequal to nil and would
+// defeat every `service == nil` guard below.
 func newBillingHandler(
 	service billingService,
 	channels *channel.Registry,
@@ -74,6 +79,9 @@ func newBillingHandler(
 ) billingHandler {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if concrete, ok := service.(*billingservice.Service); ok && concrete == nil {
+		service = nil
 	}
 	return billingHandler{service: service, channels: channels, logger: logger}
 }

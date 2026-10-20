@@ -12,6 +12,7 @@ class BoundDevice {
     required this.lifecycleStatus,
     required this.boundAt,
     required this.runtime,
+    this.canManage = false,
   });
 
   final String deviceId;
@@ -22,6 +23,7 @@ class BoundDevice {
   final String lifecycleStatus;
   final DateTime boundAt;
   final DeviceRuntimeStatus? runtime;
+  final bool canManage;
 
   factory BoundDevice.fromJson(Map<String, Object?> json) {
     final runtimeValue = json['runtime'];
@@ -38,6 +40,7 @@ class BoundDevice {
               Map<String, Object?>.from(runtimeValue),
             )
           : null,
+      canManage: json['can_manage'] == true,
     );
   }
 }

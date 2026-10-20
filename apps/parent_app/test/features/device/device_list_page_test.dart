@@ -28,6 +28,7 @@ void main() {
               capabilities: ['wifi'],
               lifecycleStatus: 'active',
               boundAt: _boundAt,
+              canManage: true,
               runtime: DeviceRuntimeStatus(
                 isOnline: true,
                 connectionState: 'online',
@@ -68,6 +69,38 @@ void main() {
     expect(find.textContaining('温度正常'), findsOneWidget);
   });
 
+  testWidgets('shows a read-only device list without mutation controls', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _buildApp(
+        DeviceBindingState(
+          isScanning: false,
+          devices: const [],
+          bindings: [
+            BoundDevice(
+              deviceId: 'device_viewer_001',
+              deviceName: '初芽',
+              hardwareModel: 'sprout_initial',
+              firmwareVersion: '1.0.0',
+              capabilities: const ['wifi'],
+              lifecycleStatus: 'active',
+              boundAt: _boundAt,
+              runtime: _onlineRuntime(),
+              canManage: false,
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('当前角色只能查看设备状态，不能添加或解除设备。'), findsOneWidget);
+    expect(find.byTooltip('添加设备'), findsNothing);
+    expect(find.byTooltip('解除绑定'), findsNothing);
+    expect(find.widgetWithText(FloatingActionButton, '添加设备'), findsNothing);
+  });
+
   testWidgets('warns and offers reconnect when device session is revoked', (
     tester,
   ) async {
@@ -85,6 +118,7 @@ void main() {
               capabilities: ['wifi'],
               lifecycleStatus: 'active',
               boundAt: _boundAt,
+              canManage: true,
               runtime: DeviceRuntimeStatus(
                 isOnline: false,
                 connectionState: 'offline',
@@ -140,6 +174,7 @@ void main() {
       capabilities: ['wifi'],
       lifecycleStatus: 'active',
       boundAt: _boundAt,
+      canManage: true,
       runtime: _onlineRuntime(),
     );
     await tester.pumpWidget(

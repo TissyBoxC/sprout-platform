@@ -28,6 +28,36 @@ void main() {
     expect(find.text('还没有账号？创建家长账号'), findsOneWidget);
   });
 
+  testWidgets('email sign-in follows the public disabled policy', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          secureStoreProvider.overrideWithValue(_EmptySecureStore()),
+          authApiProvider.overrideWithValue(_EmailDisabledAuthApi()),
+          mandatoryUpdateCheckProvider.overrideWithValue(false),
+        ],
+        child: const ParentApp(),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('手机号'), findsWidgets);
+    expect(find.text('邮箱登录暂时关闭，请使用手机号登录'), findsOneWidget);
+
+    await tester.enterText(
+      find.byType(TextFormField).first,
+      'guardian@example.com',
+    );
+    await tester.enterText(find.byType(TextFormField).last, 'sprout123');
+    await tester.tap(find.widgetWithText(FilledButton, '登录'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('请输入有效的手机号'), findsOneWidget);
+  });
+
   testWidgets('login failure stays on the sign-in screen with a reason', (
     tester,
   ) async {
@@ -111,6 +141,29 @@ void main() {
 
     expect(find.text('创建家长账号'), findsOneWidget);
     expect(find.text('这个手机号已经注册过'), findsOneWidget);
+  });
+
+  testWidgets('registration hides the code field when verification is off', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          secureStoreProvider.overrideWithValue(_EmptySecureStore()),
+          authApiProvider.overrideWithValue(_VerificationOptionalAuthApi()),
+          mandatoryUpdateCheckProvider.overrideWithValue(false),
+        ],
+        child: const ParentApp(),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    await tester.tap(find.text('还没有账号？创建家长账号'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('短信验证码'), findsNothing);
+    expect(find.text('当前注册不需要短信验证码。'), findsOneWidget);
   });
 }
 
@@ -334,6 +387,30 @@ class _InvalidCredentialsAuthApi implements AuthApi {
     String? currentResourceVersion,
   }) {
     throw UnimplementedError();
+  }
+}
+
+class _EmailDisabledAuthApi extends _FailingAuthApi {
+  @override
+  Future<RegistrationPolicy> registrationPolicy() async {
+    return const RegistrationPolicy(
+      registrationEnabled: true,
+      phoneVerificationRequired: false,
+      emailLoginEnabled: false,
+      guardianConsentVersion: '2026-03',
+    );
+  }
+}
+
+class _VerificationOptionalAuthApi extends _FailingAuthApi {
+  @override
+  Future<RegistrationPolicy> registrationPolicy() async {
+    return const RegistrationPolicy(
+      registrationEnabled: true,
+      phoneVerificationRequired: false,
+      emailLoginEnabled: true,
+      guardianConsentVersion: '2026-03',
+    );
   }
 }
 

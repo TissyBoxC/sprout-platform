@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:parent_app/core/error/app_exception.dart';
 import 'package:parent_app/features/device/application/device_binding_controller.dart';
 import 'package:parent_app/features/device/data/device_binding_api.dart';
 import 'package:parent_app/providers.dart';
@@ -36,7 +37,7 @@ void main() {
 
     final state = container.read(deviceBindingControllerProvider).value!;
     expect(state.bindings.map((device) => device.deviceId), ['device-a']);
-    expect(state.errorMessage, '设备没有移除，请稍后重试');
+    expect(state.errorMessage, isNull);
   });
 
   test(
@@ -64,6 +65,95 @@ void main() {
       expect(api.removalCount('device-a'), 1);
     },
   );
+
+  test('refresh failure keeps the last known devices visible', () async {
+    final api = _RefreshFailureApi();
+    final container = ProviderContainer(
+      overrides: [deviceBindingApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(deviceBindingControllerProvider.future);
+    api.failNextList = true;
+    await container.read(deviceBindingControllerProvider.notifier).refresh();
+
+    final state = container.read(deviceBindingControllerProvider).value;
+    expect(state?.bindings.map((device) => device.deviceId), ['device-a']);
+    expect(state?.errorMessage, '网络连接不稳定，请检查后重试');
+  });
+
+  test('a viewer cannot remove a device returned as read-only', () async {
+    final api = _RefreshFailureApi(canManage: false);
+    final container = ProviderContainer(
+      overrides: [deviceBindingApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(deviceBindingControllerProvider.future);
+    await container
+        .read(deviceBindingControllerProvider.notifier)
+        .remove('device-a');
+
+    expect(api.removalCalls, 0);
+    expect(
+      container.read(deviceBindingControllerProvider).value?.errorMessage,
+      '当前角色没有解除设备绑定的权限',
+    );
+  });
+}
+
+class _RefreshFailureApi implements DeviceBindingApi {
+  _RefreshFailureApi({this.canManage = true});
+
+  final bool canManage;
+  bool failNextList = false;
+  int removalCalls = 0;
+
+  @override
+  Future<List<BoundDevice>> list() async {
+    if (failNextList) {
+      failNextList = false;
+      throw const AppException(
+        kind: AppErrorKind.network,
+        message: '网络连接不稳定，请检查后重试',
+        retryable: true,
+      );
+    }
+    return [
+      BoundDevice(
+        deviceId: 'device-a',
+        deviceName: '初芽',
+        hardwareModel: 'sprout_initial',
+        firmwareVersion: '1.0.0',
+        capabilities: const [],
+        lifecycleStatus: 'active',
+        boundAt: DateTime.utc(2026, 10, 1),
+        runtime: null,
+        canManage: canManage,
+      ),
+    ];
+  }
+
+  @override
+  Future<void> remove(String deviceId) async {
+    removalCalls += 1;
+  }
+
+  @override
+  Future<BoundDevice> bind({
+    required String token,
+    required String deviceName,
+  }) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<DeviceProvisioningTicket> requestProvisioningTicket(
+    String deviceId,
+    String deviceSessionToken,
+  ) {
+    throw UnimplementedError();
+  }
 }
 
 class _ConcurrentDeleteApi implements DeviceBindingApi {
@@ -156,5 +246,6 @@ BoundDevice _device(String id, DateTime boundAt) {
     lifecycleStatus: 'active',
     boundAt: boundAt,
     runtime: null,
+    canManage: true,
   );
 }

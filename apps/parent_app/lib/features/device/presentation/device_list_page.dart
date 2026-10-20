@@ -18,23 +18,28 @@ class DeviceListPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final binding = ref.watch(deviceBindingControllerProvider);
+    final canManageDevices =
+        binding.value?.bindings.any((device) => device.canManage) ?? true;
     return Scaffold(
       appBar: AppBar(
         title: const Text('设备'),
         actions: [
-          IconButton(
-            tooltip: '添加设备',
-            onPressed: () => context.push('/devices/scan'),
-            icon: const Icon(Icons.add_circle_outline_rounded),
-          ),
+          if (canManageDevices)
+            IconButton(
+              tooltip: '添加设备',
+              onPressed: () => context.push('/devices/scan'),
+              icon: const Icon(Icons.add_circle_outline_rounded),
+            ),
           const SizedBox(width: 4),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/devices/scan'),
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('添加设备'),
-      ),
+      floatingActionButton: canManageDevices
+          ? FloatingActionButton.extended(
+              onPressed: () => context.push('/devices/scan'),
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('添加设备'),
+            )
+          : null,
       body: AppStateSwitcher(
         stateKey: binding.when(
           data: (_) => 'devices-content',
@@ -94,38 +99,42 @@ class DeviceListPage extends ConsumerWidget {
                             const SizedBox(height: 6),
                             const Text('带屏幕的初芽会显示二维码；没有屏幕时请在附近设备中选择。'),
                             const SizedBox(height: 16),
-                            FilledButton.icon(
-                              onPressed: () => context.push('/devices/scan'),
-                              icon: const Icon(Icons.qr_code_scanner),
-                              label: const Text('扫描设备绑定码'),
-                            ),
+                            if (canManageDevices)
+                              FilledButton.icon(
+                                onPressed: () => context.push('/devices/scan'),
+                                icon: const Icon(Icons.qr_code_scanner),
+                                label: const Text('扫描设备绑定码'),
+                              )
+                            else
+                              const Text('当前角色只能查看设备状态，不能添加或解除设备。'),
                             const SizedBox(height: 10),
-                            AnimatedSwitcher(
-                              duration: AppMotion.fast,
-                              child: OutlinedButton.icon(
-                                key: ValueKey<bool>(state.isScanning),
-                                onPressed: state.isScanning
-                                    ? null
-                                    : () => ref
-                                          .read(
-                                            deviceBindingControllerProvider
-                                                .notifier,
-                                          )
-                                          .scanNearby(),
-                                icon: state.isScanning
-                                    ? const SizedBox(
-                                        width: 18,
-                                        height: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Icon(Icons.bluetooth_searching),
-                                label: Text(
-                                  state.isScanning ? '正在寻找设备…' : '在附近设备中添加',
+                            if (canManageDevices)
+                              AnimatedSwitcher(
+                                duration: AppMotion.fast,
+                                child: OutlinedButton.icon(
+                                  key: ValueKey<bool>(state.isScanning),
+                                  onPressed: state.isScanning
+                                      ? null
+                                      : () => ref
+                                            .read(
+                                              deviceBindingControllerProvider
+                                                  .notifier,
+                                            )
+                                            .scanNearby(),
+                                  icon: state.isScanning
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Icon(Icons.bluetooth_searching),
+                                  label: Text(
+                                    state.isScanning ? '正在寻找设备…' : '在附近设备中添加',
+                                  ),
                                 ),
                               ),
-                            ),
                           ],
                         ),
                       ),
@@ -204,12 +213,14 @@ class DeviceListPage extends ConsumerWidget {
                               }),
                           onReconnect: () =>
                               _startReconnect(context, state.bindings[index]),
-                          onRemove: () => _confirmRemove(
-                            context,
-                            ref,
-                            state.bindings[index].deviceId,
-                            state.bindings[index].deviceName,
-                          ),
+                          onRemove: state.bindings[index].canManage
+                              ? () => _confirmRemove(
+                                  context,
+                                  ref,
+                                  state.bindings[index].deviceId,
+                                  state.bindings[index].deviceName,
+                                )
+                              : null,
                         ),
                       ),
                 ],
@@ -428,7 +439,7 @@ class _BoundDeviceCard extends StatelessWidget {
   final BoundDevice device;
   final VoidCallback onTap;
   final VoidCallback onReconnect;
-  final VoidCallback onRemove;
+  final VoidCallback? onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -478,11 +489,12 @@ class _BoundDeviceCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  IconButton(
-                    tooltip: '解除绑定',
-                    onPressed: onRemove,
-                    icon: const Icon(Icons.link_off_rounded),
-                  ),
+                  if (onRemove != null)
+                    IconButton(
+                      tooltip: '解除绑定',
+                      onPressed: onRemove,
+                      icon: const Icon(Icons.link_off_rounded),
+                    ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -670,7 +682,8 @@ String _deviceSubtitle(BoundDevice device) {
     if (runtime != null) runtime.isOnline ? '在线' : '离线',
     if (runtime?.networkQuality.isNotEmpty == true)
       '网络${_networkQualityLabel(runtime!.networkQuality)}',
-    if (runtime != null && runtime.temperatureState.isNotEmpty &&
+    if (runtime != null &&
+        runtime.temperatureState.isNotEmpty &&
         runtime.temperatureState != 'unknown')
       _temperatureLabel(runtime.temperatureState),
     if (runtime != null && runtime.recentCrashCount > 0) '近期曾自动重启',

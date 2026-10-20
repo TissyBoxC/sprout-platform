@@ -113,6 +113,14 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
       setState(() => _errorMessage = '请先确认你是孩子的监护人');
       return;
     }
+    final policy = _policy;
+    if (policy == null) {
+      setState(() => _errorMessage = '暂时无法读取注册要求，请重新加载后再试');
+      return;
+    }
+    if (!policy.phoneVerificationRequired) {
+      _phoneVerificationCodeController.clear();
+    }
     setState(() {
       _isSubmitting = true;
       _errorMessage = null;
@@ -189,58 +197,71 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                           return null;
                         },
                       ),
-                      const SizedBox(height: 16),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: TextFormField(
-                              controller: _phoneVerificationCodeController,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: '短信验证码',
+                      if (_isLoadingPolicy) ...[
+                        const SizedBox(height: 12),
+                        const LinearProgressIndicator(),
+                        const SizedBox(height: 8),
+                        const Text('正在读取注册要求…'),
+                      ] else if (_policy?.phoneVerificationRequired ??
+                          true) ...[
+                        const SizedBox(height: 16),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: TextFormField(
+                                controller: _phoneVerificationCodeController,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: '短信验证码',
+                                ),
+                                validator: (value) {
+                                  final code = value?.trim() ?? '';
+                                  if (code.isEmpty) {
+                                    return '请输入短信验证码';
+                                  }
+                                  if (!RegExp(r'^\d{6}$').hasMatch(code)) {
+                                    return '请输入 6 位验证码';
+                                  }
+                                  return null;
+                                },
                               ),
-                              validator: (value) {
-                                final code = value?.trim() ?? '';
-                                if (code.isNotEmpty &&
-                                    !RegExp(r'^\d{6}$').hasMatch(code)) {
-                                  return '请输入 6 位验证码';
-                                }
-                                return null;
-                              },
                             ),
-                          ),
-                          const SizedBox(width: 12),
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(
-                              minWidth: 112,
-                              maxWidth: 132,
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: OutlinedButton(
-                                onPressed: _isSendingVerificationCode
-                                    ? null
-                                    : _sendVerificationCode,
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    _isSendingVerificationCode
-                                        ? '正在发送…'
-                                        : '获取验证码',
+                            const SizedBox(width: 12),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(
+                                minWidth: 112,
+                                maxWidth: 132,
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: OutlinedButton(
+                                  onPressed: _isSendingVerificationCode
+                                      ? null
+                                      : _sendVerificationCode,
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      _isSendingVerificationCode
+                                          ? '正在发送…'
+                                          : '获取验证码',
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
+                          ],
+                        ),
+                        if (_verificationStatusMessage != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            _verificationStatusMessage!,
+                            style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ],
-                      ),
-                      if (_verificationStatusMessage != null) ...[
+                      ] else ...[
                         const SizedBox(height: 8),
-                        Text(
-                          _verificationStatusMessage!,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
+                        const Text('当前注册不需要短信验证码。'),
                       ],
                       const SizedBox(height: 16),
                       TextFormField(

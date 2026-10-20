@@ -17,6 +17,7 @@ class NotificationInboxPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final inbox = ref.watch(notificationControllerProvider);
     final unread = ref.watch(notificationUnreadProvider);
+    final controller = ref.read(notificationControllerProvider.notifier);
     return Scaffold(
       appBar: AppBar(
         title: const Text('消息'),
@@ -89,7 +90,30 @@ class NotificationInboxPage extends ConsumerWidget {
                           ),
                         ),
                       ),
-                    if (state.hasMore)
+                    if (state.loadMoreErrorMessage != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4, bottom: 12),
+                        child: Column(
+                          children: [
+                            Text(
+                              state.loadMoreErrorMessage!,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            OutlinedButton.icon(
+                              onPressed: controller.isLoadingMore
+                                  ? null
+                                  : controller.loadMore,
+                              icon: const Icon(Icons.refresh_rounded),
+                              label: const Text('重试加载更多'),
+                            ),
+                          ],
+                        ),
+                      )
+                    else if (state.hasMore)
                       const Padding(
                         padding: EdgeInsets.only(top: 4, bottom: 8),
                         child: Center(

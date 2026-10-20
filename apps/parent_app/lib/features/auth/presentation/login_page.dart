@@ -23,7 +23,32 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   final _identifierController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isSubmitting = false;
+  bool _isLoadingPolicy = true;
+  bool _emailLoginEnabled = true;
   String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRegistrationPolicy();
+  }
+
+  Future<void> _loadRegistrationPolicy() async {
+    try {
+      final policy = await ref.read(authApiProvider).registrationPolicy();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _emailLoginEnabled = policy.emailLoginEnabled;
+        _isLoadingPolicy = false;
+      });
+    } on Object {
+      if (mounted) {
+        setState(() => _isLoadingPolicy = false);
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -91,17 +116,27 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         controller: _identifierController,
                         keyboardType: TextInputType.text,
                         autofillHints: const [AutofillHints.username],
-                        decoration: const InputDecoration(labelText: '手机号或邮箱'),
+                        decoration: InputDecoration(
+                          labelText: _emailLoginEnabled ? '手机号或邮箱' : '手机号',
+                          helperText: _isLoadingPolicy
+                              ? '正在读取登录方式…'
+                              : _emailLoginEnabled
+                              ? null
+                              : '邮箱登录暂时关闭，请使用手机号登录',
+                        ),
                         validator: (value) {
                           if (value == null || value.trim().isEmpty) {
-                            return '请输入手机号或邮箱';
+                            return _emailLoginEnabled ? '请输入手机号或邮箱' : '请输入手机号';
                           }
                           final identifier = value.trim();
-                          if (!_isValidPhone(identifier) &&
-                              !_isValidEmail(identifier)) {
-                            return '请输入有效的手机号或邮箱';
+                          if (_isValidPhone(identifier) ||
+                              (_emailLoginEnabled &&
+                                  _isValidEmail(identifier))) {
+                            return null;
                           }
-                          return null;
+                          return _emailLoginEnabled
+                              ? '请输入有效的手机号或邮箱'
+                              : '请输入有效的手机号';
                         },
                       ),
                       const SizedBox(height: 16),

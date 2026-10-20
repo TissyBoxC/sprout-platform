@@ -12,30 +12,38 @@ class NotificationInboxState {
     required this.unreadCount,
     required this.hasMore,
     required this.nextCursor,
+    this.loadMoreErrorMessage,
   });
 
   const NotificationInboxState.empty()
     : items = const [],
       unreadCount = 0,
       hasMore = false,
-      nextCursor = '';
+      nextCursor = '',
+      loadMoreErrorMessage = null;
 
   final List<GuardianNotification> items;
   final int unreadCount;
   final bool hasMore;
   final String nextCursor;
+  final String? loadMoreErrorMessage;
 
   NotificationInboxState copyWith({
     List<GuardianNotification>? items,
     int? unreadCount,
     bool? hasMore,
     String? nextCursor,
+    String? loadMoreErrorMessage,
+    bool clearLoadMoreError = false,
   }) {
     return NotificationInboxState(
       items: items ?? this.items,
       unreadCount: unreadCount ?? this.unreadCount,
       hasMore: hasMore ?? this.hasMore,
       nextCursor: nextCursor ?? this.nextCursor,
+      loadMoreErrorMessage: clearLoadMoreError
+          ? null
+          : loadMoreErrorMessage ?? this.loadMoreErrorMessage,
     );
   }
 }
@@ -99,10 +107,18 @@ class NotificationController extends AsyncNotifier<NotificationInboxState> {
           unreadCount: page.unreadCount,
           hasMore: page.hasMore,
           nextCursor: page.nextCursor,
+          clearLoadMoreError: true,
         ),
       );
-    } on Object {
-      // A failed "load more" keeps the already loaded notifications.
+    } on Object catch (error) {
+      final latest = state.value;
+      if (latest != null) {
+        state = AsyncData(
+          latest.copyWith(
+            loadMoreErrorMessage: notificationErrorMessage(error),
+          ),
+        );
+      }
     } finally {
       _isLoadingMore = false;
     }

@@ -4,6 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:parent_app/app/router/app_router.dart';
 import 'package:parent_app/features/auth/application/auth_controller.dart';
 import 'package:parent_app/features/auth/data/auth_api.dart';
+import 'package:parent_app/features/device/application/device_binding_controller.dart';
+import 'package:parent_app/features/device/data/device_binding_api.dart';
+import 'package:parent_app/providers.dart';
 
 void main() {
   testWidgets(
@@ -92,6 +95,79 @@ void main() {
       expect(destination.take(), isNull, reason: '$unsafe must be rejected');
     }
   });
+
+  testWidgets('viewer cannot enter the device scan route directly', (
+    tester,
+  ) async {
+    final auth = _TestAuthController();
+    final container = ProviderContainer(
+      overrides: [
+        authControllerProvider.overrideWith(() => auth),
+        deviceBindingApiProvider.overrideWithValue(_ViewerDeviceApi()),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = createAppRouter(container);
+    addTearDown(router.dispose);
+    await container.read(deviceBindingControllerProvider.future);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    auth.signIn();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    router.go('/devices/scan');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(router.state.uri.path, '/devices');
+  });
+}
+
+class _ViewerDeviceApi implements DeviceBindingApi {
+  @override
+  Future<List<BoundDevice>> list() async {
+    return [
+      BoundDevice(
+        deviceId: 'device-viewer',
+        deviceName: '初芽',
+        hardwareModel: 'sprout_initial',
+        firmwareVersion: '1.0.0',
+        capabilities: const [],
+        lifecycleStatus: 'active',
+        boundAt: DateTime.utc(2026, 10, 1),
+        runtime: null,
+        canManage: false,
+      ),
+    ];
+  }
+
+  @override
+  Future<void> remove(String deviceId) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<BoundDevice> bind({
+    required String token,
+    required String deviceName,
+  }) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<DeviceProvisioningTicket> requestProvisioningTicket(
+    String deviceId,
+    String deviceSessionToken,
+  ) {
+    throw UnimplementedError();
+  }
 }
 
 class _TestAuthController extends AuthController {

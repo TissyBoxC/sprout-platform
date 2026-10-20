@@ -145,6 +145,22 @@ AppException mapApiError(Object error) {
         cause: error,
       );
     }
+    if (errorCode == 'email_login_disabled') {
+      return AppException(
+        kind: AppErrorKind.validation,
+        message: '邮箱登录暂时关闭，请使用手机号登录',
+        retryable: false,
+        cause: error,
+      );
+    }
+    if (errorCode == 'registration_disabled') {
+      return AppException(
+        kind: AppErrorKind.validation,
+        message: '当前暂时不能注册新账号',
+        retryable: false,
+        cause: error,
+      );
+    }
     if (status == 403) {
       return AppException(
         kind: AppErrorKind.insufficientPermission,

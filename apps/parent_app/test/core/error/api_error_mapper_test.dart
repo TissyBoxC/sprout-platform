@@ -230,4 +230,26 @@ void main() {
     expect(exception.kind, AppErrorKind.accountDisabled);
     expect(isSessionRejected(exception), isFalse);
   });
+
+  test('maps disabled email sign-in before the generic permission error', () {
+    final exception = mapApiError(
+      DioException(
+        requestOptions: RequestOptions(path: '/api/v1/auth/login'),
+        response: Response<Map<String, Object?>>(
+          requestOptions: RequestOptions(path: '/api/v1/auth/login'),
+          statusCode: 403,
+          data: const {
+            'error': {
+              'code': 'email_login_disabled',
+              'message': 'backend wording',
+              'retryable': false,
+            },
+          },
+        ),
+      ),
+    );
+
+    expect(exception.kind, AppErrorKind.validation);
+    expect(exception.message, '邮箱登录暂时关闭，请使用手机号登录');
+  });
 }

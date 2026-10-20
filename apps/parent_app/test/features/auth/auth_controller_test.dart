@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parent_app/core/config/app_config.dart';
+import 'package:parent_app/core/error/app_exception.dart';
 import 'package:parent_app/core/network/session_manager.dart';
 import 'package:parent_app/core/providers.dart';
 import 'package:parent_app/core/storage/secure_store.dart';
@@ -24,7 +25,7 @@ import 'package:parent_app/features/family/domain/family_membership.dart';
 import 'package:parent_app/providers.dart';
 
 void main() {
-  test('restores a persisted refresh token on cold start', () async {
+  test('restores a persisted access token before refreshing it', () async {
     final secureStore = _MemorySecureStore({
       SessionStoreKeys.accessToken: 'expired',
       SessionStoreKeys.refreshToken: 'refresh',
@@ -41,37 +42,44 @@ void main() {
     final state = await container.read(authControllerProvider.future);
 
     expect(state.isSignedIn, isTrue);
-    expect(adapter.refreshCount, 1);
+    expect(adapter.refreshCount, 0);
     expect(api.meCount, 1);
-    expect(secureStore.values[SessionStoreKeys.accessToken], 'access-renewed');
-    expect(
-      secureStore.values[SessionStoreKeys.refreshToken],
-      'refresh-renewed',
-    );
-  });
-
-  test('keeps the session when startup refresh has a network error', () async {
-    final secureStore = _MemorySecureStore({
-      SessionStoreKeys.accessToken: 'expired',
-      SessionStoreKeys.refreshToken: 'refresh',
-    });
-    final adapter = _RefreshAdapter(timeout: true);
-    final api = _AuthApiStub();
-    final container = _container(
-      secureStore: secureStore,
-      adapter: adapter,
-      authApi: api,
-    );
-    addTearDown(container.dispose);
-
-    final state = await container.read(authControllerProvider.future);
-
-    expect(state.canRetryRestore, isTrue);
-    expect(state.isSignedIn, isFalse);
-    expect(state.errorMessage, '网络连接不稳定，请检查后重试');
     expect(secureStore.values[SessionStoreKeys.accessToken], 'expired');
     expect(secureStore.values[SessionStoreKeys.refreshToken], 'refresh');
   });
+
+  test(
+    'keeps the session retryable when the first /me probe is offline',
+    () async {
+      final secureStore = _MemorySecureStore({
+        SessionStoreKeys.accessToken: 'expired',
+        SessionStoreKeys.refreshToken: 'refresh',
+      });
+      final adapter = _RefreshAdapter(timeout: true);
+      final api = _AuthApiStub(
+        meError: const AppException(
+          kind: AppErrorKind.network,
+          message: '网络连接不稳定，请检查后重试',
+          retryable: true,
+        ),
+      );
+      final container = _container(
+        secureStore: secureStore,
+        adapter: adapter,
+        authApi: api,
+      );
+      addTearDown(container.dispose);
+
+      final state = await container.read(authControllerProvider.future);
+
+      expect(state.canRetryRestore, isTrue);
+      expect(state.isSignedIn, isFalse);
+      expect(state.errorMessage, '网络连接不稳定，请检查后重试');
+      expect(adapter.refreshCount, 0);
+      expect(secureStore.values[SessionStoreKeys.accessToken], 'expired');
+      expect(secureStore.values[SessionStoreKeys.refreshToken], 'refresh');
+    },
+  );
 
   test('clears the session when startup refresh is rejected', () async {
     final secureStore = _MemorySecureStore({
@@ -79,7 +87,13 @@ void main() {
       SessionStoreKeys.refreshToken: 'refresh',
     });
     final adapter = _RefreshAdapter(reject: true);
-    final api = _AuthApiStub();
+    final api = _AuthApiStub(
+      meError: const AppException(
+        kind: AppErrorKind.unauthenticated,
+        message: '登录已过期，请重新登录',
+        retryable: false,
+      ),
+    );
     final container = _container(
       secureStore: secureStore,
       adapter: adapter,
@@ -425,9 +439,10 @@ class _MemorySecureStore implements SecureStore {
 }
 
 class _AuthApiStub implements AuthApi {
-  _AuthApiStub({this.logoutError});
+  _AuthApiStub({this.logoutError, this.meError});
 
   final Object? logoutError;
+  final Object? meError;
   int meCount = 0;
   int logoutCount = 0;
 
@@ -449,6 +464,10 @@ class _AuthApiStub implements AuthApi {
   @override
   Future<AuthResult> me() async {
     meCount += 1;
+    final error = meError;
+    if (error != null) {
+      throw error;
+    }
     return const AuthResult(
       accessToken: '',
       refreshToken: '',

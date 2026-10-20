@@ -9,6 +9,7 @@ import '../../auth/application/auth_controller.dart';
 import '../../auth/data/auth_api.dart';
 import '../../device/application/device_binding_controller.dart';
 import '../../device/data/device_binding_api.dart';
+import '../application/family_controller.dart';
 
 /// Guardian home screen with daily usage and device status summary.
 class FamilyHomePage extends ConsumerStatefulWidget {
@@ -114,6 +115,7 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
             }
             final overviewFuture = _overviewFuture ??= _loadOverview();
             final devices = ref.watch(deviceBindingControllerProvider);
+            final family = ref.watch(familyControllerProvider);
             return RefreshIndicator(
               key: const ValueKey<String>('content'),
               onRefresh: _refresh,
@@ -148,6 +150,9 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
                   AppReveal(
                     delay: const Duration(milliseconds: 90),
                     child: _FamilyToolsCard(
+                      canManageChildren:
+                          family.value?.capability.allows('child_manage') ??
+                          true,
                       onChildProfiles: () => context.push('/me/children'),
                       onUsageReports: () => context.push('/me/usage-reports'),
                       onNotifications: () => context.push('/me/notifications'),
@@ -173,7 +178,13 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
                       }
                       if (deviceState.bindings.isEmpty) {
                         return _EmptyDeviceCard(
-                          onAdd: () => context.go('/devices/scan'),
+                          onAdd:
+                              family.value?.capability.allows(
+                                    'device_manage',
+                                  ) ??
+                                  true
+                              ? () => context.go('/devices/scan')
+                              : null,
                         );
                       }
                       return Column(
@@ -203,12 +214,14 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
 
 class _FamilyToolsCard extends StatelessWidget {
   const _FamilyToolsCard({
+    required this.canManageChildren,
     required this.onChildProfiles,
     required this.onUsageReports,
     required this.onNotifications,
   });
 
   final VoidCallback onChildProfiles;
+  final bool canManageChildren;
   final VoidCallback onUsageReports;
   final VoidCallback onNotifications;
 
@@ -221,7 +234,9 @@ class _FamilyToolsCard extends StatelessWidget {
           ListTile(
             leading: const Icon(Icons.child_care_rounded),
             title: const Text('儿童档案'),
-            subtitle: const Text('管理宝贝年龄、兴趣、内容和使用边界'),
+            subtitle: Text(
+              canManageChildren ? '管理宝贝年龄、兴趣、内容和使用边界' : '查看宝贝档案与家长设置的守护规则',
+            ),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onChildProfiles,
           ),
@@ -604,7 +619,7 @@ class _DeviceLoadingCard extends StatelessWidget {
 class _EmptyDeviceCard extends StatelessWidget {
   const _EmptyDeviceCard({required this.onAdd});
 
-  final VoidCallback onAdd;
+  final VoidCallback? onAdd;
 
   @override
   Widget build(BuildContext context) {
@@ -623,11 +638,14 @@ class _EmptyDeviceCard extends StatelessWidget {
             const SizedBox(height: 6),
             const Text('添加初芽后，孩子就可以开始对话了。', textAlign: TextAlign.center),
             const SizedBox(height: 14),
-            FilledButton.icon(
-              onPressed: onAdd,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('添加设备'),
-            ),
+            if (onAdd != null)
+              FilledButton.icon(
+                onPressed: onAdd,
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('添加设备'),
+              )
+            else
+              const Text('你当前只能查看设备，家庭管理员可以添加新设备。'),
           ],
         ),
       ),

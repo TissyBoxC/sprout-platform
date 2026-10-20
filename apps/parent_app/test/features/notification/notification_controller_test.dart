@@ -89,6 +89,32 @@ void main() {
     expect(api.listCalls, 1);
   });
 
+  test('exposes a retryable error when loading the next page fails', () async {
+    final api = _FakeNotificationApi(
+      pages: [
+        _page(
+          items: [_notification('n-1')],
+          unreadCount: 0,
+          nextCursor: 'cursor-2',
+          hasMore: true,
+        ),
+      ],
+      failAfterFirst: true,
+    );
+    final container = ProviderContainer(
+      overrides: [notificationApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(notificationControllerProvider.future);
+    await container.read(notificationControllerProvider.notifier).loadMore();
+
+    final state = container.read(notificationControllerProvider).value;
+    expect(state?.items.map((item) => item.id), <String>['n-1']);
+    expect(state?.hasMore, isTrue);
+    expect(state?.loadMoreErrorMessage, '网络不稳定');
+  });
+
   test('marks one notification read and decrements the badge', () async {
     final api = _FakeNotificationApi(
       pages: [

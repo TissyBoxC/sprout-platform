@@ -122,23 +122,44 @@ class AuthController extends AsyncNotifier<AuthState> {
   }
 
   Future<AuthState> _restoreSession() async {
+    // A persisted access token may still be valid. Probe it first so a
+    // transient refresh failure cannot lock a signed-in guardian out of
+    // cached devices, messages, and settings.
     try {
-      await _sessionManager.refreshCurrent();
       final account = await _authApi.me();
-      _resetUserData();
-      return AuthState(
-        isLoading: false,
-        account: account.account,
-        aiAccount: account.aiAccount,
-      );
+      return _signedInState(account);
     } on Object catch (error) {
-      if (isSessionRejected(error)) {
-        await _clearSession();
-        _resetUserData();
-        return AuthState.signedOut(errorMessage: authErrorMessage(error));
+      if (!isSessionRejected(error)) {
+        return AuthState.restoreFailed(errorMessage: authErrorMessage(error));
       }
-      return AuthState.restoreFailed(errorMessage: authErrorMessage(error));
+      // Only an explicit session rejection authorizes refresh. Network and
+      // server failures above must preserve the existing token pair.
+      try {
+        await _sessionManager.refreshCurrent();
+        final account = await _authApi.me();
+        return _signedInState(account);
+      } on Object catch (refreshError) {
+        if (isSessionRejected(refreshError)) {
+          await _clearSession();
+          _resetUserData();
+          return AuthState.signedOut(
+            errorMessage: authErrorMessage(refreshError),
+          );
+        }
+        return AuthState.restoreFailed(
+          errorMessage: authErrorMessage(refreshError),
+        );
+      }
     }
+  }
+
+  AuthState _signedInState(AuthResult account) {
+    _resetUserData();
+    return AuthState(
+      isLoading: false,
+      account: account.account,
+      aiAccount: account.aiAccount,
+    );
   }
 
   Future<bool> register({

@@ -11,6 +11,7 @@ import '../../features/bluetooth_audio/presentation/bluetooth_audio_page.dart';
 import '../../features/child_profile/presentation/child_profile_page.dart';
 import '../../features/companionship/presentation/companionship_page.dart';
 import '../../features/content_management/presentation/content_library_page.dart';
+import '../../features/device/application/device_binding_controller.dart';
 import '../../features/device/presentation/device_list_page.dart';
 import '../../features/device/domain/device_payload.dart';
 import '../../features/device/presentation/device_provisioning_page.dart';
@@ -261,6 +262,17 @@ GoRouter createAppRouter(ProviderContainer container) {
       ),
       GoRoute(
         path: '/devices/scan',
+        redirect: (context, routeState) {
+          final deviceState = container
+              .read(deviceBindingControllerProvider)
+              .value;
+          final canManage =
+              deviceState?.bindings.any((device) => device.canManage) ?? false;
+          if (!canManage) {
+            return '/devices';
+          }
+          return null;
+        },
         builder: (context, state) => const DeviceQrScanPage(),
       ),
       GoRoute(

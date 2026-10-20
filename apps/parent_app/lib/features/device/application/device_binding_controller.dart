@@ -93,15 +93,47 @@ class DeviceBindingController extends AsyncNotifier<DeviceBindingState> {
   }
 
   Future<void> refresh() async {
-    state = await AsyncValue.guard(() async {
+    try {
+      await refreshWithError();
+    } on Object {
+      // The state already exposes the stable retry message. RefreshIndicator
+      // callers receive a completed future instead of an unhandled error.
+    }
+  }
+
+  Future<void> refreshWithError({bool preserveStateOnFailure = false}) async {
+    final current = state.value;
+    try {
       final bindings = await _api.list();
-      return state.value?.copyWith(bindings: bindings) ??
-          DeviceBindingState(
-            isScanning: false,
-            devices: const [],
-            bindings: bindings,
-          );
-    });
+      state = AsyncData(
+        current?.copyWith(bindings: bindings, clearErrorMessage: true) ??
+            DeviceBindingState(
+              isScanning: false,
+              devices: const [],
+              bindings: bindings,
+            ),
+      );
+    } on Object catch (error) {
+      if (preserveStateOnFailure) {
+        rethrow;
+      }
+      if (current == null) {
+        state = AsyncError(error, StackTrace.current);
+      } else {
+        final latest = state.value;
+        state = AsyncData(
+          latest == null
+              ? current.copyWith(errorMessage: authErrorMessage(error))
+              : latest.copyWith(
+                  bindings: latest.bindings.isEmpty
+                      ? current.bindings
+                      : latest.bindings,
+                  errorMessage: authErrorMessage(error),
+                ),
+        );
+      }
+      rethrow;
+    }
   }
 
   Future<void> scanNearby() async {
@@ -293,6 +325,10 @@ class DeviceBindingController extends AsyncNotifier<DeviceBindingState> {
     if (removedDevice == null) {
       return;
     }
+    if (!removedDevice.canManage) {
+      state = AsyncData(previous.copyWith(errorMessage: '当前角色没有解除设备绑定的权限'));
+      return;
+    }
     _removingDeviceIds.add(deviceId);
     // Remove the device immediately so the confirmation cannot be followed by
     // a stale row if the refresh request is slow or briefly unavailable.
@@ -308,7 +344,12 @@ class DeviceBindingController extends AsyncNotifier<DeviceBindingState> {
       await _api.remove(deviceId);
       // Refresh failures keep the optimistic result rather than resurrecting
       // a successfully deleted row. The next page refresh reconciles the list.
-      await refresh();
+      try {
+        await refreshWithError(preserveStateOnFailure: true);
+      } on Object {
+        // The delete succeeded; a failed reconciliation must not restore the
+        // row or replace the successful result with a mutation error.
+      }
     } on Object {
       final current = state.value;
       if (current != null) {

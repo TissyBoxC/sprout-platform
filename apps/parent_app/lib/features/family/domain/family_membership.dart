@@ -77,6 +77,7 @@ class FamilyCapability {
     required this.memberCount,
     required this.pendingInviteCount,
     required this.schemaVersion,
+    this.permissions = const <String, bool>{},
   });
 
   final String familyId;
@@ -84,14 +85,25 @@ class FamilyCapability {
   final int memberCount;
   final int pendingInviteCount;
   final String schemaVersion;
+  final Map<String, bool> permissions;
+
+  bool allows(String action) => permissions[action] == true;
 
   factory FamilyCapability.fromJson(Map<String, Object?> json) {
+    final rawPermissions = json['permissions'];
     return FamilyCapability(
       familyId: _string(json['family_id']),
       ownerUserId: _string(json['owner_user_id']),
       memberCount: _int(json['member_count']),
       pendingInviteCount: _int(json['pending_invite_count']),
       schemaVersion: _string(json['schema_version']),
+      permissions: rawPermissions is Map
+          ? <String, bool>{
+              for (final entry in rawPermissions.entries)
+                if (entry.value is bool)
+                  entry.key.toString(): entry.value as bool,
+            }
+          : const <String, bool>{},
     );
   }
 }

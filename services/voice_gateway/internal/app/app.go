@@ -18,6 +18,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/preprocess"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/reference"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/vad"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/buildinfo"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/config"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/conversation"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/pipeline"
@@ -117,6 +118,7 @@ func Run() error {
 		routerOptions.RealtimeHandler = realtimeHandler
 		routerOptions.RealtimePath = cfg.WebSocket.Path
 	}
+	routerOptions.BuildVersion = buildinfo.Current()
 
 	server := &http.Server{
 		Addr:              cfg.HTTP.Address(),

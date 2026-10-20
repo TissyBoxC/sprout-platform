@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/TissyBoxC/sprout-platform/packages/go/observability"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/buildinfo"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/config"
 	aiExecution "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/execution"
 	aiProvider "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/provider"
@@ -909,6 +910,7 @@ func Run() error {
 		Addr: cfg.HTTP.Address(),
 		Handler: platformhttp.NewRouter(platformhttp.RouterOptions{
 			Logger:            logger,
+			BuildVersion:      buildinfo.Current(),
 			InternalAPIConfig: cfg.Internal,
 			RedisClient:       redisCache.Client(),
 			ReadinessProbes: []platformhttp.ReadinessProbe{

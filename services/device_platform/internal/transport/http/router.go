@@ -12,6 +12,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/packages/go/httpapi"
 	"github.com/TissyBoxC/sprout-platform/packages/go/observability"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/buildinfo"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/config"
 	gatewaydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/domain"
 	gatewayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/service"
@@ -67,6 +68,7 @@ import (
 // RouterOptions contains dependencies for the device platform HTTP transport.
 type RouterOptions struct {
 	Logger                       *slog.Logger
+	BuildVersion                 string
 	InternalAPIConfig            config.InternalAPIConfig
 	ReadinessProbes              []ReadinessProbe
 	AuthService                  *authservice.Service
@@ -198,7 +200,7 @@ func NewRouter(options RouterOptions) http.Handler {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", healthHandler)
+	mux.HandleFunc("GET /healthz", healthHandler(options.BuildVersion))
 	mux.HandleFunc("GET /readyz", readyHandler(options.ReadinessProbes))
 	if options.OperationsService != nil {
 		mux.HandleFunc(
@@ -3044,12 +3046,18 @@ func (verifier bindingGuardianVerifier) DeviceIDsForParent(
 	return deviceIDs, nil
 }
 
-func healthHandler(response http.ResponseWriter, _ *http.Request) {
-	writeJSON(response, http.StatusOK, map[string]any{
-		"status":  "ok",
-		"service": "device-platform",
-		"time":    time.Now().UTC(),
-	})
+func healthHandler(buildVersion string) http.HandlerFunc {
+	return func(response http.ResponseWriter, _ *http.Request) {
+		if strings.TrimSpace(buildVersion) == "" {
+			buildVersion = buildinfo.Current()
+		}
+		writeJSON(response, http.StatusOK, map[string]any{
+			"status":  "ok",
+			"service": "device-platform",
+			"version": buildVersion,
+			"time":    time.Now().UTC(),
+		})
+	}
 }
 
 func readyHandler(probes []ReadinessProbe) http.HandlerFunc {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/packages/go/httpapi"
 	"github.com/TissyBoxC/sprout-platform/packages/go/observability"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/buildinfo"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/config"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/session"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/usage"
@@ -20,6 +21,7 @@ import (
 // RouterOptions contains dependencies for the voice gateway HTTP transport.
 type RouterOptions struct {
 	Logger            *slog.Logger
+	BuildVersion      string
 	InternalAPIConfig config.InternalAPIConfig
 	UsageRecorder     usage.Recorder
 	// RealtimeHandler, when set, is mounted at the device realtime path. The
@@ -50,7 +52,7 @@ func NewRouter(options RouterOptions) http.Handler {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", healthHandler)
+	mux.HandleFunc("GET /healthz", healthHandler(options.BuildVersion))
 	mux.HandleFunc("GET /readyz", func(response http.ResponseWriter, _ *http.Request) {
 		writeJSON(response, http.StatusOK, map[string]any{
 			"status":           "ready",
@@ -207,12 +209,18 @@ func (handler usageHandler) recordConversation(
 	})
 }
 
-func healthHandler(response http.ResponseWriter, _ *http.Request) {
-	writeJSON(response, http.StatusOK, map[string]any{
-		"status":  "ok",
-		"service": "voice-gateway",
-		"time":    time.Now().UTC(),
-	})
+func healthHandler(buildVersion string) http.HandlerFunc {
+	return func(response http.ResponseWriter, _ *http.Request) {
+		if strings.TrimSpace(buildVersion) == "" {
+			buildVersion = buildinfo.Current()
+		}
+		writeJSON(response, http.StatusOK, map[string]any{
+			"status":  "ok",
+			"service": "voice-gateway",
+			"version": buildVersion,
+			"time":    time.Now().UTC(),
+		})
+	}
 }
 
 func runtimeHandler(response http.ResponseWriter, request *http.Request) {

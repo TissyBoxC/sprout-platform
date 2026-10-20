@@ -22,13 +22,22 @@ func TestHealthEndpoint(t *testing.T) {
 	request := httptest.NewRequest(stdhttp.MethodGet, "/healthz", nil)
 	recorder := httptest.NewRecorder()
 
-	NewRouter(newTestRouterOptions()).ServeHTTP(recorder, request)
+	options := newTestRouterOptions()
+	options.BuildVersion = "0.32.0"
+	NewRouter(options).ServeHTTP(recorder, request)
 
 	if recorder.Code != stdhttp.StatusOK {
 		t.Fatalf("expected status %d, got %d", stdhttp.StatusOK, recorder.Code)
 	}
 	if recorder.Header().Get("X-Request-ID") == "" {
 		t.Fatal("expected X-Request-ID response header")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if payload["version"] != "0.32.0" {
+		t.Fatalf("health version = %#v, want 0.32.0", payload["version"])
 	}
 }
 

@@ -1,4 +1,5 @@
 FROM golang:1.27 AS build
+ARG RELEASE_VERSION=dev
 
 WORKDIR /src
 COPY packages/go/observability/go.mod packages/go/observability/go.sum ./packages/go/observability/
@@ -11,7 +12,7 @@ WORKDIR /src
 COPY packages/go ./packages/go
 COPY services/voice_gateway ./services/voice_gateway
 WORKDIR /src/services/voice_gateway
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/voice-gateway ./cmd/voice-gateway
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.buildVersion=${RELEASE_VERSION}" -o /out/voice-gateway ./cmd/voice-gateway
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates wget && adduser -D -H -u 65532 sprout

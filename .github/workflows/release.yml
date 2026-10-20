@@ -495,12 +495,14 @@ jobs:
             --push \
             --tag "ghcr.io/$owner/sprout-device-platform:$CANDIDATE_TAG" \
             --file services/device_platform/Dockerfile \
+            --build-arg "RELEASE_VERSION=$RELEASE_VERSION" \
             .
 
           docker buildx build \
             --push \
             --tag "ghcr.io/$owner/sprout-voice-gateway:$CANDIDATE_TAG" \
             --file services/voice_gateway/Dockerfile \
+            --build-arg "RELEASE_VERSION=$RELEASE_VERSION" \
             .
 
           docker buildx build \

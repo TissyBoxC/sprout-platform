@@ -38,6 +38,7 @@ REQUIRED_FRAGMENTS = (
     "docker buildx imagetools inspect",
     "Promote verified images",
     "docker buildx imagetools create",
+    '--build-arg "RELEASE_VERSION=$RELEASE_VERSION"',
 )
 
 FORBIDDEN_FRAGMENTS = (
@@ -309,6 +310,31 @@ def main() -> int:
         for fragment in missing:
             print(f"missing workflow fragment: {fragment}", file=sys.stderr)
         return 1
+    for dockerfile in (
+        Path("services/device_platform/Dockerfile"),
+        Path("services/voice_gateway/Dockerfile"),
+    ):
+        contents = dockerfile.read_text(encoding="utf-8")
+        if (
+            "ARG RELEASE_VERSION=dev" not in contents
+            or "-X main.buildVersion=${RELEASE_VERSION}" not in contents
+        ):
+            print(
+                f"{dockerfile} must inject the release version into the Go binary",
+                file=sys.stderr,
+            )
+            return 1
+    for main_file in (
+        Path("services/device_platform/cmd/device-platform/main.go"),
+        Path("services/voice_gateway/cmd/voice-gateway/main.go"),
+    ):
+        contents = main_file.read_text(encoding="utf-8")
+        if "var buildVersion = buildinfo.Version" not in contents:
+            print(
+                f"{main_file} must expose main.buildVersion for link-time injection",
+                file=sys.stderr,
+            )
+            return 1
     forbidden = [
         fragment for fragment in FORBIDDEN_FRAGMENTS if fragment in workflow
     ]

@@ -34,7 +34,7 @@ tooling. Firmware and the AI gateway fork remain independent repositories.
 
 ## Current Status
 
-The repository version is `0.32.3`. Accounts, families, devices, content,
+The repository version is `0.32.4`. Accounts, families, devices, content,
 voice, notifications, OTA, the admin Feature Center, and cloud service-version
 management have software-level closed loops. Capabilities that still depend on
 physical hardware, production keys, or bench validation remain `[Partial]`.

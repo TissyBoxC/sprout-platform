@@ -5,7 +5,7 @@
 
 当前部署基线：
 
-- 平台版本：`0.32.3`
+- 平台版本：`0.32.4`
 - Sub2API 版本：`0.2.20`
 - `SPROUT_PLATFORM_VERSION` 同时控制四个平台镜像：`device_platform`、
   `voice_gateway`、`admin_web` 和 `upgrade_worker`
@@ -566,13 +566,13 @@ cd /opt/1panel/apps/sprout/deploy/cloud
 chmod 600 .env
 
 # 推荐：脚本会先备份两个数据库，再切换版本、拉取镜像、重建并检查健康状态。
-./scripts/upgrade-cloud.sh 0.32.3 0.2.20
+./scripts/upgrade-cloud.sh 0.32.4 0.2.20
 ```
 
 省略第二个参数时保留当前 Sub2API 版本：
 
 ```bash
-./scripts/upgrade-cloud.sh 0.32.3
+./scripts/upgrade-cloud.sh 0.32.4
 ```
 
 脚本会执行以下检查与操作：
@@ -593,7 +593,7 @@ chmod 600 .env
 
 ```bash
 SPROUT_CLOUD_BACKUP_DIR=/srv/sprout-backups \
-  ./scripts/upgrade-cloud.sh 0.32.3 0.2.20
+  ./scripts/upgrade-cloud.sh 0.32.4 0.2.20
 ```
 
 备份目录包含儿童和业务数据，必须限制权限、通过加密通道同步到异地，并在
@@ -882,7 +882,7 @@ cd /opt/1panel/apps/sprout
 git pull --ff-only
 cd deploy/cloud
 chmod 600 .env
-./scripts/upgrade-cloud.sh 0.32.3 0.2.20
+./scripts/upgrade-cloud.sh 0.32.4 0.2.20
 ```
 
 脚本会先备份两个数据库，再原子切换镜像版本、拉取发布镜像、重建服务并检查
@@ -890,7 +890,7 @@ chmod 600 .env
 版本号，不允许只更新其中一侧。只升级平台服务时可省略 Sub2API 版本参数：
 
 ```bash
-./scripts/upgrade-cloud.sh 0.32.3
+./scripts/upgrade-cloud.sh 0.32.4
 ```
 
 脚本不会自动删除数据卷，也不会在失败时自动恢复数据库。失败输出会保留旧版本

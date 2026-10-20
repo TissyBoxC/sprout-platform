@@ -7,6 +7,11 @@ import '../../features/auth/application/auth_controller.dart';
 import '../../features/auth/presentation/bind_email_page.dart';
 import '../../features/auth/presentation/login_page.dart';
 import '../../features/auth/presentation/register_page.dart';
+import '../../features/billing/domain/billing_errors.dart';
+import '../../features/billing/presentation/billing_checkout_page.dart';
+import '../../features/billing/presentation/billing_consent_page.dart';
+import '../../features/billing/presentation/billing_orders_page.dart';
+import '../../features/billing/presentation/billing_plans_page.dart';
 import '../../features/bluetooth_audio/presentation/bluetooth_audio_page.dart';
 import '../../features/child_profile/presentation/child_profile_page.dart';
 import '../../features/companionship/presentation/companionship_page.dart';
@@ -139,6 +144,29 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/usage-reports',
         builder: (context, state) => const UsageReportPage(),
+      ),
+      GoRoute(
+        path: '/me/billing',
+        builder: (context, state) => const BillingPlansPage(),
+      ),
+      GoRoute(
+        path: '/me/billing/orders',
+        builder: (context, state) => const BillingOrdersPage(),
+      ),
+      GoRoute(
+        path: '/me/billing/consent',
+        builder: (context, state) => const BillingConsentPage(),
+      ),
+      // 结算页必须带着选中的套餐进入；直接打开链接时没有可结算的内容。
+      GoRoute(
+        path: '/me/billing/checkout',
+        builder: (context, state) {
+          final plan = state.extra;
+          if (plan is! BillingPlan) {
+            return const _RouteNotFoundPage();
+          }
+          return BillingCheckoutPage(plan: plan);
+        },
       ),
       GoRoute(
         path: '/me/companionship',

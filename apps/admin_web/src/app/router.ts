@@ -288,6 +288,32 @@ export function createAdminRouter() {
         component: OperationAuditPage,
         meta: { requiredPermission: ADMIN_PERMISSIONS.auditRead },
       },
+      // 计费四个页面都只需要查看权限进入；页面内部的写操作各自再校验管理权限，
+      // 这样只有查看权限的管理员也能读到数据，而不是被挡在门外。
+      {
+        path: '/billing/orders',
+        name: 'billing-orders',
+        component: () => import('@/features/billing/presentation/BillingOrdersPage.vue'),
+        meta: { requiredPermission: ADMIN_PERMISSIONS.billingRead },
+      },
+      {
+        path: '/billing/refunds',
+        name: 'billing-refunds',
+        component: () => import('@/features/billing/presentation/BillingRefundsPage.vue'),
+        meta: { requiredPermission: ADMIN_PERMISSIONS.billingRead },
+      },
+      {
+        path: '/billing/reconciliation',
+        name: 'billing-reconciliation',
+        component: () => import('@/features/billing/presentation/BillingReconciliationPage.vue'),
+        meta: { requiredPermission: ADMIN_PERMISSIONS.billingRead },
+      },
+      {
+        path: '/billing/plans',
+        name: 'billing-plans',
+        component: () => import('@/features/billing/presentation/BillingPlansPage.vue'),
+        meta: { requiredPermission: ADMIN_PERMISSIONS.billingRead },
+      },
       {
         path: '/ui-text',
         name: 'ui-text',

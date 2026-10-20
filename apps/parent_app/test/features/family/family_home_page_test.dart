@@ -138,6 +138,7 @@ ParentOverview _overview({required int deviceCount}) {
     todaySpentUsd: 1.2,
     remainingBalanceUsd: 20,
     balanceUsd: 30,
+    grantedBalanceUsd: 50,
     deviceCount: deviceCount,
     onlineDeviceCount: 0,
   );
@@ -360,6 +361,7 @@ const _defaultOverview = ParentOverview(
   todaySpentUsd: 1.2,
   remainingBalanceUsd: 20,
   balanceUsd: 30,
+  grantedBalanceUsd: 50,
   deviceCount: 1,
   onlineDeviceCount: 1,
 );

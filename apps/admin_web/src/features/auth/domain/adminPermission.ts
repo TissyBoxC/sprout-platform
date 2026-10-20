@@ -29,6 +29,8 @@ export const ADMIN_PERMISSIONS = {
   notificationsManage: 'notifications.manage',
   statsRead: 'stats.read',
   auditRead: 'audit.read',
+  billingRead: 'billing.read',
+  billingManage: 'billing.manage',
 } as const
 
 export type AdminPermission =

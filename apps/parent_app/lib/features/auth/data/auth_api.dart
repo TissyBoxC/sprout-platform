@@ -61,12 +61,17 @@ class RegistrationPolicy {
 }
 
 /// Daily usage and device summary shown on the guardian home screen.
+///
+/// The quota fields use the AI gateway's own unit because that is the pool the
+/// provider spends from. Money a guardian paid is a separate concern carried by
+/// billing orders, so these fields must never be relabelled as yuan.
 class ParentOverview {
   const ParentOverview({
     required this.todayConversationCount,
     required this.todaySpentUsd,
     required this.remainingBalanceUsd,
     required this.balanceUsd,
+    required this.grantedBalanceUsd,
     required this.deviceCount,
     required this.onlineDeviceCount,
   });
@@ -75,6 +80,10 @@ class ParentOverview {
   final double todaySpentUsd;
   final double remainingBalanceUsd;
   final double balanceUsd;
+
+  /// Total quota ever granted to this family. It is the bar's denominator;
+  /// without it the bar could only compare the balance against itself.
+  final double grantedBalanceUsd;
   final int deviceCount;
   final int onlineDeviceCount;
 
@@ -93,6 +102,10 @@ class ParentOverview {
         'remaining_balance_usd',
       ),
       balanceUsd: _requiredDouble(json['balance_usd'], 'balance_usd'),
+      grantedBalanceUsd: _optionalDouble(
+        json['granted_balance_usd'],
+        'granted_balance_usd',
+      ),
       deviceCount: _requiredInt(json['device_count'], 'device_count'),
       onlineDeviceCount: _requiredInt(
         json['online_device_count'],
@@ -433,6 +446,21 @@ double _requiredDouble(Object? value, String field) {
     return value.toDouble();
   }
   throw FormatException('missing $field');
+}
+
+/// Reads a counter that older backend versions do not send yet.
+///
+/// A missing granted total must not break the whole home screen: it degrades
+/// the bar to an empty state instead, which is the honest rendering for "this
+/// family has no grant history".
+double _optionalDouble(Object? value, String field) {
+  if (value is num) {
+    return value.toDouble();
+  }
+  if (value == null) {
+    return 0;
+  }
+  throw FormatException('malformed $field');
 }
 
 int _requiredInt(Object? value, String field) {

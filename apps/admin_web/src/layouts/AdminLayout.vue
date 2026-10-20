@@ -135,6 +135,34 @@ async function logout(): Promise<void> {
           <span class="nav-dot" aria-hidden="true"></span>
           操作审计
         </RouterLink>
+        <RouterLink
+          v-if="authStore.can(ADMIN_PERMISSIONS.billingRead)"
+          to="/billing/orders"
+        >
+          <span class="nav-dot" aria-hidden="true"></span>
+          订单管理
+        </RouterLink>
+        <RouterLink
+          v-if="authStore.can(ADMIN_PERMISSIONS.billingRead)"
+          to="/billing/refunds"
+        >
+          <span class="nav-dot" aria-hidden="true"></span>
+          退款审批
+        </RouterLink>
+        <RouterLink
+          v-if="authStore.can(ADMIN_PERMISSIONS.billingRead)"
+          to="/billing/plans"
+        >
+          <span class="nav-dot" aria-hidden="true"></span>
+          套餐设置
+        </RouterLink>
+        <RouterLink
+          v-if="authStore.can(ADMIN_PERMISSIONS.billingRead)"
+          to="/billing/reconciliation"
+        >
+          <span class="nav-dot" aria-hidden="true"></span>
+          计费对账
+        </RouterLink>
         <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.storageRead)" to="/releases">
           <span class="nav-dot" aria-hidden="true"></span>
           内容发布

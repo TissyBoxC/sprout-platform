@@ -266,6 +266,11 @@ AppException? _mapDomainError(String? code, DioException error) {
   );
 }
 
+/// 读取错误响应里的业务错误码。
+///
+/// 通用映射会把 409 折叠成 conflict，需要更精确区分的功能可以自己比对业务码。
+String? readApiErrorCode(Object? responseData) => _readErrorCode(responseData);
+
 String? _readErrorCode(Object? responseData) {
   final ErrorResponseSchema? error = _readError(responseData);
   if (error == null) {

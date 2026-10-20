@@ -67,6 +67,8 @@ export const ADMIN_PERMISSION_OPTIONS: AdminPermissionOption[] = [
   { id: 'notifications.manage', label: '创建与删除通知', group: '消息通知' },
   { id: 'stats.read', label: '查看运行统计', group: '运行概览' },
   { id: 'audit.read', label: '查看操作记录', group: '运行概览' },
+  { id: 'billing.read', label: '查看订单与对账', group: '计费与订单' },
+  { id: 'billing.manage', label: '处理退款与套餐', group: '计费与订单' },
 ]
 
 const WILDCARD_PERMISSION = '*'

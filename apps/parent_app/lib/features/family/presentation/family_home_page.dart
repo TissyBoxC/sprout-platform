@@ -156,6 +156,7 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
                       onChildProfiles: () => context.push('/me/children'),
                       onUsageReports: () => context.push('/me/usage-reports'),
                       onNotifications: () => context.push('/me/notifications'),
+                      onBillingPlans: () => context.push('/me/billing'),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -218,12 +219,14 @@ class _FamilyToolsCard extends StatelessWidget {
     required this.onChildProfiles,
     required this.onUsageReports,
     required this.onNotifications,
+    required this.onBillingPlans,
   });
 
   final VoidCallback onChildProfiles;
   final bool canManageChildren;
   final VoidCallback onUsageReports;
   final VoidCallback onNotifications;
+  final VoidCallback onBillingPlans;
 
   @override
   Widget build(BuildContext context) {
@@ -255,6 +258,14 @@ class _FamilyToolsCard extends StatelessWidget {
             subtitle: const Text('查看平台通知，给设备留言'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onNotifications,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.card_giftcard_outlined),
+            title: const Text('服务套餐'),
+            subtitle: const Text('查看套餐、购买和订单记录'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onBillingPlans,
           ),
         ],
       ),
@@ -391,7 +402,9 @@ class _DashboardCard extends StatelessWidget {
                 const SizedBox(height: 16),
                 _BalanceBar(
                   remaining: overview.remainingBalanceUsd,
-                  total: overview.balanceUsd,
+                  // Granted total, not the balance: the balance against itself
+                  // always divides to 1.0 and pinned the bar at full.
+                  total: overview.grantedBalanceUsd,
                 ),
                 const SizedBox(height: 10),
                 Text(

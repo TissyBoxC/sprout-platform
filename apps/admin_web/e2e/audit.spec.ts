@@ -134,7 +134,7 @@ test('filters, pages, and redacts administrator operation records', async ({ pag
   await page.goto('/audit')
 
   await expect(page.getByRole('heading', { name: '操作审计' })).toBeVisible()
-  await expect(page.getByText('共 21 条')).toBeVisible()
+  await expect(page.getByText('共 21 条', { exact: true })).toBeVisible()
   const firstRow = page.locator('table tbody tr').first()
   await expect(firstRow.locator('.action-cell strong')).toHaveText('导出个人数据')
   await expect(firstRow.getByText('personal_data')).toBeVisible()

@@ -13,7 +13,10 @@ interface UiTextVersionPayload {
   updated_at: string
 }
 
-async function useAdminSession(page: Page): Promise<void> {
+async function useAdminSession(
+  page: Page,
+  permissions: string[] = ['content.read', 'content.review'],
+): Promise<void> {
   await page.addInitScript(() => {
     globalThis.sessionStorage.setItem('sprout.admin.accessToken', 'test-access-token')
     globalThis.sessionStorage.setItem('sprout.admin.refreshToken', 'test-refresh-token')
@@ -28,7 +31,7 @@ async function useAdminSession(page: Page): Promise<void> {
             email: 'admin@sprout.local',
             display_name: '管理员',
             role: 'admin',
-            admin_permissions: ['content.read'],
+            admin_permissions: permissions,
           },
         },
       }),
@@ -160,6 +163,26 @@ test('lists remote ui text versions with status', async ({ page }) => {
   await expect(page.getByText('home_welcome').first()).toBeVisible()
   await expect(page.getByRole('table').getByText('待审核')).toBeVisible()
   await expect(page.getByRole('table').getByText('已发布')).toBeVisible()
+})
+
+test('keeps ui text mutations hidden without content.review', async ({ page }) => {
+  await useAdminSession(page, ['content.read'])
+  const { createPayloads } = await setupRoutes(page, {
+    versions: [versionSummary({ status: 'draft' })],
+  })
+
+  await page.goto('/ui-text')
+
+  await expect(
+    page.getByText(
+      '你当前只有查看权限。可以查看文案版本、审核记录和条目内容，但新建、编辑、审核、发布与撤回由具备内容审核权限的管理员完成。',
+    ),
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: '新建文案草稿' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '提交审核' })).toHaveCount(0)
+  await page.getByText('home_welcome').click()
+  await expect(page.getByRole('button', { name: '编辑草稿' })).toHaveCount(0)
+  expect(createPayloads).toEqual([])
 })
 
 test('creates a draft with entries', async ({ page }) => {

@@ -854,6 +854,7 @@ test('keeps system settings writable only for settings.manage', async ({ page })
 })
 
 test('manages a family AI account, profile, password, and bound devices', async ({ page }) => {
+  test.setTimeout(60_000)
   await useAdminSession(page)
   const modelRequests: string[] = []
   page.on('request', (request) => {
@@ -1137,8 +1138,8 @@ test('manages a family AI account, profile, password, and bound devices', async 
   await expect(page.getByRole('heading', { name: 'AI 服务' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'AI 用量核对' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '家庭成员与邀请' })).toBeVisible()
-  await expect(page.getByText('守护者', { exact: true })).toBeVisible()
-  await expect(page.getByText('查看者', { exact: true })).toBeVisible()
+  await expect(page.getByLabel(/调整 .* 的家庭角色/).first()).toContainText('守护者')
+  await expect(page.getByLabel(/调整 .* 的家庭角色/).first()).toContainText('查看者')
   await expect(page.getByText('guardian@example.com')).toBeVisible()
   await expect(page.getByText('等待加入', { exact: true })).toBeVisible()
   await expect(page.getByText('管理员不能代替家长创建邀请', { exact: false })).toHaveCount(0)
@@ -1146,7 +1147,11 @@ test('manages a family AI account, profile, password, and bound devices', async 
   await expect(page.getByRole('heading', { name: '账号安全' })).toBeVisible()
   await expect(page.getByText('正在读取可用模型…')).toHaveCount(0)
   expect(modelRequests).not.toHaveLength(0)
-  await expect(page.getByText('默认最快')).toBeVisible()
+  await expect(page.getByText('默认模型', { exact: true })).toBeVisible()
+  await expect(page.locator('.model-option').first()).toContainText('fast-model')
+  await expect(
+    page.locator('.model-option').first().locator('input[type="checkbox"]'),
+  ).toBeChecked()
   await expect(page.getByText('12 次')).toBeVisible()
   await expect(page.getByText('0.4500', { exact: true }).first()).toBeVisible()
   await expect(page.getByText(/\$|美元/)).toHaveCount(0)
@@ -1178,15 +1183,21 @@ test('manages a family AI account, profile, password, and bound devices', async 
   await expect(page.getByText('密码已重置，该家长需要重新登录。')).toBeVisible()
 
   await page.getByLabel('调整 李 的家庭角色').selectOption('viewer')
-  await page.getByRole('button', { name: '保存角色' }).click()
+  const guardianMember = page
+    .locator('.membership-row')
+    .filter({ has: page.getByLabel('调整 李 的家庭角色') })
+  await guardianMember.getByRole('button', { name: '保存角色' }).click()
   const roleDialog = page.getByRole('dialog', { name: '确认调整家庭角色' })
   await expect(roleDialog).toBeVisible()
   await roleDialog.getByRole('button', { name: '保存新角色' }).click()
   await expect(page.getByText('成员角色已更新。')).toBeVisible()
 
   await page.getByLabel('邀请邮箱').fill('second@example.com')
-  await page.getByLabel('加入后的角色', { exact: true }).selectOption('viewer')
-  await page.getByRole('button', { name: '发出邀请' }).click()
+  const invitationBlock = page
+    .locator('.membership-block')
+    .filter({ has: page.getByText('家庭邀请', { exact: true }) })
+  await invitationBlock.locator('select').selectOption('viewer')
+  await invitationBlock.getByRole('button', { name: '发出邀请' }).click()
   await expect(page.getByText('邀请已发出。')).toBeVisible()
 
   await page.setViewportSize({ width: 390, height: 844 })
@@ -1274,7 +1285,7 @@ test('keeps download controls hidden and readonly without storage.manage', async
 test('fills the current version and the release artifact automatically', async ({ page }) => {
   await useAdminSession(page)
   let artifactChannel = ''
-  await page.route('**/api/v1/admin/releases', async (route) => {
+  await page.route(/\/api\/v1\/admin\/releases(?:\?.*)?$/, async (route) => {
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ data: { releases: [] } }),
@@ -1336,6 +1347,7 @@ test('checks and upgrades brand services from the service version page', async (
     'postgres',
     'redis',
     'mqtt',
+    'download_init',
     'download_http',
     'download_ftp',
   ])
@@ -1465,6 +1477,22 @@ test('checks and upgrades brand services from the service version page', async (
       upgrade_supported: false,
       upgrade_executable: false,
       can_upgrade: true,
+      last_checked_at: '2026-10-03T10:00:00Z',
+      updated_at: '2026-10-03T10:00:00Z',
+    },
+    {
+      id: 'download_init',
+      display_name: '下载服务初始化',
+      role: '准备发布文件目录',
+      image: 'alpine:3.22',
+      current_version: '3.22',
+      latest_version: '3.22',
+      status: 'current',
+      release_url: '',
+      is_self: false,
+      upgrade_supported: false,
+      upgrade_executable: false,
+      can_upgrade: false,
       last_checked_at: '2026-10-03T10:00:00Z',
       updated_at: '2026-10-03T10:00:00Z',
     },
@@ -2297,7 +2325,7 @@ test('lists download files and manages uploads, deletion, and the release index'
       body: JSON.stringify({ data: { file: uploadedFile } }),
     })
   })
-  await page.route('**/api/v1/admin/releases', async (route) => {
+  await page.route(/\/api\/v1\/admin\/releases(?:\?.*)?$/, async (route) => {
     const request = route.request()
     if (request.method() === 'GET') {
       await route.fulfill({

@@ -26,6 +26,10 @@ async function useAdminSession(page: Page): Promise<void> {
               'ota.manage',
               'storage.read',
               'storage.manage',
+              'content.read',
+              'content.review',
+              'settings.read',
+              'settings.manage',
               'notifications.read',
               'notifications.manage',
               'stats.read',
@@ -70,6 +74,26 @@ function familyPayload(
       selected_models: ['model-a'],
       allowed_models: ['model-a'],
       credential_ready: true,
+    },
+  }
+}
+
+function familyListPayload(
+  accounts: Record<string, unknown>[],
+  page = 1,
+  pageSize = 20,
+  total = accounts.length,
+): Record<string, unknown> {
+  return {
+    data: {
+      accounts,
+      pagination: {
+        page,
+        page_size: pageSize,
+        total,
+        total_pages: total === 0 ? 0 : Math.ceil(total / pageSize),
+        has_more: page * pageSize < total,
+      },
     },
   }
 }
@@ -225,15 +249,20 @@ function uploadedFile(
   kind: string,
   platform: string,
 ): Record<string, unknown> {
+  const directoryKind =
+    kind === 'client' && platform === 'android' && filename.endsWith('.apk')
+      ? 'apk'
+      : kind
   return {
     id: `uploaded-${version}`,
+    name: filename,
     file_name: filename,
-    relative_path: `${version}/stable/${platform}/${filename}`,
-    directory: `${version}/stable/${platform}`,
+    relative_path: `${version}/stable/${platform}/${directoryKind}/${filename}`,
+    directory: `${version}/stable/${platform}/${directoryKind}`,
     size_bytes: 2048,
     modified_at: '2026-10-18T09:00:00Z',
     sha256: 'b'.repeat(64),
-    download_url: `https://download.example.test/${version}/stable/${platform}/${filename}`,
+    download_url: `https://download.example.test/${version}/stable/${platform}/${directoryKind}/${filename}`,
     version,
     kind,
     platform,
@@ -396,15 +425,15 @@ test('ignores a late usage report response for the previous family', async ({ pa
   await useAdminSession(page)
   const firstReportIntercepted = Promise.withResolvers<void>()
   const releaseFirstReport = Promise.withResolvers<void>()
-  await page.route('**/api/v1/admin/families', async (route) => {
-    await fulfillJSON(route, 200, {
-      data: {
-        accounts: [
-          familyPayload('family-a', '甲家庭'),
-          familyPayload('family-b', '乙家庭'),
-        ],
-      },
-    })
+  await page.route(/\/api\/v1\/admin\/families(?:\?.*)?$/, async (route) => {
+    await fulfillJSON(
+      route,
+      200,
+      familyListPayload([
+        familyPayload('family-a', '甲家庭'),
+        familyPayload('family-b', '乙家庭'),
+      ]),
+    )
   })
   await page.route(
     '**/api/v1/admin/families/family-a/usage-reports**',
@@ -441,23 +470,23 @@ test('keeps the newest child reload for a family and clears loading only for the
   page,
 }) => {
   await useAdminSession(page)
-  const firstChildLoad = Promise.withResolvers<void>()
-  const releaseFirstChildLoad = Promise.withResolvers<void>()
+  const firstReloadIntercepted = Promise.withResolvers<void>()
+  const releaseFirstReload = Promise.withResolvers<void>()
   let childRequests = 0
-  await page.route('**/api/v1/admin/families', async (route) => {
-    await fulfillJSON(route, 200, {
-      data: {
-        accounts: [familyPayload('family-child-a', '甲家庭')],
-      },
-    })
+  await page.route(/\/api\/v1\/admin\/families(?:\?.*)?$/, async (route) => {
+    await fulfillJSON(
+      route,
+      200,
+      familyListPayload([familyPayload('family-child-a', '甲家庭')]),
+    )
   })
   await page.route(
     '**/api/v1/admin/families/family-child-a/children',
     async (route) => {
       childRequests += 1
-      if (childRequests === 1) {
-        firstChildLoad.resolve()
-        await releaseFirstChildLoad.promise
+      if (childRequests === 2) {
+        firstReloadIntercepted.resolve()
+        await releaseFirstReload.promise
         await fulfillJSON(route, 200, {
           data: { children: [childPayload('旧档案')] },
         })
@@ -465,22 +494,23 @@ test('keeps the newest child reload for a family and clears loading only for the
       }
       await new Promise((resolve) => setTimeout(resolve, 120))
       await fulfillJSON(route, 200, {
-        data: { children: [childPayload('新档案')] },
+        data: {
+          children: [childPayload(childRequests === 1 ? '初始档案' : '新档案')],
+        },
       })
     },
   )
 
   await page.goto('/children')
-  await firstChildLoad.promise
-  const reloadChildren = page.getByRole('button', { name: '更新档案' })
-  await expect(reloadChildren).toBeDisabled()
-  await reloadChildren.dispatchEvent('click')
-  await reloadChildren.dispatchEvent('click')
-  await expect.poll(() => childRequests).toBe(1)
-  await expect(page.getByText('新档案', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '更新档案' })).toBeEnabled()
-  releaseFirstChildLoad.resolve()
-  await expect(page.getByText('新档案', { exact: true })).toBeVisible()
+  await expect(page.getByText('初始档案', { exact: true })).toBeVisible()
+  await page
+    .getByRole('button', { name: /正在更新…|更新档案/ })
+    .click()
+  await firstReloadIntercepted.promise
+  const loadingChildren = page.getByRole('button', { name: '正在更新…' })
+  await expect(loadingChildren).toBeDisabled()
+  expect(childRequests).toBe(2)
+  releaseFirstReload.resolve()
   await expect(page.getByText('旧档案', { exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '更新档案' })).toBeEnabled()
 })
@@ -602,7 +632,11 @@ test('keeps release pagination visible when the current page is empty', async ({
   page,
 }) => {
   await useAdminSession(page)
-  await page.route('**/api/v1/admin/releases', async (route) => {
+  await page.route('**/api/v1/admin/releases**', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.fallback()
+      return
+    }
     const requestURL = new URL(route.request().url())
     const pageNumber = Number(requestURL.searchParams.get('page') ?? '1')
     await fulfillJSON(route, 200, {
@@ -626,7 +660,9 @@ test('keeps release pagination visible when the current page is empty', async ({
   await expect(page.locator('.pagination')).toBeVisible()
   await expect(page.getByRole('button', { name: '返回上一页' })).toBeVisible()
   await expect(page.getByRole('button', { name: '重新加载' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '上一页' })).toBeEnabled()
+  await expect(
+    page.getByRole('button', { name: '上一页', exact: true }),
+  ).toBeEnabled()
 })
 
 test('keeps the current release page size when a page-size request fails', async ({
@@ -634,7 +670,11 @@ test('keeps the current release page size when a page-size request fails', async
 }) => {
   await useAdminSession(page)
   let pageSizeRequestCount = 0
-  await page.route('**/api/v1/admin/releases', async (route) => {
+  await page.route('**/api/v1/admin/releases**', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.fallback()
+      return
+    }
     const requestURL = new URL(route.request().url())
     const pageSize = Number(requestURL.searchParams.get('page_size') ?? '20')
     if (pageSize === 50) {
@@ -671,7 +711,11 @@ test('clamps to the previous release page after deleting the last item', async (
 }) => {
   await useAdminSession(page)
   let deleted = false
-  await page.route('**/api/v1/admin/releases', async (route) => {
+  await page.route('**/api/v1/admin/releases**', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.fallback()
+      return
+    }
     const requestURL = new URL(route.request().url())
     const pageNumber = Number(requestURL.searchParams.get('page') ?? '1')
     const total = deleted ? 1 : 21
@@ -728,7 +772,7 @@ test('separates a successful upload from a failed release registration', async (
       data: { file: uploadedFile('app-3.0.0.apk', '3.0.0', 'client', 'android') },
     })
   })
-  await page.route('**/api/v1/admin/releases', async (route) => {
+  await page.route(/\/api\/v1\/admin\/releases(?:\?.*)?$/, async (route) => {
     if (route.request().method() === 'GET') {
       await fulfillJSON(route, 200, {
         data: {
@@ -788,7 +832,7 @@ test('keeps a completed release open when index refresh fails and retries only t
       data: { file: uploadedFile('app-4.0.0.apk', '4.0.0', 'client', 'android') },
     })
   })
-  await page.route('**/api/v1/admin/releases', async (route) => {
+  await page.route(/\/api\/v1\/admin\/releases(?:\?.*)?$/, async (route) => {
     if (route.request().method() === 'GET') {
       await fulfillJSON(route, 200, {
         data: {
@@ -841,6 +885,7 @@ test('reloads the file list after a completed release when only the list refresh
 }) => {
   await useAdminSession(page)
   let fileListRequests = 0
+  let reloadedAfterUpload = false
   const storedFile = uploadedFile(
     'app-5.0.0.apk',
     '5.0.0',
@@ -849,6 +894,13 @@ test('reloads the file list after a completed release when only the list refresh
   )
   await page.route('**/api/v1/admin/storage/files', async (route) => {
     fileListRequests += 1
+    if (fileListRequests === 2) {
+      reloadedAfterUpload = true
+      await fulfillJSON(route, 503, {
+        error: { code: 'service_unavailable', message: '暂时无法读取文件列表' },
+      })
+      return
+    }
     await fulfillJSON(route, 200, {
       data: {
         files: fileListRequests < 3 ? [] : [storedFile],
@@ -858,7 +910,7 @@ test('reloads the file list after a completed release when only the list refresh
   await page.route('**/api/v1/admin/storage/files/upload', async (route) => {
     await fulfillJSON(route, 200, { data: { file: storedFile } })
   })
-  await page.route('**/api/v1/admin/releases', async (route) => {
+  await page.route(/\/api\/v1\/admin\/releases(?:\?.*)?$/, async (route) => {
     if (route.request().method() === 'GET') {
       await fulfillJSON(route, 200, {
         data: {
@@ -888,8 +940,9 @@ test('reloads the file list after a completed release when only the list refresh
   await dialog.getByRole('button', { name: '上传并登记版本' }).click()
   await expect(dialog).toBeVisible()
   await expect(
-    dialog.getByText('版本和索引已经完成，但文件列表刷新失败。'),
+    dialog.getByText(/版本已经完成，但文件列表刷新失败/),
   ).toBeVisible()
+  expect(reloadedAfterUpload).toBe(true)
   await dialog.getByRole('button', { name: '重新读取文件' }).click()
   await expect(dialog).toHaveCount(0)
   expect(fileListRequests).toBeGreaterThanOrEqual(3)
@@ -916,8 +969,13 @@ test('registers an uploaded file under its explicit release channel', async ({ p
     }
     await fulfillJSON(route, 200, { data: { file } })
   })
-  await page.route('**/api/v1/admin/releases', async (route) => {
+  await page.route('**/api/v1/admin/releases**', async (route) => {
     if (route.request().method() === 'GET') {
+      const requestURL = new URL(route.request().url())
+      if (requestURL.pathname !== '/api/v1/admin/releases') {
+        await route.fallback()
+        return
+      }
       await fulfillJSON(route, 200, {
         data: {
           releases: [],
@@ -955,7 +1013,7 @@ test('keeps release pagination available on a genuinely empty release catalog', 
   page,
 }) => {
   await useAdminSession(page)
-  await page.route('**/api/v1/admin/releases', async (route) => {
+  await page.route(/\/api\/v1\/admin\/releases(?:\?.*)?$/, async (route) => {
     await fulfillJSON(route, 200, {
       data: {
         releases: [],
@@ -988,7 +1046,7 @@ test('offers a concrete recovery path for a draft without release notes', async 
     published_at: '',
   }
   let deleted = false
-  await page.route('**/api/v1/admin/releases', async (route) => {
+  await page.route(/\/api\/v1\/admin\/releases(?:\?.*)?$/, async (route) => {
     if (route.request().method() === 'GET') {
       await fulfillJSON(route, 200, {
         data: {
@@ -1006,6 +1064,12 @@ test('offers a concrete recovery path for a draft without release notes', async 
     await fulfillJSON(route, 200, { data: {} })
   })
   await page.route('**/api/v1/admin/releases/release-6.0.0', async (route) => {
+    if (route.request().method() !== 'DELETE') {
+      await fulfillJSON(route, 405, {
+        error: { code: 'method_not_allowed', message: '' },
+      })
+      return
+    }
     deleted = true
     await fulfillJSON(route, 200, { data: {} })
   })
@@ -1037,7 +1101,11 @@ test('renders and operates same-version artifacts by record identity', async ({
   const deleted: string[] = []
   let currentReleases = [apk, adminWeb]
 
-  await page.route('**/api/v1/admin/releases', async (route) => {
+  await page.route(/\/api\/v1\/admin\/releases(?:\?.*)?$/, async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.fallback()
+      return
+    }
     await fulfillJSON(route, 200, {
       data: {
         releases: currentReleases,
@@ -1060,7 +1128,11 @@ test('renders and operates same-version artifacts by record identity', async ({
     await fulfillJSON(route, 200, { data: { published: true } })
   })
   await page.route('**/api/v1/admin/releases/*', async (route) => {
-    if (route.request().method() !== 'DELETE') {
+    const requestURL = new URL(route.request().url())
+    if (
+      route.request().method() !== 'DELETE' ||
+      !requestURL.pathname.startsWith('/api/v1/admin/releases/')
+    ) {
       await route.fallback()
       return
     }
@@ -1082,7 +1154,7 @@ test('renders and operates same-version artifacts by record identity', async ({
   await firstRow.getByRole('button', { name: '发布' }).click()
   await page.getByRole('button', { name: '确认发布' }).click()
   await expect.poll(() => published.length).toBe(1)
-  expect(published[0]).toBe('release-0.29.0-client-android-stable')
+  expect(published[0]).toBe('release-0.29.0-stable-client-android')
 
   const secondRow = page
     .locator('table tbody tr')
@@ -1091,7 +1163,7 @@ test('renders and operates same-version artifacts by record identity', async ({
   await secondRow.getByRole('button', { name: '删除' }).click()
   await page.getByRole('button', { name: '删除版本' }).click()
   await expect.poll(() => deleted.length).toBe(1)
-  expect(deleted[0]).toBe('release-0.29.0-client-all-stable')
+  expect(deleted[0]).toBe('release-0.29.0-stable-client-all')
   await expect(page.locator('table tbody tr')).toHaveCount(1)
 })
 
@@ -1102,14 +1174,15 @@ test('treats a failed replacement upload as a conflict without sending a file', 
   let uploadRequests = 0
   const indexedFile = {
     id: 'existing-client',
+    name: 'sprout-parent-app-0.12.3.apk',
     file_name: 'sprout-parent-app-0.12.3.apk',
-    relative_path: '0.12.3/stable/android/sprout-parent-app-0.12.3.apk',
-    directory: '0.12.3/stable/android',
+    relative_path: '0.12.3/stable/android/apk/sprout-parent-app-0.12.3.apk',
+    directory: '0.12.3/stable/android/apk',
     size_bytes: 1024,
     modified_at: '2026-10-18T09:00:00Z',
     sha256: 'a'.repeat(64),
     download_url:
-      'https://download.example.test/0.12.3/stable/android/sprout-parent-app-0.12.3.apk',
+      'https://download.example.test/0.12.3/stable/android/apk/sprout-parent-app-0.12.3.apk',
     version: '0.12.3',
     kind: 'client',
     platform: 'android',

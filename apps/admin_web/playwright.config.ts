@@ -49,6 +49,9 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
+        // Local Codex sessions launch Chrome from a restricted process
+        // environment; CI continues to use Playwright's bundled Chromium.
+        channel: process.env.CI ? undefined : 'chrome',
       },
     },
     {

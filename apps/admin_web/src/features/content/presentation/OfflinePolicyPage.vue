@@ -11,7 +11,10 @@ import {
   OFFLINE_POLICY_LIMITS,
   useOfflinePolicyStore,
 } from '@/features/content/application/offlinePolicyStore'
-import { useFamilyAccountStore } from '@/features/family/application/familyAccountStore'
+import { useAuthStore } from '@/features/auth/application/authStore'
+import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
+import { useChildProfileStore } from '@/features/child/application/childProfileStore'
+import { canManageContent } from '@/features/content/domain/contentPermission'
 
 interface PolicyForm {
   offlineEnabled: boolean
@@ -22,11 +25,16 @@ interface PolicyForm {
 }
 
 const store = useOfflinePolicyStore()
-const familyStore = useFamilyAccountStore()
+const familyStore = useChildProfileStore()
+const authStore = useAuthStore()
 
 const formErrors = reactive<Record<string, string>>({})
 const form = reactive<PolicyForm>(defaultForm())
 const selectedFamilyId = ref('')
+const canManage = computed(() =>
+  canManageContent(authStore.can(ADMIN_PERMISSIONS.contentReview)),
+)
+const canReadFamily = computed(() => authStore.can(ADMIN_PERMISSIONS.familyRead))
 
 const isDirty = computed(() => {
   const current = store.policy
@@ -34,7 +42,10 @@ const isDirty = computed(() => {
 })
 
 onMounted(async () => {
-  await Promise.all([store.load(), familyStore.load()])
+  await Promise.all([
+    store.load(),
+    canReadFamily.value ? familyStore.loadFamilies() : Promise.resolve(null),
+  ])
   syncFormFromPolicy()
 })
 
@@ -114,6 +125,9 @@ function validate(): boolean {
 }
 
 async function submit(): Promise<void> {
+  if (!canManage.value) {
+    return
+  }
   if (!validate()) {
     return
   }
@@ -135,6 +149,9 @@ async function refreshAcknowledgements(): Promise<void> {
 }
 
 function resetForm(): void {
+  if (!canManage.value) {
+    return
+  }
   syncFormFromPolicy()
 }
 
@@ -186,6 +203,10 @@ function acknowledgementLabel(entry: OfflinePolicyAcknowledgement): string {
     </div>
 
     <form v-else class="policy-form" novalidate @submit.prevent="submit">
+      <p v-if="!canManage" class="content-readonly-notice">
+        你当前只有查看权限。可以查看当前策略和设备接收情况，但不能修改策略或重新下发。
+      </p>
+      <fieldset class="policy-fields" :disabled="!canManage">
       <div class="toggle-row">
         <label class="switch">
           <input v-model="form.offlineEnabled" type="checkbox" />
@@ -247,6 +268,7 @@ function acknowledgementLabel(entry: OfflinePolicyAcknowledgement): string {
 
       <div class="form-actions">
         <button
+          v-if="canManage"
           type="button"
           class="secondary"
           :disabled="store.isSubmitting || !isDirty"
@@ -254,10 +276,16 @@ function acknowledgementLabel(entry: OfflinePolicyAcknowledgement): string {
         >
           还原
         </button>
-        <button type="submit" class="primary" :disabled="store.isSubmitting || !isDirty">
+        <button
+          v-if="canManage"
+          type="submit"
+          class="primary"
+          :disabled="store.isSubmitting || !isDirty"
+        >
           {{ store.isSubmitting ? '正在保存…' : '保存并下发' }}
         </button>
       </div>
+      </fieldset>
     </form>
 
     <section class="ack-section" aria-label="设备接收情况">
@@ -266,7 +294,7 @@ function acknowledgementLabel(entry: OfflinePolicyAcknowledgement): string {
           <h2>设备接收情况</h2>
           <p class="page-description">选择家庭后查看其设备已应用到的策略版本。</p>
         </div>
-        <div class="ack-controls">
+        <div v-if="canReadFamily" class="ack-controls">
           <select v-model="selectedFamilyId">
             <option value="">请选择家庭</option>
             <option
@@ -274,7 +302,7 @@ function acknowledgementLabel(entry: OfflinePolicyAcknowledgement): string {
               :key="family.parentAccountId"
               :value="family.parentAccountId"
             >
-              {{ family.guardianFamilyName || family.parentDisplayName || family.phone }}
+              {{ family.displayName || family.phone }}
             </option>
           </select>
           <button
@@ -285,6 +313,9 @@ function acknowledgementLabel(entry: OfflinePolicyAcknowledgement): string {
             {{ store.isLoadingAcknowledgements ? '正在查询…' : '查询' }}
           </button>
         </div>
+        <p v-else class="family-readonly-hint">
+          查看设备接收情况需要家长账号读取权限。
+        </p>
       </header>
 
       <p v-if="store.acknowledgementsError" class="error-message" role="alert">
@@ -443,6 +474,26 @@ button:disabled {
   background: #ffffff;
 }
 
+.policy-fields {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 20px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.content-readonly-notice {
+  margin: 0;
+  padding: 12px 15px;
+  border: 1px solid #e6c56d;
+  border-radius: 14px;
+  background: #fff9e8;
+  color: #7a5411;
+  line-height: 1.6;
+}
+
 .toggle-row {
   display: flex;
   align-items: center;
@@ -567,6 +618,14 @@ button:disabled {
 .ack-controls {
   display: flex;
   gap: 10px;
+}
+
+.family-readonly-hint {
+  max-width: 280px;
+  margin: 0;
+  color: var(--sprout-text-muted);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .ack-controls select {

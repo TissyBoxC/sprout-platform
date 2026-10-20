@@ -67,6 +67,20 @@ export function mapApiError(error: unknown): ApiError {
         retryable: false,
       }
     }
+    if (code === 'file_immutable' || code === 'published_file_immutable') {
+      return {
+        kind: 'validation',
+        message: '这个文件已经用于发布，不能再替换或删除。请发布新版本并使用新的文件名。',
+        retryable: false,
+      }
+    }
+    if (code === 'file_exists') {
+      return {
+        kind: 'validation',
+        message: '文件已经存在，请确认替换后再上传。',
+        retryable: false,
+      }
+    }
     if (status === 401) {
       return { kind: 'unauthenticated', message: '登录已过期，请重新登录', retryable: false }
     }

@@ -16,6 +16,9 @@ import {
   uiTextStatusLabel,
   useUiTextStore,
 } from '@/features/ui_text/application/uiTextStore'
+import { useAuthStore } from '@/features/auth/application/authStore'
+import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
+import { canManageContent } from '@/features/content/domain/contentPermission'
 import UiTextDraftFields, {
   type UiTextDraftForm,
   type UiTextEntryForm,
@@ -26,6 +29,10 @@ const platforms: UiTextPlatform[] = ['parent_app', 'admin_web', 'device_firmware
 const statuses: UiTextStatus[] = ['draft', 'in_review', 'published', 'withdrawn']
 
 const store = useUiTextStore()
+const authStore = useAuthStore()
+const canManage = computed(() =>
+  canManageContent(authStore.can(ADMIN_PERMISSIONS.contentReview)),
+)
 
 const isCreateOpen = ref(false)
 const isEditOpen = ref(false)
@@ -66,6 +73,9 @@ onMounted(() => {
 })
 
 function openCreate(): void {
+  if (!canManage.value) {
+    return
+  }
   store.clearMessages()
   Object.assign(createForm, emptyDraftForm())
   isCreateOpen.value = true
@@ -76,6 +86,9 @@ function closeCreate(): void {
 }
 
 async function submitCreate(): Promise<void> {
+  if (!canManage.value) {
+    return
+  }
   const result = await store.createDraft(toDraftInput(createForm))
   if (result.succeeded) {
     isCreateOpen.value = false
@@ -83,6 +96,9 @@ async function submitCreate(): Promise<void> {
 }
 
 function openEdit(): void {
+  if (!canManage.value) {
+    return
+  }
   const detail = store.selectedDetail
   if (detail === null || detail.package.status !== 'draft') {
     return
@@ -105,6 +121,9 @@ function openEdit(): void {
 }
 
 async function submitEdit(): Promise<void> {
+  if (!canManage.value) {
+    return
+  }
   const selectedRef = store.selectedRef
   if (selectedRef === null) {
     return
@@ -127,19 +146,31 @@ function removeEntry(form: UiTextDraftForm, index: number): void {
 }
 
 async function submitVersion(summary: UiTextVersionSummary): Promise<void> {
+  if (!canManage.value) {
+    return
+  }
   await store.submitVersion(refOf(summary))
 }
 
 async function approveVersion(summary: UiTextVersionSummary): Promise<void> {
+  if (!canManage.value) {
+    return
+  }
   await store.approveVersion(refOf(summary))
 }
 
 function openReject(summary: UiTextVersionSummary): void {
+  if (!canManage.value) {
+    return
+  }
   rejectTarget.value = summary
   rejectReason.value = ''
 }
 
 async function confirmReject(): Promise<void> {
+  if (!canManage.value) {
+    return
+  }
   const target = rejectTarget.value
   if (target === null || rejectReason.value.trim() === '') {
     return
@@ -151,12 +182,18 @@ async function confirmReject(): Promise<void> {
 }
 
 function openPublish(summary: UiTextVersionSummary): void {
+  if (!canManage.value) {
+    return
+  }
   publishTarget.value = summary
   publishKeyId.value = summary.package.signatureKeyId
   publishSignature.value = ''
 }
 
 async function confirmPublish(): Promise<void> {
+  if (!canManage.value) {
+    return
+  }
   const target = publishTarget.value
   if (target === null) {
     return
@@ -172,6 +209,9 @@ async function confirmPublish(): Promise<void> {
 }
 
 async function withdrawVersion(summary: UiTextVersionSummary): Promise<void> {
+  if (!canManage.value) {
+    return
+  }
   await store.withdrawVersion(refOf(summary))
 }
 
@@ -286,9 +326,15 @@ function formatTime(value: string): string {
         <button type="button" class="secondary" :disabled="store.isLoading" @click="store.load">
           刷新列表
         </button>
-        <button type="button" class="primary" @click="openCreate">新建文案草稿</button>
+        <button v-if="canManage" type="button" class="primary" @click="openCreate">
+          新建文案草稿
+        </button>
       </div>
     </header>
+
+    <p v-if="!canManage" class="content-readonly-notice">
+      你当前只有查看权限。可以查看文案版本、审核记录和条目内容，但新建、编辑、审核、发布与撤回由具备内容审核权限的管理员完成。
+    </p>
 
     <Transition name="toast">
       <p v-if="store.lastMessage" class="success-message">{{ store.lastMessage }}</p>
@@ -383,7 +429,7 @@ function formatTime(value: string): string {
               <td>{{ summary.entryCount }}</td>
               <td>{{ formatTime(summary.package.updatedAt) }}</td>
               <td>
-                <div class="row-actions" @click.stop>
+                <div v-if="canManage" class="row-actions" @click.stop>
                   <button
                     v-if="summary.package.status === 'draft'"
                     type="button"
@@ -428,6 +474,7 @@ function formatTime(value: string): string {
                     撤回
                   </button>
                 </div>
+                <span v-else class="read-only-copy">只读</span>
               </td>
             </tr>
           </tbody>
@@ -524,7 +571,7 @@ function formatTime(value: string): string {
               </ul>
             </div>
 
-            <div class="dialog-actions">
+            <div v-if="canManage" class="dialog-actions">
               <button
                 v-if="store.selectedDetail.package.status === 'draft'"
                 type="button"
@@ -549,7 +596,7 @@ function formatTime(value: string): string {
     </Transition>
 
     <Transition name="modal">
-      <div v-if="isCreateOpen" class="dialog-backdrop" @click.self="closeCreate">
+      <div v-if="isCreateOpen && canManage" class="dialog-backdrop" @click.self="closeCreate">
         <form class="dialog" @submit.prevent="submitCreate">
           <h2>新建文案草稿</h2>
           <p class="dialog-hint">一个文案标识按语言和平台独立管理，版本号由平台自动分配。</p>
@@ -570,7 +617,7 @@ function formatTime(value: string): string {
     </Transition>
 
     <Transition name="modal">
-      <div v-if="isEditOpen" class="dialog-backdrop" @click.self="isEditOpen = false">
+      <div v-if="isEditOpen && canManage" class="dialog-backdrop" @click.self="isEditOpen = false">
         <form class="dialog" @submit.prevent="submitEdit">
           <h2>编辑文案草稿</h2>
           <p class="dialog-hint">提交审核后条目将不可修改，请确认全部文案准确无误。</p>
@@ -591,7 +638,7 @@ function formatTime(value: string): string {
     </Transition>
 
     <Transition name="modal">
-      <div v-if="rejectTarget" class="dialog-backdrop" @click.self="rejectTarget = null">
+      <div v-if="rejectTarget && canManage" class="dialog-backdrop" @click.self="rejectTarget = null">
         <form class="dialog confirm-dialog" @submit.prevent="confirmReject">
           <h2>驳回这个版本？</h2>
           <p>驳回后版本会回到草稿状态，请填写驳回原因供创建人修改。</p>
@@ -610,7 +657,7 @@ function formatTime(value: string): string {
     </Transition>
 
     <Transition name="modal">
-      <div v-if="publishTarget" class="dialog-backdrop" @click.self="publishTarget = null">
+      <div v-if="publishTarget && canManage" class="dialog-backdrop" @click.self="publishTarget = null">
         <form class="dialog confirm-dialog" @submit.prevent="confirmPublish">
           <h2>发布这个版本？</h2>
           <p>
@@ -660,6 +707,21 @@ function formatTime(value: string): string {
   border-radius: var(--sprout-radius-card);
   background: #ffffff;
   box-shadow: 0 8px 24px rgb(194 91 128 / 5%);
+}
+
+.content-readonly-notice {
+  margin: 0 0 18px;
+  padding: 12px 15px;
+  border: 1px solid #e6c56d;
+  border-radius: 14px;
+  background: #fff9e8;
+  color: #7a5411;
+  line-height: 1.6;
+}
+
+.read-only-copy {
+  color: var(--sprout-text-muted);
+  font-size: 12px;
 }
 
 .eyebrow {

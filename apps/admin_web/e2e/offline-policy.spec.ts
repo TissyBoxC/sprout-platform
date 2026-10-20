@@ -9,7 +9,10 @@ interface OfflinePolicyPayload {
   revision: number
 }
 
-async function useAdminSession(page: Page): Promise<void> {
+async function useAdminSession(
+  page: Page,
+  permissions: string[] = ['content.read', 'content.review'],
+): Promise<void> {
   await page.addInitScript(() => {
     globalThis.sessionStorage.setItem('sprout.admin.accessToken', 'test-access-token')
     globalThis.sessionStorage.setItem('sprout.admin.refreshToken', 'test-refresh-token')
@@ -24,7 +27,7 @@ async function useAdminSession(page: Page): Promise<void> {
             email: 'admin@sprout.local',
             display_name: '管理员',
             role: 'admin',
-            admin_permissions: ['content.read'],
+            admin_permissions: permissions,
           },
         },
       }),
@@ -61,7 +64,7 @@ async function setupRoutes(
 ): Promise<{ updatePayloads: Array<Record<string, unknown>> }> {
   const updatePayloads: Array<Record<string, unknown>> = []
 
-  await page.route('**/api/v1/admin/families', async (route) => {
+  await page.route('**/api/v1/admin/families?**', async (route) => {
     await route.fulfill(
       jsonResponse({
         accounts: [
@@ -73,8 +76,14 @@ async function setupRoutes(
             status: 'active',
           },
         ],
+        pagination: {
+          has_more: false,
+        },
       }),
     )
+  })
+  await page.route('**/api/v1/admin/ai-models', async (route) => {
+    await route.fulfill(jsonResponse({ models: [] }))
   })
 
   await page.route('**/api/v1/admin/content/offline-policy/acknowledgements**', async (route) => {
@@ -127,8 +136,24 @@ test('loads the published policy and saves a new revision', async ({ page }) => 
   })
 })
 
+test('keeps policy fields readonly without content.review', async ({ page }) => {
+  await useAdminSession(page, ['content.read'])
+  const { updatePayloads } = await setupRoutes(page)
+
+  await page.goto('/content/offline-policy')
+
+  await expect(
+    page.getByText(
+      '你当前只有查看权限。可以查看当前策略和设备接收情况，但不能修改策略或重新下发。',
+    ),
+  ).toBeVisible()
+  await expect(page.getByLabel('可缓存内容包数量')).toBeDisabled()
+  await expect(page.getByRole('button', { name: '保存并下发' })).toHaveCount(0)
+  expect(updatePayloads).toEqual([])
+})
+
 test('lists each device revision after selecting a family', async ({ page }) => {
-  await useAdminSession(page)
+  await useAdminSession(page, ['content.read', 'family.read'])
   await setupRoutes(page, {
     acknowledgements: [
       { device_id: 'device-online', revision: 7, up_to_date: true },
@@ -138,7 +163,11 @@ test('lists each device revision after selecting a family', async ({ page }) => 
 
   await page.goto('/content/offline-policy')
 
-  await page.getByRole('combobox').selectOption('family-1')
+  const familySelect = page
+    .getByRole('region', { name: '设备接收情况' })
+    .getByRole('combobox')
+  await expect(familySelect).toContainText('李女士')
+  await familySelect.selectOption('family-1')
   await page.getByRole('button', { name: '查询' }).click()
 
   await expect(page.getByText('device-online')).toBeVisible()

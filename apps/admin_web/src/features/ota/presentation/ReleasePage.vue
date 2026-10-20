@@ -6,8 +6,11 @@ import {
   type AdminRelease,
   type CreateReleaseInput,
 } from '@/features/ota/application/releaseStore'
+import { useAuthStore } from '@/features/auth/application/authStore'
+import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
 
 const store = useReleaseStore()
+const authStore = useAuthStore()
 const isCreateOpen = ref(false)
 const pendingDelete = ref<AdminRelease | null>(null)
 const pendingPublish = ref<AdminRelease | null>(null)
@@ -29,13 +32,16 @@ const isBusy = computed(
     store.isSubmitting ||
     store.isResolvingArtifact,
 )
+const canManageReleases = computed(() =>
+  authStore.can(ADMIN_PERMISSIONS.storageManage),
+)
 
 onMounted(() => {
   void store.load()
 })
 
 function openCreate(): void {
-  if (isBusy.value) {
+  if (!canManageReleases.value || isBusy.value) {
     return
   }
   isCreateOpen.value = true
@@ -46,14 +52,18 @@ function openCreate(): void {
 }
 
 function startPublish(release: AdminRelease): void {
-  if (isBusy.value || release.status !== 'draft') {
+  if (
+    !canManageReleases.value ||
+    isBusy.value ||
+    release.status !== 'draft'
+  ) {
     return
   }
   pendingPublish.value = release
 }
 
 async function resolveArtifact(): Promise<void> {
-  if (isBusy.value) {
+  if (!canManageReleases.value || isBusy.value) {
     return
   }
   const artifactInput = await store.resolveArtifact({
@@ -73,7 +83,7 @@ async function resolveArtifact(): Promise<void> {
 }
 
 async function createRelease(): Promise<void> {
-  if (isBusy.value) {
+  if (!canManageReleases.value || isBusy.value) {
     return
   }
   const succeeded = await store.create(createForm)
@@ -85,7 +95,11 @@ async function createRelease(): Promise<void> {
 }
 
 function startNotesRecovery(release: AdminRelease): void {
-  if (isBusy.value || release.status !== 'draft') {
+  if (
+    !canManageReleases.value ||
+    isBusy.value ||
+    release.status !== 'draft'
+  ) {
     return
   }
   pendingNotesRecovery.value = release
@@ -105,6 +119,7 @@ function resetCreateForm(): void {
 
 async function confirmPublish(): Promise<void> {
   if (
+    !canManageReleases.value ||
     pendingPublish.value === null ||
     isBusy.value ||
     pendingPublish.value.status !== 'draft' ||
@@ -119,7 +134,11 @@ async function confirmPublish(): Promise<void> {
 }
 
 async function confirmDelete(): Promise<void> {
-  if (pendingDelete.value === null || store.isSubmitting) {
+  if (
+    !canManageReleases.value ||
+    pendingDelete.value === null ||
+    store.isSubmitting
+  ) {
     return
   }
   const succeeded = await store.remove(pendingDelete.value)
@@ -129,6 +148,9 @@ async function confirmDelete(): Promise<void> {
 }
 
 async function confirmNotesRecovery(): Promise<void> {
+  if (!canManageReleases.value) {
+    return
+  }
   const release = pendingNotesRecovery.value
   if (release === null || store.isSubmitting) {
     return
@@ -245,11 +267,21 @@ function normalizePlatform(value: string): CreateReleaseInput['platform'] {
         <button type="button" class="secondary" :disabled="isBusy" @click="store.load()">
           刷新列表
         </button>
-        <button type="button" class="primary" :disabled="isBusy" @click="openCreate">
+        <button
+          v-if="canManageReleases"
+          type="button"
+          class="primary"
+          :disabled="isBusy"
+          @click="openCreate"
+        >
           登记新版本
         </button>
       </div>
     </header>
+
+    <p v-if="!canManageReleases" class="readonly-notice">
+      你当前只有查看权限。可以查看更新记录和发布状态，但登记、补充说明、发布与删除由具备文件发布权限的管理员完成。
+    </p>
 
     <Transition name="toast">
       <p v-if="store.lastMessage" class="success-message">{{ store.lastMessage }}</p>
@@ -321,7 +353,7 @@ function normalizePlatform(value: string): CreateReleaseInput['platform'] {
               重新加载
             </button>
             <button
-              v-if="store.pagination.total === 0"
+              v-if="store.pagination.total === 0 && canManageReleases"
               type="button"
               class="primary"
               :disabled="isBusy"
@@ -406,7 +438,7 @@ function normalizePlatform(value: string): CreateReleaseInput['platform'] {
               <td>{{ formatTime(release.publishedAt) }}</td>
               <td class="notes">{{ release.releaseNotes || '未填写更新说明' }}</td>
               <td>
-                <div class="row-actions">
+                <div v-if="canManageReleases" class="row-actions">
                   <button
                     v-if="release.status === 'draft' && release.releaseNotes.trim()"
                     type="button"
@@ -432,6 +464,7 @@ function normalizePlatform(value: string): CreateReleaseInput['platform'] {
                     删除
                   </button>
                 </div>
+                <span v-else class="read-only-copy">只读</span>
               </td>
             </tr>
           </tbody>
@@ -484,7 +517,7 @@ function normalizePlatform(value: string): CreateReleaseInput['platform'] {
 
     <Transition name="modal">
       <div
-        v-if="isCreateOpen"
+        v-if="isCreateOpen && canManageReleases"
         class="dialog-backdrop"
         @click.self="!isBusy && (isCreateOpen = false)"
       >
@@ -608,7 +641,7 @@ function normalizePlatform(value: string): CreateReleaseInput['platform'] {
 
     <Transition name="modal">
       <div
-        v-if="pendingPublish"
+        v-if="pendingPublish && canManageReleases"
         class="dialog-backdrop"
         @click.self="!store.isSubmitting && (pendingPublish = null)"
       >
@@ -648,7 +681,7 @@ function normalizePlatform(value: string): CreateReleaseInput['platform'] {
 
     <Transition name="modal">
       <div
-        v-if="pendingNotesRecovery"
+        v-if="pendingNotesRecovery && canManageReleases"
         class="dialog-backdrop"
         @click.self="!store.isSubmitting && (pendingNotesRecovery = null)"
       >
@@ -691,7 +724,7 @@ function normalizePlatform(value: string): CreateReleaseInput['platform'] {
 
     <Transition name="modal">
       <div
-        v-if="pendingDelete"
+        v-if="pendingDelete && canManageReleases"
         class="dialog-backdrop"
         @click.self="!store.isSubmitting && (pendingDelete = null)"
       >
@@ -1027,6 +1060,21 @@ tbody tr:hover {
   border-radius: 14px;
   background: #fff9e8;
   color: #7a5411;
+}
+
+.readonly-notice {
+  margin: 0 0 14px;
+  padding: 12px 16px;
+  border: 1px solid #b7def2;
+  border-radius: 14px;
+  background: #f3faff;
+  color: #27627f;
+  line-height: 1.55;
+}
+
+.read-only-copy {
+  color: var(--sprout-text-muted);
+  font-size: 12px;
 }
 
 .dialog-backdrop {

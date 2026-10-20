@@ -5,6 +5,7 @@ import {
   normalizeMetricsState,
   type FeatureMetricsState,
 } from '@/features/feature_center/domain/metricsState'
+import { FEATURE_CENTER_VERSION_CONFLICT_CODES } from '@/features/feature_center/domain/versionConflictCodes'
 
 export type FeatureCenterStatus = 'enabled' | 'disabled' | 'maintenance' | 'unknown'
 
@@ -117,15 +118,6 @@ export interface AdminFeatureCenterClient {
   ): Promise<FeatureCenterMutationResult>
   checkFeatureHealth(featureId: string): Promise<FeatureCenterMutationResult>
 }
-
-export const FEATURE_CENTER_VERSION_CONFLICT_CODES = [
-  'config_version_conflict',
-  'feature_config_version_conflict',
-  'feature_version_conflict',
-  'config_version_conflict',
-  'version_conflict',
-  'stale_feature_config',
-] as const
 
 const versionConflictCodes = new Set<string>(FEATURE_CENTER_VERSION_CONFLICT_CODES)
 

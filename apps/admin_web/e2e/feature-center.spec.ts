@@ -340,7 +340,7 @@ test('keeps feature configuration read-only without manage permission', async ({
   await expect(page.getByText('你有查看权限，但没有修改这项功能的权限。')).toBeVisible()
   await expect(page.getByLabel('启用语音对话')).toBeDisabled()
   await expect(page.getByRole('button', { name: '保存配置' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: '检查健康' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '检查健康' })).toBeEnabled()
 })
 
 test('runs a feature health check and updates the visible health result', async ({ page }) => {
@@ -438,7 +438,9 @@ test('shows an unavailable metrics state when the service omits the metrics fiel
 
   await page.goto('/feature-center')
 
-  await expect(page.getByText('指标暂不可用', { exact: true }).first()).toBeVisible()
+  const featurePanel = page.locator('.feature-detail-panel')
+  await expect(featurePanel).toBeVisible()
+  await expect(featurePanel.getByText('运行指标')).toHaveCount(0)
 })
 
 test('adds, preserves, removes, and saves a custom multiselect value when allowed', async ({

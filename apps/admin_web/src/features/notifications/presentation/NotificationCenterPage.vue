@@ -110,10 +110,25 @@ function emptyForm(): NotificationFormState {
   }
 }
 
+const selectableAudienceOptions = computed(() =>
+  store.canReadFamilies
+    ? audienceOptions
+    : audienceOptions.filter((option) => option.value !== 'parent'),
+)
+
+const canSubmitNotification = computed(
+  () => store.canManageNotifications && formError.value === '',
+)
+
 function openComposer(): void {
+  if (!store.canManageNotifications) {
+    return
+  }
   Object.assign(form, emptyForm())
   showComposer.value = true
-  void store.loadFamilies()
+  if (store.canReadFamilies) {
+    void store.loadFamilies()
+  }
 }
 
 function closeComposer(): void {
@@ -181,10 +196,16 @@ const formError = computed(() => {
   if (form.audience === 'family_devices' && form.deviceId.trim() === '') {
     return '请选择要送达的设备'
   }
+  if (!store.canManageNotifications) {
+    return '你没有权限发布通知'
+  }
   return ''
 })
 
 async function submit(): Promise<void> {
+  if (!store.canManageNotifications) {
+    return
+  }
   if (formError.value !== '') {
     return
   }
@@ -209,6 +230,9 @@ async function submit(): Promise<void> {
 }
 
 async function confirmDelete(): Promise<void> {
+  if (!store.canManageNotifications) {
+    return
+  }
   const target = pendingDelete.value
   if (target === null) {
     return
@@ -276,11 +300,20 @@ function formatTime(value: string): string {
         <button type="button" class="ghost-button" :disabled="store.isLoading" @click="store.load">
           {{ store.isLoading ? '正在刷新…' : '刷新' }}
         </button>
-        <button type="button" class="primary-button" @click="openComposer">
+        <button
+          v-if="store.canManageNotifications"
+          type="button"
+          class="primary-button"
+          @click="openComposer"
+        >
           发布通知
         </button>
       </div>
     </header>
+
+    <p v-if="!store.canManageNotifications" class="readonly-notice">
+      你当前只有查看权限。可以查看通知、筛选记录和送达情况，但发布与删除由具备通知管理权限的管理员完成。
+    </p>
 
     <Transition name="toast">
       <p v-if="store.lastMessage" class="success-message" role="status">
@@ -437,6 +470,7 @@ function formatTime(value: string): string {
         </button>
         <button
           v-else-if="
+            store.canManageNotifications &&
             !store.isCurrentPageOutOfRange &&
             !isCurrentPageEmpty &&
             store.filters.page === 1
@@ -493,6 +527,7 @@ function formatTime(value: string): string {
                 <td>{{ formatTime(notification.publishAt) }}</td>
                 <td>
                   <button
+                    v-if="store.canManageNotifications"
                     type="button"
                     class="text-button danger"
                     :disabled="store.deletingId === notification.id"
@@ -500,6 +535,7 @@ function formatTime(value: string): string {
                   >
                     {{ store.deletingId === notification.id ? '正在删除…' : '删除' }}
                   </button>
+                  <span v-else class="read-only-copy">只读</span>
                 </td>
               </tr>
             </tbody>
@@ -531,7 +567,11 @@ function formatTime(value: string): string {
     </template>
 
     <Transition name="fade">
-      <div v-if="showComposer" class="modal-backdrop" @click.self="closeComposer">
+      <div
+        v-if="showComposer && store.canManageNotifications"
+        class="modal-backdrop"
+        @click.self="closeComposer"
+      >
         <div class="modal" role="dialog" aria-modal="true" aria-label="发布通知">
           <header class="modal-header">
             <h2>发布通知</h2>
@@ -582,7 +622,7 @@ function formatTime(value: string): string {
               <legend>接收对象</legend>
               <div class="chip-row">
                 <button
-                  v-for="option in audienceOptions"
+                  v-for="option in selectableAudienceOptions"
                   :key="option.value"
                   type="button"
                   :class="['chip', { selected: form.audience === option.value }]"
@@ -591,9 +631,12 @@ function formatTime(value: string): string {
                   {{ option.label }}
                 </button>
               </div>
+              <small v-if="!store.canReadFamilies" class="permission-hint">
+                你当前没有读取家长账号的权限，暂时不能向指定家长单独发布通知。
+              </small>
             </fieldset>
 
-            <label v-if="form.audience === 'parent'">
+            <label v-if="form.audience === 'parent' && store.canReadFamilies">
               <span>指定家长</span>
               <select v-model="form.parentAccountId">
                 <option value="">请选择家长</option>
@@ -655,7 +698,7 @@ function formatTime(value: string): string {
               <button
                 type="submit"
                 class="primary-button"
-                :disabled="store.isSubmitting || formError !== ''"
+                :disabled="store.isSubmitting || !canSubmitNotification"
               >
                 {{ store.isSubmitting ? '正在发布…' : '发布通知' }}
               </button>
@@ -666,7 +709,11 @@ function formatTime(value: string): string {
     </Transition>
 
     <Transition name="fade">
-      <div v-if="pendingDelete" class="modal-backdrop" @click.self="pendingDelete = null">
+      <div
+        v-if="pendingDelete && store.canManageNotifications"
+        class="modal-backdrop"
+        @click.self="pendingDelete = null"
+      >
         <div class="modal narrow" role="dialog" aria-modal="true" aria-label="删除通知">
           <header class="modal-header">
             <h2>删除这条通知？</h2>
@@ -744,6 +791,29 @@ h2 {
   margin: 8px 0 0;
   color: var(--sprout-text-muted);
   line-height: 1.6;
+}
+
+.readonly-notice {
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid #b7def2;
+  border-radius: var(--sprout-radius-control);
+  background: #f3faff;
+  color: #27627f;
+  line-height: 1.55;
+}
+
+.read-only-copy {
+  color: var(--sprout-text-muted);
+  font-size: 12px;
+}
+
+.permission-hint {
+  display: block;
+  margin-top: 8px;
+  color: #27627f !important;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .header-actions {

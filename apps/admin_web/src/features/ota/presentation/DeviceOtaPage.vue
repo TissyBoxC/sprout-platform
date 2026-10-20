@@ -10,6 +10,8 @@ import type {
   UpdateOtaReleaseInput,
 } from '@/api/adminOta'
 import type { DownloadFile } from '@/api/adminDownloadFiles'
+import { useAuthStore } from '@/features/auth/application/authStore'
+import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
 import {
   otaDeploymentRailClass,
   otaDeploymentStatusLabel,
@@ -30,6 +32,7 @@ interface PendingAction {
 }
 
 const store = useDeviceOtaStore()
+const authStore = useAuthStore()
 const isReleaseFormOpen = ref(false)
 const isUploadOpen = ref(false)
 const isFilePickerOpen = ref(false)
@@ -71,6 +74,13 @@ const releaseForm = reactive<CreateOtaReleaseInput>({
 })
 
 const isEditing = computed(() => editingRelease.value !== null)
+const canManageOta = computed(() => authStore.can(ADMIN_PERMISSIONS.otaManage))
+const canReadStorage = computed(() =>
+  authStore.can(ADMIN_PERMISSIONS.storageRead),
+)
+const canUploadFirmware = computed(() =>
+  authStore.can(ADMIN_PERMISSIONS.storageManage),
+)
 const releaseFormTitle = computed(() => (isEditing.value ? '编辑固件版本' : '新建固件版本'))
 const detailRelease = computed(() => store.detail?.release ?? null)
 const deploymentStart = computed(() =>
@@ -97,6 +107,9 @@ onMounted(() => {
 })
 
 function openCreateRelease(): void {
+  if (!canManageOta.value) {
+    return
+  }
   store.clearMessages()
   editingRelease.value = null
   resetReleaseForm()
@@ -105,6 +118,9 @@ function openCreateRelease(): void {
 }
 
 function openEditRelease(release: OtaRelease): void {
+  if (!canManageOta.value) {
+    return
+  }
   store.clearMessages()
   editingRelease.value = release
   releaseForm.releaseId = release.releaseId
@@ -158,6 +174,9 @@ function resetReleaseForm(): void {
 }
 
 async function submitReleaseForm(): Promise<void> {
+  if (!canManageOta.value) {
+    return
+  }
   formError.value = validateReleaseForm()
   if (formError.value !== '') {
     return
@@ -233,6 +252,9 @@ function validateReleaseForm(): string {
 }
 
 function openUpload(): void {
+  if (!canUploadFirmware.value) {
+    return
+  }
   store.clearMessages()
   uploadForm.file = null
   uploadForm.filename = ''
@@ -269,6 +291,9 @@ function selectUploadFile(event: Event): void {
 }
 
 async function submitUpload(): Promise<void> {
+  if (!canUploadFirmware.value) {
+    return
+  }
   uploadFormError.value = ''
   if (uploadForm.file === null) {
     uploadFormError.value = '请选择要上传的固件文件。'
@@ -298,6 +323,9 @@ async function submitUpload(): Promise<void> {
 }
 
 function openFilePicker(): void {
+  if (!canReadStorage.value || !canManageOta.value) {
+    return
+  }
   void store.loadFirmwareFiles()
   isFilePickerOpen.value = true
 }
@@ -318,6 +346,9 @@ function applyFirmwareFile(file: DownloadFile): void {
 }
 
 function requestAction(kind: OtaActionKind, release: OtaRelease): void {
+  if (!canManageOta.value) {
+    return
+  }
   store.clearMessages()
   pendingAction.value = { kind, release }
 }
@@ -330,6 +361,9 @@ function closeActionDialog(): void {
 }
 
 async function confirmAction(): Promise<void> {
+  if (!canManageOta.value) {
+    return
+  }
   const action = pendingAction.value
   if (action === null) {
     return
@@ -365,6 +399,9 @@ async function loadDeploymentPage(page: number): Promise<void> {
 }
 
 async function sendToDevice(): Promise<void> {
+  if (!canManageOta.value) {
+    return
+  }
   deploymentFormError.value = ''
   const release = detailRelease.value
   if (release === null || release.status !== 'published') {
@@ -381,6 +418,13 @@ async function sendToDevice(): Promise<void> {
     deploymentDeviceId.value = ''
     releasedDevices.value = [deviceId, ...releasedDevices.value.filter((item) => item !== deviceId)]
   }
+}
+
+async function retryDeployment(deployment: OtaDeployment): Promise<void> {
+  if (!canManageOta.value || store.isSubmitting) {
+    return
+  }
+  await store.retryDeployment(deployment)
 }
 
 function formatBytes(value: number): string {
@@ -501,11 +545,20 @@ function deploymentProgress(deployment: OtaDeployment): number {
         <button type="button" class="secondary" :disabled="store.isLoading" @click="store.load">
           {{ store.isLoading ? '正在刷新…' : '刷新列表' }}
         </button>
-        <button type="button" class="primary" @click="openCreateRelease">
+        <button
+          v-if="canManageOta"
+          type="button"
+          class="primary"
+          @click="openCreateRelease"
+        >
           {{ isEditing ? '继续编辑' : '新建固件版本' }}
         </button>
       </div>
     </header>
+
+    <p v-if="!canManageOta" class="readonly-notice">
+      你当前只有查看权限。可以查看固件版本、签名状态和设备升级进度，但新建、编辑、发布、下发与重试由具备 OTA 管理权限的管理员完成。
+    </p>
 
     <Transition name="toast">
       <p v-if="store.lastMessage" class="success-message" role="status">
@@ -710,7 +763,10 @@ function deploymentProgress(deployment: OtaDeployment): number {
                           详情
                         </button>
                         <button
-                          v-if="release.status === 'draft' || release.status === 'paused'"
+                          v-if="
+                            canManageOta &&
+                            (release.status === 'draft' || release.status === 'paused')
+                          "
                           type="button"
                           class="compact"
                           :disabled="store.isSubmitting"
@@ -719,7 +775,10 @@ function deploymentProgress(deployment: OtaDeployment): number {
                           编辑
                         </button>
                         <button
-                          v-if="release.status === 'draft' || release.status === 'paused'"
+                          v-if="
+                            canManageOta &&
+                            (release.status === 'draft' || release.status === 'paused')
+                          "
                           type="button"
                           class="compact primary"
                           :disabled="store.isSubmitting"
@@ -728,7 +787,7 @@ function deploymentProgress(deployment: OtaDeployment): number {
                           发布
                         </button>
                         <button
-                          v-if="release.status === 'published'"
+                          v-if="canManageOta && release.status === 'published'"
                           type="button"
                           class="compact"
                           :disabled="store.isSubmitting"
@@ -737,7 +796,10 @@ function deploymentProgress(deployment: OtaDeployment): number {
                           暂停
                         </button>
                         <button
-                          v-if="release.status === 'published' || release.status === 'paused'"
+                          v-if="
+                            canManageOta &&
+                            (release.status === 'published' || release.status === 'paused')
+                          "
                           type="button"
                           class="compact danger"
                           :disabled="store.isSubmitting"
@@ -746,7 +808,11 @@ function deploymentProgress(deployment: OtaDeployment): number {
                           撤回
                         </button>
                         <button
-                          v-if="release.status === 'published' && release.rollbackAllowed"
+                          v-if="
+                            canManageOta &&
+                            release.status === 'published' &&
+                            release.rollbackAllowed
+                          "
                           type="button"
                           class="compact danger"
                           :disabled="store.isSubmitting"
@@ -787,7 +853,11 @@ function deploymentProgress(deployment: OtaDeployment): number {
     </Transition>
 
     <Transition name="modal">
-      <div v-if="isReleaseFormOpen" class="dialog-backdrop" @click.self="closeReleaseForm">
+      <div
+        v-if="isReleaseFormOpen && canManageOta"
+        class="dialog-backdrop"
+        @click.self="closeReleaseForm"
+      >
         <form
           class="dialog"
           role="dialog"
@@ -801,13 +871,35 @@ function deploymentProgress(deployment: OtaDeployment): number {
             固件发布依赖下载服务器上的真实文件。选择文件后会自动填入地址、校验值和大小，发布前请再确认一次。
           </p>
           <div class="artifact-toolbar">
-            <button type="button" class="secondary" @click="openFilePicker">
+            <button
+              v-if="canReadStorage"
+              type="button"
+              class="secondary"
+              @click="openFilePicker"
+            >
               从下载服务器选择固件
             </button>
-            <button type="button" class="secondary" :disabled="store.uploading" @click="openUpload">
+            <button
+              v-if="canUploadFirmware"
+              type="button"
+              class="secondary"
+              :disabled="store.uploading"
+              @click="openUpload"
+            >
               上传新固件
             </button>
-            <span>仅显示已上传的固件文件。</span>
+            <span v-if="canReadStorage && canUploadFirmware">
+              可以从下载服务器选择，也可以直接上传新固件。
+            </span>
+            <span v-else-if="canReadStorage">
+              可以选择已上传的固件；上传新文件需要文件管理权限。
+            </span>
+            <span v-else-if="canUploadFirmware">
+              可以上传新固件。
+            </span>
+            <span v-else class="permission-hint">
+              当前没有下载服务器权限。仍可手动填写固件地址、对象键、校验值和大小。
+            </span>
           </div>
           <div class="field-grid">
             <label>
@@ -953,7 +1045,11 @@ function deploymentProgress(deployment: OtaDeployment): number {
     </Transition>
 
     <Transition name="modal">
-      <div v-if="isUploadOpen" class="dialog-backdrop" @click.self="closeUpload">
+      <div
+        v-if="isUploadOpen && canUploadFirmware"
+        class="dialog-backdrop"
+        @click.self="closeUpload"
+      >
         <form
           class="dialog"
           role="dialog"
@@ -1026,7 +1122,11 @@ function deploymentProgress(deployment: OtaDeployment): number {
     </Transition>
 
     <Transition name="modal">
-      <div v-if="isFilePickerOpen" class="dialog-backdrop" @click.self="isFilePickerOpen = false">
+      <div
+        v-if="isFilePickerOpen && canReadStorage && canManageOta"
+        class="dialog-backdrop"
+        @click.self="isFilePickerOpen = false"
+      >
         <section
           class="dialog file-picker-dialog"
           role="dialog"
@@ -1079,7 +1179,11 @@ function deploymentProgress(deployment: OtaDeployment): number {
     </Transition>
 
     <Transition name="modal">
-      <div v-if="pendingAction" class="dialog-backdrop" @click.self="closeActionDialog">
+      <div
+        v-if="pendingAction && canManageOta"
+        class="dialog-backdrop"
+        @click.self="closeActionDialog"
+      >
         <section class="dialog confirm-dialog" role="dialog" aria-modal="true">
           <p class="eyebrow">需要确认</p>
           <h2>{{ actionTitle(pendingAction.kind) }}</h2>
@@ -1203,24 +1307,29 @@ function deploymentProgress(deployment: OtaDeployment): number {
                 <span>{{ otaReleaseStatusLabel(detailRelease.status) }}</span>
               </div>
               <div class="deployment-filter">
-                <label>
-                  <span>设备唯一标识</span>
-                  <input
-                    v-model.trim="deploymentDeviceId"
-                    type="text"
-                    maxlength="128"
-                    placeholder="例如 device_0123456789abcdef"
-                    :disabled="detailRelease.status !== 'published'"
-                    @input="deploymentFormError = ''"
-                  />
-                </label>
-                <button
-                  type="button"
-                  :disabled="store.isSubmitting || detailRelease.status !== 'published'"
-                  @click="sendToDevice"
-                >
-                  {{ store.isSubmitting ? '正在下发…' : '下发更新' }}
-                </button>
+                <template v-if="canManageOta">
+                  <label>
+                    <span>设备唯一标识</span>
+                    <input
+                      v-model.trim="deploymentDeviceId"
+                      type="text"
+                      maxlength="128"
+                      placeholder="例如 device_0123456789abcdef"
+                      :disabled="detailRelease.status !== 'published'"
+                      @input="deploymentFormError = ''"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    :disabled="store.isSubmitting || detailRelease.status !== 'published'"
+                    @click="sendToDevice"
+                  >
+                    {{ store.isSubmitting ? '正在下发…' : '下发更新' }}
+                  </button>
+                </template>
+                <span v-else class="read-only-copy">
+                  当前只有查看权限，不能手动下发固件。
+                </span>
               </div>
               <p v-if="deploymentFormError" class="form-error">{{ deploymentFormError }}</p>
               <div v-if="releasedDevices.length" class="deployment-device-list">
@@ -1300,11 +1409,11 @@ function deploymentProgress(deployment: OtaDeployment): number {
                       <td class="time-cell">{{ formatTime(deployment.updatedAt) }}</td>
                       <td>
                         <button
-                          v-if="deployment.status === 'failed'"
+                          v-if="canManageOta && deployment.status === 'failed'"
                           type="button"
                           class="compact"
                           :disabled="store.isSubmitting"
-                          @click="store.retryDeployment(deployment)"
+                          @click="retryDeployment(deployment)"
                         >
                           重试
                         </button>
@@ -1529,6 +1638,25 @@ button:disabled {
   border-radius: 15px;
   background: #fff9e8;
   color: #7a5411;
+}
+
+.readonly-notice {
+  margin: 14px 0 0;
+  padding: 12px 16px;
+  border: 1px solid #b7def2;
+  border-radius: 14px;
+  background: #f3faff;
+  color: #27627f;
+  line-height: 1.55;
+}
+
+.permission-hint {
+  color: #27627f !important;
+}
+
+.read-only-copy {
+  color: var(--sprout-text-muted);
+  font-size: 12px;
 }
 
 .error-message {

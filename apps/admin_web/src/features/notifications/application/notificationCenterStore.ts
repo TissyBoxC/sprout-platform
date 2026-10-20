@@ -20,6 +20,8 @@ import {
   parentAccountPageHasMore,
   type ParentAccountOption,
 } from '@/features/child/domain/childProfile'
+import { useAuthStore } from '@/features/auth/application/authStore'
+import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
 
 export interface NotificationFormState {
   category: NotificationCategory
@@ -39,6 +41,7 @@ export interface NotificationFormState {
 /// Drives the brand console notification center: authoring platform notices,
 /// reviewing delivery counters, and removing withdrawn copy.
 export const useNotificationCenterStore = defineStore('admin-notifications', () => {
+  const authStore = useAuthStore()
   const httpClient = createHttpClient()
   const client = createAdminNotificationsClient(httpClient)
   const notifications = ref<AdminNotification[]>([])
@@ -71,6 +74,12 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
   let familiesRequestGeneration = 0
 
   const hasNotifications = computed(() => notifications.value.length > 0)
+  const canManageNotifications = computed(() =>
+    authStore.can(ADMIN_PERMISSIONS.notificationsManage),
+  )
+  const canReadFamilies = computed(() =>
+    authStore.can(ADMIN_PERMISSIONS.familyRead),
+  )
   const canGoPrevious = computed(() => filters.value.page > 1)
   const canGoNext = computed(() => filters.value.page < totalPages.value)
   const hasActiveFilters = computed(
@@ -151,6 +160,13 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
   }
 
   async function loadFamilies(): Promise<void> {
+    if (!canReadFamilies.value) {
+      familiesRequestGeneration += 1
+      families.value = []
+      familiesError.value = null
+      isLoadingFamilies.value = false
+      return
+    }
     if (families.value.length > 0 || isLoadingFamilies.value) {
       return
     }
@@ -202,6 +218,14 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
   }
 
   async function create(input: CreateAdminNotificationInput): Promise<boolean> {
+    if (!canManageNotifications.value) {
+      error.value = {
+        kind: 'insufficient_permission',
+        message: '你没有权限发布通知',
+        retryable: false,
+      }
+      return false
+    }
     isSubmitting.value = true
     error.value = null
     lastMessage.value = ''
@@ -221,6 +245,14 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
   }
 
   async function remove(notificationId: string): Promise<boolean> {
+    if (!canManageNotifications.value) {
+      error.value = {
+        kind: 'insufficient_permission',
+        message: '你没有权限删除通知',
+        retryable: false,
+      }
+      return false
+    }
     deletingId.value = notificationId
     error.value = null
     lastMessage.value = ''
@@ -253,6 +285,8 @@ export const useNotificationCenterStore = defineStore('admin-notifications', () 
   return {
     canGoNext,
     canGoPrevious,
+    canManageNotifications,
+    canReadFamilies,
     create,
     deletingId,
     error,

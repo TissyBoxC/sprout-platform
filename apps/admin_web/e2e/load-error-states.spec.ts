@@ -37,7 +37,7 @@ test('shows a retry state instead of empty dashboard data', async ({ page }) => 
 
   await page.goto('/')
 
-  await expect(page.getByText('服务暂时不可用，请稍后重试')).toBeVisible()
+  await expect(page.getByText('服务暂时不可用，请稍后重试').first()).toBeVisible()
   await expect(page.getByRole('button', { name: '重新加载' })).toBeVisible()
   await expect(page.getByText('暂时没有可显示的数据，请稍后重新加载。')).toHaveCount(0)
 })

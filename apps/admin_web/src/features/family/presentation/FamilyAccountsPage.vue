@@ -11,7 +11,14 @@ import type {
   AdminFamilyMemberRole,
 } from '@/api/adminFamilyMembership'
 import type { AIModelOption } from '@/api/adminOperations'
+import { useAuthStore } from '@/features/auth/application/authStore'
+import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
 import { preferredDefaultModel } from '@/features/system/domain/aiModelPreference'
+import {
+  canCreateFamilyAccount,
+  canManageFamilyAIAccount,
+  canManageFamilyAccount,
+} from '@/features/support/domain/adminMutationPermission'
 import {
   useFamilyAccountStore,
   type AdminFamily,
@@ -25,6 +32,7 @@ import { useAdminFamilyMembershipStore } from '@/features/family/application/adm
 
 const store = useFamilyAccountStore()
 const membershipStore = useAdminFamilyMembershipStore()
+const authStore = useAuthStore()
 membershipStore.setClient(createAdminFamilyMembershipClient(createHttpClient()))
 const isCreateOpen = ref(false)
 const selectedFamilyId = ref('')
@@ -87,13 +95,43 @@ const aiUsageError = computed(() =>
     : store.aiUsageErrorFor(selectedFamily.value.parentAccountId),
 )
 const membershipReadiness = computed(() => (membershipStore.isReadOnly ? '只读' : '可管理'))
+const canManageFamily = computed(() =>
+  canManageFamilyAccount(authStore.can(ADMIN_PERMISSIONS.familyManage)),
+)
+const canManageAIAccount = computed(() =>
+  canManageFamilyAIAccount(authStore.can(ADMIN_PERMISSIONS.aiAccountsManage)),
+)
+const canCreateFamily = computed(() =>
+  canCreateFamilyAccount(canManageFamily.value, canManageAIAccount.value),
+)
+const familyWriteBlockedReason = computed(() => {
+  if (canManageFamily.value) {
+    return ''
+  }
+  return '你当前只有家长查看权限，不能创建家长、修改资料或重置密码。'
+})
+const createBlockedReason = computed(() => {
+  if (canCreateFamily.value) {
+    return ''
+  }
+  if (!canManageFamily.value && !canManageAIAccount.value) {
+    return '创建家长需要家长管理和 AI 账号管理权限。'
+  }
+  if (!canManageAIAccount.value) {
+    return '创建家长会自动开通 AI 服务，因此还需要 AI 账号管理权限。'
+  }
+  return '创建家长需要家长管理权限。'
+})
+const aiWriteBlockedReason = computed(() =>
+  canManageAIAccount.value ? '' : '你当前只有 AI 服务查看权限，不能调整额度、模型或重新开通服务。',
+)
 
 onMounted(() => {
   void store.load()
 })
 
 function openCreate(): void {
-  if (store.isLoading || store.isSubmitting) {
+  if (store.isLoading || store.isSubmitting || !canCreateFamily.value) {
     return
   }
   isCreateOpen.value = true
@@ -108,7 +146,7 @@ function closeCreate(): void {
 }
 
 async function createFamily(): Promise<void> {
-  if (store.isSubmitting) {
+  if (store.isSubmitting || !canCreateFamily.value) {
     return
   }
   const succeeded = await store.create(createForm)
@@ -325,7 +363,7 @@ async function reloadMembership(): Promise<void> {
 }
 
 async function saveProfile(): Promise<void> {
-  if (selectedFamily.value === null) {
+  if (selectedFamily.value === null || !canManageFamily.value) {
     return
   }
   const result = await store.updateParentProfile(selectedFamily.value.parentAccountId, profileForm)
@@ -333,7 +371,11 @@ async function saveProfile(): Promise<void> {
 }
 
 async function saveAiAccount(): Promise<void> {
-  if (selectedFamily.value === null || selectedFamily.value.aiAccount === null) {
+  if (
+    selectedFamily.value === null ||
+    selectedFamily.value.aiAccount === null ||
+    !canManageAIAccount.value
+  ) {
     return
   }
   if (aiForm.availableModels.length === 0) {
@@ -359,6 +401,7 @@ async function saveAiAccount(): Promise<void> {
 
 function openPasswordReset(): void {
   if (
+    !canManageFamily.value ||
     store.isResettingPassword ||
     store.isUpdatingProfile ||
     store.isUpdatingAiAccount ||
@@ -383,7 +426,7 @@ function closePasswordReset(): void {
 }
 
 async function resetPassword(): Promise<void> {
-  if (selectedFamily.value === null) {
+  if (selectedFamily.value === null || !canManageFamily.value) {
     return
   }
   if (store.isResettingPassword) {
@@ -421,7 +464,7 @@ async function resetPassword(): Promise<void> {
 }
 
 async function retryAiAccount(): Promise<void> {
-  if (selectedFamily.value === null) {
+  if (selectedFamily.value === null || !canManageAIAccount.value) {
     return
   }
   if (store.isSubmitting || store.isUpdatingAiAccount) {
@@ -458,6 +501,9 @@ async function changePageSize(event: Event): Promise<void> {
 }
 
 function toggleModel(model: AIModelOption): void {
+  if (!canManageAIAccount.value) {
+    return
+  }
   if (aiForm.availableModels.includes(model.id)) {
     aiForm.availableModels = aiForm.availableModels.filter((modelId) => modelId !== model.id)
     return
@@ -466,6 +512,9 @@ function toggleModel(model: AIModelOption): void {
 }
 
 function selectAllModels(): void {
+  if (!canManageAIAccount.value) {
+    return
+  }
   aiForm.availableModels = store.modelOptions.map((model) => model.id)
 }
 
@@ -688,6 +737,7 @@ function emptySectionFeedback(): {
           重新加载
         </button>
         <button
+          v-if="canCreateFamily"
           type="button"
           class="primary"
           :disabled="store.isLoading || store.isSubmitting"
@@ -697,6 +747,13 @@ function emptySectionFeedback(): {
         </button>
       </div>
     </header>
+
+    <p v-if="familyWriteBlockedReason" class="readonly-notice">
+      {{ familyWriteBlockedReason }}
+    </p>
+    <p v-else-if="createBlockedReason" class="readonly-notice">
+      {{ createBlockedReason }}
+    </p>
 
     <Transition name="toast">
       <p v-if="store.lastMessage && !selectedFamily" class="success-message">
@@ -760,6 +817,15 @@ function emptySectionFeedback(): {
             @click="store.retryCurrentPage"
           >
             重新加载
+          </button>
+          <button
+            v-if="canCreateFamily"
+            type="button"
+            class="primary"
+            :disabled="store.isLoading || store.isSubmitting"
+            @click="openCreate"
+          >
+            新建家长账号
           </button>
         </div>
         <footer class="pagination pagination-empty">
@@ -1032,7 +1098,7 @@ function emptySectionFeedback(): {
                   <p>这些信息用于家长端展示和孩子生日提醒。</p>
                 </div>
               </div>
-              <div class="form-grid">
+              <fieldset class="form-grid" :disabled="!canManageFamily">
                 <label>
                   <span>家长称呼</span>
                   <input
@@ -1058,8 +1124,11 @@ function emptySectionFeedback(): {
                   <span>宝贝生日</span>
                   <input v-model="profileForm.childBirthday" type="date" />
                 </label>
-              </div>
-              <div class="section-actions">
+              </fieldset>
+              <p v-if="!canManageFamily" class="field-hint">
+                你当前只有家长资料查看权限，不能修改这些信息。
+              </p>
+              <div v-if="canManageFamily" class="section-actions">
                 <button
                   type="button"
                   class="primary"
@@ -1103,7 +1172,7 @@ function emptySectionFeedback(): {
                     {{ feedbackBySection.ai.error.message }}
                   </p>
                 </Transition>
-                <div class="form-grid">
+                <fieldset class="form-grid" :disabled="!canManageAIAccount">
                   <label>
                     <span>服务状态</span>
                     <select v-model="aiForm.status">
@@ -1119,15 +1188,15 @@ function emptySectionFeedback(): {
                     <span>同时对话数量</span>
                     <input v-model.number="aiForm.concurrencyLimit" type="number" min="1" />
                   </label>
-                </div>
+                </fieldset>
 
-                <div class="model-picker">
+                <div class="model-picker" :class="{ readonly: !canManageAIAccount }">
                   <div class="model-picker-heading">
                     <div>
                       <span class="field-label">可分配模型</span>
                       <p class="field-hint">家长只能使用勾选的模型，列表按当前延迟从低到高排列。</p>
                     </div>
-                    <div class="model-picker-actions">
+                    <div v-if="canManageAIAccount" class="model-picker-actions">
                       <button type="button" class="text-button" @click="selectAllModels">
                         全部选择
                       </button>
@@ -1150,6 +1219,7 @@ function emptySectionFeedback(): {
                         <input
                           type="checkbox"
                           :checked="isModelSelected(model.id)"
+                          :disabled="!canManageAIAccount"
                           @change="toggleModel(model)"
                         />
                         <span class="model-option-main">
@@ -1164,7 +1234,10 @@ function emptySectionFeedback(): {
                   </ul>
                 </div>
 
-                <div class="section-actions">
+                <p v-if="aiWriteBlockedReason" class="field-hint">
+                  {{ aiWriteBlockedReason }}
+                </p>
+                <div v-if="canManageAIAccount" class="section-actions">
                   <button
                     type="button"
                     class="primary"
@@ -1181,6 +1254,7 @@ function emptySectionFeedback(): {
               <div v-else class="empty-section">
                 <p>这个家长还没有 AI 服务。</p>
                 <button
+                  v-if="canManageAIAccount"
                   type="button"
                   class="primary"
                   :disabled="
@@ -1190,6 +1264,7 @@ function emptySectionFeedback(): {
                 >
                   {{ store.isSubmitting ? '正在开通…' : '重新开通 AI 服务' }}
                 </button>
+                <p v-else class="field-hint">{{ aiWriteBlockedReason }}</p>
                 <p v-if="feedbackBySection.ai.message" class="success-message">
                   {{ feedbackBySection.ai.message }}
                 </p>
@@ -1580,6 +1655,7 @@ function emptySectionFeedback(): {
                   <p>家长可以用手机号和密码登录应用。</p>
                 </div>
                 <button
+                  v-if="canManageFamily"
                   type="button"
                   :disabled="
                     store.isResettingPassword ||
@@ -1592,6 +1668,9 @@ function emptySectionFeedback(): {
                 >
                   重置密码
                 </button>
+                <p v-if="!canManageFamily" class="field-hint">
+                  你当前只有账号安全查看权限，不能重置家长密码。
+                </p>
               </div>
               <p v-if="feedbackBySection.password.message" class="success-message">
                 {{ feedbackBySection.password.message }}
@@ -2406,6 +2485,10 @@ tbody tr:hover {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
 .section-actions {
@@ -2420,6 +2503,12 @@ tbody tr:hover {
 .model-picker {
   display: grid;
   gap: 12px;
+}
+
+.model-picker.readonly {
+  padding: 12px;
+  border-radius: 15px;
+  background: #fcf8fa;
 }
 
 .model-picker-heading {
@@ -2439,6 +2528,16 @@ tbody tr:hover {
   color: var(--sprout-text-muted);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.readonly-notice {
+  margin: 0 0 18px;
+  padding: 13px 16px;
+  border: 1px solid #e6c56d;
+  border-radius: 15px;
+  background: #fff9e8;
+  color: #7a5411;
+  line-height: 1.6;
 }
 
 .model-list,

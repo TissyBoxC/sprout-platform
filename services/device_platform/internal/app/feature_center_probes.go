@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	billingchannel "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/channel"
+	billingdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/domain"
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
@@ -200,6 +202,95 @@ func recommendationReadinessProbe(
 			}
 			if err := service.CheckReadiness(ctx); err != nil {
 				return featureCenterDomain.HealthUnavailable, nil
+			}
+			return featureCenterDomain.HealthHealthy, nil
+		},
+	)
+}
+
+// billingOrderBacklogProbe reports order health from the expiry backlog: an
+// order past its payment deadline that the sweep has not closed yet is a real
+// operational problem, while pending orders still inside their window are not.
+func billingOrderBacklogProbe(
+	service interface {
+		Backlog(ctx context.Context) (int, int, error)
+	},
+) featureCenterService.HealthProbe {
+	return featureCenterService.HealthProbeFunc(
+		func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+			if service == nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			_, overdue, err := service.Backlog(ctx)
+			if err != nil {
+				// An unreadable backlog is not a healthy or degraded claim.
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			if overdue > 0 {
+				return featureCenterDomain.HealthDegraded, nil
+			}
+			return featureCenterDomain.HealthHealthy, nil
+		},
+	)
+}
+
+// billingPaymentChannelProbe reports the worst state across every registered
+// provider. A channel that is absent, errors, or reports an unknown status is
+// unavailable: the payment feature must never read healthy while no provider
+// can actually collect money (design doc §4).
+func billingPaymentChannelProbe(
+	channels interface {
+		Health(ctx context.Context) map[string]billingchannel.HealthStatus
+	},
+) featureCenterService.HealthProbe {
+	return featureCenterService.HealthProbeFunc(
+		func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+			if channels == nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			statuses := channels.Health(ctx)
+			if len(statuses) == 0 {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			worst := featureCenterDomain.HealthHealthy
+			for _, status := range statuses {
+				switch status {
+				case billingchannel.HealthStatusHealthy:
+					continue
+				case billingchannel.HealthStatusDegraded:
+					worst = featureCenterDomain.HealthDegraded
+				default:
+					return featureCenterDomain.HealthUnavailable, nil
+				}
+			}
+			return worst, nil
+		},
+	)
+}
+
+// billingReconciliationProbe reports the most recent reconciliation run. No
+// run yet and a failed run both leave the day unverified, a completed run with
+// a non-zero difference needs an operator, and only a completed zero-difference
+// run is healthy (design doc §7).
+func billingReconciliationProbe(
+	service interface {
+		LatestRun(ctx context.Context) (*billingdomain.ReconciliationRun, error)
+	},
+) featureCenterService.HealthProbe {
+	return featureCenterService.HealthProbeFunc(
+		func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+			if service == nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			run, err := service.LatestRun(ctx)
+			if err != nil || run == nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			if run.Status != billingdomain.ReconciliationStatusCompleted {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			if run.DifferenceCents != 0 {
+				return featureCenterDomain.HealthDegraded, nil
 			}
 			return featureCenterDomain.HealthHealthy, nil
 		},

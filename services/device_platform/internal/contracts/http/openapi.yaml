@@ -10787,6 +10787,721 @@ paths:
                 $ref: "#/components/schemas/ResponseEnvelope"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/billing/plans:
+    get:
+      summary: 在售套餐列表
+      description: 返回上架中的套餐，供家长端展示与下单。金额为整数人民币分。
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: 在售套餐
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPlansEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/billing/orders:
+    post:
+      summary: 创建订单
+      description: |
+        家长下单。必须先有有效的消费同意记录，否则拒绝；
+        同一 idempotency_key 重复提交返回已存在的订单，不会产生第二笔。
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BillingOrderCreateRequest"
+      responses:
+        "201":
+          description: 已创建的订单
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingOrderEnvelope"
+        "400":
+          description: 套餐不可售或参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: 缺少监护人消费同意
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    get:
+      summary: 我的订单列表
+      security:
+        - userToken: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: 该家长的订单
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingOrdersEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/billing/orders/{order_no}:
+    get:
+      summary: 订单详情
+      description: 只能读取本家庭的订单；其他家庭的订单一律返回 404，不泄露其存在。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/BillingOrderNo"
+      responses:
+        "200":
+          description: 订单详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingOrderEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: 订单不存在或不属于本家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/billing/orders/{order_no}/cancel:
+    post:
+      summary: 取消未支付订单
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/BillingOrderNo"
+      responses:
+        "200":
+          description: 已取消的订单
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingOrderEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: 订单不存在或不属于本家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: 订单已不是待支付状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/billing/orders/{order_no}/pay:
+    post:
+      summary: 发起支付
+      description: |
+        支付渠道尚未接入时返回 409，订单保持待支付，家长可在渠道开通后重试。
+        绝不返回一个假的成功结果。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/BillingOrderNo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BillingPaymentStartRequest"
+      responses:
+        "200":
+          description: 支付已发起
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPaymentEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: 订单不存在或不属于本家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: 支付渠道尚未开通，或订单已不可支付
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/billing/orders/{order_no}/refund:
+    post:
+      summary: 申请退款
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/BillingOrderNo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BillingRefundRequest"
+      responses:
+        "201":
+          description: 已提交的退款申请
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingRefundEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: 订单不存在或不属于本家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: 退款金额超过可退余额
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/billing/consent:
+    get:
+      summary: 读取监护人消费同意状态
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: 同意状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingConsentEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: 记录监护人消费同意
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BillingConsentRequest"
+      responses:
+        "200":
+          description: 同意已记录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingConsentEnvelope"
+        "400":
+          description: 未提供同意版本
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    delete:
+      summary: 撤回监护人消费同意
+      security:
+        - userToken: []
+      responses:
+        "200":
+          description: 同意已撤回
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingConsentEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/billing/payments/notify/{channel}:
+    post:
+      summary: 支付渠道异步回调
+      description: |
+        由支付渠道调用，不使用用户令牌，改用渠道签名验签。
+        同一通知重复投递只会入账一次；验签失败、金额不符一律不记账。
+        处理已被接受或判定为重复投递时返回 200，让渠道停止重试。
+      parameters:
+        - name: channel
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [wechat, alipay, manual]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: 通知已受理或判定为重复
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "400":
+          description: 验签失败或内容无法解析
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/admin/billing/orders:
+    get:
+      summary: 运营端订单列表
+      security:
+        - adminToken: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, paid, cancelled, expired, refunded, partially_refunded]
+        - name: plan_code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: 订单分页
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingOrdersEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: 缺少 billing.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/admin/billing/orders/{order_no}:
+    get:
+      summary: 运营端订单详情
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: "#/components/parameters/BillingOrderNo"
+      responses:
+        "200":
+          description: 订单详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingOrderEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 订单不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/admin/billing/plans:
+    get:
+      summary: 套餐列表（含草稿与已下架）
+      security:
+        - adminToken: []
+      responses:
+        "200":
+          description: 套餐列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPlansEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: 新建套餐
+      security:
+        - adminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BillingPlanUpsertRequest"
+      responses:
+        "201":
+          description: 已创建的套餐
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPlanEnvelope"
+        "400":
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: 套餐编码已被占用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/admin/billing/plans/{plan_id}:
+    put:
+      summary: 修改套餐
+      description: |
+        必须带上读取时的 version。版本不一致返回 409，界面要求重新加载，
+        避免两位管理员互相覆盖已上架的价格。
+      security:
+        - adminToken: []
+      parameters:
+        - name: plan_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BillingPlanUpsertRequest"
+      responses:
+        "200":
+          description: 已保存的套餐
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPlanEnvelope"
+        "400":
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 套餐不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: 套餐已被其他管理员修改
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/admin/billing/refunds/{refund_no}/approve:
+    post:
+      summary: 批准退款
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: "#/components/parameters/BillingRefundNo"
+      responses:
+        "200":
+          description: 已批准的退款
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingRefundEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 退款申请不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: 退款已不在待审批状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/admin/billing/refunds/{refund_no}/reject:
+    post:
+      summary: 拒绝退款
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: "#/components/parameters/BillingRefundNo"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+              additionalProperties: false
+      responses:
+        "200":
+          description: 已拒绝的退款
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingRefundEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 退款申请不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: 退款已不在待审批状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/admin/billing/reconciliation:
+    get:
+      summary: 对账运行列表
+      security:
+        - adminToken: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: 对账运行分页
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingReconciliationRunsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: 发起一次对账
+      description: |
+        渠道尚未接入时，本次运行会如实记为失败并说明原因，
+        不会产出一份看起来「已对平」的报告。
+      security:
+        - adminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BillingReconciliationStartRequest"
+      responses:
+        "201":
+          description: 已记录的对账运行
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingReconciliationRunEnvelope"
+        "400":
+          description: 渠道或营业日无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: 该渠道该营业日已对过账
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/admin/billing/reconciliation/{run_id}:
+    get:
+      summary: 对账运行详情
+      security:
+        - adminToken: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 对账运行及其差异明细
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingReconciliationRunEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 对账运行不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/admin/billing/channels:
+    get:
+      summary: 支付渠道接入状态
+      description: 只报告各渠道是否已接入，绝不返回任何密钥值。
+      security:
+        - adminToken: []
+      responses:
+        "200":
+          description: 渠道状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingChannelsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
 components:
   securitySchemes:
     serviceToken:
@@ -10802,6 +11517,22 @@ components:
       scheme: bearer
       bearerFormat: device-session-token
   parameters:
+    BillingOrderNo:
+      name: order_no
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^SP[0-9]{8}[A-Z2-7]{8}$"
+
+    BillingRefundNo:
+      name: refund_no
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^SR[0-9]{8}[A-Z2-7]{8}$"
+
     IfMatchMembershipRevision:
       name: If-Match
       in: header
@@ -11343,6 +12074,622 @@ components:
           schema:
             $ref: "#/components/schemas/ResponseEnvelope"
   schemas:
+    # 计费域组件。
+    #
+    # 金额一律是整数人民币分，字段名以 _cny_cents 结尾。用整数是因为浮点无法
+    # 精确表示 0.01，一旦金额进入浮点链路，与渠道账单的差异就永远对不平。
+
+    BillingPlan:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - code
+        - display_name
+        - billing_period
+        - period_months
+        - price_cny_cents
+        - original_price_cny_cents
+        - ai_quota_usd
+        - quota_validity_days
+        - status
+        - sort_order
+        - version
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          pattern: "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$"
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        description:
+          type: string
+          maxLength: 2000
+        billing_period:
+          type: string
+          enum: [monthly, quarterly, yearly, one_time]
+        period_months:
+          type: integer
+          minimum: 0
+          maximum: 36
+        price_cny_cents:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+        original_price_cny_cents:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+          description: 划线价；0 表示不展示划线价，而不是免费。
+        ai_quota_usd:
+          type: string
+          description: 上游模型额度，保留上游自己的计量单位，不是价格。
+        quota_validity_days:
+          type: integer
+          minimum: 0
+          description: 额度有效期天数；0 表示不过期。
+        status:
+          type: string
+          enum: [draft, active, archived]
+        sort_order:
+          type: integer
+        version:
+          type: integer
+          minimum: 1
+        published_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    BillingOrder:
+      type: object
+      additionalProperties: false
+      required:
+        - order_no
+        - plan_code
+        - plan_display_name
+        - billing_period
+        - period_months
+        - unit_price_cny_cents
+        - discount_cny_cents
+        - payable_cny_cents
+        - paid_cny_cents
+        - refunded_cny_cents
+        - status
+        - created_at
+      properties:
+        order_no:
+          type: string
+          pattern: "^SP[0-9]{8}[A-Z2-7]{8}$"
+          description: 对外单号；40 位随机段是为了同一天大批量下单也不会碰撞。
+        plan_code:
+          type: string
+        plan_display_name:
+          type: string
+        billing_period:
+          type: string
+          enum: [monthly, quarterly, yearly, one_time]
+        period_months:
+          type: integer
+          minimum: 0
+          maximum: 36
+        ai_quota_usd:
+          type: string
+        quota_validity_days:
+          type: integer
+          minimum: 0
+        unit_price_cny_cents:
+          type: integer
+          minimum: 0
+        discount_cny_cents:
+          type: integer
+          minimum: 0
+        payable_cny_cents:
+          type: integer
+          minimum: 0
+        paid_cny_cents:
+          type: integer
+          minimum: 0
+        refunded_cny_cents:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+          enum:
+            - pending
+            - paid
+            - cancelled
+            - expired
+            - refunded
+            - partially_refunded
+        expires_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        paid_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+
+    BillingPayment:
+      type: object
+      additionalProperties: false
+      required:
+        - payment_no
+        - order_no
+        - channel
+        - amount_cny_cents
+        - status
+        - created_at
+      properties:
+        payment_no:
+          type: string
+        order_no:
+          type: string
+        channel:
+          type: string
+          enum: [wechat, alipay, manual]
+        amount_cny_cents:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+          enum: [created, processing, succeeded, failed, closed]
+        failure_code:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+          description: 渠道返回给客户端的拉起参数；不含任何密钥。
+        created_at:
+          type: string
+          format: date-time
+        paid_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+
+    BillingRefund:
+      type: object
+      additionalProperties: false
+      required:
+        - refund_no
+        - order_no
+        - amount_cny_cents
+        - status
+        - requested_at
+      properties:
+        refund_no:
+          type: string
+          pattern: "^SR[0-9]{8}[A-Z2-7]{8}$"
+        order_no:
+          type: string
+        amount_cny_cents:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [requested, approved, processing, succeeded, failed, rejected]
+        reason:
+          type: string
+          maxLength: 500
+        requested_at:
+          type: string
+          format: date-time
+        approved_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        completed_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+
+    BillingConsent:
+      type: object
+      additionalProperties: false
+      required:
+        - is_active
+      properties:
+        is_active:
+          type: boolean
+        consent_version:
+          type: string
+        granted_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        revoked_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+
+    BillingReconciliationRun:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - channel
+        - business_date
+        - status
+        - matched_count
+        - discrepancy_count
+        - difference_cny_cents
+        - started_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          enum: [wechat, alipay, manual]
+        business_date:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [running, completed, failed]
+        matched_count:
+          type: integer
+          minimum: 0
+        discrepancy_count:
+          type: integer
+          minimum: 0
+        difference_cny_cents:
+          type: integer
+          description: 渠道金额减平台金额；正数表示渠道多收，负数表示渠道少收。
+        failure_reason:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BillingReconciliationItem"
+
+    BillingReconciliationItem:
+      type: object
+      additionalProperties: false
+      required:
+        - discrepancy
+        - platform_cny_cents
+        - channel_cny_cents
+      properties:
+        discrepancy:
+          type: string
+          enum: [matched, amount_mismatch, platform_only, channel_only]
+        order_no:
+          type: string
+        channel_trade_no:
+          type: string
+        platform_cny_cents:
+          type: integer
+        channel_cny_cents:
+          type: integer
+        resolved_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+
+    BillingChannelStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - configured
+        - health
+      properties:
+        name:
+          type: string
+        configured:
+          type: boolean
+        health:
+          type: string
+          enum: [healthy, degraded, unavailable, unknown]
+        message:
+          type: string
+          description: 面向运营的说明；绝不包含密钥或内部地址。
+
+    BillingOrderCreateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - plan_code
+        - idempotency_key
+      properties:
+        plan_code:
+          type: string
+        idempotency_key:
+          type: string
+          minLength: 8
+          maxLength: 128
+          description: 客户端生成；重复提交同一个键只产生一笔订单。
+        client_ip:
+          type: string
+          maxLength: 64
+
+    BillingPaymentStartRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - channel
+      properties:
+        channel:
+          type: string
+          enum: [wechat, alipay, manual]
+
+    BillingRefundRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        amount_cny_cents:
+          type: integer
+          minimum: 1
+          description: 不填表示全额退款。
+
+    BillingConsentRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - consent_version
+      properties:
+        consent_version:
+          type: string
+          minLength: 1
+          maxLength: 64
+
+    BillingPlanUpsertRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - display_name
+        - billing_period
+        - period_months
+        - price_cny_cents
+      properties:
+        code:
+          type: string
+          pattern: "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$"
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        description:
+          type: string
+          maxLength: 2000
+        billing_period:
+          type: string
+          enum: [monthly, quarterly, yearly, one_time]
+        period_months:
+          type: integer
+          minimum: 0
+          maximum: 36
+        price_cny_cents:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+        original_price_cny_cents:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+        ai_quota_usd:
+          type: string
+        quota_validity_days:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+          enum: [draft, active, archived]
+        sort_order:
+          type: integer
+        version:
+          type: integer
+          minimum: 1
+          description: 修改时必填，取自上次读取的值。
+
+    BillingReconciliationStartRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - channel
+        - business_date
+      properties:
+        channel:
+          type: string
+          enum: [wechat, alipay, manual]
+        business_date:
+          type: string
+          format: date
+
+    BillingPlansEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required: [plans]
+              properties:
+                plans:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/BillingPlan"
+
+    BillingPlanEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required: [plan]
+              properties:
+                plan:
+                  $ref: "#/components/schemas/BillingPlan"
+
+    BillingOrderEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required: [order]
+              properties:
+                order:
+                  $ref: "#/components/schemas/BillingOrder"
+
+    BillingOrdersEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required: [orders, page, page_size, total]
+              properties:
+                orders:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/BillingOrder"
+                page:
+                  type: integer
+                  minimum: 1
+                page_size:
+                  type: integer
+                  minimum: 1
+                total:
+                  type: integer
+                  minimum: 0
+
+    BillingPaymentEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required: [payment]
+              properties:
+                payment:
+                  $ref: "#/components/schemas/BillingPayment"
+
+    BillingRefundEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required: [refund]
+              properties:
+                refund:
+                  $ref: "#/components/schemas/BillingRefund"
+
+    BillingConsentEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required: [consent]
+              properties:
+                consent:
+                  $ref: "#/components/schemas/BillingConsent"
+
+    BillingReconciliationRunEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required: [run]
+              properties:
+                run:
+                  $ref: "#/components/schemas/BillingReconciliationRun"
+
+    BillingReconciliationRunsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required: [runs, page, page_size, total]
+              properties:
+                runs:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/BillingReconciliationRun"
+                page:
+                  type: integer
+                  minimum: 1
+                page_size:
+                  type: integer
+                  minimum: 1
+                total:
+                  type: integer
+                  minimum: 0
+
+    BillingChannelsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required: [channels]
+              properties:
+                channels:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/BillingChannelStatus"
     ResponseEnvelope:
       type: object
       additionalProperties: false

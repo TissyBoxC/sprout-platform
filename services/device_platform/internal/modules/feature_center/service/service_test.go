@@ -721,6 +721,9 @@ func TestDefaultRegistryCoversRequiredFeatures(t *testing.T) {
 		"recommendation",
 		"privacy_lifecycle",
 		"deployment_infrastructure",
+		"billing_orders",
+		"billing_payments",
+		"billing_reconciliation",
 	}
 	definitions := DefaultRegistry()
 	registered := make(map[string]Definition, len(definitions))
@@ -910,6 +913,14 @@ func TestDefaultRegistryMetricsHaveVerifiableSource(t *testing.T) {
 		"available_model_count":                 {},
 		"mfa_enabled_admin_count":               {},
 		"gateway_ready_state":                   {},
+		"pending_order_count":                   {},
+		"paid_order_count_30d":                  {},
+		"expired_order_count":                   {},
+		"configured_channel_count":              {},
+		"registered_channel_count":              {},
+		"reconciliation_run_count":              {},
+		"reconciliation_difference_cny_cents":   {},
+		"unresolved_discrepancy_count":          {},
 	}
 	for _, definition := range DefaultRegistry() {
 		for _, metric := range definition.Feature.ReadOnlyMetrics {

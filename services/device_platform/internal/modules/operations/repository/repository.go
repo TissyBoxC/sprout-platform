@@ -427,6 +427,15 @@ func (r *PostgresRepository) ParentOverview(
 				WHERE parent_account_id = $1
 				  AND status = 'active'
 			), 0),
+			-- Total quota ever granted to this family, from the ledger. The bar
+			-- needs a denominator that is not the balance itself; using the
+			-- balance as its own total is what kept the bar permanently full.
+			COALESCE((
+				SELECT SUM(amount_usd)
+				FROM ai_quota_ledger
+				WHERE parent_account_id = $1
+				  AND amount_usd > 0
+			), 0),
 			(SELECT COUNT(*) FROM device_bindings WHERE parent_account_id = $1),
 			(
 				SELECT COUNT(*)
@@ -444,12 +453,16 @@ func (r *PostgresRepository) ParentOverview(
 		&overview.TodayConversationCount,
 		&overview.TodaySpentUSD,
 		&overview.BalanceUSD,
+		&overview.GrantedBalanceUSD,
 		&overview.DeviceCount,
 		&overview.OnlineDeviceCount,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("load parent overview: %w", err)
 	}
+	// The remaining quota is the live balance; the granted total is the bar's
+	// denominator. A family that has never been granted quota reports zero
+	// granted, and the caller must render an empty bar rather than a full one.
 	overview.RemainingBalanceUSD = overview.BalanceUSD
 	return overview, nil
 }

@@ -718,6 +718,20 @@ func (r *PostgresRepository) PurgeParentData(
 	}{
 		{`DELETE FROM notification_deliveries WHERE parent_account_id = $1`, "notification deliveries"},
 		{`DELETE FROM notifications WHERE parent_account_id = $1`, "notifications"},
+		// Billing rows are deleted child-first so no foreign key is left
+		// dangling: notifications and payments reference an order, refunds
+		// reference both an order and a payment, and the quota ledger
+		// references orders and refunds. Purchase history is a guardian's
+		// personal data like any other, so it leaves with the account.
+		{`DELETE FROM billing_payment_notifications WHERE payment_id IN (
+			SELECT id FROM billing_payments WHERE parent_account_id = $1
+		)`, "billing payment notifications"},
+		{`DELETE FROM billing_refunds WHERE parent_account_id = $1`, "billing refunds"},
+		{`DELETE FROM billing_payments WHERE parent_account_id = $1`, "billing payments"},
+		{`DELETE FROM billing_subscriptions WHERE parent_account_id = $1`, "billing subscriptions"},
+		{`DELETE FROM billing_spending_consents WHERE parent_account_id = $1`, "billing spending consents"},
+		{`DELETE FROM ai_quota_ledger WHERE parent_account_id = $1`, "AI quota ledger"},
+		{`DELETE FROM billing_orders WHERE parent_account_id = $1`, "billing orders"},
 		{`DELETE FROM companionship_growth_records WHERE family_id = $1`, "companionship growth records"},
 		{`DELETE FROM companionship_habit_reminders WHERE family_id = $1`, "companionship habit reminders"},
 		{`DELETE FROM alarm_reminder_events WHERE family_id = $1`, "alarm reminder events"},

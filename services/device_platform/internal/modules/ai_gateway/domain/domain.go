@@ -12,6 +12,10 @@ var (
 	ErrProviderUnavailable = errors.New("AI provider unavailable")
 	ErrCredentialInvalid   = errors.New("AI credential is invalid")
 	ErrModelNotAllowed     = errors.New("AI model is not allowed")
+	// ErrBalanceWouldGoNegative refuses a quota movement that would overdraw
+	// the pool. Clamping instead would erase evidence that the family spent
+	// past what it paid for, which the console and reconciliation both need.
+	ErrBalanceWouldGoNegative = errors.New("AI account balance would go negative")
 )
 
 // Account mirrors the platform's view of one provider execution account.

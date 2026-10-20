@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/channel"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -40,6 +41,24 @@ const voiceConversationMetricQuery = `SELECT COALESCE(SUM(conversation_count), 0
 	FROM platform_usage_daily
 	WHERE usage_day >= CURRENT_DATE - INTERVAL '6 days'`
 
+// ChannelRegistryProbe reports which payment channels are registered. The
+// billing metrics use it so a channel count is process state rather than a
+// constant, and Feature Center never claims a provider is configured while the
+// placeholder adapter is still the only one wired in.
+type ChannelRegistryProbe interface {
+	Health(ctx context.Context) map[string]channel.HealthStatus
+}
+
+// MetricsOptions contains the non-database inputs some metrics need.
+type MetricsOptions struct {
+	// OnlineThreshold defines what counts as an online device. A non-positive
+	// value falls back to the operations dashboard threshold.
+	OnlineThreshold time.Duration
+	// ChannelRegistry backs the payment channel metrics. Nil reports zero
+	// registered channels.
+	ChannelRegistry ChannelRegistryProbe
+}
+
 // MetricsRepository answers the read-only metric keys declared by the feature
 // registry. Every query is a plain count against a table owned by another
 // module, so the feature center never invents an operational value it cannot
@@ -48,6 +67,7 @@ const voiceConversationMetricQuery = `SELECT COALESCE(SUM(conversation_count), 0
 type MetricsRepository struct {
 	pool            *pgxpool.Pool
 	onlineThreshold time.Duration
+	channels        ChannelRegistryProbe
 }
 
 // NewMetricsRepository creates a live feature metric source. A non-positive
@@ -56,10 +76,26 @@ func NewMetricsRepository(
 	pool *pgxpool.Pool,
 	onlineThreshold time.Duration,
 ) *MetricsRepository {
+	return NewMetricsRepositoryWithOptions(pool, MetricsOptions{
+		OnlineThreshold: onlineThreshold,
+	})
+}
+
+// NewMetricsRepositoryWithOptions creates a live feature metric source that
+// also reads process-level signals the database cannot answer.
+func NewMetricsRepositoryWithOptions(
+	pool *pgxpool.Pool,
+	options MetricsOptions,
+) *MetricsRepository {
+	onlineThreshold := options.OnlineThreshold
 	if onlineThreshold <= 0 {
 		onlineThreshold = defaultOnlineThreshold
 	}
-	return &MetricsRepository{pool: pool, onlineThreshold: onlineThreshold}
+	return &MetricsRepository{
+		pool:            pool,
+		onlineThreshold: onlineThreshold,
+		channels:        options.ChannelRegistry,
+	}
 }
 
 // FeatureMetrics returns the live values for one feature id. Features without
@@ -381,6 +417,46 @@ func (r *MetricsRepository) FeatureMetrics(
 				(SELECT COUNT(*) FROM parent_deletion_requests WHERE status = 'pending')`,
 			"consent_event_count",
 			"pending_deletion_count",
+		)
+	case "billing_orders":
+		return r.triad(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM billing_orders WHERE status = 'pending'),
+				(SELECT COUNT(*) FROM billing_orders
+				 WHERE status IN ('paid', 'partially_refunded', 'refunded')
+				   AND paid_at >= NOW() - INTERVAL '30 days'),
+				(SELECT COUNT(*) FROM billing_orders WHERE status = 'expired')`,
+			"pending_order_count",
+			"paid_order_count_30d",
+			"expired_order_count",
+		)
+	case "billing_payments":
+		// No registered payment channel can collect money yet, because every
+		// provider adapter is still the unconfigured placeholder. Both probes
+		// are therefore real process state, not a stored preference.
+		active := 0
+		if r.channels != nil {
+			active = len(r.channels.Health(ctx))
+		}
+		return map[string]any{
+			"configured_channel_count": int64(0),
+			"registered_channel_count": int64(active),
+		}, nil
+	case "billing_reconciliation":
+		return r.triad(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM billing_reconciliation_runs),
+				(SELECT COALESCE((
+					SELECT difference_cny_cents
+					FROM billing_reconciliation_runs
+					ORDER BY started_at DESC, id DESC
+					LIMIT 1
+				), 0)),
+				(SELECT COUNT(*) FROM billing_reconciliation_items
+				 WHERE resolved = FALSE AND discrepancy <> 'matched')`,
+			"reconciliation_run_count",
+			"reconciliation_difference_cny_cents",
+			"unresolved_discrepancy_count",
 		)
 	default:
 		return nil, nil

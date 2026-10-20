@@ -28,6 +28,9 @@ import (
 	authdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
 	authRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/repository"
 	authService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
+	billingChannel "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/channel"
+	billingRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/repository"
+	billingService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/service"
 	bluetoothAudioRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/bluetooth_audio/repository"
 	bluetoothAudioService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/bluetooth_audio/service"
 	childdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/domain"
@@ -117,6 +120,7 @@ import (
 	wearableRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/wearable/repository"
 	wearableService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/wearable/service"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/cache"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/clock"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/database"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/security"
 	platformhttp "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/transport/http"
@@ -174,6 +178,7 @@ func Run() error {
 	englishPersistence := englishRepository.NewPostgresRepository(databaseStore.Pool())
 	bindingPersistence := bindingRepository.NewPostgresRepository(databaseStore.Pool())
 	usagePersistence := usageReportRepository.NewPostgresRepository(databaseStore.Pool())
+	billingPersistence := billingRepository.NewPostgresRepository(databaseStore.Pool())
 
 	tokenIssuer, err := security.NewHMACTokenIssuer(cfg.Auth.AccessTokenSecret)
 	if err != nil {
@@ -602,6 +607,26 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create usage report service: %w", err)
 	}
+	billingChannelRegistry, err := newBillingChannelRegistry()
+	if err != nil {
+		return err
+	}
+	billing, err := billingService.New(billingService.Options{
+		Repository: billingPersistence,
+		Channels:   billingChannelRegistry,
+		Quota:      aiQuotaGrader{service: aiAccountService},
+		Clock:      clock.SystemClock{},
+	})
+	if err != nil {
+		return fmt.Errorf("create billing service: %w", err)
+	}
+	featureCenterHealthProbes["billing_orders"] = billingOrderBacklogProbe(billing.Expiry)
+	featureCenterHealthProbes["billing_payments"] = billingPaymentChannelProbe(
+		billingChannelRegistry,
+	)
+	featureCenterHealthProbes["billing_reconciliation"] = billingReconciliationProbe(
+		billing.Reconciliation,
+	)
 	privacy, err := privacyService.New(privacyService.Options{
 		Repository:     privacyRepository.NewPostgresRepository(databaseStore.Pool()),
 		ParentAccounts: authPersistence,
@@ -1276,4 +1301,71 @@ func runNotificationDeliveryWorker(
 		case <-ticker.C:
 		}
 	}
+}
+
+// newBillingChannelRegistry builds the payment provider registry.
+//
+// Every provider is registered unconfigured this round: the interface, state
+// machine and callback verification are complete, but no provider can collect
+// money until real credentials exist. Registering them (rather than an empty
+// registry) keeps the Feature Center able to report "not configured" honestly
+// instead of dropping the capability from the inventory entirely.
+func newBillingChannelRegistry() (*billingChannel.Registry, error) {
+	registry := billingChannel.NewRegistry()
+	for _, provider := range billingChannel.NewUnconfiguredChannels() {
+		if err := registry.Register(provider); err != nil {
+			return nil, fmt.Errorf("register billing channel %s: %w", provider.Name(), err)
+		}
+	}
+	return registry, nil
+}
+
+// aiQuotaGrader adapts the AI account service to the billing quota seam.
+//
+// The provider balance is the pool the upstream actually spends from, so a
+// purchase raises it and a refund lowers it. Going through the account service
+// rather than the repository keeps the same status, model pool and concurrency
+// validation as any other quota change.
+type aiQuotaGrader struct {
+	service *aiService.Service
+}
+
+// GrantQuota raises a family's provider balance by amountUSD.
+func (g aiQuotaGrader) GrantQuota(
+	ctx context.Context,
+	parentAccountID string,
+	amountUSD float64,
+	reason string,
+) error {
+	return g.adjust(ctx, parentAccountID, amountUSD, reason)
+}
+
+// ClawBackQuota lowers a family's provider balance by amountUSD.
+//
+// amountUSD arrives from the billing service already negative, so it is applied
+// as signed rather than negated again; a second negation would turn a refund
+// into a grant.
+func (g aiQuotaGrader) ClawBackQuota(
+	ctx context.Context,
+	parentAccountID string,
+	amountUSD float64,
+	reason string,
+) error {
+	return g.adjust(ctx, parentAccountID, amountUSD, reason)
+}
+
+// adjust applies one signed balance change through the account service.
+func (g aiQuotaGrader) adjust(
+	ctx context.Context,
+	parentAccountID string,
+	deltaUSD float64,
+	reason string,
+) error {
+	if g.service == nil {
+		return errors.New("adjust AI quota: AI account service is not configured")
+	}
+	if err := g.service.AdjustBalanceForParent(ctx, parentAccountID, deltaUSD, reason); err != nil {
+		return fmt.Errorf("adjust AI quota for %s: %w", parentAccountID, err)
+	}
+	return nil
 }

@@ -21,6 +21,8 @@ import (
 	audithandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/handler"
 	authdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
 	authservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/service"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/channel"
+	billingservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/service"
 	bluetoothaudioservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/bluetooth_audio/service"
 	childservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
 	companionshipservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/companionship/service"
@@ -121,10 +123,25 @@ type RouterOptions struct {
 	DeviceMeshService            *devicemeshservice.Service
 	ScreenService                *screenservice.Service
 	AuditRecorder                auditRecorder
+	// Billing groups the billing domain services. A nil entry disables only
+	// the routes that need it, so the rest of the platform still starts.
+	Billing BillingOptions
 	// RedisClient backs cross-replica authentication rate limits. When nil,
 	// login and verification endpoints fail closed instead of running without
 	// brute-force protection.
 	RedisClient rateLimitStore
+}
+
+// BillingOptions wires the billing domain into the HTTP transport.
+//
+// Service serves the guardian and operator routes; Channels backs the payment
+// provider callback and the operator channel-health view. The callback route is
+// registered even when Channels is nil so a misdirected provider call receives
+// an explicit "not available" answer instead of a 404 that looks like a
+// deployment problem.
+type BillingOptions struct {
+	Service  *billingservice.Service
+	Channels *channel.Registry
 }
 
 // ReadinessProbe checks one runtime dependency before the platform accepts
@@ -2944,6 +2961,8 @@ func NewRouter(options RouterOptions) http.Handler {
 			requireOTADeviceManage,
 		)
 	}
+
+	registerBillingRoutes(mux, options, logger)
 
 	return observability.WithRequestLabels(observability.WithRequestMetadata(
 		observability.WithAccessLog(

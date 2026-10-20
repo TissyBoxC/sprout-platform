@@ -37,6 +37,8 @@ const (
 	AdminPermissionNotificationsWrite = "notifications.manage"
 	AdminPermissionStatsRead          = "stats.read"
 	AdminPermissionAuditRead          = "audit.read"
+	AdminPermissionBillingRead        = "billing.read"
+	AdminPermissionBillingManage      = "billing.manage"
 )
 
 // AdminPermissionCatalog is the closed, ordered list of assignable
@@ -67,6 +69,8 @@ var AdminPermissionCatalog = []string{
 	AdminPermissionNotificationsWrite,
 	AdminPermissionStatsRead,
 	AdminPermissionAuditRead,
+	AdminPermissionBillingRead,
+	AdminPermissionBillingManage,
 }
 
 // IsKnownAdminPermission reports whether one identifier is assignable. The

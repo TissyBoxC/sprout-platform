@@ -110,6 +110,11 @@ var retentionExemptTables = map[string]string{
 	// broadcast history is intentionally retained for the admin console, so the
 	// row is not deleted when the notice stops being visible to guardians.
 	"notifications": "expiry hides the notice from inboxes; admin history is retained",
+	// billing_orders.expires_at is the payment deadline, not a retention
+	// window. A settled order is a financial record the guardian and the
+	// reconciliation trail both depend on, so the row outlives the deadline and
+	// only its status changes.
+	"billing_orders": "expires_at is the payment deadline; the order is retained as a financial record",
 }
 
 // TestPurgeExpiredRecordsCoversEphemeralTables guards the retention job that

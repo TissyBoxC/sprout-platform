@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprout.example/contracts/schemas/billing_order.schema.json",
+  "title": "Guardian purchase order",
+  "description": "One guardian-facing purchase order. Every amount is an integer count of 人民币分 (1/100 CNY): accepting a decimal here would reintroduce binary floating point into money, which corrupts reconciliation. Display formatting is the client's concern, never the transport's.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "order_no",
+    "plan_code",
+    "plan_display_name",
+    "billing_period",
+    "period_months",
+    "unit_price_cny_cents",
+    "discount_cny_cents",
+    "payable_cny_cents",
+    "paid_cny_cents",
+    "refunded_cny_cents",
+    "status",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "order_no": {
+      "type": "string",
+      "pattern": "^SP[0-9]{8}[A-Z2-7]{6}$",
+      "description": "Shown to the guardian and quoted to support, so it is stable and unique."
+    },
+    "plan_code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "plan_display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "billing_period": {
+      "type": "string",
+      "enum": [
+        "monthly",
+        "quarterly",
+        "yearly",
+        "one_time"
+      ]
+    },
+    "period_months": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 36
+    },
+    "unit_price_cny_cents": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000000
+    },
+    "discount_cny_cents": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000000
+    },
+    "payable_cny_cents": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000000
+    },
+    "paid_cny_cents": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000000
+    },
+    "refunded_cny_cents": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000000
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "paid",
+        "cancelled",
+        "expired",
+        "refunded",
+        "partially_refunded"
+      ]
+    },
+    "expires_at": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    },
+    "paid_at": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    },
+    "created_at": {
+      "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+    }
+  },
+  "allOf": [
+    {
+      "description": "A term plan must state its length; a one-time purchase must not pretend to have one.",
+      "if": {
+        "properties": { "billing_period": { "const": "one_time" } },
+        "required": ["billing_period"]
+      },
+      "then": {
+        "properties": { "period_months": { "const": 0 } }
+      },
+      "else": {
+        "properties": {
+          "period_months": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    {
+      "description": "Only a pending order still expects payment, so only it carries a deadline.",
+      "if": {
+        "properties": { "status": { "const": "pending" } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "expires_at": {
+            "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+          }
+        },
+        "required": ["expires_at"]
+      }
+    },
+    {
+      "description": "A paid or refunded order must record when the money arrived.",
+      "if": {
+        "properties": {
+          "status": {
+            "enum": ["paid", "refunded", "partially_refunded"]
+          }
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "paid_at": {
+            "$ref": "https://sprout.example/contracts/schemas/common.schema.json#/$defs/timestamp"
+          }
+        },
+        "required": ["paid_at"]
+      }
+    }
+  ]
+}

@@ -607,6 +607,49 @@ func (s *Service) deleteStaleProviderKey(
 	_ = s.provider.DeleteAPIKey(ctx, providerAccountID, staleKeyID)
 }
 
+// AdjustBalanceForParent applies a signed change to a family's provider balance.
+//
+// Billing owns the money side and must not need the provider account id to
+// credit quota, so this keeps the lookup here. The existing status, model pool
+// and concurrency limit are carried through unchanged, which means a quota
+// movement can never quietly widen what a child is allowed to use. A change
+// that would push the balance below zero is refused rather than clamped: a
+// negative balance means the pool was over-spent, and silently flooring it
+// would erase the evidence reconciliation needs.
+func (s *Service) AdjustBalanceForParent(
+	ctx context.Context,
+	parentAccountID string,
+	deltaUSD float64,
+	reason string,
+) error {
+	if deltaUSD == 0 {
+		return nil
+	}
+	account, err := s.repository.GetByParentAccountID(ctx, parentAccountID)
+	if err != nil {
+		return err
+	}
+	balance := account.BalanceUSD + deltaUSD
+	if balance < 0 {
+		return fmt.Errorf(
+			"%w: balance %.6f would become %.6f",
+			domain.ErrBalanceWouldGoNegative,
+			account.BalanceUSD,
+			balance,
+		)
+	}
+	_, err = s.UpdateForAdmin(
+		ctx,
+		account.ProviderAccountID,
+		account.Status,
+		balance,
+		account.ConcurrencyLimit,
+		account.AvailableModels,
+		reason,
+	)
+	return err
+}
+
 // GetForParent returns the parent-safe AI account summary.
 func (s *Service) GetForParent(
 	ctx context.Context,

@@ -276,6 +276,26 @@ func DefaultRegistry() []Definition {
 		featureDef("deployment_infrastructure", "部署基础设施", "容器、数据库、缓存和消息服务。", "platform", "平台运维", false,
 			nil,
 			metrics("running_service_count", "运行服务", "个")),
+		readOnlyFeatureDef("billing_orders", "订单与订阅", "监护人下单、支付、退款与订阅周期。", "commerce", "商业化平台",
+			"套餐价格和订单状态由订单服务按状态机维护，功能中心只提供能力状态和统计。",
+			metrics(
+				"pending_order_count", "待支付订单", "笔",
+				"paid_order_count_30d", "近 30 天已付订单", "笔",
+				"expired_order_count", "已过期订单", "笔",
+			)),
+		readOnlyFeatureDef("billing_payments", "支付渠道", "微信支付与支付宝的接入、回调与退款。", "commerce", "商业化平台",
+			"支付渠道的商户号、密钥和证书只由部署配置提供，功能中心只展示渠道健康状态和统计。",
+			metrics(
+				"configured_channel_count", "已接入支付渠道", "个",
+				"registered_channel_count", "已注册渠道", "个",
+			)),
+		readOnlyFeatureDef("billing_reconciliation", "计费对账", "按渠道营业日比对公司账与渠道账单。", "commerce", "商业化平台",
+			"对账按渠道和营业日由订单服务发起，功能中心只提供最近一次对账的状态和统计。",
+			metrics(
+				"reconciliation_run_count", "对账批次", "次",
+				"reconciliation_difference_cny_cents", "最近对账差额", "分",
+				"unresolved_discrepancy_count", "未处理差异", "笔",
+			)),
 	}
 }
 

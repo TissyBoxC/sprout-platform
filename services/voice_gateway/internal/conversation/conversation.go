@@ -19,6 +19,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/tts"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/frame"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/playback"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/wav"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/llm"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/platform/observability"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/audit"
@@ -462,6 +463,11 @@ func (r *Runner) speak(ctx context.Context, deviceID string, text string, sink S
 	}
 	defer stream.Close()
 
+	// Providers return a self-describing WAV container, but the encoder needs
+	// raw samples. Feeding container bytes straight to the speaker emits the
+	// header as a click and, when the provider used another profile, plays the
+	// reply at the wrong pitch.
+	decoder := wav.NewDecoder()
 	pending := make([]byte, 0, ttsFrameBytes)
 	// Each turn gets a unique item prefix. Reusing reply_0.. across turns would
 	// collide with frames a preemption requeued for the previous turn, and the
@@ -469,7 +475,11 @@ func (r *Runner) speak(ctx context.Context, deviceID string, text string, sink S
 	playbackSequence := r.replySequence.Add(1)
 	frameSequence := 0
 	for chunk := range stream.Audio() {
-		pending = append(pending, chunk...)
+		pcmBytes, err := decoder.Push(chunk)
+		if err != nil {
+			return observability.NewSafeError("语音播报格式不受支持", err)
+		}
+		pending = append(pending, pcmBytes...)
 		for len(pending) >= ttsFrameBytes {
 			itemID := fmt.Sprintf("%s_reply_%d_%d", deviceID, playbackSequence, frameSequence)
 			frameSequence++
@@ -488,6 +498,13 @@ func (r *Runner) speak(ctx context.Context, deviceID string, text string, sink S
 	if err := stream.Err(); err != nil {
 		return observability.NewSafeError("语音播报服务未能完成", err)
 	}
+	// A stream shorter than the header probe never reached the payload phase in
+	// Push, so the tail must be released before the final partial frame.
+	tail, err := decoder.Finish()
+	if err != nil {
+		return observability.NewSafeError("语音播报格式不受支持", err)
+	}
+	pending = append(pending, tail...)
 	if len(pending) > 0 {
 		// Zero-pad the trailing partial frame so the device always receives
 		// whole 20 ms frames; the padding is silence, not lost speech.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/asr"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/adapter/tts"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/frame"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/playback"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/llm"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/audit"
@@ -740,5 +741,97 @@ func TestPlatformSafetyPolicyReadFailureFailsStrict(t *testing.T) {
 	}
 	if ttsClient.lastRequest.Text == "他拿刀杀死了所有人" {
 		t.Fatal("a policy read failure must not speak an unmoderated reply")
+	}
+}
+
+// buildPCMWAV assembles the 16 kHz mono 16-bit container every speech provider
+// returns, so a test can prove the encoder receives samples and not header bytes.
+func buildPCMWAV(payload []byte) []byte {
+	const (
+		formatPCM   = 1
+		channels    = 1
+		bitsPerSamp = 16
+	)
+	// Declared as a variable so the byte-packing shifts below are runtime
+	// operations; a typed constant would still be evaluated at compile time and
+	// fail the narrow-byte conversion.
+	sampleRate := uint32(16000)
+	blockAlign := uint32(channels * bitsPerSamp / 8)
+	byteRate := sampleRate * blockAlign
+
+	body := make([]byte, 0, 36+len(payload))
+	body = append(body, "WAVE"...)
+	body = append(body, "fmt "...)
+	body = append(body, 16, 0, 0, 0)
+	body = append(body, byte(uint16(formatPCM)), byte(uint16(formatPCM)>>8))
+	body = append(body, byte(uint16(channels)), byte(uint16(channels)>>8))
+	body = append(body, byte(sampleRate), byte(sampleRate>>8), byte(sampleRate>>16), byte(sampleRate>>24))
+	body = append(body, byte(byteRate), byte(byteRate>>8), byte(byteRate>>16), byte(byteRate>>24))
+	body = append(body, byte(blockAlign), byte(blockAlign>>8))
+	body = append(body, byte(uint16(bitsPerSamp)), byte(uint16(bitsPerSamp)>>8))
+	body = append(body, "data"...)
+	size := len(payload)
+	body = append(body, byte(size), byte(size>>8), byte(size>>16), byte(size>>24))
+	body = append(body, payload...)
+	if len(payload)%2 == 1 {
+		body = append(body, 0)
+	}
+
+	document := make([]byte, 0, 8+len(body))
+	document = append(document, "RIFF"...)
+	riffSize := len(body)
+	document = append(document, byte(riffSize), byte(riffSize>>8), byte(riffSize>>16), byte(riffSize>>24))
+	return append(document, body...)
+}
+
+func TestTurnSpeaksSamplesFromAWAVContainer(t *testing.T) {
+	// frame.SamplesPerFrame is 320 samples per 20 ms frame, so this payload is
+	// exactly one frame and a correct decoder yields one frame with no padding.
+	payload := make([]byte, frame.SamplesPerFrame*2)
+	for index := range payload {
+		payload[index] = byte(index % 251)
+	}
+	config := testConfig()
+	config.TTS = &fakeTTS{audio: buildPCMWAV(payload)}
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	sink := &recordingSink{}
+
+	if err := runner.Turn(context.Background(), "session_wav", "device_a", []int16{1}, sink); err != nil {
+		t.Fatalf("Turn() error = %v", err)
+	}
+	if sink.count() != 1 {
+		t.Fatalf("frame count = %d, want 1", sink.count())
+	}
+
+	// The header must be gone: a leaked RIFF header would shift every sample.
+	want := bytesToInt16(payload)
+	got := sink.pcmFrames[0]
+	if len(got) != len(want) {
+		t.Fatalf("sample count = %d, want %d", len(got), len(want))
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("sample %d = %d, want %d", index, got[index], want[index])
+		}
+	}
+}
+
+func TestTurnRejectsAnUnsupportedTTSProfile(t *testing.T) {
+	// A stereo container cannot be played at the fixed monaural device profile.
+	config := testConfig()
+	stereo := buildPCMWAV(make([]byte, 256))
+	// Patch the fmt chunk channel count so the decoder must refuse it.
+	stereo[22] = 2
+	config.TTS = &fakeTTS{audio: stereo}
+
+	runner, err := New(config)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := runner.Turn(context.Background(), "session_bad_wav", "device_a", []int16{1}, &recordingSink{}); err == nil {
+		t.Fatal("Turn() accepted a non-mono WAV stream")
 	}
 }

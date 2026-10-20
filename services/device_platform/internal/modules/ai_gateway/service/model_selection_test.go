@@ -97,9 +97,10 @@ func TestModelIDsFromRuntimeConfigTrimsDeduplicatesAndPreservesOrder(t *testing.
 }
 
 func TestDefaultSelectedModelsPreservesValidSelection(t *testing.T) {
-	got := defaultSelectedModels(
+	got := defaultSelectedModelsWithCatalog(
 		[]string{"model-b"},
 		[]string{"model-a", "model-b"},
+		providerModelCatalog{recommendedModel: "model-a"},
 	)
 
 	if !reflect.DeepEqual(got, []string{"model-b"}) {
@@ -110,7 +111,7 @@ func TestDefaultSelectedModelsPreservesValidSelection(t *testing.T) {
 func TestDefaultSelectedModelsSelectsWholePoolForNewAccount(t *testing.T) {
 	pool := []string{"model-a", "model-b"}
 
-	got := defaultSelectedModels(nil, pool)
+	got := defaultSelectedModelsWithCatalog(nil, pool, providerModelCatalog{})
 
 	if !reflect.DeepEqual(got, pool) {
 		t.Fatalf("expected the whole pool, got %v", got)
@@ -120,10 +121,39 @@ func TestDefaultSelectedModelsSelectsWholePoolForNewAccount(t *testing.T) {
 func TestDefaultSelectedModelsDoesNotAliasAvailablePool(t *testing.T) {
 	pool := []string{"model-a", "model-b"}
 
-	got := defaultSelectedModels(nil, pool)
+	got := defaultSelectedModelsWithCatalog(nil, pool, providerModelCatalog{})
 	got[0] = "mutated"
 
 	if pool[0] != "model-a" {
 		t.Fatal("defaultSelectedModels must not alias the available pool")
+	}
+}
+
+func TestDefaultSelectedModelsUsesLowestLatencyRecommendation(t *testing.T) {
+	catalog := providerModelCatalog{
+		availableModels:  []string{"slow", "unmeasured", "fast"},
+		recommendedModel: "fast",
+		latencies: map[string]int{
+			"slow": 340,
+			"fast": 120,
+		},
+	}
+
+	got := defaultSelectedModelsWithCatalog(nil, catalog.availableModels, catalog)
+
+	if !reflect.DeepEqual(got, []string{"fast"}) {
+		t.Fatalf("expected the lowest-latency model, got %v", got)
+	}
+}
+
+func TestDefaultSelectedModelsFallsBackToWholePoolWhenLatencyUnknown(t *testing.T) {
+	pool := []string{"model-a", "model-b"}
+	got := defaultSelectedModelsWithCatalog(
+		nil,
+		pool,
+		providerModelCatalog{availableModels: pool},
+	)
+	if !reflect.DeepEqual(got, pool) {
+		t.Fatalf("expected the whole unmeasured pool, got %v", got)
 	}
 }

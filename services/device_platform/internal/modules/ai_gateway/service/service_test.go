@@ -20,8 +20,8 @@ func TestEnsureForParentPersistsCredentialOnFirstCreate(t *testing.T) {
 		runtimeConfig: &domain.ProviderRuntimeConfig{
 			RecommendedModel: "model-b",
 			Models: []domain.ProviderModelLatency{
-				{Model: "model-a"},
-				{Model: "model-b"},
+				{Model: "model-a", PrimaryLatencyMs: intPointer(300)},
+				{Model: "model-b", PrimaryLatencyMs: intPointer(120)},
 			},
 		},
 	}
@@ -74,18 +74,15 @@ func TestEnsureForParentPersistsCredentialOnFirstCreate(t *testing.T) {
 			repository.created.AvailableModels,
 		)
 	}
-	if !reflect.DeepEqual(
-		repository.created.SelectedModels,
-		[]string{"model-a", "model-b"},
-	) {
+	if !reflect.DeepEqual(repository.created.SelectedModels, []string{"model-b"}) {
 		t.Fatalf(
-			"expected the whole model pool to be preselected, got %v",
+			"expected the lowest-latency model to be preselected, got %v",
 			repository.created.SelectedModels,
 		)
 	}
 	if !reflect.DeepEqual(
 		provider.createdAccount.AllowedModels,
-		[]string{"model-a", "model-b"},
+		[]string{"model-b"},
 	) {
 		t.Fatalf(
 			"expected the effective allowlist on create, got %v",
@@ -119,8 +116,8 @@ func TestEnsureForParentBackfillsLegacyModelPool(t *testing.T) {
 		runtimeConfig: &domain.ProviderRuntimeConfig{
 			RecommendedModel: "model-b",
 			Models: []domain.ProviderModelLatency{
-				{Model: "model-a"},
-				{Model: "model-b"},
+				{Model: "model-a", PrimaryLatencyMs: intPointer(300)},
+				{Model: "model-b", PrimaryLatencyMs: intPointer(120)},
 			},
 		},
 	}
@@ -142,9 +139,9 @@ func TestEnsureForParentBackfillsLegacyModelPool(t *testing.T) {
 	}
 	if !reflect.DeepEqual(
 		summary.SelectedModels,
-		[]string{"model-a", "model-b"},
+		[]string{"model-b"},
 	) {
-		t.Fatalf("expected the whole model pool, got %v", summary.SelectedModels)
+		t.Fatalf("expected the lowest-latency model, got %v", summary.SelectedModels)
 	}
 }
 
@@ -174,8 +171,8 @@ func TestEnsureForParentPreservesValidLegacySelection(t *testing.T) {
 		runtimeConfig: &domain.ProviderRuntimeConfig{
 			RecommendedModel: "model-b",
 			Models: []domain.ProviderModelLatency{
-				{Model: "model-a"},
-				{Model: "model-b"},
+				{Model: "model-a", PrimaryLatencyMs: intPointer(300)},
+				{Model: "model-b", PrimaryLatencyMs: intPointer(120)},
 			},
 		},
 	}
@@ -195,6 +192,10 @@ func TestEnsureForParentPreservesValidLegacySelection(t *testing.T) {
 	if !reflect.DeepEqual(summary.AvailableModels, []string{"model-a", "model-b"}) {
 		t.Fatalf("expected the runtime pool, got %v", summary.AvailableModels)
 	}
+}
+
+func intPointer(value int) *int {
+	return &value
 }
 
 func TestEnsureForParentFallsBackToDefaultModelsWhenRuntimeConfigFails(
@@ -314,9 +315,9 @@ func TestUpdateForAdminBackfillsLegacyModelPoolFromRuntimeConfig(t *testing.T) {
 	}
 	if !reflect.DeepEqual(
 		account.SelectedModels,
-		[]string{"model-a", "model-b"},
+		[]string{"model-b"},
 	) {
-		t.Fatalf("expected the whole model pool, got %v", account.SelectedModels)
+		t.Fatalf("expected the lowest-latency model, got %v", account.SelectedModels)
 	}
 }
 

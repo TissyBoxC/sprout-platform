@@ -135,7 +135,9 @@ type Service struct {
 
 // providerModelCatalog is the live model policy returned by the gateway.
 type providerModelCatalog struct {
-	availableModels []string
+	availableModels  []string
+	recommendedModel string
+	latencies        map[string]int
 }
 
 // RuntimePolicyReader supplies the operator defaults used when a new AI
@@ -225,8 +227,18 @@ func (s *Service) resolveModelCatalog(
 	if err == nil && runtimeConfig != nil {
 		availableModels := modelIDsFromRuntimeConfig(runtimeConfig.Models)
 		if len(availableModels) > 0 {
+			latencies := modelLatenciesFromRuntimeConfig(runtimeConfig.Models)
+			recommended := strings.TrimSpace(runtimeConfig.RecommendedModel)
+			if !containsModel(availableModels, recommended) {
+				recommended = fastestModelWithLatency(
+					availableModels,
+					latencies,
+				)
+			}
 			return providerModelCatalog{
-				availableModels: availableModels,
+				availableModels:  availableModels,
+				recommendedModel: recommended,
+				latencies:        latencies,
 			}, nil
 		}
 	}
@@ -261,9 +273,10 @@ func (s *Service) repairModelCatalog(
 		return nil
 	}
 
-	account.SelectedModels = defaultSelectedModels(
+	account.SelectedModels = defaultSelectedModelsWithCatalog(
 		account.SelectedModels,
 		account.AvailableModels,
+		catalog,
 	)
 	allowedModels := effectiveModels(
 		account.SelectedModels,
@@ -388,9 +401,10 @@ func (s *Service) EnsureForParent(
 				providerAccount.AllowedModels...,
 			)
 		}
-		selectedModels := defaultSelectedModels(
+		selectedModels := defaultSelectedModelsWithCatalog(
 			nil,
 			availableModels,
+			catalog,
 		)
 		allowedModels := effectiveModels(selectedModels, availableModels)
 		existing = &domain.Account{
@@ -475,9 +489,10 @@ func (s *Service) loadOrCreateProviderAccount(
 	if catalogErr != nil {
 		return nil, providerModelCatalog{}, catalogErr
 	}
-	selectedModels := defaultSelectedModels(
+	selectedModels := defaultSelectedModelsWithCatalog(
 		nil,
 		catalog.availableModels,
+		catalog,
 	)
 	allowedModels := effectiveModels(selectedModels, catalog.availableModels)
 
@@ -647,9 +662,10 @@ func (s *Service) UpdateForAdmin(
 			)
 			if len(account.SelectedModels) == 0 &&
 				len(availableModels) > 0 {
-				account.SelectedModels = defaultSelectedModels(
+				account.SelectedModels = defaultSelectedModelsWithCatalog(
 					nil,
 					availableModels,
+					catalog,
 				)
 			}
 		}
@@ -866,6 +882,58 @@ func modelIDsFromRuntimeConfig(
 	return normalizeModelIDs(modelIDs)
 }
 
+func modelLatenciesFromRuntimeConfig(
+	models []domain.ProviderModelLatency,
+) map[string]int {
+	latencies := make(map[string]int, len(models))
+	for _, model := range models {
+		modelID := strings.TrimSpace(model.Model)
+		if modelID == "" || model.PrimaryLatencyMs == nil ||
+			*model.PrimaryLatencyMs < 0 {
+			continue
+		}
+		key := strings.ToLower(modelID)
+		if existing, ok := latencies[key]; ok &&
+			existing <= *model.PrimaryLatencyMs {
+			continue
+		}
+		latencies[key] = *model.PrimaryLatencyMs
+	}
+	return latencies
+}
+
+func fastestModelWithLatency(
+	availableModels []string,
+	latencies map[string]int,
+) string {
+	fastest := ""
+	fastestLatency := 0
+	for _, model := range availableModels {
+		latency, ok := latencies[strings.ToLower(strings.TrimSpace(model))]
+		if !ok {
+			continue
+		}
+		if fastest == "" || latency < fastestLatency {
+			fastest = model
+			fastestLatency = latency
+		}
+	}
+	return fastest
+}
+
+func containsModel(models []string, model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+	for _, candidate := range models {
+		if strings.EqualFold(strings.TrimSpace(candidate), model) {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeModelIDs(models []string) []string {
 	normalized := make([]string, 0, len(models))
 	seen := make(map[string]struct{}, len(models))
@@ -884,13 +952,13 @@ func normalizeModelIDs(models []string) []string {
 	return normalized
 }
 
-// defaultSelectedModels preserves a valid explicit selection and otherwise
-// selects the entire available pool. Guardians start with every approved
-// model rather than a single recommendation, and may narrow the selection
-// later in either client.
-func defaultSelectedModels(
+// defaultSelectedModelsWithCatalog prefers an explicit guardian selection,
+// then the provider's lowest-latency recommendation, then the whole pool when
+// no latency has been measured yet. The function never invents a latency.
+func defaultSelectedModelsWithCatalog(
 	selectedModels []string,
 	availableModels []string,
+	catalog providerModelCatalog,
 ) []string {
 	selectedModels = intersectModels(selectedModels, availableModels)
 	if len(selectedModels) > 0 {
@@ -898,6 +966,19 @@ func defaultSelectedModels(
 	}
 	if len(availableModels) == 0 {
 		return nil
+	}
+	if containsModel(availableModels, catalog.recommendedModel) {
+		for _, model := range availableModels {
+			if strings.EqualFold(model, catalog.recommendedModel) {
+				return []string{model}
+			}
+		}
+	}
+	if fastest := fastestModelWithLatency(
+		availableModels,
+		catalog.latencies,
+	); fastest != "" {
+		return []string{fastest}
 	}
 	return append([]string(nil), availableModels...)
 }

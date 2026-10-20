@@ -14,6 +14,7 @@ import {
 import { mapApiError, type ApiError } from '@/api/apiError'
 import { createHttpClient } from '@/api/httpClient'
 import { useAuthStore } from '@/features/auth/application/authStore'
+import { canApplyMutationResult } from '@/features/feature_center/domain/mutationGuard'
 
 export interface FeatureCenterFilters {
   category: string
@@ -332,6 +333,7 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
       values: config,
       expectedVersion: draftVersion.value,
     }
+    const requestGeneration = detailRequestGeneration
 
     isSaving.value = true
     error.value = null
@@ -341,6 +343,14 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
     partialSuccessMessage.value = ''
     try {
       const result = await client.updateFeatureConfig(feature.id, input)
+      if (!canApplyMutationResult(
+        requestGeneration,
+        detailRequestGeneration,
+        feature.id,
+        selectedFeatureId.value,
+      )) {
+        return { succeeded: false, conflicted: false, error: null }
+      }
       applyMutationResult(result)
       if (result.notice === null) {
         lastMessage.value = `${result.feature.name || feature.name} 的配置已保存。`
@@ -374,14 +384,24 @@ export const useFeatureCenterStore = defineStore('admin-feature-center', () => {
     conflictMessage.value = ''
     lastMessage.value = ''
     partialSuccessMessage.value = ''
+    const requestGeneration = detailRequestGeneration
     try {
       const result = await client.checkFeatureHealth(normalizedId)
+      if (!canApplyMutationResult(
+        requestGeneration,
+        detailRequestGeneration,
+        normalizedId,
+        selectedFeatureId.value,
+      )) {
+        return false
+      }
       applyMutationResult(result)
       if (selectedFeature.value?.id === normalizedId) {
         selectedFeature.value = {
           ...selectedFeature.value,
           metrics: result.feature.metrics,
           metricsReported: result.feature.metricsReported,
+          metricsState: result.feature.metricsState,
           health: result.feature.health,
           updatedAt: result.feature.updatedAt,
         }

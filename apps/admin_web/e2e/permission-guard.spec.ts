@@ -43,3 +43,37 @@ test('shows only the navigation and pages granted to the administrator', async (
   await expect(page.getByRole('link', { name: '功能中心' })).toBeVisible()
   await expect(page.getByRole('link', { name: '家长账号' })).toHaveCount(0)
 })
+
+test('keeps the sidebar and account area visually separate from page content', async ({
+  page,
+}) => {
+  await useAdminSession(page, ['stats.read'])
+  await page.goto('/')
+
+  const sidebar = page.locator('.admin-sidebar')
+  const content = page.locator('.admin-content')
+  const account = page.locator('.sidebar-account')
+  await expect(sidebar).toBeVisible()
+  await expect(content).toBeVisible()
+  await expect(account).toBeVisible()
+
+  const desktopSidebar = await sidebar.boundingBox()
+  const desktopContent = await content.boundingBox()
+  const desktopAccount = await account.boundingBox()
+  expect(desktopSidebar).not.toBeNull()
+  expect(desktopContent).not.toBeNull()
+  expect(desktopAccount).not.toBeNull()
+  expect(desktopContent!.x - (desktopSidebar!.x + desktopSidebar!.width)).toBeGreaterThanOrEqual(12)
+  expect(
+    desktopSidebar!.y + desktopSidebar!.height - (desktopAccount!.y + desktopAccount!.height),
+  ).toBeLessThanOrEqual(32)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  const mobileSidebar = await sidebar.boundingBox()
+  const mobileContent = await content.boundingBox()
+  expect(mobileSidebar).not.toBeNull()
+  expect(mobileContent).not.toBeNull()
+  expect(mobileContent!.y).toBeGreaterThanOrEqual(
+    mobileSidebar!.y + mobileSidebar!.height,
+  )
+})

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/features/auth/application/authStore'
@@ -7,6 +8,10 @@ import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const accountInitial = computed(() => {
+  const displayName = authStore.account?.displayName.trim() ?? ''
+  return displayName.slice(0, 1).toUpperCase() || '管'
+})
 
 async function logout(): Promise<void> {
   await authStore.logout()
@@ -17,20 +22,23 @@ async function logout(): Promise<void> {
 <template>
   <div class="admin-layout">
     <aside class="admin-sidebar">
-      <RouterLink class="brand" to="/">
-        <img
-          class="brand-avatar"
-          src="/brand/sprout/brand_avatar.png"
-          alt=""
-          width="48"
-          height="48"
-        />
-        <span>
-          <strong>如此萌屋</strong>
-          <small>品牌管理端</small>
-        </span>
-      </RouterLink>
+      <div class="sidebar-brand">
+        <RouterLink class="brand" to="/">
+          <img
+            class="brand-avatar"
+            src="/brand/sprout/brand_avatar.png"
+            alt=""
+            width="48"
+            height="48"
+          />
+          <span>
+            <strong>如此萌屋</strong>
+            <small>品牌管理端</small>
+          </span>
+        </RouterLink>
+      </div>
       <nav class="admin-nav" aria-label="主要导航">
+        <div class="admin-nav-inner">
         <p class="nav-section">品牌管理</p>
         <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/">
           <span class="nav-dot" aria-hidden="true"></span>
@@ -175,10 +183,18 @@ async function logout(): Promise<void> {
           <span class="nav-dot" aria-hidden="true"></span>
           管理员权限
         </RouterLink>
+        </div>
       </nav>
-      <div class="account-panel">
-        <p>{{ authStore.account?.displayName }}</p>
-        <small>{{ authStore.account?.email }}</small>
+      <div class="sidebar-account">
+        <div class="account-identity">
+          <span class="account-avatar" aria-hidden="true">
+            {{ accountInitial }}
+          </span>
+          <span class="account-copy">
+            <strong>{{ authStore.account?.displayName || '管理员' }}</strong>
+            <small>{{ authStore.account?.email }}</small>
+          </span>
+        </div>
         <button type="button" @click="logout">退出登录</button>
       </div>
     </aside>
@@ -196,27 +212,35 @@ async function logout(): Promise<void> {
 .admin-layout {
   display: grid;
   min-height: 100vh;
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: 272px minmax(0, 1fr);
+  gap: 20px;
+  padding: 16px;
   background: transparent;
 }
 
 .admin-sidebar {
   position: sticky;
-  top: 0;
+  top: 16px;
   display: flex;
-  height: 100vh;
+  height: calc(100vh - 32px);
+  min-height: 0;
   flex-direction: column;
-  padding: 24px 18px;
-  border-right: 1px solid rgb(240 189 203 / 72%);
-  background: rgb(255 255 255 / 88%);
-  backdrop-filter: blur(18px);
+  overflow: hidden;
+  border: 1px solid var(--sprout-outline-soft);
+  border-radius: 24px;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 18px 44px rgb(143 69 94 / 10%);
+}
+
+.sidebar-brand {
+  flex: 0 0 auto;
+  padding: 18px 20px 14px;
 }
 
 .brand {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 32px;
   color: #4a2e3b;
   text-decoration: none;
   transition: transform var(--sprout-duration-base) var(--sprout-ease-out);
@@ -247,12 +271,21 @@ async function logout(): Promise<void> {
 }
 
 .admin-nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 12px 16px;
+  scrollbar-color: rgb(240 189 203 / 75%) transparent;
+  scrollbar-width: thin;
+}
+
+.admin-nav-inner {
   display: grid;
-  gap: 8px;
+  gap: 5px;
 }
 
 .nav-section {
-  margin: 3px 14px 1px;
+  margin: 7px 11px 3px;
   color: #6b4f5a;
   font-size: 11px;
   font-weight: 700;
@@ -260,7 +293,7 @@ async function logout(): Promise<void> {
 }
 
 .nav-section-services {
-  margin-top: 14px;
+  margin-top: 18px;
 }
 
 .admin-nav a {
@@ -268,7 +301,7 @@ async function logout(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 11px 14px;
+  padding: 10px 13px;
   color: #6b4f5a;
   text-decoration: none;
   border: 1px solid transparent;
@@ -316,32 +349,61 @@ async function logout(): Promise<void> {
   box-shadow: 0 4px 10px rgb(217 79 131 / 18%);
 }
 
-.account-panel {
+.sidebar-account {
+  flex: 0 0 auto;
   display: grid;
-  gap: 4px;
-  margin-top: auto;
-  padding-top: 20px;
-  border-top: 1px solid #f7d9e2;
+  gap: 12px;
+  margin: 0 12px 12px;
+  padding: 14px;
+  border: 1px solid var(--sprout-outline-soft);
+  border-radius: 18px;
+  background: #fff8fa;
 }
 
-.account-panel p,
-.account-panel small {
+.account-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.account-avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 12px;
+  background: #ffe7ee;
+  color: var(--sprout-pink-deep);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.account-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.account-copy strong,
+.account-copy small {
   margin: 0;
   overflow-wrap: anywhere;
 }
 
-.account-panel p {
+.account-copy strong {
   color: #4a2e3b;
   font-weight: 700;
 }
 
-.account-panel small {
+.account-copy small {
   color: #6b4f5a;
+  font-size: 11px;
 }
 
-.account-panel button {
+.sidebar-account button {
   min-height: 38px;
-  margin-top: 10px;
   border: 1px solid #f0bdcb;
   border-radius: 19px;
   background: #ffffff;
@@ -350,7 +412,7 @@ async function logout(): Promise<void> {
   cursor: pointer;
 }
 
-.account-panel button:hover {
+.sidebar-account button:hover {
   border-color: #e9a5b8;
   background: #fff7fa;
   box-shadow: 0 8px 18px rgb(217 79 131 / 10%);
@@ -358,35 +420,47 @@ async function logout(): Promise<void> {
 
 .admin-content {
   min-width: 0;
-  padding: 32px;
+  padding: 16px 16px 32px 0;
 }
 
 @media (max-width: 760px) {
   .admin-layout {
     grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 12px;
   }
 
   .admin-sidebar {
     position: static;
     height: auto;
-    border-right: 0;
-    border-bottom: 1px solid #f0bdcb;
+    overflow: visible;
+    border-radius: 22px;
   }
 
-  .brand {
-    margin-bottom: 18px;
+  .sidebar-brand {
+    padding: 16px 16px 12px;
   }
 
   .admin-nav {
+    max-height: min(52vh, 430px);
+    overflow-y: auto;
+    padding: 0 10px 12px;
+  }
+
+  .admin-nav-inner {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .account-panel {
-    margin-top: 18px;
+  .nav-section {
+    grid-column: 1 / -1;
+  }
+
+  .sidebar-account {
+    margin: 0 10px 10px;
   }
 
   .admin-content {
-    padding: 22px 16px;
+    padding: 4px 0 22px;
   }
 }
 </style>

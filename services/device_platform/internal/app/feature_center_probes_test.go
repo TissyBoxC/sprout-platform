@@ -496,3 +496,36 @@ func TestNotificationReadinessProbeUnavailableOnRepositoryFailure(t *testing.T) 
 		t.Fatalf("status = %q, want unavailable", status)
 	}
 }
+
+// TestCoverageValidationRunsAfterEveryProbeIsResolved guards the ordering that
+// a real deployment depends on. Probes are registered in two phases: a block of
+// service-backed probes, then another block once later services exist. The
+// coverage check rejects any active feature whose probe is still a placeholder,
+// so running it between the two phases refuses to start the service even though
+// every probe is eventually registered. Source inspection is enough here because
+// the failure is purely positional and needs no database.
+func TestCoverageValidationRunsAfterEveryProbeIsResolved(t *testing.T) {
+	source, err := os.ReadFile("app.go")
+	if err != nil {
+		t.Fatalf("read app.go: %v", err)
+	}
+	body := string(source)
+
+	validationAt := strings.Index(body, "featureCenterService.ValidateHealthProbeCoverage(")
+	if validationAt < 0 {
+		t.Fatal("coverage validation call not found in app.go")
+	}
+
+	// The last assignment wins: every probe must already be resolved by then.
+	lastAssignmentAt := strings.LastIndex(body, "featureCenterHealthProbes[")
+	if lastAssignmentAt < 0 {
+		t.Fatal("no probe assignments found in app.go")
+	}
+	if validationAt < lastAssignmentAt {
+		t.Fatalf(
+			"coverage validation at offset %d runs before the last probe "+
+				"assignment at offset %d; placeholders would fail startup",
+			validationAt, lastAssignmentAt,
+		)
+	}
+}

@@ -718,12 +718,6 @@ func Run() error {
 			return string(readiness.State)
 		},
 	)
-	if err := featureCenterService.ValidateHealthProbeCoverage(
-		featureCenterService.DefaultRegistry(),
-		featureCenterHealthProbes,
-	); err != nil {
-		return fmt.Errorf("validate feature center health coverage: %w", err)
-	}
 	featurePersistence := featureCenterRepository.NewPostgresRepository(
 		databaseStore.Pool(),
 	)
@@ -942,6 +936,16 @@ func Run() error {
 			return string(readiness.State)
 		},
 	)
+	// Every probe is now resolved, so this is the first point where the check
+	// can tell a genuinely missing probe apart from one still awaiting its
+	// owning service. Validating earlier rejected features whose probe is
+	// registered further down this function.
+	if err := featureCenterService.ValidateHealthProbeCoverage(
+		featureCenterService.DefaultRegistry(),
+		featureCenterHealthProbes,
+	); err != nil {
+		return fmt.Errorf("validate feature center health coverage: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTP.Address(),

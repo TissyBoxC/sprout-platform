@@ -15,6 +15,7 @@ import {
   writeGuardianConsentVersion,
 } from '@/features/system/domain/guardianConsentVersion'
 import { assertMinorModeNotDisabled } from '@/features/system/domain/minorModeInvariant'
+import { preferredDefaultModel } from '@/features/system/domain/aiModelPreference'
 
 export interface SystemSettings {
   defaultBalanceUsd: number
@@ -193,9 +194,9 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
       if (currentDefaultModels.length > 0) {
         settings.value.defaultModels = [...currentDefaultModels]
       } else {
-        const fastestModel = fastestAvailableModel(modelsResult.value)
-        if (fastestModel !== null) {
-          settings.value.defaultModels = [fastestModel.id]
+        const preferredModel = preferredDefaultModel(modelsResult.value)
+        if (preferredModel !== null) {
+          settings.value.defaultModels = [preferredModel.id]
         }
       }
     }
@@ -230,20 +231,6 @@ export const useSystemSettingsStore = defineStore('admin-system-settings', () =>
 function isSettingsVersionConflict(error: unknown): boolean {
   const response = (error as { response?: { data?: { error?: { code?: unknown } } } })?.response
   return response?.data?.error?.code === 'settings_version_conflict'
-}
-
-function fastestAvailableModel(models: AIModelOption[]): AIModelOption | null {
-  const availableModels = models.filter(
-    (model) => model.id && model.latencyMs !== null && model.latencyMs >= 0,
-  )
-  if (availableModels.length === 0) {
-    return null
-  }
-  return availableModels.reduce((fastest, model) =>
-    (model.latencyMs ?? Number.POSITIVE_INFINITY) < (fastest.latencyMs ?? Number.POSITIVE_INFINITY)
-      ? model
-      : fastest,
-  )
 }
 
 export function systemSettingsFromResponse(value: Record<string, unknown>): SystemSettings {

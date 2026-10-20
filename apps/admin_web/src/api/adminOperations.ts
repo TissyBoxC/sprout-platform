@@ -5,6 +5,7 @@ import { createHttpClient } from '@/api/httpClient'
 export interface AIModelOption {
   id: string
   latencyMs: number | null
+  isRecommended?: boolean
 }
 
 export interface AIAccountDefaults {
@@ -90,9 +91,20 @@ export function createAdminOperationsClient(
       if (!Array.isArray(records)) {
         return []
       }
+      const recommendedModel = stringValue(
+        response.data?.data?.recommended_model ??
+          response.data?.data?.recommendedModel,
+      )
       return records
         .map(toAIModelOption)
         .filter((model): model is AIModelOption => model !== null)
+        .map((model) => ({
+          ...model,
+          isRecommended:
+            model.isRecommended ||
+            (recommendedModel !== '' &&
+              model.id.toLowerCase() === recommendedModel.toLowerCase()),
+        }))
     },
 
     async loadAIGatewayChildPolicy(): Promise<AIGatewayChildPolicy | null> {
@@ -161,6 +173,7 @@ function toAIModelOption(value: unknown): AIModelOption | null {
   return {
     id,
     latencyMs: nullableNumber(record.latency_ms ?? record.latencyMs),
+    isRecommended: record.is_recommended === true || record.isRecommended === true,
   }
 }
 

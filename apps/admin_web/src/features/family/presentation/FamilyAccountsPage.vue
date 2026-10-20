@@ -11,6 +11,7 @@ import type {
   AdminFamilyMemberRole,
 } from '@/api/adminFamilyMembership'
 import type { AIModelOption } from '@/api/adminOperations'
+import { preferredDefaultModel } from '@/features/system/domain/aiModelPreference'
 import {
   useFamilyAccountStore,
   type AdminFamily,
@@ -555,20 +556,6 @@ function assignableModels(account: AdminFamilyAiAccount, models: AIModelOption[]
   return models.map((model) => model.id)
 }
 
-function fastestModel(models: AIModelOption[]): AIModelOption | null {
-  const measuredModels = models.filter(
-    (model) => model.id && model.latencyMs !== null && model.latencyMs >= 0,
-  )
-  if (measuredModels.length === 0) {
-    return models.find((model) => model.id) ?? null
-  }
-  return measuredModels.reduce((fastest, model) =>
-    (model.latencyMs ?? Number.POSITIVE_INFINITY) < (fastest.latencyMs ?? Number.POSITIVE_INFINITY)
-      ? model
-      : fastest,
-  )
-}
-
 function latencyLabel(model: AIModelOption): string {
   return model.latencyMs === null ? '延迟待测' : `约 ${model.latencyMs} ms`
 }
@@ -577,8 +564,8 @@ function isModelSelected(modelId: string): boolean {
   return aiForm.availableModels.includes(modelId)
 }
 
-function isFastestModel(modelId: string): boolean {
-  return fastestModel(store.modelOptions)?.id === modelId
+function isDefaultModel(modelId: string): boolean {
+  return preferredDefaultModel(store.modelOptions)?.id === modelId
 }
 
 function formatDate(value: string): string {
@@ -1168,7 +1155,7 @@ function emptySectionFeedback(): {
                         <span class="model-option-main">
                           <span class="model-name">
                             <strong>{{ model.id }}</strong>
-                            <em v-if="isFastestModel(model.id)">默认最快</em>
+                            <em v-if="isDefaultModel(model.id)">默认模型</em>
                           </span>
                           <small>{{ latencyLabel(model) }}</small>
                         </span>

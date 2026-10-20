@@ -175,6 +175,7 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
                   />
                   <span>
                     <strong>{{ model.id }}</strong>
+                    <em v-if="model.isRecommended" class="model-recommended">推荐</em>
                     <small>
                       {{ model.latencyMs === null ? '延迟待测' : `${model.latencyMs} ms` }}
                     </small>
@@ -185,7 +186,8 @@ function tierBindingLabel(bound: boolean, ageBandMissing: boolean): string {
                 </p>
               </div>
               <small class="field-hint">
-                可选择一个或多个默认模型。已有选择会原样保留；只有未设置时才会回退到延迟最低的可用模型。
+                可选择一个或多个默认模型。已有选择会原样保留；只有未设置时才会优先使用 AI
+                服务推荐的模型，未返回推荐时再使用延迟最低的可用模型。
               </small>
             </div>
           </div>
@@ -751,6 +753,17 @@ button:disabled {
 
 .model-default-option strong {
   overflow-wrap: anywhere;
+}
+
+.model-default-option .model-recommended {
+  width: fit-content;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #fff0f5;
+  color: #a12b4a;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
 }
 
 .model-default-option small {

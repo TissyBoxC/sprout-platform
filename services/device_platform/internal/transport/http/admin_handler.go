@@ -227,8 +227,9 @@ type aiAccountDefaultsResponse struct {
 }
 
 type aiModelResponse struct {
-	ID        string `json:"id"`
-	LatencyMS *int   `json:"latency_ms"`
+	ID               string `json:"id"`
+	LatencyMS        *int   `json:"latency_ms"`
+	IsRecommended    bool   `json:"is_recommended"`
 }
 
 type createParentRequest struct {
@@ -644,11 +645,18 @@ func (handler adminHandler) listAIModels(
 			continue
 		}
 		models = append(models, aiModelResponse{
-			ID:        model.Model,
-			LatencyMS: model.PrimaryLatencyMs,
+			ID:            model.Model,
+			LatencyMS:     model.PrimaryLatencyMs,
+			IsRecommended: strings.EqualFold(
+				strings.TrimSpace(model.Model),
+				strings.TrimSpace(config.RecommendedModel),
+			),
 		})
 	}
-	writeSuccess(response, request, http.StatusOK, map[string]any{"models": models})
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"models":            models,
+		"recommended_model": strings.TrimSpace(config.RecommendedModel),
+	})
 }
 
 // getAIGatewayChildPolicy exposes the child-safety policy the AI gateway is

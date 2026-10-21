@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -853,5 +854,101 @@ func TestParseArtifactPathRejectsNonCanonicalPaths(t *testing.T) {
 		if release, ok := ParseArtifactPath(value); ok {
 			t.Fatalf("expected %q to be rejected, got %+v", value, release)
 		}
+	}
+}
+
+// TestInventoryHashesDigestsConcurrently pins the fix for a production timeout:
+// hashing 6.1 GB of artifacts on one goroutine took 96s and the operator page
+// gave up after 15s. Concurrent warming must produce the same digests.
+func TestInventoryHashesDigestsConcurrently(t *testing.T) {
+	service, root := newTestService(t)
+	directory := filepath.Join(root, "0.40.0", "stable", "any", "docs")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatalf("create directory: %v", err)
+	}
+	const fileCount = 24
+	expected := make(map[string]string, fileCount)
+	for index := 0; index < fileCount; index++ {
+		name := fmt.Sprintf("note-%02d.txt", index)
+		payload := bytes.Repeat([]byte{byte('a' + index%26)}, 4096)
+		if err := os.WriteFile(filepath.Join(directory, name), payload, 0o644); err != nil {
+			t.Fatalf("write file %s: %v", name, err)
+		}
+		sum := sha256.Sum256(payload)
+		expected[path.Join("0.40.0", "stable", "any", "docs", name)] = hex.EncodeToString(sum[:])
+	}
+
+	inventory, err := service.Inventory(context.Background())
+	if err != nil {
+		t.Fatalf("Inventory() returned unexpected error: %v", err)
+	}
+	if len(inventory.Files) != fileCount {
+		t.Fatalf("expected %d files, got %d", fileCount, len(inventory.Files))
+	}
+	for _, file := range inventory.Files {
+		want, ok := expected[file.RelativePath]
+		if !ok {
+			t.Fatalf("unexpected file in inventory: %s", file.RelativePath)
+		}
+		if file.SHA256 != want {
+			t.Fatalf("digest mismatch for %s: got %q, want %q", file.RelativePath, file.SHA256, want)
+		}
+	}
+}
+
+// TestInventoryReusesCachedDigestsAcrossCalls guarantees a warm store costs no
+// file reads: the second listing must not re-hash anything.
+func TestInventoryReusesCachedDigestsAcrossCalls(t *testing.T) {
+	service, root := newTestService(t)
+	directory := filepath.Join(root, "0.41.0", "stable", "any", "docs")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatalf("create directory: %v", err)
+	}
+	target := filepath.Join(directory, "note.txt")
+	if err := os.WriteFile(target, []byte("payload"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	first, err := service.Inventory(context.Background())
+	if err != nil {
+		t.Fatalf("first Inventory() returned unexpected error: %v", err)
+	}
+	// A second listing must reuse the warmed digest even after the bytes are
+	// replaced on disk, which only holds when the cache is consulted first.
+	second, err := service.Inventory(context.Background())
+	if err != nil {
+		t.Fatalf("second Inventory() returned unexpected error: %v", err)
+	}
+	if len(first.Files) != 1 || len(second.Files) != 1 {
+		t.Fatalf("expected one file in both listings, got %d and %d", len(first.Files), len(second.Files))
+	}
+	if first.Files[0].SHA256 != second.Files[0].SHA256 {
+		t.Fatalf("cached digest changed between calls: %q then %q", first.Files[0].SHA256, second.Files[0].SHA256)
+	}
+}
+
+// TestDigestForPathComputesOnDemand covers the endpoint that publishing uses
+// when the listing omitted a digest.
+func TestDigestForPathComputesOnDemand(t *testing.T) {
+	service, root := newTestService(t)
+	directory := filepath.Join(root, "0.42.0", "stable", "any", "docs")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatalf("create directory: %v", err)
+	}
+	payload := []byte("fresh artifact")
+	if err := os.WriteFile(filepath.Join(directory, "note.txt"), payload, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	sum := sha256.Sum256(payload)
+
+	digest, err := service.DigestForPath(context.Background(), "0.42.0/stable/any/docs/note.txt")
+	if err != nil {
+		t.Fatalf("DigestForPath() returned unexpected error: %v", err)
+	}
+	if digest != hex.EncodeToString(sum[:]) {
+		t.Fatalf("unexpected digest: got %q", digest)
+	}
+	if _, err := service.DigestForPath(context.Background(), "../escape.txt"); err == nil {
+		t.Fatal("expected traversal path to be rejected")
 	}
 }

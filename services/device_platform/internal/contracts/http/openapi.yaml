@@ -9120,6 +9120,50 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/storage/files/digest:
+    get:
+      summary: Hash one stored download file on demand
+      description: |
+        Returns the SHA-256 of a single artifact. The inventory listing no longer
+        hashes every file, so publishing a file that already exists asks for its
+        digest here. The read may take a while for a multi-gigabyte artifact.
+      security:
+        - userToken: []
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Relative path of the file inside the download store.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Digest of the requested file
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [relative_path, sha256]
+                    properties:
+                      relative_path:
+                        type: string
+                      sha256:
+                        type: string
+                        pattern: "^[0-9a-f]{64}$"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
   /api/v1/admin/storage/files/upload:
     post:
       summary: Upload one file into the shared download store

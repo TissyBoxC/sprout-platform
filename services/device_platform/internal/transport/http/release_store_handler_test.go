@@ -28,6 +28,8 @@ type fakeReleaseStoreAdminService struct {
 	uploadFileName  string
 	uploadBody      string
 	deletedPath     string
+	digestPath      string
+	digest          string
 	refreshInput    releaseStoredomain.IndexRefreshRequest
 }
 
@@ -80,6 +82,14 @@ func (service *fakeReleaseStoreAdminService) DeleteFile(
 ) error {
 	service.deletedPath = relativePath
 	return service.err
+}
+
+func (service *fakeReleaseStoreAdminService) DigestForPath(
+	_ context.Context,
+	relativePath string,
+) (string, error) {
+	service.digestPath = relativePath
+	return service.digest, service.err
 }
 
 func (service *fakeReleaseStoreAdminService) RefreshIndex(

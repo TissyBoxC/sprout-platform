@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/release_store/domain"
@@ -224,11 +225,16 @@ func (s *Service) Close() error {
 
 // Inventory returns every regular file in the store. Canonical release
 // artifacts are annotated with their parsed release metadata.
+//
+// Digests are warmed concurrently before the walk. Hashing serially read 6.1 GB
+// and took 96s, which exceeded the client timeout; a cold store now finishes
+// within a few seconds of parallel reads.
 func (s *Service) Inventory(ctx context.Context) (domain.Inventory, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.Inventory{}, err
 	}
 	indexedArtifacts := s.indexedArtifactSet()
+	s.warmInventoryDigests(ctx, s.inventoryDigestCandidates(ctx))
 	files := make([]domain.File, 0)
 	err := s.walkInventory(ctx, ".", func(relativePath string, info os.FileInfo) error {
 		if err := ctx.Err(); err != nil {
@@ -264,6 +270,106 @@ func (s *Service) Inventory(ctx context.Context) (domain.Inventory, error) {
 		Files:         files,
 		GeneratedAt:   s.clock.Now().UTC(),
 	}, nil
+}
+
+// inventoryDigestCandidates lists canonical release artifacts whose digest is
+// not yet cached for their current identity. Only these are hashed: hashing
+// notes and temporary uploads made a cold listing read the entire store for
+// values that are never published.
+func (s *Service) inventoryDigestCandidates(ctx context.Context) []string {
+	candidates := make([]string, 0)
+	_ = s.walkInventory(ctx, ".", func(relativePath string, info os.FileInfo) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !info.Mode().IsRegular() ||
+			isTemporaryUploadFile(relativePath) ||
+			relativePath == immutableIndexPath {
+			return nil
+		}
+		if _, ok := ParseArtifactPath(relativePath); !ok {
+			return nil
+		}
+		if _, ok := s.cachedInventoryDigest(relativePath, info); ok {
+			return nil
+		}
+		candidates = append(candidates, relativePath)
+		return nil
+	})
+	return candidates
+}
+
+// DigestForPath returns the SHA-256 of one stored file, reusing the inventory
+// cache when it still describes the file on disk.
+//
+// Publishing needs a digest but listing does not, so the expensive read lives
+// here instead of in Inventory. Listing every artifact used to hash 6.1 GB and
+// took 96s in production, well past the client's 15s timeout.
+func (s *Service) DigestForPath(ctx context.Context, relativePath string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	cleaned, err := NormalizeRelativePath(relativePath)
+	if err != nil {
+		return "", err
+	}
+	if info, statErr := s.root.Stat(cleaned); statErr == nil {
+		if digest, ok := s.cachedInventoryDigest(cleaned, info); ok {
+			return digest, nil
+		}
+	}
+	digest, err := s.fileSHA256(cleaned)
+	if err != nil {
+		return "", err
+	}
+	if info, statErr := s.root.Stat(cleaned); statErr == nil {
+		s.storeInventoryDigest(cleaned, info, digest)
+	}
+	return digest, nil
+}
+
+// warmInventoryDigests hashes the given paths concurrently so a cold inventory
+// does not serialise one full read per artifact. Release stores grow past 6 GB,
+// and hashing that on one goroutine took 96s and timed out the operator page.
+//
+// Failures are recorded as an empty digest rather than returned: a single
+// unreadable artifact must not fail the whole listing. Callers treat an empty
+// digest as "not yet verified".
+func (s *Service) warmInventoryDigests(ctx context.Context, paths []string) {
+	const workers = 8
+	if len(paths) == 0 {
+		return
+	}
+	var (
+		waitGroup sync.WaitGroup
+		next      int64 = -1
+	)
+	for worker := 0; worker < workers && worker < len(paths); worker++ {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			for {
+				index := int(atomic.AddInt64(&next, 1))
+				if index >= len(paths) || ctx.Err() != nil {
+					return
+				}
+				relativePath := paths[index]
+				info, statErr := s.root.Stat(relativePath)
+				if statErr != nil {
+					continue
+				}
+				if _, ok := s.cachedInventoryDigest(relativePath, info); ok {
+					continue
+				}
+				digest, hashErr := s.fileSHA256(relativePath)
+				if hashErr != nil {
+					continue
+				}
+				s.storeInventoryDigest(relativePath, info, digest)
+			}
+		}()
+	}
+	waitGroup.Wait()
 }
 
 // readInventoryFile performs a bounded retry for every directory entry. A
@@ -304,25 +410,10 @@ func (s *Service) readInventoryFile(
 			_ = file.Close()
 			return domain.File{}, false, nil
 		}
-		digest, cached := s.cachedInventoryDigest(relativePath, info)
-		if !cached {
-			hasher := sha256.New()
-			_, readErr := io.Copy(hasher, file)
-			closeErr := file.Close()
-			if readErr == nil && closeErr == nil {
-				digest = hex.EncodeToString(hasher.Sum(nil))
-				s.storeInventoryDigest(relativePath, info, digest)
-				return inventoryFile(relativePath, info, digest), true, nil
-			}
-			lastErr = readErr
-			if lastErr == nil {
-				lastErr = closeErr
-			}
-			if !s.waitInventoryRetry(ctx) {
-				return domain.File{}, false, ctx.Err()
-			}
-			continue
-		}
+		// Digests were warmed concurrently before the walk, so this only reads
+		// the cache. A miss means the file could not be hashed and is listed
+		// with an empty digest instead of stalling the response.
+		digest, _ := s.cachedInventoryDigest(relativePath, info)
 		if err := file.Close(); err != nil {
 			lastErr = err
 			if !s.waitInventoryRetry(ctx) {

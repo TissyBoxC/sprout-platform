@@ -176,6 +176,10 @@ type releaseStoreAdminService interface {
 		input releaseStoredomain.PromoteStagedInput,
 	) (releaseStoredomain.File, error)
 	DeleteFile(ctx context.Context, relativePath string) error
+	// DigestForPath hashes one stored artifact on demand. Inventory stopped
+	// hashing every file because that read 6.1 GB, took 96s and timed the
+	// operator page out; registering a pre-existing file asks for it here.
+	DigestForPath(ctx context.Context, relativePath string) (string, error)
 	RefreshIndex(
 		ctx context.Context,
 		input releaseStoredomain.IndexRefreshRequest,

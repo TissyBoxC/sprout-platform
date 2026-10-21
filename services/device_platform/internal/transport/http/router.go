@@ -1549,6 +1549,13 @@ func NewRouter(options RouterOptions) http.Handler {
 					),
 				)
 				mux.HandleFunc(
+					"GET /api/v1/admin/storage/files/digest",
+					authHandler.requireAdminPermission(
+						authdomain.AdminPermissionStorageRead,
+						adminHandler.getReleaseFileDigest,
+					),
+				)
+				mux.HandleFunc(
 					"POST /api/v1/admin/storage/files/upload",
 					authHandler.requireAdminPermission(
 						authdomain.AdminPermissionStorageManage,

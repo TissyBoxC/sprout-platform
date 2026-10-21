@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -39,6 +40,41 @@ func (handler adminHandler) getReleaseIndexStatus(
 		return
 	}
 	writeSuccess(response, request, http.StatusOK, status)
+}
+
+// getReleaseFileDigest hashes one stored artifact on demand.
+//
+// The inventory listing deliberately omits digests it has not cached, because
+// hashing the whole store blocked the page for 96s. Registering a release that
+// already exists needs the value, so it is requested here for that file alone.
+func (handler adminHandler) getReleaseFileDigest(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	relativePath := strings.TrimSpace(request.URL.Query().Get("path"))
+	if relativePath == "" {
+		writeError(
+			response,
+			request,
+			http.StatusBadRequest,
+			"invalid_path",
+			"请选择要校验的文件",
+		)
+		return
+	}
+	// Hashing a multi-gigabyte artifact is legitimately slow, so the caller is
+	// allowed to wait longer than the default request deadline.
+	ctx, cancel := context.WithTimeout(request.Context(), largeReleaseUploadTimeout)
+	defer cancel()
+	digest, err := handler.releaseStoreService.DigestForPath(ctx, relativePath)
+	if err != nil {
+		writeReleaseStoreError(response, request, err)
+		return
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"relative_path": relativePath,
+		"sha256":        digest,
+	})
 }
 
 // uploadReleaseFile accepts multipart/form-data with fields "path" and

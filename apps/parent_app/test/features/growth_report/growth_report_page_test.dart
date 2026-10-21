@@ -6,7 +6,6 @@ import 'package:parent_app/core/theme/app_theme.dart';
 import 'package:parent_app/features/child_profile/application/child_profile_controller.dart';
 import 'package:parent_app/features/child_profile/domain/child_profile.dart';
 import 'package:parent_app/features/growth_report/application/growth_report_controller.dart';
-import 'package:parent_app/features/growth_report/data/growth_report_api.dart';
 import 'package:parent_app/features/growth_report/domain/growth_report.dart';
 import 'package:parent_app/features/growth_report/presentation/growth_report_page.dart';
 

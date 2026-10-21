@@ -724,6 +724,7 @@ func TestDefaultRegistryCoversRequiredFeatures(t *testing.T) {
 		"billing_orders",
 		"billing_payments",
 		"billing_reconciliation",
+		"family_spending_limit",
 	}
 	definitions := DefaultRegistry()
 	registered := make(map[string]Definition, len(definitions))
@@ -921,6 +922,8 @@ func TestDefaultRegistryMetricsHaveVerifiableSource(t *testing.T) {
 		"reconciliation_run_count":              {},
 		"reconciliation_difference_cny_cents":   {},
 		"unresolved_discrepancy_count":          {},
+		"spending_limit_family_count":           {},
+		"spending_limit_rejection_count":        {},
 	}
 	for _, definition := range DefaultRegistry() {
 		for _, metric := range definition.Feature.ReadOnlyMetrics {

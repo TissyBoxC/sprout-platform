@@ -627,6 +627,9 @@ func Run() error {
 	featureCenterHealthProbes["billing_reconciliation"] = billingReconciliationProbe(
 		billing.Reconciliation,
 	)
+	featureCenterHealthProbes["family_spending_limit"] = familySpendingLimitProbe(
+		billing.SpendingLimits,
+	)
 	privacy, err := privacyService.New(privacyService.Options{
 		Repository:     privacyRepository.NewPostgresRepository(databaseStore.Pool()),
 		ParentAccounts: authPersistence,

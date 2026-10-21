@@ -96,6 +96,8 @@ class ProfilePage extends ConsumerWidget {
                     onWearable: () => context.push('/me/wearable'),
                     onMultiDevice: () => context.push('/me/multi-device'),
                     onUsageReports: () => context.push('/me/usage-reports'),
+                    onSpendingLimit: () =>
+                        context.push('/me/billing/spending-limit'),
                     onNotifications: () => context.push('/me/notifications'),
                     onContent: () => context.push('/me/content'),
                     onEmail: () => context.push('/account/email'),
@@ -619,6 +621,7 @@ class _SettingsCard extends StatelessWidget {
     required this.onWearable,
     required this.onMultiDevice,
     required this.onUsageReports,
+    required this.onSpendingLimit,
     required this.onNotifications,
     required this.onContent,
     required this.onEmail,
@@ -650,6 +653,7 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onWearable;
   final VoidCallback onMultiDevice;
   final VoidCallback onUsageReports;
+  final VoidCallback onSpendingLimit;
   final VoidCallback onNotifications;
   final VoidCallback onContent;
   final VoidCallback onEmail;
@@ -838,6 +842,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('查看每日时长、对话、内容和限制记录'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onUsageReports,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.savings_outlined),
+            title: const Text('消费限额'),
+            subtitle: const Text('设置每月消费上限，查看本月已花金额'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onSpendingLimit,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

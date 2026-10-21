@@ -3,6 +3,7 @@ import 'money.dart';
 
 export 'billing_models.dart';
 export 'money.dart';
+export 'spending_limit.dart';
 
 /// 支付渠道未开放时，后端以 HTTP 409 返回的业务结果。
 ///
@@ -23,10 +24,27 @@ class SpendingConsentRequiredException implements Exception {
   String toString() => 'SpendingConsentRequiredException';
 }
 
+/// 本月消费已经达到家长设置的金额上限，后端拒绝下单。
+///
+/// 这不是故障：家长调高限额或等到下个月就能继续购买，界面需要同时给出
+/// 这两个方向，而不是让家长反复重试。
+class SpendingLimitExceededException implements Exception {
+  const SpendingLimitExceededException();
+
+  @override
+  String toString() => 'SpendingLimitExceededException';
+}
+
 bool isPaymentNotOpen(Object error) => error is PaymentNotOpenException;
 
 bool isSpendingConsentRequired(Object error) =>
     error is SpendingConsentRequiredException;
+
+bool isSpendingLimitExceeded(Object error) =>
+    error is SpendingLimitExceededException;
+
+/// 达到限额时统一使用的说明，下单页和限额页共用同一句。
+const spendingLimitExceededMessage = '本月消费已达上限，请先调整限额或次月再试';
 
 /// 把支付动作的失败转成家长可读的文案。
 ///
@@ -37,6 +55,9 @@ String billingActionErrorMessage(Object? error) {
   }
   if (error is SpendingConsentRequiredException) {
     return '购买前需要监护人同意消费条款';
+  }
+  if (error is SpendingLimitExceededException) {
+    return spendingLimitExceededMessage;
   }
   if (error is AppException) {
     return error.message;

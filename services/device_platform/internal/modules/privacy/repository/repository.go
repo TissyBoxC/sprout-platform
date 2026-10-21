@@ -730,6 +730,11 @@ func (r *PostgresRepository) PurgeParentData(
 		{`DELETE FROM billing_payments WHERE parent_account_id = $1`, "billing payments"},
 		{`DELETE FROM billing_subscriptions WHERE parent_account_id = $1`, "billing subscriptions"},
 		{`DELETE FROM billing_spending_consents WHERE parent_account_id = $1`, "billing spending consents"},
+		// The spending cap is the guardian's own money policy and the rejection
+		// log is derived from their purchases, so both leave with the account
+		// rather than keeping a deleted family's spending profile.
+		{`DELETE FROM family_spending_limit_rejections WHERE family_id = $1`, "family spending limit rejections"},
+		{`DELETE FROM family_spending_limits WHERE family_id = $1`, "family spending limits"},
 		{`DELETE FROM ai_quota_ledger WHERE parent_account_id = $1`, "AI quota ledger"},
 		{`DELETE FROM billing_orders WHERE parent_account_id = $1`, "billing orders"},
 		{`DELETE FROM companionship_growth_records WHERE family_id = $1`, "companionship growth records"},

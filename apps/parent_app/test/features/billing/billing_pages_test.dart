@@ -11,6 +11,9 @@ import 'package:parent_app/features/billing/domain/billing_errors.dart';
 import 'package:parent_app/features/billing/presentation/billing_checkout_page.dart';
 import 'package:parent_app/features/billing/presentation/billing_orders_page.dart';
 import 'package:parent_app/features/billing/presentation/billing_plans_page.dart';
+import 'package:parent_app/features/billing/presentation/spending_limit_page.dart';
+import 'package:parent_app/features/family/application/family_controller.dart';
+import 'package:parent_app/features/family/domain/family_membership.dart';
 
 void main() {
   group('BillingPlansPage', () {
@@ -185,6 +188,30 @@ void main() {
       expect(find.text('网络连接不稳定，请检查后重试'), findsOneWidget);
       expect(find.textContaining('Exception'), findsNothing);
     });
+
+    testWidgets('spending limit blocks the order and offers the limit page', (
+      tester,
+    ) async {
+      final api = _RecordingBillingApi(
+        createOrderError: const SpendingLimitExceededException(),
+      );
+      await tester.pumpWidget(
+        _checkoutApp(api, const BillingConsent(isGranted: true)),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('确认支付'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('确认支付').last);
+      await tester.pumpAndSettle();
+
+      expect(api.createdOrders, hasLength(1));
+      expect(find.text('本月消费已达上限，请先调整限额或次月再试'), findsOneWidget);
+      expect(find.text('调整消费限额'), findsOneWidget);
+      // 限额是保护而不是故障，不能出现技术词或原始错误。
+      expect(find.textContaining('Exception'), findsNothing);
+      expect(find.textContaining('409'), findsNothing);
+    });
   });
 
   group('BillingOrdersPage', () {
@@ -312,6 +339,162 @@ void main() {
       expect(find.textContaining('Exception'), findsNothing);
     });
   });
+
+  group('SpendingLimitPage', () {
+    testWidgets('shows this month spending, the limit, and a progress bar', (
+      tester,
+    ) async {
+      final api = _SpendingLimitApi(limit: _limit());
+      await tester.pumpWidget(_spendingLimitApp(api));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey<String>('spending-limit-spent')),
+        findsOneWidget,
+      );
+      expect(find.text('¥49.90'), findsOneWidget);
+      expect(find.text('上限 ¥200.00，还可以用 ¥150.10'), findsOneWidget);
+      final progress = tester.widget<LinearProgressIndicator>(
+        find.byKey(const ValueKey<String>('spending-limit-progress')),
+      );
+      expect(progress.value, closeTo(0.2495, 0.001));
+      final input = tester.widget<TextFormField>(
+        find.byKey(const ValueKey<String>('spending-limit-input')),
+      );
+      expect(input.controller?.text, '200.00');
+    });
+
+    testWidgets('saving 0 means no limit and refreshes in place', (
+      tester,
+    ) async {
+      final api = _SpendingLimitApi(limit: _limit());
+      await tester.pumpWidget(_spendingLimitApp(api));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('spending-limit-input')),
+        '0',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey<String>('spending-limit-save')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(api.savedCents, [0]);
+      expect(find.text('当前没有设置上限，购买套餐不受金额限制。'), findsOneWidget);
+      expect(find.text('已保存，本月不再限制消费金额'), findsOneWidget);
+    });
+
+    testWidgets('converts yuan input to cents and shows the saved limit', (
+      tester,
+    ) async {
+      final api = _SpendingLimitApi(limit: _limit());
+      await tester.pumpWidget(_spendingLimitApp(api));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('spending-limit-input')),
+        '199.9',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey<String>('spending-limit-save')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(api.savedCents, [19990]);
+      expect(find.text('上限 ¥199.90，还可以用 ¥150.00'), findsOneWidget);
+    });
+
+    testWidgets('rejects an empty amount before saving', (tester) async {
+      final api = _SpendingLimitApi(limit: _limit());
+      await tester.pumpWidget(_spendingLimitApp(api));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('spending-limit-input')),
+        '',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey<String>('spending-limit-save')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('请输入每月上限，填 0 表示不限额'), findsOneWidget);
+      expect(api.savedCents, isEmpty);
+    });
+
+    testWidgets('explains a reached limit and what to do next', (tester) async {
+      final api = _SpendingLimitApi(
+        limit: SpendingLimit(
+          monthlyLimit: Money.fromNonNegativeCents(4990),
+          monthSpent: Money.fromNonNegativeCents(4990),
+        ),
+      );
+      await tester.pumpWidget(_spendingLimitApp(api));
+      await tester.pumpAndSettle();
+
+      expect(find.text('上限 ¥49.90，本月额度已经用完'), findsOneWidget);
+      expect(find.textContaining('把上限调高'), findsOneWidget);
+    });
+
+    testWidgets('shows the loading state', (tester) async {
+      final api = _SpendingLimitApi(limit: _limit(), isPending: true);
+      await tester.pumpWidget(_spendingLimitApp(api));
+      await tester.pump();
+
+      expect(find.text('正在加载…'), findsOneWidget);
+    });
+
+    testWidgets('shows an empty state when no limit was ever saved', (
+      tester,
+    ) async {
+      final api = _SpendingLimitApi(
+        limit: _limit(),
+        loadError: const AppException(
+          kind: AppErrorKind.notFound,
+          message: '没有找到这条内容',
+          retryable: false,
+        ),
+      );
+      await tester.pumpWidget(_spendingLimitApp(api));
+      await tester.pumpAndSettle();
+
+      expect(find.text('还没有设置消费限额'), findsOneWidget);
+      expect(find.textContaining('填 0 表示不限额'), findsOneWidget);
+      expect(find.textContaining('没有找到这条内容'), findsNothing);
+    });
+
+    testWidgets('shows a readable error with a retry action', (tester) async {
+      final api = _SpendingLimitApi(
+        limit: _limit(),
+        loadError: const AppException(
+          kind: AppErrorKind.network,
+          message: '网络连接不稳定，请检查后重试',
+          retryable: true,
+        ),
+      );
+      await tester.pumpWidget(_spendingLimitApp(api));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('网络连接不稳定'), findsOneWidget);
+      expect(find.text('重新加载'), findsOneWidget);
+      expect(find.textContaining('Exception'), findsNothing);
+    });
+
+    testWidgets('a member without the permission gets a read-only page', (
+      tester,
+    ) async {
+      final api = _SpendingLimitApi(limit: _limit());
+      await tester.pumpWidget(_spendingLimitApp(api, canManage: false));
+      await tester.pumpAndSettle();
+
+      expect(find.text('只有家庭所有者可以设置消费限额'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey<String>('spending-limit-save')),
+        findsNothing,
+      );
+    });
+  });
 }
 
 Widget _plansApp(AsyncValue<List<BillingPlan>> state) {
@@ -350,6 +533,164 @@ Widget _ordersApp(AsyncValue<BillingOrdersState> state, {BillingApi? api}) {
     ],
     child: MaterialApp(theme: AppTheme.light, home: const BillingOrdersPage()),
   );
+}
+
+/// 本月已花 ¥49.90、上限 ¥200.00 的典型家庭。
+SpendingLimit _limit() => SpendingLimit(
+  monthlyLimit: Money.fromNonNegativeCents(20000),
+  monthSpent: Money.fromNonNegativeCents(4990),
+);
+
+Widget _spendingLimitApp(
+  _SpendingLimitApi api, {
+  bool canManage = true,
+}) {
+  return ProviderScope(
+    overrides: [
+      billingApiProvider.overrideWithValue(api),
+      familyControllerProvider.overrideWith(
+        () => _FixedFamilyController(canManage: canManage),
+      ),
+      spendingLimitControllerProvider.overrideWith(
+        () => _FixedSpendingLimitController(api),
+      ),
+    ],
+    child: MaterialApp(theme: AppTheme.light, home: const SpendingLimitPage()),
+  );
+}
+
+FamilyMembershipState _familyState({required bool canManage}) {
+  return FamilyMembershipState(
+    capability: FamilyCapability.fromJson({
+      'family_id': 'fam_001',
+      'owner_user_id': 'user_owner',
+      'member_count': 2,
+      'pending_invite_count': 0,
+      'schema_version': '1',
+      'permissions': {'spending_limit_manage': canManage},
+    }),
+    members: const <FamilyMember>[],
+    invitations: const <FamilyInvitation>[],
+  );
+}
+
+class _FixedFamilyController extends FamilyController {
+  _FixedFamilyController({required this.canManage});
+
+  final bool canManage;
+
+  @override
+  Future<FamilyMembershipState> build() async =>
+      _familyState(canManage: canManage);
+}
+
+/// 用假数据源驱动真实的限额控制器，保留刷新与保存后的状态切换。
+class _FixedSpendingLimitController extends SpendingLimitController {
+  _FixedSpendingLimitController(this._api);
+
+  final _SpendingLimitApi _api;
+
+  @override
+  Future<SpendingLimit> build() async {
+    // 先让父类完成 build，把数据源和行为都接好，再按测试意图覆盖结果。
+    final live = super.build();
+    if (_api.isPending) {
+      // 真实数据源也挂起时，父类请求同样不会完成；这里换成永不完成的结果，
+      // 并把父类这次请求的错误吞掉，避免未处理的异步异常打断测试。
+      unawaited(live.then((_) {}, onError: (Object _) {}));
+      return Completer<SpendingLimit>().future;
+    }
+    unawaited(
+      live.then((_) {}, onError: (Object _) {}),
+    );
+    final error = _api.loadError;
+    if (error != null) {
+      throw error;
+    }
+    return _api.limit;
+  }
+}
+
+class _SpendingLimitApi implements BillingApi {
+  _SpendingLimitApi({
+    required this.limit,
+    this.loadError,
+    this.isPending = false,
+  });
+
+  SpendingLimit limit;
+  final Object? loadError;
+  final bool isPending;
+  final List<int> savedCents = [];
+
+  @override
+  Future<SpendingLimit> fetchSpendingLimit(String familyId) async {
+    if (isPending) {
+      return Completer<SpendingLimit>().future;
+    }
+    final error = loadError;
+    if (error != null) {
+      throw error;
+    }
+    return limit;
+  }
+
+  @override
+  Future<SpendingLimit> updateSpendingLimit(
+    String familyId, {
+    required int monthlyLimitCents,
+  }) async {
+    savedCents.add(monthlyLimitCents);
+    limit = SpendingLimit(
+      monthlyLimit: Money.fromNonNegativeCents(monthlyLimitCents),
+      monthSpent: limit.monthSpent,
+    );
+    return limit;
+  }
+
+  @override
+  Future<List<BillingPlan>> fetchPlans() async => const <BillingPlan>[];
+
+  @override
+  Future<BillingConsent> fetchConsent() async => const BillingConsent.none();
+
+  @override
+  Future<BillingConsent> grantConsent() async => const BillingConsent.none();
+
+  @override
+  Future<BillingConsent> revokeConsent() async => const BillingConsent.none();
+
+  @override
+  Future<BillingOrder> createOrder({
+    required String planCode,
+    required String idempotencyKey,
+  }) async => _order(status: 'pending');
+
+  @override
+  Future<BillingPaymentResult> payOrder({
+    required String orderNo,
+    required String channel,
+  }) async => const BillingPaymentResult(order: null);
+
+  @override
+  Future<BillingOrderPage> fetchOrders({
+    required int page,
+    required int pageSize,
+  }) async => const BillingOrderPage(orders: <BillingOrder>[], total: 0);
+
+  @override
+  Future<BillingOrder> fetchOrder(String orderNo) async =>
+      _order(status: 'pending');
+
+  @override
+  Future<BillingOrder> cancelOrder(String orderNo) async =>
+      _order(status: 'cancelled');
+
+  @override
+  Future<BillingOrder> requestRefund({
+    required String orderNo,
+    required String reason,
+  }) async => _order(status: 'paid');
 }
 
 BillingPlan _plan({int originalPriceCents = 1990}) {
@@ -463,9 +804,10 @@ class _FixedOrdersController extends BillingOrdersController {
 
 /// 记录下单、支付与退款调用的假数据源。
 class _RecordingBillingApi implements BillingApi {
-  _RecordingBillingApi({this.payError});
+  _RecordingBillingApi({this.payError, this.createOrderError});
 
   final Object? payError;
+  final Object? createOrderError;
   final List<String> createdOrders = [];
   final List<String> refundReasons = [];
   int payAttempts = 0;
@@ -477,6 +819,10 @@ class _RecordingBillingApi implements BillingApi {
     required String idempotencyKey,
   }) async {
     createdOrders.add(planCode);
+    final error = createOrderError;
+    if (error != null) {
+      throw error;
+    }
     return _order(status: 'pending');
   }
 
@@ -534,4 +880,20 @@ class _RecordingBillingApi implements BillingApi {
   @override
   Future<BillingConsent> revokeConsent() async =>
       const BillingConsent(isGranted: false);
+
+  @override
+  Future<SpendingLimit> fetchSpendingLimit(String familyId) async =>
+      const SpendingLimit(
+        monthlyLimit: Money.zero,
+        monthSpent: Money.zero,
+      );
+
+  @override
+  Future<SpendingLimit> updateSpendingLimit(
+    String familyId, {
+    required int monthlyLimitCents,
+  }) async => SpendingLimit(
+    monthlyLimit: Money.fromNonNegativeCents(monthlyLimitCents),
+    monthSpent: Money.zero,
+  );
 }

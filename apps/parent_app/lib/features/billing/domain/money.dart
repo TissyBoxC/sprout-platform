@@ -16,6 +16,8 @@ class Money implements Comparable<Money> {
   }
 
   /// 解析必须为非负的整数分，用于价格、优惠等不允许为负的字段。
+  ///
+  /// 不能用 const 构造：负数在编译期无法拦住，会绕过这里的安全检查。
   factory Money.fromNonNegativeCents(Object? value) {
     final money = Money.fromCents(value);
     if (money._cents < 0) {

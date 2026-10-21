@@ -297,6 +297,29 @@ func billingReconciliationProbe(
 	)
 }
 
+// familySpendingLimitProbe verifies that the cap and rejection tables are
+// readable. It is a real read, not a configuration inspection: if the migration
+// is missing, the guardian cannot set a cap and the checkout guard silently
+// fails, so the console must show the feature as unavailable rather than
+// healthy.
+func familySpendingLimitProbe(
+	service interface {
+		Readiness(ctx context.Context) error
+	},
+) featureCenterService.HealthProbe {
+	return featureCenterService.HealthProbeFunc(
+		func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+			if service == nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			if err := service.Readiness(ctx); err != nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			return featureCenterDomain.HealthHealthy, nil
+		},
+	)
+}
+
 // notificationReadinessProbe validates the durable notification store without
 // treating optional external senders as a prerequisite. In-app notifications
 // are built in; failed delivery rows are the actionable degradation signal.

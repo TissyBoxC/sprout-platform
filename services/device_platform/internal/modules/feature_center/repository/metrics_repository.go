@@ -41,6 +41,15 @@ const voiceConversationMetricQuery = `SELECT COALESCE(SUM(conversation_count), 0
 	FROM platform_usage_daily
 	WHERE usage_day >= CURRENT_DATE - INTERVAL '6 days'`
 
+// familySpendingLimitMetricQuery counts the families that actually hold a
+// monthly cap and the checkouts refused for exceeding one this month. Both
+// tables are owned by the billing module; the feature center only reads them so
+// the console figure is the same one enforcement uses.
+const familySpendingLimitMetricQuery = `SELECT
+	(SELECT COUNT(*) FROM family_spending_limits WHERE monthly_limit_cents > 0),
+	(SELECT COUNT(*) FROM family_spending_limit_rejections
+	 WHERE created_at >= date_trunc('month', NOW()))`
+
 // ChannelRegistryProbe reports which payment channels are registered. The
 // billing metrics use it so a channel count is process state rather than a
 // constant, and Feature Center never claims a provider is configured while the
@@ -457,6 +466,12 @@ func (r *MetricsRepository) FeatureMetrics(
 			"reconciliation_run_count",
 			"reconciliation_difference_cny_cents",
 			"unresolved_discrepancy_count",
+		)
+	case "family_spending_limit":
+		return r.pair(ctx,
+			familySpendingLimitMetricQuery,
+			"spending_limit_family_count",
+			"spending_limit_rejection_count",
 		)
 	default:
 		return nil, nil

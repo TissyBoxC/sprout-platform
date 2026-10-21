@@ -251,6 +251,100 @@ void main() {
       );
     });
   });
+
+  group('SpendingLimit', () {
+    test('reads the family limit with integer cents', () async {
+      final client = _FakeApiClient(
+        getResponses: {
+          '/api/v1/families/fam_001/spending-limit': _spendingLimitResponse(),
+        },
+      );
+      final api = BillingApi(client);
+
+      final limit = await api.fetchSpendingLimit('fam_001');
+
+      expect(limit.monthlyLimit.format(), '¥200.00');
+      expect(limit.monthSpent.format(), '¥49.90');
+      expect(limit.remaining.format(), '¥150.10');
+      expect(limit.isReached, isFalse);
+      expect(limit.updatedAt, isNotNull);
+    });
+
+    test('treats a zero limit as unlimited', () async {
+      final client = _FakeApiClient(
+        getResponses: {
+          '/api/v1/families/fam_001/spending-limit': _spendingLimitResponse(
+            monthlyLimitCents: 0,
+          ),
+        },
+      );
+      final api = BillingApi(client);
+
+      final limit = await api.fetchSpendingLimit('fam_001');
+
+      expect(limit.isUnlimited, isTrue);
+      expect(limit.usedRatio, 0);
+    });
+
+    test('sends integer cents when saving the limit', () async {
+      final client = _FakeApiClient(
+        putResponses: {
+          '/api/v1/families/fam_001/spending-limit': _spendingLimitResponse(
+            monthlyLimitCents: 19990,
+          ),
+        },
+      );
+      final api = BillingApi(client);
+
+      final saved = await api.updateSpendingLimit(
+        'fam_001',
+        monthlyLimitCents: 19990,
+      );
+
+      expect(client.putBodies.single, {'monthly_limit_cents': 19990});
+      expect(saved.monthlyLimit.format(), '¥199.90');
+    });
+
+    test('maps spending_limit_exceeded to the business state', () async {
+      final client = _FakeApiClient(
+        postErrors: {
+          '/api/v1/billing/orders': _conflict('spending_limit_exceeded'),
+        },
+      );
+      final api = BillingApi(client);
+
+      await expectLater(
+        api.createOrder(planCode: 'starter_monthly', idempotencyKey: 'key-1'),
+        throwsA(isA<SpendingLimitExceededException>()),
+      );
+      expect(
+        billingActionErrorMessage(const SpendingLimitExceededException()),
+        '本月消费已达上限，请先调整限额或次月再试',
+      );
+    });
+
+    test('rejects a fractional cent limit', () {
+      expect(
+        () => SpendingLimit.fromJson({
+          ..._spendingLimitJson(),
+          'monthly_limit_cents': 200.0,
+        }),
+        throwsA(isA<MoneyFormatException>()),
+      );
+    });
+  });
+}
+
+Map<String, Object?> _spendingLimitJson({int monthlyLimitCents = 20000}) {
+  return <String, Object?>{
+    'monthly_limit_cents': monthlyLimitCents,
+    'current_month_spent_cents': 4990,
+    'updated_at': '2026-10-20T10:00:00Z',
+  };
+}
+
+Map<String, Object?> _spendingLimitResponse({int monthlyLimitCents = 20000}) {
+  return {'data': _spendingLimitJson(monthlyLimitCents: monthlyLimitCents)};
 }
 
 /// 构造与生产链路一致的 409：通用映射先折叠成 conflict，原始失败里带着业务码。
@@ -326,13 +420,17 @@ class _FakeApiClient implements ApiClient {
     Map<String, Object?>? getResponses,
     Map<String, Object?>? postResponses,
     Map<String, Object?>? postErrors,
+    Map<String, Object?>? putResponses,
   }) : getResponses = getResponses ?? <String, Object?>{},
        postResponses = postResponses ?? <String, Object?>{},
-       postErrors = postErrors ?? <String, Object?>{};
+       postErrors = postErrors ?? <String, Object?>{},
+       putResponses = putResponses ?? <String, Object?>{};
 
   final Map<String, Object?> getResponses;
   final Map<String, Object?> postResponses;
   final Map<String, Object?> postErrors;
+  final Map<String, Object?> putResponses;
+  final List<Object?> putBodies = <Object?>[];
 
   @override
   Future<Map<String, Object?>> get(
@@ -364,6 +462,14 @@ class _FakeApiClient implements ApiClient {
 
   @override
   Future<Map<String, Object?>> put(String path, {Object? body}) async {
+    putBodies.add(body);
+    final response = putResponses[path];
+    if (response is AppException) {
+      throw response;
+    }
+    if (response is Map) {
+      return Map<String, Object?>.from(response);
+    }
     throw StateError('unexpected put $path');
   }
 

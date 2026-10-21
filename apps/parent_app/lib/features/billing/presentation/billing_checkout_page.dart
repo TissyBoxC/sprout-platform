@@ -30,6 +30,7 @@ class _BillingCheckoutPageState extends ConsumerState<BillingCheckoutPage> {
   bool _isCreatingOrder = false;
   bool _isPaying = false;
   bool _hasPaymentOpen = true;
+  bool _hasSpendingLimitExceeded = false;
   String? _actionError;
 
   BillingPlan get _plan => widget.plan;
@@ -71,9 +72,11 @@ class _BillingCheckoutPageState extends ConsumerState<BillingCheckoutPage> {
               isCreatingOrder: _isCreatingOrder,
               isPaying: _isPaying,
               hasPaymentOpen: _hasPaymentOpen,
+              hasSpendingLimitExceeded: _hasSpendingLimitExceeded,
               actionError: _actionError,
               onConfirmPay: _confirmAndPay,
               onBackToOrders: () => context.push('/me/billing/orders'),
+              onManageSpendingLimit: _openSpendingLimit,
             );
           },
         ),
@@ -123,6 +126,7 @@ class _BillingCheckoutPageState extends ConsumerState<BillingCheckoutPage> {
     setState(() {
       _isPaying = true;
       _actionError = null;
+      _hasSpendingLimitExceeded = false;
     });
     try {
       final order = _order ?? await _createOrder();
@@ -145,6 +149,10 @@ class _BillingCheckoutPageState extends ConsumerState<BillingCheckoutPage> {
       });
       _showMessage('支付请求已提交，订单会显示最新状态');
       context.push('/me/billing/orders');
+    } on SpendingLimitExceededException {
+      if (mounted) {
+        setState(() => _hasSpendingLimitExceeded = true);
+      }
     } on PaymentNotOpenException {
       if (!mounted) {
         return;
@@ -170,6 +178,7 @@ class _BillingCheckoutPageState extends ConsumerState<BillingCheckoutPage> {
       setState(() {
         _isCreatingOrder = true;
         _actionError = null;
+        _hasSpendingLimitExceeded = false;
       });
     }
     try {
@@ -193,6 +202,12 @@ class _BillingCheckoutPageState extends ConsumerState<BillingCheckoutPage> {
         setState(() => _actionError = '购买前需要监护人同意消费条款');
       }
       return null;
+    } on SpendingLimitExceededException {
+      if (mounted) {
+        // 达到限额不是故障：给出调整限额的入口，而不是让家长反复点击支付。
+        setState(() => _hasSpendingLimitExceeded = true);
+      }
+      return null;
     } on Object catch (error) {
       if (mounted) {
         setState(() => _actionError = billingActionErrorMessage(error));
@@ -209,6 +224,14 @@ class _BillingCheckoutPageState extends ConsumerState<BillingCheckoutPage> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// 达到限额后回到结算页时，需要家长重新确认这次支付，所以先撤掉提示。
+  Future<void> _openSpendingLimit() async {
+    await context.push('/me/billing/spending-limit');
+    if (mounted) {
+      setState(() => _hasSpendingLimitExceeded = false);
+    }
   }
 
   void _leave(BuildContext context) {
@@ -383,9 +406,11 @@ class _OrderStep extends StatelessWidget {
     required this.isCreatingOrder,
     required this.isPaying,
     required this.hasPaymentOpen,
+    required this.hasSpendingLimitExceeded,
     required this.actionError,
     required this.onConfirmPay,
     required this.onBackToOrders,
+    required this.onManageSpendingLimit,
     super.key,
   });
 
@@ -394,9 +419,11 @@ class _OrderStep extends StatelessWidget {
   final bool isCreatingOrder;
   final bool isPaying;
   final bool hasPaymentOpen;
+  final bool hasSpendingLimitExceeded;
   final String? actionError;
   final Future<void> Function() onConfirmPay;
   final VoidCallback onBackToOrders;
+  final VoidCallback onManageSpendingLimit;
 
   @override
   Widget build(BuildContext context) {
@@ -470,6 +497,12 @@ class _OrderStep extends StatelessWidget {
           ),
           const SizedBox(height: 14),
         ],
+        if (hasSpendingLimitExceeded) ...[
+          AppReveal(
+            child: _SpendingLimitNotice(onManageSpendingLimit: onManageSpendingLimit),
+          ),
+          const SizedBox(height: 14),
+        ],
         if (actionError != null) ...[
           BillingInlineNotice(message: actionError!, isWarning: true),
           const SizedBox(height: 14),
@@ -497,6 +530,58 @@ class _OrderStep extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+/// 本月消费达到上限时的说明与出口。
+///
+/// 限额是家长自己设的保护，所以文案不把它当成故障，而是给出两条明确去路：
+/// 调整限额，或者等次月额度重置。
+class _SpendingLimitNotice extends StatelessWidget {
+  const _SpendingLimitNotice({required this.onManageSpendingLimit});
+
+  final VoidCallback onManageSpendingLimit;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.primaryContainer.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: colorScheme.primary.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.savings_outlined, size: 20, color: colorScheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  spendingLimitExceededMessage,
+                  key: const ValueKey<String>('checkout-spending-limit'),
+                  style: theme.textTheme.titleSmall,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text('限额达到后，新的套餐暂时不能下单。已经付过款的订单和已开通的服务不受影响。'),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            key: const ValueKey<String>('checkout-open-spending-limit'),
+            onPressed: onManageSpendingLimit,
+            icon: const Icon(Icons.edit_outlined),
+            label: const Text('调整消费限额'),
+          ),
+        ],
+      ),
     );
   }
 }

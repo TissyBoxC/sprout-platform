@@ -10854,6 +10854,8 @@ paths:
       summary: 创建订单
       description: |
         家长下单。必须先有有效的消费同意记录，否则拒绝；
+        家庭设置了月度消费限额时，本次应支付金额加上本月已支付金额超过限额会返回
+        409，错误码 `spending_limit_exceeded`，提示「本月消费已达上限，请先调整限额或次月再试」。
         同一 idempotency_key 重复提交返回已存在的订单，不会产生第二笔。
       security:
         - userToken: []
@@ -10880,6 +10882,14 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: 缺少监护人消费同意
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: |
+            订单无法创建。已设置家庭月度消费限额且超限时错误码为 `spending_limit_exceeded`，
+            提示「本月消费已达上限，请先调整限额或次月再试」；套餐停售时为 `plan_not_available`。
           content:
             application/json:
               schema:
@@ -11539,6 +11549,159 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BillingChannelsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/families/{family_id}/spending-limit:
+    get:
+      summary: 读取家庭月度消费限额
+      description: |
+        返回本家庭的月度消费上限、本月已消费金额与剩余金额。金额均为整数人民币分。
+        尚未设置过限额的家庭返回 0，表示不限额度。月份由服务端按 UTC 计算。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+      responses:
+        "200":
+          description: 当前限额与本月已消费金额
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilySpendingLimitEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 家庭不存在或不是当前账号所属家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: 设置家庭月度消费限额
+      description: |
+        只有家庭所有者可以修改限额。0 表示不限额度；超过 100000 元或负数会被拒绝。
+        修改会写入审计，旧限额与金额一并记录。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FamilySpendingLimitUpdateRequest"
+      responses:
+        "200":
+          description: 保存后的限额与本月已消费金额
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilySpendingLimitEnvelope"
+        "400":
+          description: 请求体缺少 monthly_limit_cents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 家庭不存在或不是当前账号所属家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: 限额为负数或超过允许上限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/admin/families/{family_id}/spending-limit:
+    get:
+      summary: 运营端读取指定家庭的月度消费限额
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+      responses:
+        "200":
+          description: 该家庭的限额与本月已消费金额
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilySpendingLimitEnvelope"
+        "400":
+          description: 缺少家庭标识
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
+  /api/v1/admin/families/{family_id}/spending-limit/rejections:
+    get:
+      summary: 运营端查询超限拒绝记录
+      description: |
+        返回指定家庭在给定月份（默认当月）因超过月度消费限额被拒绝的下单记录，
+        按时间倒序。金额均为整数人民币分。
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - name: period
+          in: query
+          required: false
+          description: 月份，格式 YYYY-MM；省略表示当月。
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: 该月份的拒绝记录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilySpendingLimitRejectionsEnvelope"
+        "400":
+          description: 家庭标识或月份格式无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -12734,6 +12897,112 @@ components:
                   type: array
                   items:
                     $ref: "#/components/schemas/BillingChannelStatus"
+    FamilySpendingLimit:
+      type: object
+      additionalProperties: false
+      required:
+        - family_id
+        - monthly_limit_cents
+        - consumed_cents
+        - remaining_cents
+        - is_unlimited
+        - period
+      properties:
+        family_id:
+          type: string
+        monthly_limit_cents:
+          type: integer
+          minimum: 0
+          description: 家庭月度消费上限，整数人民币分；0 表示不限。
+        consumed_cents:
+          type: integer
+          minimum: 0
+          description: 本月已支付订单的应支付金额合计，整数人民币分。
+        remaining_cents:
+          type: integer
+          description: 剩余可用金额，整数人民币分；不限额度时为 -1。
+        is_unlimited:
+          type: boolean
+        period:
+          type: string
+          pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$"
+        updated_by:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+
+    FamilySpendingLimitUpdateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - monthly_limit_cents
+      properties:
+        monthly_limit_cents:
+          type: integer
+          minimum: 0
+          maximum: 10000000
+          description: 整数人民币分，0 表示不限；最大 10000000 分（100000 元）。
+
+    FamilySpendingLimitEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/FamilySpendingLimit"
+
+    FamilySpendingLimitRejection:
+      type: object
+      additionalProperties: false
+      required:
+        - rejection_id
+        - monthly_limit_cents
+        - consumed_cents
+        - requested_cents
+        - plan_code
+        - created_at
+      properties:
+        rejection_id:
+          type: string
+        monthly_limit_cents:
+          type: integer
+          minimum: 0
+        consumed_cents:
+          type: integer
+          minimum: 0
+        requested_cents:
+          type: integer
+          minimum: 0
+        plan_code:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    FamilySpendingLimitRejectionsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required: [family_id, period, rejections, total]
+              properties:
+                family_id:
+                  type: string
+                period:
+                  type: string
+                  pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$"
+                rejections:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/FamilySpendingLimitRejection"
+                total:
+                  type: integer
+                  minimum: 0
+
     ResponseEnvelope:
       type: object
       additionalProperties: false

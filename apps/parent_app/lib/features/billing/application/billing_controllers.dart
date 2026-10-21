@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/error/api_error_mapper.dart';
 import '../../../core/error/app_exception.dart';
 import '../../../core/providers.dart';
+import '../../family/application/family_controller.dart';
 import '../data/billing_api.dart';
 import '../domain/billing_errors.dart';
 
@@ -383,6 +384,73 @@ class StaleBillingResultException implements Exception {
   @override
   String toString() => 'StaleBillingResultException';
 }
+
+/// 家庭每月消费限额的读写状态。
+///
+/// 页面按当前登录家庭读取；家庭信息还没准备好时先等 `familyId` 完成，
+/// 期间不发出限额请求，界面停留在加载态。保存成功后直接用服务端返回的
+/// 余额覆盖本地状态，不再补一次读取，避免进度条闪烁。
+class SpendingLimitController extends AsyncNotifier<SpendingLimit> {
+  late BillingApi _api;
+  int _requestGeneration = 0;
+
+  /// 当前请求生成号，用于丢弃过期的读取结果。
+  int get requestGeneration => _requestGeneration;
+
+  @override
+  Future<SpendingLimit> build() async {
+    _api = ref.read(billingApiProvider);
+    final familyId = await ref.watch(spendingFamilyIdProvider.future);
+    final generation = ++_requestGeneration;
+    final limit = await _api.fetchSpendingLimit(familyId);
+    if (isStaleBillingResult(generation, _requestGeneration)) {
+      throw const StaleBillingResultException();
+    }
+    return limit;
+  }
+
+  /// 重新读取限额。
+  Future<void> refresh() async {
+    final generation = ++_requestGeneration;
+    final next = await AsyncValue.guard(() async {
+      final familyId = await ref.read(spendingFamilyIdProvider.future);
+      return _api.fetchSpendingLimit(familyId);
+    });
+    if (isStaleBillingResult(generation, _requestGeneration)) {
+      return;
+    }
+    state = next;
+  }
+
+  /// 保存每月上限。[monthlyLimitCents] 为零表示不限额。
+  Future<SpendingLimit> saveMonthlyLimit(int monthlyLimitCents) async {
+    final generation = ++_requestGeneration;
+    final familyId = await ref.read(spendingFamilyIdProvider.future);
+    final saved = await _api.updateSpendingLimit(
+      familyId,
+      monthlyLimitCents: monthlyLimitCents,
+    );
+    if (isStaleBillingResult(generation, _requestGeneration)) {
+      return saved;
+    }
+    state = AsyncData(saved);
+    return saved;
+  }
+}
+
+final spendingLimitControllerProvider =
+    AsyncNotifierProvider<SpendingLimitController, SpendingLimit>(
+      SpendingLimitController.new,
+    );
+
+/// 当前家庭的 family id，来自家庭能力摘要。
+///
+/// 限额接口按家庭维度寻址，客户端不自行拼接家庭标识；摘要里没有家庭时
+/// 返回空字符串，页面据此显示空状态而不是发出注定失败的请求。
+final spendingFamilyIdProvider = FutureProvider<String>((ref) async {
+  final family = await ref.watch(familyControllerProvider.future);
+  return family.capability.familyId;
+});
 
 /// 只有真正的业务失败才转成提示，陈旧结果静默丢弃。
 String billingStateErrorMessage(Object? error) {

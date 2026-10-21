@@ -297,6 +297,7 @@ type Service struct {
 	Reconciliation *ReconciliationService
 	Expiry         *ExpiryService
 	QuotaLedger    *QuotaLedgerService
+	SpendingLimits *SpendingLimitService
 }
 
 // New builds every billing service over one set of Options.
@@ -317,6 +318,14 @@ func New(options Options) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create order service: %w", err)
 	}
+	spendingLimits, err := NewSpendingLimitService(options)
+	if err != nil {
+		return nil, fmt.Errorf("create spending limit service: %w", err)
+	}
+	// The checkout path enforces the family cap, so the order service must hold
+	// the same instance the guardian routes write through. Wiring it here keeps
+	// one enforcement object instead of a copy per transport.
+	orders.spendingLimits = spendingLimits
 	quotaLedger, err := NewQuotaLedgerService(options)
 	if err != nil {
 		return nil, fmt.Errorf("create quota ledger service: %w", err)
@@ -347,6 +356,7 @@ func New(options Options) (*Service, error) {
 		Reconciliation: reconciliation,
 		Expiry:         expiry,
 		QuotaLedger:    quotaLedger,
+		SpendingLimits: spendingLimits,
 	}, nil
 }
 
@@ -473,6 +483,35 @@ func (s *Service) RejectRefund(
 	refundNo string,
 ) (*domain.Refund, error) {
 	return s.Refunds.RejectRefund(ctx, operatorAccountID, refundNo)
+}
+
+// GetSpendingLimit returns one family's monthly cap with this month's spend.
+func (s *Service) GetSpendingLimit(
+	ctx context.Context,
+	familyID string,
+) (SpendingLimitView, error) {
+	return s.SpendingLimits.GetLimit(ctx, familyID)
+}
+
+// SetSpendingLimit stores a guardian-set monthly cap for one family.
+func (s *Service) SetSpendingLimit(
+	ctx context.Context,
+	familyID string,
+	actorAccountID string,
+	monthlyLimitCents domain.Cents,
+) (SpendingLimitView, error) {
+	return s.SpendingLimits.SetLimit(ctx, familyID, actorAccountID, monthlyLimitCents)
+}
+
+// ListSpendingLimitRejections returns one family's over-limit refusals for the
+// calendar month containing moment (the current month when zero).
+func (s *Service) ListSpendingLimitRejections(
+	ctx context.Context,
+	familyID string,
+	moment time.Time,
+	page Page,
+) ([]domain.SpendingLimitRejection, int, MonthPeriod, error) {
+	return s.SpendingLimits.ListRejections(ctx, familyID, moment, page)
 }
 
 // GetActiveConsent returns the family's live spending consent, or nil.

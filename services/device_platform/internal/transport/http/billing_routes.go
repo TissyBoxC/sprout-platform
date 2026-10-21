@@ -8,6 +8,28 @@ import (
 	familydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/domain"
 )
 
+// scopedSpendingLimit adapts a handler that needs the caller's resolved family
+// id onto the parent-scoped route shape.
+//
+// The family id comes from the resolved membership, not from the path, so a
+// caller cannot address another family even if the path happens to be editable.
+func (handler billingHandler) scopedSpendingLimit(
+	next func(http.ResponseWriter, *http.Request, string),
+) func(http.ResponseWriter, *http.Request, string) {
+	return func(
+		response http.ResponseWriter,
+		request *http.Request,
+		ownerAccountID string,
+	) {
+		access, ok := authenticatedFamilyAccess(request)
+		if !ok {
+			writeError(response, request, http.StatusUnauthorized, "unauthenticated", "请重新登录")
+			return
+		}
+		next(response, request, access.FamilyID)
+	}
+}
+
 // registerBillingRoutes mounts the billing surfaces.
 //
 // Three groups, each with its own boundary:
@@ -108,6 +130,34 @@ func registerBillingRoutes(
 	mux.HandleFunc(
 		"DELETE /api/v1/billing/consent",
 		requireBillingManage(handler.revokeConsent),
+	)
+
+	// Family spending cap. The cap is guardian-owned money policy, so reading
+	// it needs family read and changing it needs the same owner-only action as
+	// checkout: an invited guardian cannot silently raise the limit the owner
+	// set for their children.
+	spendingLimits := spendingLimitHandler{service: options.Billing.Service}
+	mux.HandleFunc(
+		"GET /api/v1/families/{family_id}/spending-limit",
+		requireBillingRead(handler.scopedSpendingLimit(spendingLimits.getLimit)),
+	)
+	mux.HandleFunc(
+		"PUT /api/v1/families/{family_id}/spending-limit",
+		requireBillingManage(handler.scopedSpendingLimit(spendingLimits.setLimit)),
+	)
+	mux.HandleFunc(
+		"GET /api/v1/admin/families/{family_id}/spending-limit",
+		authHandler.requireAdminPermission(
+			authdomain.AdminPermissionBillingRead,
+			spendingLimits.adminGetLimit,
+		),
+	)
+	mux.HandleFunc(
+		"GET /api/v1/admin/families/{family_id}/spending-limit/rejections",
+		authHandler.requireAdminPermission(
+			authdomain.AdminPermissionBillingRead,
+			spendingLimits.adminListRejections,
+		),
 	)
 
 	// Operator console. Reads need billing.read; every mutation needs

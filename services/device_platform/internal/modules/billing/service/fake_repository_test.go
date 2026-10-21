@@ -40,6 +40,8 @@ type fakeRepository struct {
 	ledger              []domain.QuotaLedgerEntry
 	ledgerState         map[string]string
 	settled             []repository.SettledPayment
+	spendingLimits      map[string]*domain.FamilySpendingLimit
+	spendingRejections  []domain.SpendingLimitRejection
 
 	// grantFailures makes the quota path deterministic for the rollback test.
 	grantFailures int
@@ -60,6 +62,7 @@ func newFakeRepository() *fakeRepository {
 		runs:                map[string]*domain.ReconciliationRun{},
 		items:               map[string][]domain.ReconciliationItem{},
 		ledgerState:         map[string]string{},
+		spendingLimits:      map[string]*domain.FamilySpendingLimit{},
 	}
 }
 
@@ -1340,4 +1343,133 @@ func (f *fakeRepository) LatestObservedProviderBalance(
 	parentAccountID string,
 ) (string, bool, error) {
 	return "", false, nil
+}
+
+// GetSpendingLimit returns the stored monthly cap, mirroring the Postgres
+// repository's "no row means not found" contract.
+func (f *fakeRepository) GetSpendingLimit(
+	ctx context.Context,
+	familyID string,
+) (*domain.FamilySpendingLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	limit, ok := f.spendingLimits[familyID]
+	if !ok {
+		return nil, repository.ErrSpendingLimitNotFound
+	}
+	copied := *limit
+	return &copied, nil
+}
+
+// UpsertSpendingLimit stores the cap, keeping the first created_at exactly as
+// the ON CONFLICT clause does.
+func (f *fakeRepository) UpsertSpendingLimit(
+	ctx context.Context,
+	limit domain.FamilySpendingLimit,
+) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if existing, ok := f.spendingLimits[limit.FamilyID]; ok {
+		limit.CreatedAt = existing.CreatedAt
+	}
+	copied := limit
+	f.spendingLimits[limit.FamilyID] = &copied
+	return nil
+}
+
+// SumMonthlyPaidCents sums the payable amount of the family's paid orders in
+// the half-open window.
+func (f *fakeRepository) SumMonthlyPaidCents(
+	ctx context.Context,
+	familyID string,
+	from time.Time,
+	to time.Time,
+) (domain.Cents, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	total := domain.Cents(0)
+	for _, order := range f.orders {
+		if order.ParentAccountID != familyID || order.PaidAt == nil {
+			continue
+		}
+		paidAt := *order.PaidAt
+		if paidAt.Before(from) || !paidAt.Before(to) {
+			continue
+		}
+		switch order.Status {
+		case domain.OrderStatusPaid,
+			domain.OrderStatusPartiallyRefunded,
+			domain.OrderStatusRefunded:
+			total += order.PayableCents
+		}
+	}
+	return total, nil
+}
+
+// AppendSpendingLimitRejection records one refused checkout.
+func (f *fakeRepository) AppendSpendingLimitRejection(
+	ctx context.Context,
+	rejection domain.SpendingLimitRejection,
+) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.spendingRejections = append(f.spendingRejections, rejection)
+	return nil
+}
+
+// ListSpendingLimitRejections returns the family's refusals in the window,
+// newest first.
+func (f *fakeRepository) ListSpendingLimitRejections(
+	ctx context.Context,
+	familyID string,
+	from time.Time,
+	to time.Time,
+	limit int,
+	offset int,
+) ([]domain.SpendingLimitRejection, int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	matching := make([]domain.SpendingLimitRejection, 0)
+	for _, rejection := range f.spendingRejections {
+		if rejection.FamilyID != familyID {
+			continue
+		}
+		if rejection.CreatedAt.Before(from) || !rejection.CreatedAt.Before(to) {
+			continue
+		}
+		matching = append(matching, rejection)
+	}
+	sort.Slice(matching, func(left int, right int) bool {
+		return matching[left].CreatedAt.After(matching[right].CreatedAt)
+	})
+	total := len(matching)
+	if offset >= total {
+		return []domain.SpendingLimitRejection{}, total, nil
+	}
+	end := offset + limit
+	if end > total || limit <= 0 {
+		end = total
+	}
+	return matching[offset:end], total, nil
+}
+
+// SpendingLimitMetrics reports the configured family count and the current
+// month's rejection count, matching the repository query.
+func (f *fakeRepository) SpendingLimitMetrics(
+	ctx context.Context,
+) (repository.SpendingLimitMetrics, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	metrics := repository.SpendingLimitMetrics{}
+	for _, limit := range f.spendingLimits {
+		if limit.MonthlyLimitCents > 0 {
+			metrics.ConfiguredFamilyCount++
+		}
+	}
+	return metrics, nil
+}
+
+// SpendingLimitReadiness reports the fake store as readable.
+func (f *fakeRepository) SpendingLimitReadiness(ctx context.Context) error {
+	return nil
 }

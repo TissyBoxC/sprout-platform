@@ -48,6 +48,8 @@ type testHarness struct {
 	quota      *QuotaLedgerService
 	expiry     *ExpiryService
 	reconcile  *ReconciliationService
+	// spendingLimits enforces the guardian's family monthly cap on checkout.
+	spendingLimits *SpendingLimitService
 }
 
 // quotaRecorder captures the provider-side quota calls, so a test can prove the
@@ -127,6 +129,12 @@ func newHarness(t *testing.T, quota AIQuotaGrafter, channels ...channel.Channel)
 	if harness.reconcile, err = NewReconciliationService(options); err != nil {
 		t.Fatalf("build reconciliation service: %v", err)
 	}
+	// The order service must enforce the same cap object the tests configure,
+	// mirroring the facade's single-instance wiring.
+	if harness.spendingLimits, err = NewSpendingLimitService(options); err != nil {
+		t.Fatalf("build spending limit service: %v", err)
+	}
+	harness.orders.spendingLimits = harness.spendingLimits
 	return harness
 }
 

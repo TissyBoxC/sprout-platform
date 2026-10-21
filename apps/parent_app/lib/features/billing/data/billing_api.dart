@@ -8,8 +8,9 @@ import '../domain/billing_errors.dart';
 /// 计费域的 HTTP 数据源。
 ///
 /// 所有金额字段都以整数分解析，不经过浮点；金额或结构不符合约定时抛出
-/// [FormatException]，由控制器转成普通提示。支付未开放、缺少消费同意这类
-/// 业务结果用 [PaymentNotOpenException] 与 [SpendingConsentRequiredException]
+/// [FormatException]，由控制器转成普通提示。支付未开放、缺少消费同意、
+/// 本月消费已达上限这类业务结果分别用 [PaymentNotOpenException]、
+/// [SpendingConsentRequiredException] 与 [SpendingLimitExceededException]
 /// 表达，不向界面泄露状态码或后端原文。
 class BillingApi {
   const BillingApi(this._apiClient);
@@ -144,6 +145,38 @@ class BillingApi {
     return _readConsent(response, revoked: true);
   }
 
+  /// 读取家庭每月的消费上限与本月已花金额。
+  Future<SpendingLimit> fetchSpendingLimit(String familyId) async {
+    final response = await _guard(
+      () => _apiClient.get(_spendingLimitPath(familyId)),
+    );
+    return _readSpendingLimit(response);
+  }
+
+  /// 保存每月消费上限；[monthlyLimitCents] 为零表示不限额。
+  ///
+  /// 保存后的余额与已花金额以服务端返回为准，本地不自行推算。
+  Future<SpendingLimit> updateSpendingLimit(
+    String familyId, {
+    required int monthlyLimitCents,
+  }) async {
+    final response = await _guard(
+      () => _apiClient.put(
+        _spendingLimitPath(familyId),
+        body: {'monthly_limit_cents': monthlyLimitCents},
+      ),
+    );
+    return _readSpendingLimit(response);
+  }
+
+  String _spendingLimitPath(String familyId) =>
+      '/api/v1/families/${Uri.encodeComponent(familyId)}/spending-limit';
+
+  SpendingLimit _readSpendingLimit(Map<String, Object?> response) {
+    final data = _requiredMap(response['data'], 'data');
+    return SpendingLimit.fromJson(data);
+  }
+
   String _orderPath(String orderNo) =>
       '/api/v1/billing/orders/${Uri.encodeComponent(orderNo)}';
 
@@ -198,6 +231,10 @@ class BillingApi {
           spendingConsentRequiredErrorCodes.contains(errorCode)) {
         throw const SpendingConsentRequiredException();
       }
+      if (errorCode != null &&
+          spendingLimitExceededErrorCodes.contains(errorCode)) {
+        throw const SpendingLimitExceededException();
+      }
       rethrow;
     }
   }
@@ -227,6 +264,9 @@ const spendingConsentRequiredErrorCodes = <String>{
   'spending_consent_required',
   'billing_consent_required',
 };
+
+/// 后端表示「本月消费已达上限」的业务错误码。
+const spendingLimitExceededErrorCodes = <String>{'spending_limit_exceeded'};
 
 /// 一页订单。
 class BillingOrderPage {

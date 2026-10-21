@@ -296,6 +296,12 @@ func DefaultRegistry() []Definition {
 				"reconciliation_difference_cny_cents", "最近对账差额", "分",
 				"unresolved_discrepancy_count", "未处理差异", "笔",
 			)),
+		readOnlyFeatureDef("family_spending_limit", "家庭消费限额", "监护人设置的家庭月度消费上限与超限拒绝。", "commerce", "商业化平台",
+			"月度上限由监护人在家长端按家庭设置，功能中心只提供限额写入状态和统计。",
+			metrics(
+				"spending_limit_family_count", "已设置限额家庭", "个",
+				"spending_limit_rejection_count", "本月超限拒绝", "次",
+			)),
 	}
 }
 

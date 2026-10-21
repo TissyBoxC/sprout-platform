@@ -18,6 +18,10 @@ import (
 // cross-family read returns domain.ErrCrossFamilyAccess rather than 404.
 type OrderService struct {
 	base
+	// spendingLimits enforces the family monthly cap. A nil value means the
+	// service was built without one and no cap is applied, which only happens
+	// in isolated tests.
+	spendingLimits *SpendingLimitService
 }
 
 // NewOrderService creates the order service.
@@ -53,9 +57,10 @@ type CreateOrderResult struct {
 // CreateOrder creates one pending order for an active plan.
 //
 // Order of checks matters: the spending consent comes first because a guardian
-// who has not agreed may not spend, and the idempotency key is honoured before
-// any plan lookup so a retry returns the original order even if the plan has
-// since been archived or repriced.
+// who has not agreed may not spend, the family monthly cap is checked next so a
+// guardian holding their own limit is answered before any plan detail is read,
+// and the idempotency key is honoured before any plan lookup so a retry returns
+// the original order even if the plan has since been archived or repriced.
 func (s *OrderService) CreateOrder(
 	ctx context.Context,
 	request CreateOrderRequest,
@@ -77,6 +82,11 @@ func (s *OrderService) CreateOrder(
 		return CreateOrderResult{}, domain.ErrSpendingConsentRequired
 	}
 
+	plan, err := s.repository.GetPlanByCode(ctx, strings.TrimSpace(request.PlanCode))
+	if err != nil {
+		return CreateOrderResult{}, err
+	}
+
 	existing, err := s.repository.GetOrderByIdentityOrIdempotency(ctx, parentAccountID, idempotencyKey)
 	if err == nil {
 		return CreateOrderResult{Order: *existing, Reused: true}, nil
@@ -85,10 +95,6 @@ func (s *OrderService) CreateOrder(
 		return CreateOrderResult{}, err
 	}
 
-	plan, err := s.repository.GetPlanByCode(ctx, strings.TrimSpace(request.PlanCode))
-	if err != nil {
-		return CreateOrderResult{}, err
-	}
 	if plan.Status != domain.PlanStatusActive {
 		return CreateOrderResult{}, fmt.Errorf("%w: plan %q is %s",
 			domain.ErrPlanNotActive, plan.Code, plan.Status)
@@ -105,6 +111,19 @@ func (s *OrderService) CreateOrder(
 		// path, and settling it through a callback would be fabricated success.
 		return CreateOrderResult{}, fmt.Errorf(
 			"%w: payable amount %s is not positive", domain.ErrInvalidOrderAmounts, payable.Format())
+	}
+	// The cap is checked against the amount the guardian would actually pay,
+	// and only after a retry found no order to reuse: re-checking a retried
+	// checkout would refuse the very order the guardian already created.
+	if s.spendingLimits != nil {
+		if err := s.spendingLimits.CheckOrderSpending(
+			ctx,
+			parentAccountID,
+			payable,
+			plan.Code,
+		); err != nil {
+			return CreateOrderResult{}, err
+		}
 	}
 
 	now := s.now()

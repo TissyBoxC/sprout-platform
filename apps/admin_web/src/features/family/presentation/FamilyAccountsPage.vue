@@ -23,6 +23,7 @@ import {
   useFamilyAccountStore,
   type AdminFamily,
   type AdminFamilyAiAccount,
+  type AdminFamilySpendingLimit,
   type CreateAdminFamilyInput,
   type FamilyMutationResult,
   type UpdateAdminFamilyAiAccountInput,
@@ -93,6 +94,21 @@ const aiUsageError = computed(() =>
   selectedFamily.value === null
     ? null
     : store.aiUsageErrorFor(selectedFamily.value.parentAccountId),
+)
+const spendingLimit = computed(() =>
+  selectedFamily.value === null
+    ? null
+    : store.spendingLimitFor(selectedFamily.value.parentAccountId),
+)
+const isSpendingLimitLoading = computed(
+  () =>
+    selectedFamily.value !== null &&
+    store.isSpendingLimitLoading(selectedFamily.value.parentAccountId),
+)
+const spendingLimitError = computed(() =>
+  selectedFamily.value === null
+    ? null
+    : store.spendingLimitErrorFor(selectedFamily.value.parentAccountId),
 )
 const membershipReadiness = computed(() => (membershipStore.isReadOnly ? '只读' : '可管理'))
 const canManageFamily = computed(() =>
@@ -192,6 +208,7 @@ async function openFamily(family: AdminFamily): Promise<void> {
     family.aiAccount === null
       ? Promise.resolve(null)
       : store.loadFamilyAIUsage(family.parentAccountId),
+    store.loadFamilySpendingLimit(family.parentAccountId),
     membershipStore.load(family.parentAccountId),
   ])
 }
@@ -360,6 +377,13 @@ async function reloadMembership(): Promise<void> {
   }
   await membershipStore.load(selectedFamily.value.parentAccountId)
   resetMembershipDrafts()
+}
+
+async function reloadSpendingLimit(): Promise<void> {
+  if (selectedFamily.value === null) {
+    return
+  }
+  await store.loadFamilySpendingLimit(selectedFamily.value.parentAccountId)
 }
 
 async function saveProfile(): Promise<void> {
@@ -656,6 +680,23 @@ function formatQuota(value: number): string {
     return '0.0000'
   }
   return value.toFixed(4)
+}
+
+/// The billing module stores every amount as an integer number of cents, so the
+/// console must divide once here rather than letting a raw cents figure reach
+/// the screen as if it were yuan.
+function formatCents(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '¥0.00'
+  }
+  return `¥${(value / 100).toFixed(2)}`
+}
+
+function formatSpendingLimit(limit: AdminFamilySpendingLimit): string {
+  if (limit.monthlyLimitCents === 0) {
+    return '未设置'
+  }
+  return formatCents(limit.monthlyLimitCents)
 }
 
 function formatDurationMs(value: number): string {
@@ -1354,6 +1395,57 @@ function emptySectionFeedback(): {
                   </li>
                 </ul>
                 <p v-else class="field-hint">这段时间没有按模型的调用记录。</p>
+              </template>
+            </section>
+
+            <section class="detail-card">
+              <div class="section-heading">
+                <div>
+                  <h3>消费限额</h3>
+                  <p>监护人设置的每月消费上限，用于控制家庭购买套餐的支出。</p>
+                </div>
+                <button
+                  type="button"
+                  class="text-button"
+                  :disabled="isSpendingLimitLoading"
+                  @click="reloadSpendingLimit"
+                >
+                  {{ isSpendingLimitLoading ? '正在更新…' : '更新限额' }}
+                </button>
+              </div>
+              <div v-if="isSpendingLimitLoading" class="inline-state">正在加载…</div>
+              <div v-else-if="spendingLimitError" class="inline-state error">
+                {{ spendingLimitError.message }}
+              </div>
+              <div v-else-if="!spendingLimit" class="empty-section">
+                还没有读取到消费限额。点击“更新限额”重新获取。
+              </div>
+              <template v-else>
+                <dl class="detail-grid">
+                  <div>
+                    <dt>每月上限</dt>
+                    <dd>{{ formatSpendingLimit(spendingLimit) }}</dd>
+                  </div>
+                  <div>
+                    <dt>本月已消费</dt>
+                    <dd>{{ formatCents(spendingLimit.currentMonthSpentCents) }}</dd>
+                  </div>
+                  <div>
+                    <dt>最近更新</dt>
+                    <dd>{{ formatTime(spendingLimit.updatedAt) }}</dd>
+                  </div>
+                </dl>
+                <p v-if="spendingLimit.monthlyLimitCents === 0" class="field-hint">
+                  监护人尚未设置每月上限，家庭可以持续购买套餐。
+                </p>
+                <p
+                  v-else-if="
+                    spendingLimit.currentMonthSpentCents >= spendingLimit.monthlyLimitCents
+                  "
+                  class="field-hint"
+                >
+                  本月消费已达到上限，新的下单会被拒绝，直到监护人调高上限或进入次月。
+                </p>
               </template>
             </section>
 

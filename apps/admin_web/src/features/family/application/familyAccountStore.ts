@@ -112,6 +112,12 @@ export interface AdminFamilyAiUsage {
   models: AdminFamilyAiUsageModel[]
 }
 
+export interface AdminFamilySpendingLimit {
+  monthlyLimitCents: number
+  currentMonthSpentCents: number
+  updatedAt: string
+}
+
 export interface AdminFamilyPagination {
   page: number
   pageSize: number
@@ -137,6 +143,9 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   const aiUsageByFamily = ref<Record<string, AdminFamilyAiUsage>>({})
   const aiUsageErrorsByFamily = ref<Record<string, ApiError | null>>({})
   const aiUsageLoadingCounts = ref<Record<string, number>>({})
+  const spendingLimitByFamily = ref<Record<string, AdminFamilySpendingLimit>>({})
+  const spendingLimitErrorsByFamily = ref<Record<string, ApiError | null>>({})
+  const spendingLimitLoadingCounts = ref<Record<string, number>>({})
   const isLoading = ref(false)
   const isLoadingModels = ref(false)
   const isSubmitting = ref(false)
@@ -166,6 +175,8 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   const deviceLoadingSequences = new Map<string, number>()
   const aiUsageRequestSequences = new Map<string, number>()
   const aiUsageLoadingSequences = new Map<string, number>()
+  const spendingLimitRequestSequences = new Map<string, number>()
+  const spendingLimitLoadingSequences = new Map<string, number>()
   const pageStart = computed(() =>
     pagination.value.total === 0
       ? 0
@@ -434,6 +445,47 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
     }
   }
 
+  /// Loads the guardian-set monthly cap for one family. The console only reads
+  /// it: the cap belongs to the guardian, so an operator cannot change it here.
+  /// A family that never set a cap answers with zero, which the page renders as
+  /// "未设置" rather than as a zero yuan budget.
+  async function loadFamilySpendingLimit(
+    parentAccountId: string,
+  ): Promise<ApiError | null> {
+    const sequence = (spendingLimitRequestSequences.get(parentAccountId) ?? 0) + 1
+    spendingLimitRequestSequences.set(parentAccountId, sequence)
+    const loadingSequence = advanceLoadingSequence(
+      spendingLimitLoadingSequences,
+      parentAccountId,
+    )
+    updateCount(spendingLimitLoadingCounts, parentAccountId, 1)
+    setSpendingLimitError(parentAccountId, null)
+    try {
+      const response = await httpClient.get(
+        `/api/v1/admin/families/${encodeURIComponent(parentAccountId)}/spending-limit`,
+      )
+      if (spendingLimitRequestSequences.get(parentAccountId) !== sequence) {
+        return null
+      }
+      spendingLimitByFamily.value = {
+        ...spendingLimitByFamily.value,
+        [parentAccountId]: toSpendingLimit(response.data?.data),
+      }
+      return null
+    } catch (caught: unknown) {
+      const mapped = mapApiError(caught)
+      if (spendingLimitRequestSequences.get(parentAccountId) === sequence) {
+        setSpendingLimitError(parentAccountId, mapped)
+        return mapped
+      }
+      return null
+    } finally {
+      if (spendingLimitLoadingSequences.get(parentAccountId) === loadingSequence) {
+        resetCount(spendingLimitLoadingCounts, parentAccountId)
+      }
+    }
+  }
+
   async function loadFamilies(
     page: number,
     reportError: boolean,
@@ -695,6 +747,30 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
     return aiUsageErrorsByFamily.value[parentAccountId] ?? null
   }
 
+  function setSpendingLimitError(
+    parentAccountId: string,
+    value: ApiError | null,
+  ): void {
+    spendingLimitErrorsByFamily.value = {
+      ...spendingLimitErrorsByFamily.value,
+      [parentAccountId]: value,
+    }
+  }
+
+  function spendingLimitFor(
+    parentAccountId: string,
+  ): AdminFamilySpendingLimit | null {
+    return spendingLimitByFamily.value[parentAccountId] ?? null
+  }
+
+  function spendingLimitErrorFor(parentAccountId: string): ApiError | null {
+    return spendingLimitErrorsByFamily.value[parentAccountId] ?? null
+  }
+
+  function isSpendingLimitLoading(parentAccountId: string): boolean {
+    return (spendingLimitLoadingCounts.value[parentAccountId] ?? 0) > 0
+  }
+
   function isFamilyAIUsageLoading(parentAccountId: string): boolean {
     return (aiUsageLoadingCounts.value[parentAccountId] ?? 0) > 0
   }
@@ -702,6 +778,10 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   return {
     aiUsageErrorFor,
     aiUsageFor,
+    loadFamilySpendingLimit,
+    spendingLimitFor,
+    spendingLimitErrorFor,
+    isSpendingLimitLoading,
     create,
     deviceErrorFor,
     devicesFor,
@@ -889,6 +969,15 @@ function toFamilyDevice(value: unknown): AdminFamilyDevice | null {
     runtime: isRecord(value.runtime)
       ? toFamilyDeviceRuntime(value.runtime)
       : null,
+  }
+}
+
+function toSpendingLimit(value: unknown): AdminFamilySpendingLimit {
+  const record = (value ?? {}) as Record<string, unknown>
+  return {
+    monthlyLimitCents: numberValue(record.monthly_limit_cents),
+    currentMonthSpentCents: numberValue(record.current_month_spent_cents),
+    updatedAt: stringValue(record.updated_at),
   }
 }
 

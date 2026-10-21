@@ -28,6 +28,12 @@ var (
 	// ErrSpendingConsentRequired rejects checkout without a live guardian
 	// spending consent.
 	ErrSpendingConsentRequired = errors.New("billing: guardian spending consent required")
+	// ErrSpendingLimitExceeded rejects a checkout that would take the family
+	// past its self-set monthly spending cap. It is the stable reason code
+	// behind the HTTP error code "spending_limit_exceeded".
+	ErrSpendingLimitExceeded = errors.New("billing: monthly spending limit exceeded")
+	// ErrInvalidSpendingLimit rejects a monthly cap outside the accepted range.
+	ErrInvalidSpendingLimit = errors.New("billing: invalid monthly spending limit")
 	// ErrOverRefund rejects a refund that would exceed the paid total.
 	ErrOverRefund = errors.New("billing: refund exceeds paid amount")
 	// ErrPlanNotFound is returned when a plan code or id resolves to no plan.

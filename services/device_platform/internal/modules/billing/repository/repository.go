@@ -108,6 +108,24 @@ type Repository interface {
 	GetActiveSpendingConsent(ctx context.Context, parentAccountID string, consentVersion string) (*domain.SpendingConsent, error)
 	GetLatestSpendingConsent(ctx context.Context, parentAccountID string) (*domain.SpendingConsent, error)
 
+	// The family spending cap: one row per family, and a monthly total derived
+	// from the order ledger so the cap never depends on a second running total
+	// that could drift from what was actually settled.
+	GetSpendingLimit(ctx context.Context, familyID string) (*domain.FamilySpendingLimit, error)
+	UpsertSpendingLimit(ctx context.Context, limit domain.FamilySpendingLimit) error
+	SumMonthlyPaidCents(ctx context.Context, familyID string, from time.Time, to time.Time) (domain.Cents, error)
+	AppendSpendingLimitRejection(ctx context.Context, rejection domain.SpendingLimitRejection) error
+	ListSpendingLimitRejections(
+		ctx context.Context,
+		familyID string,
+		from time.Time,
+		to time.Time,
+		limit int,
+		offset int,
+	) ([]domain.SpendingLimitRejection, int, error)
+	SpendingLimitMetrics(ctx context.Context) (SpendingLimitMetrics, error)
+	SpendingLimitReadiness(ctx context.Context) error
+
 	CreateRun(ctx context.Context, run domain.ReconciliationRun) error
 	FinishRun(ctx context.Context, run domain.ReconciliationRun) error
 	ListRuns(ctx context.Context, limit int, offset int) ([]domain.ReconciliationRun, error)

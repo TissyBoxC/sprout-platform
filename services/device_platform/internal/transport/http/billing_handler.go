@@ -926,6 +926,13 @@ func writeBillingError(response http.ResponseWriter, request *http.Request, err 
 		writeError(response, request, http.StatusConflict, "plan_not_available", "该套餐已停止售卖，请选择其他套餐")
 	case errors.Is(err, billingdomain.ErrSpendingConsentRequired):
 		writeError(response, request, http.StatusConflict, "spending_consent_required", "请先由监护人确认消费授权")
+	case errors.Is(err, billingdomain.ErrSpendingLimitExceeded):
+		// The guardian's own cap, not a payment problem: the fix is to change
+		// the cap or wait for next month, so this is a conflict rather than a
+		// validation error.
+		writeError(response, request, http.StatusConflict, "spending_limit_exceeded", "本月消费已达上限，请先调整限额或次月再试")
+	case errors.Is(err, billingdomain.ErrInvalidSpendingLimit):
+		writeError(response, request, http.StatusUnprocessableEntity, "invalid_spending_limit", "请输入 0 到 100000 元之间的每月消费上限")
 	case errors.Is(err, billingservice.ErrPaymentNotOpenYet),
 		errors.Is(err, billingdomain.ErrChannelNotConfigured):
 		writePaymentNotOpen(response, request)

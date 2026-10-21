@@ -567,6 +567,13 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
     return (growthReportLoadingCounts.value[parentAccountId] ?? 0) > 0
   }
 
+  async function loadFamilies(
+    page: number,
+    reportError: boolean,
+  ): Promise<ApiError | null> {
+    return loadFamiliesWithPageSize(page, reportError, pagination.value.pageSize)
+  }
+
   async function loadFamiliesWithPageSize(
     page: number,
     reportError: boolean,

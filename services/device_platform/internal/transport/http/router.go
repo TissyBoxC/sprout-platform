@@ -45,6 +45,7 @@ import (
 	memoryservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/service"
 	growthreportservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/service"
 	devicechildservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/devicechild/service"
+	intercomservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/service"
 	motionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
 	notificationhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/handler"
 	notificationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
@@ -128,6 +129,10 @@ type RouterOptions struct {
 	MemoryService                *memoryservice.Service
 	GrowthReportService          *growthreportservice.Service
 	DeviceChildService           *devicechildservice.Service
+	// IntercomService enables the guardian↔device voice intercom routes. When it
+	// is nil the routes are not registered, so a deployment without intercom
+	// answers 404 rather than half-serving a call.
+	IntercomService *intercomservice.Service
 	// MemoryChildResolver maps a device's family to its child profile for the
 	// memory sync routes. The routes are registered only when it is set, so a
 	// deployment that does not wire it keeps answering 404 instead of syncing a
@@ -672,6 +677,67 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/child",
 					requireDeviceSession(options.BindingService, deviceChildBindings.current),
+				)
+			}
+		}
+		if options.IntercomService != nil {
+			guardianIntercom := guardianIntercomHandler{service: options.IntercomService}
+			// Calling a device is a family action, so it requires the guardian to
+			// hold the device-management permission for that family.
+			requireIntercomManage := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionChildManage,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
+			mux.HandleFunc(
+				"POST /api/v1/families/{family_id}/devices/{device_id}/intercom-calls",
+				requireIntercomManage(guardianIntercom.start),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/families/{family_id}/intercom-calls",
+				requireIntercomManage(guardianIntercom.history),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/families/{family_id}/intercom-calls/{call_id}",
+				requireIntercomManage(guardianIntercom.get),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/families/{family_id}/intercom-calls/{call_id}/cancel",
+				requireIntercomManage(guardianIntercom.cancel),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/families/{family_id}/intercom-calls/{call_id}/hangup",
+				requireIntercomManage(guardianIntercom.hangUp),
+			)
+			// The device answers with its own session token: the child presses a
+			// button on the robot, not on a phone.
+			if options.BindingService != nil {
+				deviceIntercom := deviceIntercomHandler{service: options.IntercomService}
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/intercom-calls/{call_id}",
+					requireDeviceSession(options.BindingService, deviceIntercom.current),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/intercom-calls/{call_id}/accept",
+					requireDeviceSession(options.BindingService, deviceIntercom.accept),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/intercom-calls/{call_id}/decline",
+					requireDeviceSession(options.BindingService, deviceIntercom.decline),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/intercom-calls/{call_id}/hangup",
+					requireDeviceSession(options.BindingService, deviceIntercom.hangUp),
 				)
 			}
 		}

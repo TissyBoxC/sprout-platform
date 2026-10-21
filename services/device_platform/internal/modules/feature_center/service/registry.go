@@ -254,6 +254,12 @@ func DefaultRegistry() []Definition {
 				"device_child_bound_count", "已指定儿童的设备", "台",
 				"device_child_unassigned_count", "未指定儿童的设备", "台",
 			)),
+		readOnlyFeatureDef("voice_intercom", "语音对讲", "家长呼叫设备、孩子在设备上按键接受后进行双向语音通话。", "family", "家庭平台",
+			"呼叫由家长发起，设备必须由孩子接受才建立声音通道；通话不录音、不落盘，功能中心只展示通话数量与进行中的通话数。",
+			metrics(
+				"intercom_open_call_count", "进行中的通话", "路",
+				"intercom_calls_24h", "24 小时通话数", "次",
+			)),
 		readOnlyFeatureDef("local_command", "本地指令", "断网可用的本地设备指令。", "content", "内容平台",
 			"本地指令随离线内容下发并由设备执行，功能中心只提供能力状态和统计。",
 			metrics(

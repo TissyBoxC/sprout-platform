@@ -716,6 +716,7 @@ func TestDefaultRegistryCoversRequiredFeatures(t *testing.T) {
 		"child_memory",
 		"growth_report",
 		"device_child_binding",
+		"voice_intercom",
 		"local_command",
 		"offline_content",
 		"content_engagement",
@@ -935,6 +936,8 @@ func TestDefaultRegistryMetricsHaveVerifiableSource(t *testing.T) {
 		"growth_report_stale_days":              {},
 		"device_child_bound_count":             {},
 		"device_child_unassigned_count":        {},
+		"intercom_open_call_count":             {},
+		"intercom_calls_24h":                   {},
 	}
 	for _, definition := range DefaultRegistry() {
 		for _, metric := range definition.Feature.ReadOnlyMetrics {

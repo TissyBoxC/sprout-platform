@@ -81,6 +81,8 @@ import (
 	growthReportService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/service"
 	deviceChildRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/devicechild/repository"
 	deviceChildService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/devicechild/service"
+	intercomRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/repository"
+	intercomService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/service"
 	motionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/repository"
 	motionRuntimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
 	notificationDelivery "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/delivery"
@@ -274,6 +276,16 @@ func Run() error {
 		databaseStore.Pool(),
 	)
 	deviceChildren := deviceChildService.NewService(deviceChildPersistence, logger)
+	// Voice intercom is guardian-initiated and child-accepted. The switch is
+	// read on every call so turning it off takes effect immediately.
+	intercomRepositoryInstance := intercomRepository.NewRepository(databaseStore.Pool())
+	intercomSettings := intercomFamilySettings{pool: databaseStore.Pool()}
+	intercoms := intercomService.NewService(
+		intercomStore{repository: intercomRepositoryInstance},
+		intercomDeviceLookup{pool: databaseStore.Pool()},
+		intercomSettings,
+		logger,
+	)
 	childProfileService, err := childService.New(childService.Options{
 		Repository:        childPersistence,
 		PolicyProvisioner: parentPolicyService,
@@ -679,6 +691,7 @@ func Run() error {
 	featureCenterHealthProbes["device_child_binding"] = deviceChildBindingProbe(
 		deviceChildPersistence,
 	)
+	featureCenterHealthProbes["voice_intercom"] = intercomProbe(intercoms)
 
 	privacy, err := privacyService.New(privacyService.Options{
 		Repository:     privacyRepository.NewPostgresRepository(databaseStore.Pool()),
@@ -1082,6 +1095,7 @@ func Run() error {
 			MemoryChildResolver:          memoryRepository.NewDeviceChildResolver(databaseStore.Pool()),
 			GrowthReportService:          growthReports,
 			DeviceChildService:           deviceChildren,
+			IntercomService:              intercoms,
 			AuditRecorder:                privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -1104,6 +1118,10 @@ func Run() error {
 	// The generator runs on its own goroutine so a slow aggregation over a large
 	// family table cannot delay the HTTP server becoming ready.
 	go growthReportService.NewWorker(growthReports, time.Hour).Run(runtimeCtx)
+	// Calls must never outlive their deadline, including when both apps were
+	// closed. The sweep runs often because a stuck ringing call blocks the
+	// device from receiving the next one.
+	go intercomService.NewExpiryWorker(intercoms, 15*time.Second).Run(runtimeCtx)
 	go runFeatureHealthScheduler(runtimeCtx, logger, featureCenter)
 	go runNotificationDeliveryWorker(
 		runtimeCtx,

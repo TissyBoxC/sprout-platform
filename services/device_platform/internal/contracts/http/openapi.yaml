@@ -46,6 +46,14 @@ paths:
         short-lived opaque ticket. Provider credentials are never returned to
         the relay, guardians, administrators, or firmware clients.
       parameters:
+    IntercomCallId:
+      name: call_id
+      in: path
+      required: true
+      description: 通话标识
+      schema:
+        type: string
+        format: uuid
         - name: device_id
           in: path
           required: true
@@ -12235,6 +12243,215 @@ paths:
         "500":
           $ref: "#/components/responses/DeviceServiceError"
 
+  /api/v1/families/{family_id}/devices/{device_id}/intercom-calls:
+    post:
+      summary: 向自己的设备发起一次对讲呼叫
+      description: |
+        家长向自己家庭的设备发起呼叫。呼叫建立后设备会提示孩子，孩子必须
+        在设备上按键接受后才会建立声音通道；未接受之前不采集也不传输任何音频。
+        同一台设备同一时刻只能有一次未结束的通话。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "201":
+          description: 呼叫已发起，正在等待孩子接受
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntercomCallEnvelope"
+        "403":
+          description: 家庭已关闭对讲功能
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 设备不存在或不属于该家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 设备正在另一次通话中
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: 呼叫过于频繁
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/families/{family_id}/intercom-calls:
+    get:
+      summary: 查看家庭最近的通话记录
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+      responses:
+        "200":
+          description: 通话记录，最新的在前
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntercomCallListEnvelope"
+  /api/v1/families/{family_id}/intercom-calls/{call_id}:
+    get:
+      summary: 查看一次通话的当前状态
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/IntercomCallId"
+      responses:
+        "200":
+          description: 通话状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntercomCallEnvelope"
+        "404":
+          description: 通话不存在或不属于该家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/families/{family_id}/intercom-calls/{call_id}/cancel:
+    post:
+      summary: 取消尚未接通的呼叫
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/IntercomCallId"
+      responses:
+        "200":
+          description: 呼叫已取消
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntercomCallEnvelope"
+        "409":
+          description: 通话状态已变化
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/families/{family_id}/intercom-calls/{call_id}/hangup:
+    post:
+      summary: 家长挂断正在进行的通话
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/IntercomCallId"
+      responses:
+        "200":
+          description: 通话已结束
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntercomCallEnvelope"
+        "409":
+          description: 通话状态已变化
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/devices/{device_id}/intercom-calls/{call_id}:
+    get:
+      summary: 设备查询一次呼叫的当前状态
+      description: |
+        设备用会话令牌查询自己参与的呼叫。设备据此决定是否提示孩子接听。
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/IntercomCallId"
+      responses:
+        "200":
+          description: 通话状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntercomCallEnvelope"
+        "404":
+          description: 通话不存在或不属于该设备
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/devices/{device_id}/intercom-calls/{call_id}/accept:
+    post:
+      summary: 孩子在设备上接受呼叫
+      description: |
+        只有在孩子主动按键接受后，这次呼叫才会进入进行中状态并允许音频传输。
+        这是对讲功能的同意步骤，任何未接受的状态都不会传输音频。
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/IntercomCallId"
+      responses:
+        "200":
+          description: 已接通
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntercomCallEnvelope"
+        "409":
+          description: 呼叫已结束或不处于响铃状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/devices/{device_id}/intercom-calls/{call_id}/decline:
+    post:
+      summary: 孩子在设备上拒绝呼叫
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/IntercomCallId"
+      responses:
+        "200":
+          description: 已拒绝，通话结束
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntercomCallEnvelope"
+        "409":
+          description: 呼叫已结束或不处于响铃状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/devices/{device_id}/intercom-calls/{call_id}/hangup:
+    post:
+      summary: 设备端挂断通话
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/IntercomCallId"
+      responses:
+        "200":
+          description: 通话已结束
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntercomCallEnvelope"
+        "409":
+          description: 通话状态已变化
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
 components:
   securitySchemes:
     serviceToken:
@@ -12807,6 +13024,67 @@ components:
           schema:
             $ref: "#/components/schemas/ResponseEnvelope"
   schemas:
+    IntercomCall:
+      type: object
+      description: |
+        一次对讲通话的生命周期。只包含状态与时间，不包含任何音频、文字内容或凭证。
+      required:
+        - call_id
+        - device_id
+        - state
+        - started_at
+        - deadline
+      properties:
+        call_id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+          format: uuid
+        child_id:
+          type: string
+          description: 这台设备当前使用的儿童；家庭还没有儿童档案时为空
+        state:
+          type: string
+          enum: [ringing, active, ended, missed, declined, cancelled]
+          description: |
+            响铃中、进行中、已结束、未接听、孩子拒绝、家长取消。只有进行中允许音频。
+        started_at:
+          type: string
+          format: date-time
+        accepted_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        duration_seconds:
+          type: integer
+          description: 实际通话秒数，未接通为零
+        finish_reason:
+          type: string
+        deadline:
+          type: string
+          format: date-time
+          description: 这次通话最晚的结束时刻，超过后由服务端自动结束
+    IntercomCallEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/IntercomCall"
+    IntercomCallListEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [calls]
+          properties:
+            calls:
+              type: array
+              items:
+                $ref: "#/components/schemas/IntercomCall"
     # 计费域组件。
     #
     # 金额一律是整数人民币分，字段名以 _cny_cents 结尾。用整数是因为浮点无法

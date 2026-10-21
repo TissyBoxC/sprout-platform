@@ -12,6 +12,7 @@ import (
 	billingdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/domain"
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
+	intercomservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/service"
 	memorydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/domain"
 	growthReportDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/domain"
 	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
@@ -400,6 +401,29 @@ func deviceChildBindingProbe(
 				return featureCenterDomain.HealthUnavailable, nil
 			}
 			if _, err := repository.CountBindings(ctx); err != nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			return featureCenterDomain.HealthHealthy, nil
+		},
+	)
+}
+
+// intercomProbe reports whether calls can be started and closed.
+//
+// A call table that cannot be read means nobody can ring a device, so the
+// feature is unavailable rather than degraded; a readable table is healthy even
+// when no call is in progress.
+func intercomProbe(
+	service interface {
+		ReadMetrics(ctx context.Context) (intercomservice.Metrics, error)
+	},
+) featureCenterService.HealthProbe {
+	return featureCenterService.HealthProbeFunc(
+		func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+			if service == nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			if _, err := service.ReadMetrics(ctx); err != nil {
 				return featureCenterDomain.HealthUnavailable, nil
 			}
 			return featureCenterDomain.HealthHealthy, nil

@@ -753,6 +753,9 @@ func (r *PostgresRepository) PurgeParentData(
 		// Binding history records which child used which device; it must go with
 		// the family even though the rows also reference child_profiles.
 		{`DELETE FROM device_child_bindings WHERE family_id = $1`, "device child bindings"},
+		// Call history reveals when a household was contacted, so it goes too.
+		{`DELETE FROM intercom_calls WHERE family_id = $1`, "intercom calls"},
+		{`DELETE FROM intercom_family_settings WHERE family_id = $1`, "intercom settings"},
 		{`DELETE FROM alarm_reminder_events WHERE family_id = $1`, "alarm reminder events"},
 		{`DELETE FROM alarm_reminders WHERE family_id = $1`, "alarm reminders"},
 		{`DELETE FROM english_practice_attempts WHERE family_id = $1`, "english practice attempts"},

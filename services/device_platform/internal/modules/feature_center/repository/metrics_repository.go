@@ -434,6 +434,18 @@ func (r *MetricsRepository) FeatureMetrics(
 			"device_child_bound_count",
 			"device_child_unassigned_count",
 		)
+	case "voice_intercom":
+		// Counts only: how many calls are in flight and how many ran in a day.
+		// The table holds no audio, so there is nothing else to report.
+		return r.pair(
+			ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM intercom_calls WHERE state IN ('ringing', 'active')),
+				(SELECT COUNT(*) FROM intercom_calls
+				 WHERE started_at >= now() - interval '24 hours')`,
+			"intercom_open_call_count",
+			"intercom_calls_24h",
+		)
 	case "local_command":
 		return r.scalar(ctx,
 			"SELECT COUNT(*) FROM local_commands",

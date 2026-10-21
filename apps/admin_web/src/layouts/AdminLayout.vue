@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/features/auth/application/authStore'
-import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
+import { ADMIN_PERMISSIONS, type AdminPermission } from '@/features/auth/domain/adminPermission'
 
 const router = useRouter()
 const route = useRoute()
@@ -12,6 +12,202 @@ const accountInitial = computed(() => {
   const displayName = authStore.account?.displayName.trim() ?? ''
   return displayName.slice(0, 1).toUpperCase() || '管'
 })
+
+/// One navigable destination. The permission is checked before the entry is
+/// rendered, so an operator never sees a link that would answer 403.
+interface AdminNavItem {
+  label: string
+  to: string
+  permission: AdminPermission
+  /// A path that also implies this entry, used when several links share a
+  /// prefix such as /content.
+  activePrefix?: string
+}
+
+/// One collapsible group. A group with `collapsible` false always shows its
+/// entries, which suits the short, frequently used groups.
+interface AdminNavGroup {
+  id: string
+  label: string
+  collapsible: boolean
+  items: AdminNavItem[]
+}
+
+/// The sidebar is grouped by the job an operator is doing rather than by data
+/// model, because a flat list of 39 links forced people to read all of it to
+/// find one page. Order runs from daily work outward to platform plumbing.
+const navGroups: AdminNavGroup[] = [
+  {
+    id: 'overview',
+    label: '总览',
+    collapsible: false,
+    items: [
+      { label: '品牌总览', to: '/', permission: ADMIN_PERMISSIONS.statsRead },
+    ],
+  },
+  {
+    id: 'family',
+    label: '家庭与成长',
+    collapsible: false,
+    items: [
+      { label: '家长账号', to: '/families', permission: ADMIN_PERMISSIONS.familyRead },
+      { label: '儿童档案', to: '/children', permission: ADMIN_PERMISSIONS.familyRead },
+      { label: '使用报告', to: '/usage-reports', permission: ADMIN_PERMISSIONS.familyRead },
+      {
+        label: '消息通知',
+        to: '/notifications',
+        permission: ADMIN_PERMISSIONS.notificationsRead,
+      },
+    ],
+  },
+  {
+    id: 'device',
+    label: '设备',
+    collapsible: false,
+    items: [
+      { label: '设备管理', to: '/devices', permission: ADMIN_PERMISSIONS.devicesRead },
+      {
+        label: '设备诊断',
+        to: '/device-diagnostics',
+        permission: ADMIN_PERMISSIONS.devicesRead,
+      },
+    ],
+  },
+  {
+    id: 'capability',
+    label: '设备能力',
+    collapsible: true,
+    items: [
+      { label: '屏幕与护眼', to: '/display', permission: ADMIN_PERMISSIONS.statsRead },
+      { label: '屏幕能力', to: '/screen', permission: ADMIN_PERMISSIONS.statsRead },
+      { label: '触摸交互', to: '/touch', permission: ADMIN_PERMISSIONS.statsRead },
+      { label: '摄像头与视觉', to: '/vision', permission: ADMIN_PERMISSIONS.statsRead },
+      { label: '蓝牙音箱', to: '/bluetooth-audio', permission: ADMIN_PERMISSIONS.statsRead },
+      { label: '蜂窝网络', to: '/cellular', permission: ADMIN_PERMISSIONS.statsRead },
+      { label: '电池与省电', to: '/power', permission: ADMIN_PERMISSIONS.statsRead },
+      { label: '动作与电机', to: '/motion', permission: ADMIN_PERMISSIONS.statsRead },
+      { label: '形态能力', to: '/form-factor', permission: ADMIN_PERMISSIONS.statsRead },
+      { label: '视频陪伴', to: '/video-companion', permission: ADMIN_PERMISSIONS.statsRead },
+      { label: '视频会话', to: '/video-session', permission: ADMIN_PERMISSIONS.statsRead },
+      {
+        label: '学习可视化',
+        to: '/learning-visualization',
+        permission: ADMIN_PERMISSIONS.statsRead,
+      },
+      { label: '图片隐私', to: '/image-privacy', permission: ADMIN_PERMISSIONS.statsRead },
+      { label: '穿戴与定位', to: '/wearable', permission: ADMIN_PERMISSIONS.statsRead },
+      { label: '多设备', to: '/multi-device', permission: ADMIN_PERMISSIONS.statsRead },
+    ],
+  },
+  {
+    id: 'billing',
+    label: '计费',
+    collapsible: true,
+    items: [
+      { label: '订单管理', to: '/billing/orders', permission: ADMIN_PERMISSIONS.billingRead },
+      { label: '退款审批', to: '/billing/refunds', permission: ADMIN_PERMISSIONS.billingRead },
+      { label: '套餐设置', to: '/billing/plans', permission: ADMIN_PERMISSIONS.billingRead },
+      {
+        label: '计费对账',
+        to: '/billing/reconciliation',
+        permission: ADMIN_PERMISSIONS.billingRead,
+      },
+    ],
+  },
+  {
+    id: 'release',
+    label: '发布与内容',
+    collapsible: true,
+    items: [
+      { label: '内容发布', to: '/releases', permission: ADMIN_PERMISSIONS.storageRead },
+      { label: '下载文件', to: '/downloads', permission: ADMIN_PERMISSIONS.storageRead },
+      { label: '设备 OTA', to: '/device-ota', permission: ADMIN_PERMISSIONS.otaRead },
+      { label: '内容库', to: '/content', permission: ADMIN_PERMISSIONS.contentRead },
+      {
+        label: '主题包',
+        to: '/content/theme-packs',
+        permission: ADMIN_PERMISSIONS.contentRead,
+      },
+      {
+        label: '离线下载策略',
+        to: '/content/offline-policy',
+        permission: ADMIN_PERMISSIONS.contentRead,
+      },
+      { label: '界面文案', to: '/ui-text', permission: ADMIN_PERMISSIONS.contentRead },
+    ],
+  },
+  {
+    id: 'platform',
+    label: '平台',
+    collapsible: false,
+    items: [
+      { label: '服务版本', to: '/services', permission: ADMIN_PERMISSIONS.serviceRead },
+      {
+        label: '功能中心',
+        to: '/feature-center',
+        permission: ADMIN_PERMISSIONS.featureCenterRead,
+      },
+      { label: '系统设置', to: '/settings', permission: ADMIN_PERMISSIONS.settingsRead },
+      {
+        label: '管理员权限',
+        to: '/admin-permissions',
+        permission: ADMIN_PERMISSIONS.adminsRead,
+      },
+      { label: '操作审计', to: '/audit', permission: ADMIN_PERMISSIONS.auditRead },
+    ],
+  },
+]
+
+/// Only the groups a group needs are shown, so a narrower role sees a shorter
+/// sidebar instead of many empty headings.
+const visibleGroups = computed(() =>
+  navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => authStore.can(item.permission)),
+    }))
+    .filter((group) => group.items.length > 0),
+)
+
+const openGroups = ref<Record<string, boolean>>({})
+
+function isItemActive(item: AdminNavItem): boolean {
+  return route.path === item.to || route.path.startsWith(`${item.to}/`)
+}
+
+function groupHasActiveItem(group: AdminNavGroup): boolean {
+  return group.items.some(isItemActive)
+}
+
+// Start with the group holding the current page open and the rest closed, so
+// the sidebar opens compact but never hides where the operator already is.
+watch(
+  () => route.path,
+  () => {
+    for (const group of visibleGroups.value) {
+      if (!group.collapsible) {
+        continue
+      }
+      if (groupHasActiveItem(group)) {
+        openGroups.value[group.id] = true
+      } else if (openGroups.value[group.id] === undefined) {
+        openGroups.value[group.id] = false
+      }
+    }
+  },
+  { immediate: true },
+)
+
+function toggleGroup(group: AdminNavGroup): void {
+  openGroups.value[group.id] = !isGroupOpen(group)
+}
+
+function isGroupOpen(group: AdminNavGroup): boolean {
+  if (!group.collapsible) {
+    return true
+  }
+  return openGroups.value[group.id] === true
+}
 
 async function logout(): Promise<void> {
   await authStore.logout()
@@ -39,178 +235,55 @@ async function logout(): Promise<void> {
       </div>
       <nav class="admin-nav" aria-label="主要导航">
         <div class="admin-nav-inner">
-        <p class="nav-section">品牌管理</p>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/">
-          <span class="nav-dot" aria-hidden="true"></span>
-          品牌总览
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.familyRead)" to="/families">
-          <span class="nav-dot" aria-hidden="true"></span>
-          家长账号
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.familyRead)" to="/children">
-          <span class="nav-dot" aria-hidden="true"></span>
-          儿童档案
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.familyRead)" to="/usage-reports">
-          <span class="nav-dot" aria-hidden="true"></span>
-          使用报告
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.notificationsRead)" to="/notifications">
-          <span class="nav-dot" aria-hidden="true"></span>
-          消息通知
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.devicesRead)" to="/devices">
-          <span class="nav-dot" aria-hidden="true"></span>
-          设备管理
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.devicesRead)" to="/device-diagnostics">
-          <span class="nav-dot" aria-hidden="true"></span>
-          设备诊断
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/vision">
-          <span class="nav-dot" aria-hidden="true"></span>
-          摄像头与视觉
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/display">
-          <span class="nav-dot" aria-hidden="true"></span>
-          屏幕与护眼
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/screen">
-          <span class="nav-dot" aria-hidden="true"></span>
-          屏幕能力
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/touch">
-          <span class="nav-dot" aria-hidden="true"></span>
-          触摸交互
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/cellular">
-          <span class="nav-dot" aria-hidden="true"></span>
-          蜂窝网络
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/power">
-          <span class="nav-dot" aria-hidden="true"></span>
-          电池与省电
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/motion">
-          <span class="nav-dot" aria-hidden="true"></span>
-          动作与电机
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/form-factor">
-          <span class="nav-dot" aria-hidden="true"></span>
-          形态能力
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/video-companion">
-          <span class="nav-dot" aria-hidden="true"></span>
-          视频陪伴
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/video-session">
-          <span class="nav-dot" aria-hidden="true"></span>
-          视频会话
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/bluetooth-audio">
-          <span class="nav-dot" aria-hidden="true"></span>
-          蓝牙音箱
-        </RouterLink>
-        <RouterLink
-          v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)"
-          to="/learning-visualization"
-        >
-          <span class="nav-dot" aria-hidden="true"></span>
-          学习可视化
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/image-privacy">
-          <span class="nav-dot" aria-hidden="true"></span>
-          图片隐私
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/wearable">
-          <span class="nav-dot" aria-hidden="true"></span>
-          穿戴与定位
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.statsRead)" to="/multi-device">
-          <span class="nav-dot" aria-hidden="true"></span>
-          多设备
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.auditRead)" to="/audit">
-          <span class="nav-dot" aria-hidden="true"></span>
-          操作审计
-        </RouterLink>
-        <RouterLink
-          v-if="authStore.can(ADMIN_PERMISSIONS.billingRead)"
-          to="/billing/orders"
-        >
-          <span class="nav-dot" aria-hidden="true"></span>
-          订单管理
-        </RouterLink>
-        <RouterLink
-          v-if="authStore.can(ADMIN_PERMISSIONS.billingRead)"
-          to="/billing/refunds"
-        >
-          <span class="nav-dot" aria-hidden="true"></span>
-          退款审批
-        </RouterLink>
-        <RouterLink
-          v-if="authStore.can(ADMIN_PERMISSIONS.billingRead)"
-          to="/billing/plans"
-        >
-          <span class="nav-dot" aria-hidden="true"></span>
-          套餐设置
-        </RouterLink>
-        <RouterLink
-          v-if="authStore.can(ADMIN_PERMISSIONS.billingRead)"
-          to="/billing/reconciliation"
-        >
-          <span class="nav-dot" aria-hidden="true"></span>
-          计费对账
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.storageRead)" to="/releases">
-          <span class="nav-dot" aria-hidden="true"></span>
-          内容发布
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.otaRead)" to="/device-ota">
-          <span class="nav-dot" aria-hidden="true"></span>
-          设备 OTA
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.contentRead)" to="/content">
-          <span class="nav-dot" aria-hidden="true"></span>
-          内容库
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.contentRead)" to="/content/theme-packs">
-          <span class="nav-dot" aria-hidden="true"></span>
-          主题包
-        </RouterLink>
-        <RouterLink
-          v-if="authStore.can(ADMIN_PERMISSIONS.contentRead)"
-          to="/content/offline-policy"
-        >
-          <span class="nav-dot" aria-hidden="true"></span>
-          离线下载策略
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.storageRead)" to="/downloads">
-          <span class="nav-dot" aria-hidden="true"></span>
-          下载文件
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.contentRead)" to="/ui-text">
-          <span class="nav-dot" aria-hidden="true"></span>
-          界面文案
-        </RouterLink>
-        <p class="nav-section nav-section-services">服务管理</p>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.serviceRead)" to="/services">
-          <span class="nav-dot" aria-hidden="true"></span>
-          服务版本
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.featureCenterRead)" to="/feature-center">
-          <span class="nav-dot" aria-hidden="true"></span>
-          功能中心
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.settingsRead)" to="/settings">
-          <span class="nav-dot" aria-hidden="true"></span>
-          系统设置
-        </RouterLink>
-        <RouterLink v-if="authStore.can(ADMIN_PERMISSIONS.adminsRead)" to="/admin-permissions">
-          <span class="nav-dot" aria-hidden="true"></span>
-          管理员权限
-        </RouterLink>
+          <section
+            v-for="group in visibleGroups"
+            :key="group.id"
+            class="nav-group"
+          >
+            <button
+              v-if="group.collapsible"
+              type="button"
+              class="nav-group-toggle"
+              :class="{ expanded: isGroupOpen(group), current: groupHasActiveItem(group) }"
+              :aria-expanded="isGroupOpen(group)"
+              :aria-controls="`nav-group-${group.id}`"
+              @click="toggleGroup(group)"
+            >
+              <span class="nav-group-label">{{ group.label }}</span>
+              <span class="nav-group-count" aria-hidden="true">{{ group.items.length }}</span>
+              <svg
+                class="nav-group-chevron"
+                viewBox="0 0 16 16"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path
+                  d="M4 6l4 4 4-4"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+            <p v-else class="nav-section">{{ group.label }}</p>
+            <div
+              v-show="isGroupOpen(group)"
+              :id="`nav-group-${group.id}`"
+              class="nav-group-items"
+            >
+              <RouterLink
+                v-for="item in group.items"
+                :key="item.to"
+                :to="item.to"
+                :class="{ 'router-link-active': isItemActive(item) }"
+              >
+                <span class="nav-dot" aria-hidden="true"></span>
+                {{ item.label }}
+              </RouterLink>
+            </div>
+          </section>
         </div>
       </nav>
       <div class="sidebar-account">
@@ -320,8 +393,82 @@ async function logout(): Promise<void> {
   letter-spacing: 0.08em;
 }
 
-.nav-section-services {
-  margin-top: 18px;
+.nav-group {
+  display: grid;
+  gap: 3px;
+}
+
+.nav-group + .nav-group {
+  margin-top: 6px;
+}
+
+.nav-group-items {
+  display: grid;
+  gap: 3px;
+}
+
+/* The toggle mirrors a nav link so a collapsed group still reads as one row. */
+.nav-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 11px;
+  color: #6b4f5a;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  cursor: pointer;
+  transition:
+    background-color var(--sprout-duration-base) ease,
+    color var(--sprout-duration-base) ease;
+}
+
+.nav-group-toggle:hover {
+  color: #b23a68;
+  background: #fffafb;
+}
+
+.nav-group-toggle:focus-visible {
+  outline: 2px solid #f7a8bf;
+  outline-offset: 1px;
+}
+
+.nav-group-toggle.current {
+  color: #c94175;
+}
+
+.nav-group-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* A count tells the operator how much a collapsed group holds. */
+.nav-group-count {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  color: #8a6b77;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  background: #fff0f4;
+  border-radius: 999px;
+}
+
+.nav-group-chevron {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  color: #b4899a;
+  transition: transform var(--sprout-duration-base) var(--sprout-ease-out);
+}
+
+.nav-group-toggle.expanded .nav-group-chevron {
+  transform: rotate(180deg);
 }
 
 .admin-nav a {

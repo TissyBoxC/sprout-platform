@@ -1027,16 +1027,24 @@ func (s *Service) DeleteFile(ctx context.Context, relativePath string) error {
 
 // MarkPublishedArtifact protects the exact canonical file signed by an OTA
 // manifest from the normal overwrite and delete paths.
+// MarkPublishedArtifact records a path as immutable once it has been published.
+//
+// The existence check runs under the same mutex as commitUpload: reading before
+// taking the lock left a window where a concurrent overwrite could complete
+// between the read and the mark, so both operations reported success and the
+// published artifact's bytes changed after publication.
 func (s *Service) MarkPublishedArtifact(relativePath string) error {
 	normalized, err := NormalizeFilePath(relativePath)
 	if err != nil {
 		return err
 	}
-	if _, err := s.ReadArtifact(context.Background(), normalized); err != nil {
-		return err
-	}
 	s.inventoryDigestMu.Lock()
 	defer s.inventoryDigestMu.Unlock()
+	// readArtifactLocked is the lock-free body, because ReadArtifact would try to
+	// take the same mutex again.
+	if _, err := s.readArtifactLocked(context.Background(), normalized); err != nil {
+		return err
+	}
 	if _, exists := s.immutablePaths[normalized]; exists {
 		return nil
 	}

@@ -6,6 +6,11 @@ import {
 } from '@/api/apiNotice'
 import { createHttpClient } from '@/api/httpClient'
 
+/// Hashing one stored artifact reads the whole file, and release artifacts run
+/// to hundreds of megabytes, so this single call waits far longer than the
+/// shared request timeout. The page shows a busy state while it runs.
+const FILE_DIGEST_TIMEOUT_MS = 5 * 60 * 1000
+
 export type DownloadArtifactKind = 'resource' | 'client' | 'firmware' | 'unknown'
 
 export type DownloadArtifactPlatform =
@@ -79,6 +84,10 @@ export interface AdminDownloadFilesClient {
   deleteFile(relativePath: string): Promise<ApiMutationResult<null>>
   refreshIndex(): Promise<ApiMutationResult<DownloadIndexStatus>>
   loadIndexStatus(): Promise<DownloadIndexStatus>
+  /// The file list omits checksums it has not computed yet, because hashing the
+  /// whole store made the page time out. Registering an existing file asks for
+  /// the checksum of that one file here.
+  loadFileDigest(relativePath: string): Promise<string>
 }
 
 /// Creates the client for the download server inventory and its publishing
@@ -151,6 +160,16 @@ export function createAdminDownloadFilesClient(
     async loadIndexStatus(): Promise<DownloadIndexStatus> {
       const response = await httpClient.get('/api/v1/admin/storage/index/status')
       return toIndexStatus(response.data?.data)
+    },
+
+    async loadFileDigest(relativePath: string): Promise<string> {
+      // Hashing one multi-gigabyte artifact is legitimately slow, so this call
+      // waits longer than the shared request timeout instead of failing.
+      const response = await httpClient.get('/api/v1/admin/storage/files/digest', {
+        params: { path: relativePath },
+        timeout: FILE_DIGEST_TIMEOUT_MS,
+      })
+      return stringValue(response.data?.data?.sha256)
     },
   }
 }

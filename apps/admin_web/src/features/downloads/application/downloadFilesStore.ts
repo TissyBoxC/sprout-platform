@@ -666,12 +666,24 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
   ): Promise<'registered' | 'skipped' | 'conflict' | 'notes_missing'> {
     if (
       !file.version ||
-      !file.sha256 ||
       !file.downloadUrl ||
       file.kind === 'unknown' ||
       file.platform === 'unknown'
     ) {
       return 'skipped'
+    }
+    // The list no longer computes every checksum up front, so an existing file
+    // may arrive without one. Ask for that file alone rather than refusing.
+    let sha256 = file.sha256
+    if (sha256 === '') {
+      try {
+        sha256 = await client.loadFileDigest(file.relativePath)
+      } catch {
+        return 'skipped'
+      }
+      if (sha256 === '') {
+        return 'skipped'
+      }
     }
     const existing = await findRegisteredRelease(
       file.version,
@@ -692,7 +704,7 @@ export const useDownloadFilesStore = defineStore('admin-download-files', () => {
         kind: file.kind,
         platform: file.platform,
         download_url: downloadUrlForFile(file),
-        sha256: file.sha256,
+        sha256,
         release_notes: releaseNotes.trim(),
         is_mandatory: false,
         min_supported_version: '',

@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -88,9 +87,20 @@ func TestInventoryListsNestedFilesAndAnnotatesReleaseArtifacts(t *testing.T) {
 		releaseFile.Release.Kind != "apk" {
 		t.Fatalf("unexpected release metadata: %+v", releaseFile.Release)
 	}
-	if releaseFile.SHA256 != "93e5c2dd0e6b0e5f2c9e6e8c17fd22b7d62075a6e2e81e6b0f8a9c6d5e4f3a2b" &&
-		len(releaseFile.SHA256) != 64 {
-		t.Fatalf("expected sha256 digest, got %q", releaseFile.SHA256)
+	// The listing no longer hashes inside the request, so it may report an
+	// empty digest. The value must still be obtainable on demand.
+	if releaseFile.SHA256 != "" && len(releaseFile.SHA256) != 64 {
+		t.Fatalf("expected empty or complete sha256 digest, got %q", releaseFile.SHA256)
+	}
+	digest, digestErr := service.DigestForPath(
+		context.Background(),
+		releaseFile.RelativePath,
+	)
+	if digestErr != nil {
+		t.Fatalf("DigestForPath() returned unexpected error: %v", digestErr)
+	}
+	if len(digest) != 64 {
+		t.Fatalf("expected a 64-character digest, got %q", digest)
 	}
 	if releaseFile.DownloadURL !=
 		"https://download.example.test/0.12.3/stable/android/apk/sprout-parent-app-v0.12.3.apk" {
@@ -214,9 +224,10 @@ func TestInventorySupportsConcurrentRequests(t *testing.T) {
 				errs <- err
 				return
 			}
+			// Concurrent listings must agree on the snapshot. Digests are warmed
+			// in the background, so only the paths are compared here.
 			if len(inventory.Files) != 1 ||
-				inventory.Files[0].RelativePath != relativePath ||
-				len(inventory.Files[0].SHA256) != 64 {
+				inventory.Files[0].RelativePath != relativePath {
 				errs <- errors.New("concurrent inventory returned an unexpected snapshot")
 			}
 		}()
@@ -857,91 +868,57 @@ func TestParseArtifactPathRejectsNonCanonicalPaths(t *testing.T) {
 	}
 }
 
-// TestInventoryHashesDigestsConcurrently pins the fix for a production timeout:
-// hashing 6.1 GB of artifacts on one goroutine took 96s and the operator page
-// gave up after 15s. Concurrent warming must produce the same digests.
-func TestInventoryHashesDigestsConcurrently(t *testing.T) {
+// TestInventoryNeverHashesInsideTheRequest pins the fix for a production
+// timeout. The store holds 6.1 GB and the host throttles disk, so hashing in
+// the request took 96s serially and 52s with eight readers, while the operator
+// page gives up after 15s. The listing must return without reading contents.
+func TestInventoryNeverHashesInsideTheRequest(t *testing.T) {
 	service, root := newTestService(t)
-	directory := filepath.Join(root, "0.40.0", "stable", "any", "docs")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatalf("create directory: %v", err)
+	artifactPath := filepath.Join(
+		root,
+		"0.40.0", "stable", "android", "apk",
+		"sprout-parent-app-v0.40.0.apk",
+	)
+	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o755); err != nil {
+		t.Fatalf("create artifact directory: %v", err)
 	}
-	const fileCount = 24
-	expected := make(map[string]string, fileCount)
-	for index := 0; index < fileCount; index++ {
-		name := fmt.Sprintf("note-%02d.txt", index)
-		payload := bytes.Repeat([]byte{byte('a' + index%26)}, 4096)
-		if err := os.WriteFile(filepath.Join(directory, name), payload, 0o644); err != nil {
-			t.Fatalf("write file %s: %v", name, err)
-		}
-		sum := sha256.Sum256(payload)
-		expected[path.Join("0.40.0", "stable", "any", "docs", name)] = hex.EncodeToString(sum[:])
+	if err := os.WriteFile(artifactPath, bytes.Repeat([]byte("x"), 1<<20), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
 	}
 
-	inventory, err := service.Inventory(context.Background())
-	if err != nil {
+	// The service refuses to open any file while the barrier is set, which
+	// proves the listing performed no content read.
+	service.artifactReadBarrier = func([]byte) {
+		t.Error("Inventory read file contents inside the request")
+	}
+	if _, err := service.Inventory(context.Background()); err != nil {
 		t.Fatalf("Inventory() returned unexpected error: %v", err)
 	}
-	if len(inventory.Files) != fileCount {
-		t.Fatalf("expected %d files, got %d", fileCount, len(inventory.Files))
-	}
-	for _, file := range inventory.Files {
-		want, ok := expected[file.RelativePath]
-		if !ok {
-			t.Fatalf("unexpected file in inventory: %s", file.RelativePath)
-		}
-		if file.SHA256 != want {
-			t.Fatalf("digest mismatch for %s: got %q, want %q", file.RelativePath, file.SHA256, want)
-		}
-	}
+	service.artifactReadBarrier = nil
 }
 
-// TestInventoryReusesCachedDigestsAcrossCalls guarantees a warm store costs no
-// file reads: the second listing must not re-hash anything.
-func TestInventoryReusesCachedDigestsAcrossCalls(t *testing.T) {
-	service, root := newTestService(t)
-	directory := filepath.Join(root, "0.41.0", "stable", "any", "docs")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatalf("create directory: %v", err)
-	}
-	target := filepath.Join(directory, "note.txt")
-	if err := os.WriteFile(target, []byte("payload"), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	first, err := service.Inventory(context.Background())
-	if err != nil {
-		t.Fatalf("first Inventory() returned unexpected error: %v", err)
-	}
-	// A second listing must reuse the warmed digest even after the bytes are
-	// replaced on disk, which only holds when the cache is consulted first.
-	second, err := service.Inventory(context.Background())
-	if err != nil {
-		t.Fatalf("second Inventory() returned unexpected error: %v", err)
-	}
-	if len(first.Files) != 1 || len(second.Files) != 1 {
-		t.Fatalf("expected one file in both listings, got %d and %d", len(first.Files), len(second.Files))
-	}
-	if first.Files[0].SHA256 != second.Files[0].SHA256 {
-		t.Fatalf("cached digest changed between calls: %q then %q", first.Files[0].SHA256, second.Files[0].SHA256)
-	}
-}
-
-// TestDigestForPathComputesOnDemand covers the endpoint that publishing uses
-// when the listing omitted a digest.
+// TestDigestForPathComputesOnDemand covers the endpoint that publishing and OTA
+// use when the listing omitted a digest.
 func TestDigestForPathComputesOnDemand(t *testing.T) {
 	service, root := newTestService(t)
-	directory := filepath.Join(root, "0.42.0", "stable", "any", "docs")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatalf("create directory: %v", err)
+	artifactPath := filepath.Join(
+		root,
+		"0.42.0", "stable", "android", "apk",
+		"sprout-parent-app-v0.42.0.apk",
+	)
+	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o755); err != nil {
+		t.Fatalf("create artifact directory: %v", err)
 	}
 	payload := []byte("fresh artifact")
-	if err := os.WriteFile(filepath.Join(directory, "note.txt"), payload, 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
+	if err := os.WriteFile(artifactPath, payload, 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
 	}
 	sum := sha256.Sum256(payload)
 
-	digest, err := service.DigestForPath(context.Background(), "0.42.0/stable/any/docs/note.txt")
+	digest, err := service.DigestForPath(
+		context.Background(),
+		"0.42.0/stable/android/apk/sprout-parent-app-v0.42.0.apk",
+	)
 	if err != nil {
 		t.Fatalf("DigestForPath() returned unexpected error: %v", err)
 	}
@@ -950,5 +927,35 @@ func TestDigestForPathComputesOnDemand(t *testing.T) {
 	}
 	if _, err := service.DigestForPath(context.Background(), "../escape.txt"); err == nil {
 		t.Fatal("expected traversal path to be rejected")
+	}
+}
+
+// TestFindArtifactHashesUncachedArtifact guards the OTA path: a listing hit
+// without a digest must still produce a verifiable artifact for the device.
+func TestFindArtifactHashesUncachedArtifact(t *testing.T) {
+	service, _ := newTestService(t)
+	relativePath := "0.43.0/stable/linux/device-platform/sprout-device-platform-v0.43.0-linux-amd64"
+	payload := []byte("binary payload")
+	if _, err := service.UploadFile(
+		context.Background(),
+		domain.UploadInput{RelativePath: relativePath},
+		bytes.NewReader(payload),
+	); err != nil {
+		t.Fatalf("seed upload: %v", err)
+	}
+	if _, err := service.RefreshIndex(
+		context.Background(),
+		domain.IndexRefreshRequest{Version: "0.43.0", Channel: "stable"},
+	); err != nil {
+		t.Fatalf("refresh release index: %v", err)
+	}
+	sum := sha256.Sum256(payload)
+
+	lookup, err := service.FindArtifact(context.Background(), "0.43.0", "device-platform", "linux", "stable")
+	if err != nil {
+		t.Fatalf("FindArtifact() returned unexpected error: %v", err)
+	}
+	if lookup.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("unexpected digest: got %q", lookup.SHA256)
 	}
 }

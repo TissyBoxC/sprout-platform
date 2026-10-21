@@ -68,6 +68,11 @@ type Service struct {
 	inventoryDigestMu   sync.Mutex
 	inventoryDigests    map[string]cachedInventoryDigest
 	inventoryDigestKeys []string
+	// A single background hasher keeps repeated page loads from queueing
+	// readers against a store that already saturates the disk.
+	digestWarmUpRunning atomic.Bool
+	digestWarmUpContext context.Context
+	digestWarmUpCancel  context.CancelFunc
 	artifactReadBarrier func([]byte)
 }
 
@@ -165,7 +170,11 @@ func New(options Options) (*Service, error) {
 		inventoryStat:       root.Stat,
 		inventoryDigests:    make(map[string]cachedInventoryDigest),
 	}
+	service.digestWarmUpContext, service.digestWarmUpCancel = context.WithCancel(
+		context.Background(),
+	)
 	if err := service.loadImmutableIndex(); err != nil {
+		service.digestWarmUpCancel()
 		_ = root.Close()
 		return nil, err
 	}
@@ -209,10 +218,13 @@ func (s *Service) persistImmutableIndex() error {
 	})
 }
 
-// Close releases the root handle.
+// Close cancels any background digest warm-up and releases the root handle.
 func (s *Service) Close() error {
 	if s == nil || s.root == nil {
 		return nil
+	}
+	if s.digestWarmUpCancel != nil {
+		s.digestWarmUpCancel()
 	}
 	rootErr := s.root.Close()
 	if s.staging != nil && s.staging != s.root {
@@ -226,15 +238,15 @@ func (s *Service) Close() error {
 // Inventory returns every regular file in the store. Canonical release
 // artifacts are annotated with their parsed release metadata.
 //
-// Digests are warmed concurrently before the walk. Hashing serially read 6.1 GB
-// and took 96s, which exceeded the client timeout; a cold store now finishes
-// within a few seconds of parallel reads.
+// The listing never hashes inside the request. This store holds 6.1 GB and the
+// host throttles disk I/O, so even eight parallel readers needed 52s, far past
+// the operator page's 15s timeout. Digests are warmed in the background and a
+// file without one is listed with an empty digest until the next refresh.
 func (s *Service) Inventory(ctx context.Context) (domain.Inventory, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.Inventory{}, err
 	}
 	indexedArtifacts := s.indexedArtifactSet()
-	s.warmInventoryDigests(ctx, s.inventoryDigestCandidates(ctx))
 	files := make([]domain.File, 0)
 	err := s.walkInventory(ctx, ".", func(relativePath string, info os.FileInfo) error {
 		if err := ctx.Err(); err != nil {
@@ -264,12 +276,32 @@ func (s *Service) Inventory(ctx context.Context) (domain.Inventory, error) {
 	sort.SliceStable(files, func(left int, right int) bool {
 		return files[left].RelativePath < files[right].RelativePath
 	})
+	s.startInventoryDigestWarmUp()
 	return domain.Inventory{
 		RootDir:       s.rootDir,
 		PublicBaseURL: s.publicBaseURL,
 		Files:         files,
 		GeneratedAt:   s.clock.Now().UTC(),
 	}, nil
+}
+
+// startInventoryDigestWarmUp hashes uncached artifacts in the background so a
+// later listing can report them. The request context is deliberately not used:
+// the work outlives the response that triggered it, and the service context
+// ends it at shutdown. A second call while one is running is a no-op, so
+// repeated page loads do not pile up readers.
+func (s *Service) startInventoryDigestWarmUp() {
+	if !s.digestWarmUpRunning.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer s.digestWarmUpRunning.Store(false)
+		ctx := s.digestWarmUpContext
+		if ctx == nil {
+			return
+		}
+		s.warmInventoryDigests(ctx, s.inventoryDigestCandidates(ctx))
+	}()
 }
 
 // inventoryDigestCandidates lists canonical release artifacts whose digest is
@@ -689,16 +721,24 @@ func (s *Service) FindArtifact(
 		if !file.IsIndexed ||
 			file.Release == nil ||
 			!strings.HasPrefix(file.RelativePath, expectedPrefix) ||
-			file.DownloadURL == "" ||
-			file.SHA256 == "" {
+			file.DownloadURL == "" {
 			continue
+		}
+		// The listing skips digests it has not cached yet, but a device must
+		// receive a verifiable artifact, so the matched file is hashed here.
+		digest := file.SHA256
+		if digest == "" {
+			digest, err = s.DigestForPath(ctx, file.RelativePath)
+			if err != nil {
+				continue
+			}
 		}
 		return &ArtifactLookup{
 			Version:     file.Release.Version,
 			Kind:        kind,
 			Platform:    file.Release.Platform,
 			DownloadURL: file.DownloadURL,
-			SHA256:      file.SHA256,
+			SHA256:      digest,
 		}, nil
 	}
 	return nil, domain.ErrArtifactNotFound

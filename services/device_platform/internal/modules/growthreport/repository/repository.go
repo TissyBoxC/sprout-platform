@@ -325,7 +325,7 @@ func (r *Repository) ChildrenForFamily(
 	familyID string,
 ) ([]string, error) {
 	const query = `
-		SELECT child_id::text
+		SELECT id::text
 		FROM child_profiles
 		WHERE family_id = $1
 		ORDER BY created_at`
@@ -354,7 +354,7 @@ func (r *Repository) FamiliesWithChildren(
 	ctx context.Context,
 ) (map[string][]string, error) {
 	const query = `
-		SELECT family_id::text, child_id::text
+		SELECT family_id::text, id::text
 		FROM child_profiles
 		ORDER BY family_id, created_at`
 	rows, err := r.pool.Query(ctx, query)

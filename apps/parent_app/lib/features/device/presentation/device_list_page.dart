@@ -10,6 +10,7 @@ import '../../ota/device_firmware/presentation/device_firmware_update_panel.dart
 import '../application/device_binding_controller.dart';
 import '../data/device_binding_api.dart';
 import '../domain/device_provisioning_status.dart';
+import 'device_child_panel.dart';
 
 /// Lists bound devices and starts QR or nearby-device provisioning.
 class DeviceListPage extends ConsumerWidget {
@@ -368,6 +369,8 @@ class DeviceListPage extends ConsumerWidget {
                   status: device.runtime?.provisioning,
                   onReconnect: () => Navigator.of(sheetContext).pop(true),
                 ),
+                const SizedBox(height: 20),
+                DeviceChildPanel(deviceId: device.deviceId),
                 const SizedBox(height: 20),
                 Text(
                   '设备能力',

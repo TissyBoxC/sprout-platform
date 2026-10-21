@@ -384,6 +384,29 @@ func growthReportReadinessProbe(
 	)
 }
 
+// deviceChildBindingProbe verifies the binding table is readable.
+//
+// It is a real read: without migration 0081 a multi-child family gets a 409 on
+// device memory sync, which is exactly the failure an operator must see instead
+// of a green row.
+func deviceChildBindingProbe(
+	repository interface {
+		CountBindings(ctx context.Context) (int, error)
+	},
+) featureCenterService.HealthProbe {
+	return featureCenterService.HealthProbeFunc(
+		func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+			if repository == nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			if _, err := repository.CountBindings(ctx); err != nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			return featureCenterDomain.HealthHealthy, nil
+		},
+	)
+}
+
 // notificationReadinessProbe validates the durable notification store without
 // treating optional external senders as a prerequisite. In-app notifications
 // are built in; failed delivery rows are the actionable degradation signal.

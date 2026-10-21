@@ -248,6 +248,12 @@ func DefaultRegistry() []Definition {
 				"growth_report_child_count", "已生成报告的儿童", "个",
 				"growth_report_stale_days", "距上次生成", "天",
 			)),
+		readOnlyFeatureDef("device_child_binding", "设备儿童绑定", "一台设备当前服务哪个儿童，支持多孩家庭在同一台设备上切换身份。", "family", "家庭平台",
+			"绑定由监护人在家长端选择，设备按会话读取当前儿童；功能中心只展示绑定覆盖率，不展示儿童姓名。",
+			metrics(
+				"device_child_bound_count", "已指定儿童的设备", "台",
+				"device_child_unassigned_count", "未指定儿童的设备", "台",
+			)),
 		readOnlyFeatureDef("local_command", "本地指令", "断网可用的本地设备指令。", "content", "内容平台",
 			"本地指令随离线内容下发并由设备执行，功能中心只提供能力状态和统计。",
 			metrics(

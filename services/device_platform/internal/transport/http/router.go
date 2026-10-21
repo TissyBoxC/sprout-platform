@@ -44,6 +44,7 @@ import (
 	localcommandservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
 	memoryservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/service"
 	growthreportservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/service"
+	devicechildservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/devicechild/service"
 	motionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
 	notificationhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/handler"
 	notificationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
@@ -126,6 +127,7 @@ type RouterOptions struct {
 	ScreenService                *screenservice.Service
 	MemoryService                *memoryservice.Service
 	GrowthReportService          *growthreportservice.Service
+	DeviceChildService           *devicechildservice.Service
 	// MemoryChildResolver maps a device's family to its child profile for the
 	// memory sync routes. The routes are registered only when it is set, so a
 	// deployment that does not wire it keeps answering 404 instead of syncing a
@@ -629,6 +631,49 @@ func NewRouter(options RouterOptions) http.Handler {
 					adminReports.list,
 				),
 			)
+		}
+		if options.DeviceChildService != nil {
+			guardianBindings := guardianBindingHandler{
+				service: options.DeviceChildService,
+			}
+			requireBindingManage := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionChildManage,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
+			mux.HandleFunc(
+				"PUT /api/v1/families/{family_id}/devices/{device_id}/child",
+				requireBindingManage(guardianBindings.activate),
+			)
+			mux.HandleFunc(
+				"DELETE /api/v1/families/{family_id}/devices/{device_id}/child",
+				requireBindingManage(guardianBindings.clear),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/families/{family_id}/devices/{device_id}/child-history",
+				requireBindingManage(guardianBindings.history),
+			)
+			// The device asks with its own session token, because a robot at
+			// bedtime has no logged-in guardian to ask on its behalf.
+			if options.BindingService != nil {
+				deviceChildBindings := deviceChildBindingHandler{
+					service: options.DeviceChildService,
+				}
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/child",
+					requireDeviceSession(options.BindingService, deviceChildBindings.current),
+				)
+			}
 		}
 		if options.AlarmReminderService != nil {
 			alarmReminderHandler := alarmReminderHandler{service: options.AlarmReminderService}

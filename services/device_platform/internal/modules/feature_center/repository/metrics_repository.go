@@ -419,6 +419,21 @@ func (r *MetricsRepository) FeatureMetrics(
 			"growth_report_child_count",
 			"growth_report_stale_days",
 		)
+	case "device_child_binding":
+		// Coverage, not identity: an operator needs to know how many devices
+		// still have no child chosen, never which child a device serves.
+		return r.pair(
+			ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM device_child_bindings WHERE is_active),
+				(SELECT COUNT(*) FROM device_bindings d
+				 WHERE NOT EXISTS (
+					SELECT 1 FROM device_child_bindings b
+					WHERE b.device_id = d.device_id AND b.is_active
+				 ))`,
+			"device_child_bound_count",
+			"device_child_unassigned_count",
+		)
 	case "local_command":
 		return r.scalar(ctx,
 			"SELECT COUNT(*) FROM local_commands",

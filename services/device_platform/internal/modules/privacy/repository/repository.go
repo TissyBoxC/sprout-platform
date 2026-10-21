@@ -750,6 +750,9 @@ func (r *PostgresRepository) PurgeParentData(
 		// still identifiable, so a deleted account must not leave the summaries
 		// behind.
 		{`DELETE FROM growth_reports WHERE family_id = $1`, "growth reports"},
+		// Binding history records which child used which device; it must go with
+		// the family even though the rows also reference child_profiles.
+		{`DELETE FROM device_child_bindings WHERE family_id = $1`, "device child bindings"},
 		{`DELETE FROM alarm_reminder_events WHERE family_id = $1`, "alarm reminder events"},
 		{`DELETE FROM alarm_reminders WHERE family_id = $1`, "alarm reminders"},
 		{`DELETE FROM english_practice_attempts WHERE family_id = $1`, "english practice attempts"},

@@ -1030,6 +1030,130 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "503":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/families/{family_id}/devices/{device_id}/child:
+    put:
+      summary: 指定设备当前使用的儿童
+      description: |
+        把某个儿童设为这台设备的当前儿童。同一台设备在同一时刻只有一个当前儿童；
+        切换时旧的关联会被关闭并保留历史，不会被删除。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - child_id
+              properties:
+                child_id:
+                  type: string
+      responses:
+        "200":
+          description: 已切换
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceChildBindingEnvelope"
+        "400":
+          description: 未选择儿童
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 儿童或设备不属于当前家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          $ref: "#/components/responses/DeviceServiceError"
+    delete:
+      summary: 清除设备当前使用的儿童
+      description: 只关闭当前关联，历史记录保留。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: 已清除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: 这台设备当前没有正在使用的儿童
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/families/{family_id}/devices/{device_id}/child-history:
+    get:
+      summary: 查询设备用过的儿童
+      description: 按当前优先、时间倒序返回这台设备服务过的儿童，用于核对多孩家庭的切换记录。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: 切换历史
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceChildHistoryEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/child:
+    get:
+      summary: 设备读取当前儿童
+      description: |
+        设备用会话令牌读取自己当前服务的儿童。state 为 assigned 时 child_id 有值；
+        no_child 表示家庭还没有儿童档案，unassigned 表示有儿童但尚未指定。
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: 当前儿童状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceChildStateEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: 找不到这台设备
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          $ref: "#/components/responses/DeviceServiceError"
   /api/v1/families/{family_id}/children/{child_id}/memories:
     get:
       summary: 读取一个儿童的全部长期记忆
@@ -22249,6 +22373,91 @@ components:
       type: string
       description: 记忆标识，小写 snake_case，用于设备与家长端定位同一条事实。
       pattern: "^[a-z][a-z0-9_]{1,63}$"
+    DeviceChildBindingEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - binding
+              properties:
+                binding:
+                  type: object
+                  additionalProperties: false
+                  required:
+                    - device_id
+                    - child_id
+                    - activated_at
+                  properties:
+                    device_id:
+                      type: string
+                    child_id:
+                      type: string
+                    activated_at:
+                      type: string
+                      format: date-time
+    DeviceChildHistoryEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - child_id
+        - is_active
+        - activated_at
+      properties:
+        child_id:
+          type: string
+        is_active:
+          type: boolean
+        activated_at:
+          type: string
+          format: date-time
+        deactivated_at:
+          type: string
+          format: date-time
+          description: 只在非当前关联上出现。
+    DeviceChildHistoryEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - history
+              properties:
+                history:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/DeviceChildHistoryEntry"
+    DeviceChildStateEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - state
+                - child_count
+              properties:
+                state:
+                  type: string
+                  enum:
+                    - assigned
+                    - no_child
+                    - unassigned
+                child_id:
+                  type: string
+                  description: 仅在 state 为 assigned 时出现。
+                child_count:
+                  type: integer
+                  minimum: 0
+                  description: 家庭里的儿童数量，用于区分「还没建档」和「还没选」。
     GrowthReportPeriodType:
       type: string
       description: 报告周期。周报按 UTC 周一开始，月报按自然月。

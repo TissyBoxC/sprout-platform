@@ -715,6 +715,7 @@ func TestDefaultRegistryCoversRequiredFeatures(t *testing.T) {
 		"companionship",
 		"child_memory",
 		"growth_report",
+		"device_child_binding",
 		"local_command",
 		"offline_content",
 		"content_engagement",
@@ -932,6 +933,8 @@ func TestDefaultRegistryMetricsHaveVerifiableSource(t *testing.T) {
 		"growth_report_count":                   {},
 		"growth_report_child_count":             {},
 		"growth_report_stale_days":              {},
+		"device_child_bound_count":             {},
+		"device_child_unassigned_count":        {},
 	}
 	for _, definition := range DefaultRegistry() {
 		for _, metric := range definition.Feature.ReadOnlyMetrics {

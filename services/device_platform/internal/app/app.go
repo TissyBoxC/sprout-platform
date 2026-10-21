@@ -79,6 +79,8 @@ import (
 	memoryService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/service"
 	growthReportRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/repository"
 	growthReportService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/service"
+	deviceChildRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/devicechild/repository"
+	deviceChildService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/devicechild/service"
 	motionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/repository"
 	motionRuntimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
 	notificationDelivery "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/delivery"
@@ -266,6 +268,12 @@ func Run() error {
 		nil,
 		0,
 	)
+	// Device-to-child binding replaces the old "family has one child" guess, so
+	// voice, memory and reports can all resolve the same active child.
+	deviceChildPersistence := deviceChildRepository.NewRepository(
+		databaseStore.Pool(),
+	)
+	deviceChildren := deviceChildService.NewService(deviceChildPersistence, logger)
 	childProfileService, err := childService.New(childService.Options{
 		Repository:        childPersistence,
 		PolicyProvisioner: parentPolicyService,
@@ -668,6 +676,10 @@ func Run() error {
 	featureCenterHealthProbes["growth_report"] = growthReportReadinessProbe(
 		growthReports,
 	)
+	featureCenterHealthProbes["device_child_binding"] = deviceChildBindingProbe(
+		deviceChildPersistence,
+	)
+
 	privacy, err := privacyService.New(privacyService.Options{
 		Repository:     privacyRepository.NewPostgresRepository(databaseStore.Pool()),
 		ParentAccounts: authPersistence,
@@ -1069,6 +1081,7 @@ func Run() error {
 			MemoryService:                childMemory,
 			MemoryChildResolver:          memoryRepository.NewDeviceChildResolver(databaseStore.Pool()),
 			GrowthReportService:          growthReports,
+			DeviceChildService:           deviceChildren,
 			AuditRecorder:                privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

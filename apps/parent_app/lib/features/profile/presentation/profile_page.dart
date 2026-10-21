@@ -853,6 +853,14 @@ class _SettingsCard extends StatelessWidget {
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(
+            leading: const Icon(Icons.psychology_alt_outlined),
+            title: const Text('记忆'),
+            subtitle: const Text('查看和修改机器人记住的事情'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => context.push('/me/memories'),
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
             leading: const Icon(Icons.mark_email_unread_outlined),
             title: const Text('消息通知'),
             subtitle: const Text('查看平台通知，给设备留言'),

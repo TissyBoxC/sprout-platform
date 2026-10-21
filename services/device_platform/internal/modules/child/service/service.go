@@ -34,10 +34,19 @@ type PolicyProvisioner interface {
 	) error
 }
 
+// ChildDataPurger removes the child-scoped data owned by another module when a
+// profile is deleted. It is optional: a deployment that does not wire a purger
+// still deletes the profile, and the owning module's own cascade or retention
+// window remains the fallback.
+type ChildDataPurger interface {
+	DeleteForChild(ctx context.Context, childID string) error
+}
+
 // Service owns child profile validation and persistence.
 type Service struct {
 	repository        repository.Repository
 	policyProvisioner PolicyProvisioner
+	childDataPurgers  []ChildDataPurger
 	readinessReader   ReadinessReader
 	timeSource        clock.Clock
 }
@@ -46,6 +55,7 @@ type Service struct {
 type Options struct {
 	Repository        repository.Repository
 	PolicyProvisioner PolicyProvisioner
+	ChildDataPurgers  []ChildDataPurger
 	ReadinessReader   ReadinessReader
 	Clock             clock.Clock
 }
@@ -68,6 +78,7 @@ func New(options Options) (*Service, error) {
 	return &Service{
 		repository:        options.Repository,
 		policyProvisioner: options.PolicyProvisioner,
+		childDataPurgers:  options.ChildDataPurgers,
 		readinessReader:   readinessReader,
 		timeSource:        timeSource,
 	}, nil
@@ -272,7 +283,12 @@ func (s *Service) Get(
 	return child, nil
 }
 
-// Delete removes one child profile and its dependent policy.
+// Delete removes one child profile together with every child-scoped record that
+// other modules own (policy, long-term memories).
+//
+// The dependent purges run before the profile row disappears so each purger can
+// still see the child. A purge failure aborts the deletion instead of leaving
+// the child's personal data behind after the guardian asked for it to be gone.
 func (s *Service) Delete(
 	ctx context.Context,
 	familyID string,
@@ -283,6 +299,14 @@ func (s *Service) Delete(
 	}
 	if s.policyProvisioner != nil {
 		if err := s.policyProvisioner.DeleteForChild(ctx, childID); err != nil {
+			return err
+		}
+	}
+	for _, purger := range s.childDataPurgers {
+		if purger == nil {
+			continue
+		}
+		if err := purger.DeleteForChild(ctx, childID); err != nil {
 			return err
 		}
 	}

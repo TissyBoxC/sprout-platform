@@ -42,6 +42,7 @@ import (
 	inputservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/service"
 	learningvisualizationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/learning_visualization/service"
 	localcommandservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
+	memoryservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/service"
 	motionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
 	notificationhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/handler"
 	notificationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
@@ -122,7 +123,13 @@ type RouterOptions struct {
 	WearableService              *wearableservice.Service
 	DeviceMeshService            *devicemeshservice.Service
 	ScreenService                *screenservice.Service
-	AuditRecorder                auditRecorder
+	MemoryService                *memoryservice.Service
+	// MemoryChildResolver maps a device's family to its child profile for the
+	// memory sync routes. The routes are registered only when it is set, so a
+	// deployment that does not wire it keeps answering 404 instead of syncing a
+	// guessed child.
+	MemoryChildResolver memoryDeviceChildResolver
+	AuditRecorder       auditRecorder
 	// Billing groups the billing domain services. A nil entry disables only
 	// the routes that need it, so the rest of the platform still starts.
 	Billing BillingOptions
@@ -517,6 +524,75 @@ func NewRouter(options RouterOptions) http.Handler {
 				"DELETE /api/v1/companionship/habit-reminders/{reminder_id}",
 				requireCompanionshipManage(companionshipHandler.deleteHabitReminder),
 			)
+		}
+		if options.MemoryService != nil {
+			memoryEndpoints := memoryHandler{service: options.MemoryService}
+			// Reading a memory exposes the child's own statements, so it needs the
+			// child read action; writing or deleting one changes the data subject's
+			// record and therefore needs the manage action.
+			requireMemoryRead := func(next func(
+				http.ResponseWriter,
+				*http.Request,
+				string,
+			)) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionChildRead,
+						next,
+					),
+				)
+			}
+			requireMemoryManage := func(next func(
+				http.ResponseWriter,
+				*http.Request,
+				string,
+			)) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionChildManage,
+						next,
+					),
+				)
+			}
+			mux.HandleFunc(
+				"GET /api/v1/families/{family_id}/memories",
+				requireMemoryRead(memoryEndpoints.overview),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/families/{family_id}/children/{child_id}/memories",
+				requireMemoryRead(memoryEndpoints.list),
+			)
+			mux.HandleFunc(
+				"PUT /api/v1/families/{family_id}/children/{child_id}/memories",
+				requireMemoryManage(memoryEndpoints.set),
+			)
+			mux.HandleFunc(
+				"DELETE /api/v1/families/{family_id}/children/{child_id}/memories",
+				requireMemoryManage(memoryEndpoints.removeAll),
+			)
+			mux.HandleFunc(
+				"DELETE /api/v1/families/{family_id}/children/{child_id}/memories/{memory_key}",
+				requireMemoryManage(memoryEndpoints.remove),
+			)
+			// Devices sync with a device session token instead of a guardian
+			// credential, because the robot has no logged-in guardian at bedtime.
+			if options.BindingService != nil && options.MemoryChildResolver != nil {
+				deviceMemoryEndpoints := deviceMemoryHandler{
+					handler:        options.MemoryService,
+					familyResolver: options.RuntimeService,
+					childResolver:  options.MemoryChildResolver,
+				}
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/memories",
+					requireDeviceSession(options.BindingService, deviceMemoryEndpoints.syncForDevice),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/memories",
+					requireDeviceSession(options.BindingService, deviceMemoryEndpoints.upsertForDevice),
+				)
+			}
 		}
 		if options.AlarmReminderService != nil {
 			alarmReminderHandler := alarmReminderHandler{service: options.AlarmReminderService}

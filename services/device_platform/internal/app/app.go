@@ -75,6 +75,8 @@ import (
 	localCommandDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/domain"
 	localCommandRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/repository"
 	localCommandService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
+	memoryRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/repository"
+	memoryService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/service"
 	motionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/repository"
 	motionRuntimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
 	notificationDelivery "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/delivery"
@@ -238,9 +240,27 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create parent policy service: %w", err)
 	}
+	// Child memories are the only durable copy of what a child told the robot,
+	// so the per-child cap and the retention window are explicit configuration
+	// rather than constants buried in the module.
+	memoryPersistence := memoryRepository.NewPostgresRepository(databaseStore.Pool())
+	childMemory, err := memoryService.New(memoryService.Options{
+		Repository:    memoryPersistence,
+		RetentionDays: cfg.Memory.RetentionDays,
+		ChildLimit:    cfg.Memory.ChildLimit,
+	})
+	if err != nil {
+		return fmt.Errorf("create child memory service: %w", err)
+	}
 	childProfileService, err := childService.New(childService.Options{
 		Repository:        childPersistence,
 		PolicyProvisioner: parentPolicyService,
+		// A deleted child profile must take every module-owned child record with
+		// it. Registering the memory purger here keeps the child module free of a
+		// hard dependency on the memory module while making the cascade automatic.
+		ChildDataPurgers: []childService.ChildDataPurger{
+			childDataPurgerFunc(childMemory.DeleteForChild),
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("create child profile service: %w", err)
@@ -439,6 +459,7 @@ func Run() error {
 		"english_learning":       placeholderHealthProbe{},
 		"alarm_reminder":         placeholderHealthProbe{},
 		"companionship":          placeholderHealthProbe{},
+		"child_memory":           placeholderHealthProbe{},
 		"local_command":          placeholderHealthProbe{},
 		"offline_content":        placeholderHealthProbe{},
 		"content_engagement":     placeholderHealthProbe{},
@@ -721,6 +742,10 @@ func Run() error {
 			return string(readiness.State)
 		},
 	)
+	// Child memory health is a real table read: the probe counts stored rows and
+	// children that already saturated the per-child cap. A missing migration
+	// therefore reports unavailable instead of a fabricated healthy state.
+	featureCenterHealthProbes["child_memory"] = childMemoryReadinessProbe(childMemory)
 	featurePersistence := featureCenterRepository.NewPostgresRepository(
 		databaseStore.Pool(),
 	)
@@ -736,9 +761,12 @@ func Run() error {
 	featureCenter.SetRuntimeSettingsReader(operations)
 	featureCenter.SetModelCatalogReader(aiModelCatalogReader{service: aiAccountService})
 	featureCenter.SetMetricsReader(featureCenterMetricsReader{
-		repository: featureCenterRepository.NewMetricsRepository(
+		repository: featureCenterRepository.NewMetricsRepositoryWithOptions(
 			databaseStore.Pool(),
-			cfg.DeviceRuntime.OfflineThreshold,
+			featureCenterRepository.MetricsOptions{
+				OnlineThreshold:     cfg.DeviceRuntime.OfflineThreshold,
+				MemoryRetentionDays: childMemory.RetentionDays(),
+			},
 		),
 		serviceVersions: serviceVersions,
 		releaseStore:    releaseStore,
@@ -1021,6 +1049,8 @@ func Run() error {
 			WearableService:              wearable,
 			DeviceMeshService:            deviceMesh,
 			ScreenService:                screen,
+			MemoryService:                childMemory,
+			MemoryChildResolver:          memoryRepository.NewDeviceChildResolver(databaseStore.Pool()),
 			AuditRecorder:                privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -1039,7 +1069,7 @@ func Run() error {
 	}()
 
 	go runDeletionWorker(runtimeCtx, logger, privacy)
-	go runRetentionWorker(runtimeCtx, logger, privacy, vision)
+	go runRetentionWorker(runtimeCtx, logger, privacy, vision, childMemory)
 	go runFeatureHealthScheduler(runtimeCtx, logger, featureCenter)
 	go runNotificationDeliveryWorker(
 		runtimeCtx,
@@ -1141,12 +1171,15 @@ func runDeletionWorker(
 // 0034 promises that expired vision results are removed by "the same retention
 // job that prunes sensitive caches"; this is that job. It also reclaims expired
 // authentication artefacts so a long-running deployment does not accumulate
-// dead sessions, challenge hashes, verification codes, or export receipts.
+// dead sessions, challenge hashes, verification codes, or export receipts, and
+// it applies the child memory retention window so a fact that is never
+// reinforced again does not outlive its disclosed lifetime.
 func runRetentionWorker(
 	ctx context.Context,
 	logger *slog.Logger,
 	privacy *privacyService.Service,
 	vision *visionService.Service,
+	childMemory *memoryService.Service,
 ) {
 	const interval = time.Hour
 	ticker := time.NewTicker(interval)
@@ -1190,6 +1223,20 @@ func runRetentionWorker(
 					"vision retention worker pruned data",
 					"expired_tasks", expiredTasks,
 					"deleted_results", deletedResults,
+				)
+			}
+		}
+		if childMemory != nil {
+			// Only the removed count is logged: a memory value is child personal
+			// information and must never reach a log line.
+			purgedMemories, err := childMemory.PurgeExpired(ctx)
+			if err != nil {
+				logger.Error("child memory retention worker failed", "error", err)
+			} else if purgedMemories > 0 {
+				logger.Info(
+					"child memory retention worker purged expired memories",
+					"total", purgedMemories,
+					"retention_days", childMemory.RetentionDays(),
 				)
 			}
 		}
@@ -1379,4 +1426,14 @@ func (g aiQuotaGrader) adjust(
 		return fmt.Errorf("adjust AI quota for %s: %w", parentAccountID, err)
 	}
 	return nil
+}
+
+// childDataPurgerFunc adapts one purge method to the child module's
+// ChildDataPurger contract, so the child service never imports the memory
+// module and the wiring stays in this composition root.
+type childDataPurgerFunc func(ctx context.Context, childID string) error
+
+// DeleteForChild runs the adapted purge.
+func (purge childDataPurgerFunc) DeleteForChild(ctx context.Context, childID string) error {
+	return purge(ctx, childID)
 }

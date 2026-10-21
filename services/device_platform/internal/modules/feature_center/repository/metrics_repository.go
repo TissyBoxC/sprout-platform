@@ -66,6 +66,10 @@ type MetricsOptions struct {
 	// ChannelRegistry backs the payment channel metrics. Nil reports zero
 	// registered channels.
 	ChannelRegistry ChannelRegistryProbe
+	// MemoryRetentionDays is the child memory retention window the memory module
+	// enforces. It is configuration, not stored data, and 0 means the memory
+	// module is not wired in this deployment.
+	MemoryRetentionDays int
 }
 
 // MetricsRepository answers the read-only metric keys declared by the feature
@@ -74,9 +78,10 @@ type MetricsOptions struct {
 // verify. A key with no reliable source is intentionally absent from the
 // result: the console then renders "not reported" instead of a fake number.
 type MetricsRepository struct {
-	pool            *pgxpool.Pool
-	onlineThreshold time.Duration
-	channels        ChannelRegistryProbe
+	pool                *pgxpool.Pool
+	onlineThreshold     time.Duration
+	channels            ChannelRegistryProbe
+	memoryRetentionDays int
 }
 
 // NewMetricsRepository creates a live feature metric source. A non-positive
@@ -101,9 +106,10 @@ func NewMetricsRepositoryWithOptions(
 		onlineThreshold = defaultOnlineThreshold
 	}
 	return &MetricsRepository{
-		pool:            pool,
-		onlineThreshold: onlineThreshold,
-		channels:        options.ChannelRegistry,
+		pool:                pool,
+		onlineThreshold:     onlineThreshold,
+		channels:            options.ChannelRegistry,
+		memoryRetentionDays: options.MemoryRetentionDays,
 	}
 }
 
@@ -380,6 +386,21 @@ func (r *MetricsRepository) FeatureMetrics(
 				(SELECT COUNT(*) FROM companionship_habit_reminders)`,
 			"companionship_record_count",
 			"habit_reminder_count",
+		)
+	case "child_memory":
+		// Only aggregate counters reach the console: a memory value is child
+		// personal information and must never appear in an operator metric. The
+		// retention column reports the window this repository is configured with
+		// (0 when unwired), so an operator never reads an invented policy.
+		return r.triadWithArgs(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM child_memories),
+				(SELECT COUNT(DISTINCT child_id) FROM child_memories),
+				$1::bigint`,
+			[]any{r.memoryRetentionDays},
+			"memory_count",
+			"memory_child_count",
+			"memory_retention_days",
 		)
 	case "local_command":
 		return r.scalar(ctx,

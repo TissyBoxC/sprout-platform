@@ -739,6 +739,13 @@ func (r *PostgresRepository) PurgeParentData(
 		{`DELETE FROM billing_orders WHERE parent_account_id = $1`, "billing orders"},
 		{`DELETE FROM companionship_growth_records WHERE family_id = $1`, "companionship growth records"},
 		{`DELETE FROM companionship_habit_reminders WHERE family_id = $1`, "companionship habit reminders"},
+		// Child long-term memories are the child's own statements, so they are
+		// deleted before child_profiles. The tombstone table is emptied in the
+		// same transaction: a leftover tombstone still ties a deletion fact to the
+		// family and would keep the child's memory keys discoverable after the
+		// account itself is anonymized.
+		{`DELETE FROM child_memory_tombstones WHERE family_id = $1`, "child memory tombstones"},
+		{`DELETE FROM child_memories WHERE family_id = $1`, "child memories"},
 		{`DELETE FROM alarm_reminder_events WHERE family_id = $1`, "alarm reminder events"},
 		{`DELETE FROM alarm_reminders WHERE family_id = $1`, "alarm reminders"},
 		{`DELETE FROM english_practice_attempts WHERE family_id = $1`, "english practice attempts"},

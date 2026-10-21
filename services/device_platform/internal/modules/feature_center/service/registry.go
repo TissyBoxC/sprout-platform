@@ -234,6 +234,13 @@ func DefaultRegistry() []Definition {
 				"companionship_record_count", "成长记录", "条",
 				"habit_reminder_count", "习惯提醒", "条",
 			)),
+		readOnlyFeatureDef("child_memory", "儿童长期记忆", "孩子的偏好与生活事实在云端按儿童保存，可跨设备延续。", "family", "家庭平台",
+			"记忆内容属于儿童个人信息，只在家长端按儿童查看、编辑和删除；功能中心只展示能力状态、保留策略和聚合统计。",
+			metrics(
+				"memory_count", "记忆总数", "条",
+				"memory_child_count", "已设置记忆的儿童", "个",
+				"memory_retention_days", "保留天数", "天",
+			)),
 		readOnlyFeatureDef("local_command", "本地指令", "断网可用的本地设备指令。", "content", "内容平台",
 			"本地指令随离线内容下发并由设备执行，功能中心只提供能力状态和统计。",
 			metrics(

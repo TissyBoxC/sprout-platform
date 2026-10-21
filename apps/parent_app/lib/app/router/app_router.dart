@@ -13,6 +13,7 @@ import '../../features/billing/presentation/billing_consent_page.dart';
 import '../../features/billing/presentation/billing_orders_page.dart';
 import '../../features/billing/presentation/billing_plans_page.dart';
 import '../../features/billing/presentation/spending_limit_page.dart';
+import '../../features/memory/presentation/memory_page.dart';
 import '../../features/bluetooth_audio/presentation/bluetooth_audio_page.dart';
 import '../../features/child_profile/presentation/child_profile_page.dart';
 import '../../features/companionship/presentation/companionship_page.dart';
@@ -161,6 +162,11 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/billing/spending-limit',
         builder: (context, state) => const SpendingLimitPage(),
+      ),
+      // 记忆页面展示儿童的对话记忆，属于监护人自己的数据访问入口。
+      GoRoute(
+        path: '/me/memories',
+        builder: (context, state) => const MemoryPage(),
       ),
       // 结算页必须带着选中的套餐进入；直接打开链接时没有可结算的内容。
       GoRoute(

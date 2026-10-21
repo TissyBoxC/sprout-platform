@@ -29,6 +29,7 @@ type Config struct {
 	ReleaseStore   ReleaseStoreConfig
 	VoiceGateway   VoiceGatewayConfig
 	Notification   NotificationConfig
+	Memory         MemoryConfig
 }
 
 // HTTPConfig contains HTTP server settings.
@@ -192,6 +193,35 @@ type NotificationConfig struct {
 	Email NotificationChannelConfig
 }
 
+// MemoryConfig bounds the child long-term memory store.
+//
+// RetentionDays is measured from the last reinforcement of a fact. The privacy
+// baseline requires the shortest practical retention, so the default is one
+// year and an operator may only shorten it within a sane range. ChildLimit is
+// the per-child key cap that stops a device from flooding the server.
+type MemoryConfig struct {
+	RetentionDays int
+	ChildLimit    int
+}
+
+const (
+	// defaultMemoryRetentionDays is the disclosed retention window for a child
+	// memory that is never reinforced again.
+	defaultMemoryRetentionDays = 365
+	// defaultMemoryChildLimit caps how many facts one child can hold. It is
+	// generous enough for a year of conversation and small enough that a
+	// compromised device cannot flood the store.
+	defaultMemoryChildLimit = 200
+	// minMemoryRetentionDays stops an operator from configuring a window so
+	// short that ordinary use would erase facts overnight.
+	minMemoryRetentionDays = 1
+	// maxMemoryRetentionDays stops an operator from configuring indefinite
+	// retention, which the child privacy baseline does not allow.
+	maxMemoryRetentionDays = 3650
+	minMemoryChildLimit    = 1
+	maxMemoryChildLimit    = 2000
+)
+
 // Load reads configuration from environment variables with local defaults.
 func Load() (Config, error) {
 	cfg := Config{
@@ -336,6 +366,16 @@ func Load() (Config, error) {
 				Token:    env("DEVICE_PLATFORM_NOTIFICATION_EMAIL_TOKEN", ""),
 			},
 		},
+		Memory: MemoryConfig{
+			RetentionDays: envInt(
+				"DEVICE_PLATFORM_MEMORY_RETENTION_DAYS",
+				defaultMemoryRetentionDays,
+			),
+			ChildLimit: envInt(
+				"DEVICE_PLATFORM_MEMORY_CHILD_LIMIT",
+				defaultMemoryChildLimit,
+			),
+		},
 	}
 
 	if cfg.Internal.Enabled && len(strings.TrimSpace(cfg.Internal.AuthToken)) < 32 {
@@ -389,6 +429,24 @@ func Load() (Config, error) {
 	}
 	if cfg.DeviceRuntime.CommandTTL <= 0 {
 		return Config{}, fmt.Errorf("DEVICE_PLATFORM_RUNTIME_COMMAND_TTL must be positive")
+	}
+	// The retention window and the per-child cap are child-privacy controls, so
+	// an out-of-range value stops startup instead of silently widening them.
+	if cfg.Memory.RetentionDays < minMemoryRetentionDays ||
+		cfg.Memory.RetentionDays > maxMemoryRetentionDays {
+		return Config{}, fmt.Errorf(
+			"DEVICE_PLATFORM_MEMORY_RETENTION_DAYS must be between %d and %d",
+			minMemoryRetentionDays,
+			maxMemoryRetentionDays,
+		)
+	}
+	if cfg.Memory.ChildLimit < minMemoryChildLimit ||
+		cfg.Memory.ChildLimit > maxMemoryChildLimit {
+		return Config{}, fmt.Errorf(
+			"DEVICE_PLATFORM_MEMORY_CHILD_LIMIT must be between %d and %d",
+			minMemoryChildLimit,
+			maxMemoryChildLimit,
+		)
 	}
 	if !strings.HasPrefix(strings.TrimSpace(cfg.ServiceVersion.StateDir), "/") {
 		return Config{}, fmt.Errorf("DEVICE_PLATFORM_SERVICE_VERSION_STATE_DIR must be an absolute path")

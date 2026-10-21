@@ -18,6 +18,7 @@ import (
 
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
+	memoryDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/domain"
 	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 )
@@ -571,5 +572,71 @@ func TestRouterReceivesEveryConstructedService(t *testing.T) {
 				name,
 			)
 		}
+	}
+}
+
+// memoryReadinessStub is a scripted memory readiness source.
+type memoryReadinessStub struct {
+	readiness memoryDomain.Readiness
+	err       error
+}
+
+// Readiness returns the scripted snapshot.
+func (stub memoryReadinessStub) Readiness(
+	context.Context,
+) (memoryDomain.Readiness, error) {
+	return stub.readiness, stub.err
+}
+
+func TestChildMemoryReadinessProbeReportsHealthyOnEmptyStore(t *testing.T) {
+	probe := childMemoryReadinessProbe(memoryReadinessStub{
+		readiness: memoryDomain.Readiness{State: memoryDomain.ReadinessHealthy},
+	})
+	status, err := probe.Check(context.Background(), "child_memory")
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if status != featureCenterDomain.HealthHealthy {
+		t.Fatalf("status = %q, want healthy", status)
+	}
+}
+
+func TestChildMemoryReadinessProbeDegradesAtTheChildCap(t *testing.T) {
+	probe := childMemoryReadinessProbe(memoryReadinessStub{
+		readiness: memoryDomain.Readiness{
+			State:               memoryDomain.ReadinessDegraded,
+			OverLimitChildCount: 1,
+		},
+	})
+	status, err := probe.Check(context.Background(), "child_memory")
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if status != featureCenterDomain.HealthDegraded {
+		t.Fatalf("status = %q, want degraded", status)
+	}
+}
+
+func TestChildMemoryReadinessProbeUnavailableOnReadFailure(t *testing.T) {
+	probe := childMemoryReadinessProbe(memoryReadinessStub{
+		err: errors.New("relation child_memories does not exist"),
+	})
+	status, err := probe.Check(context.Background(), "child_memory")
+	if err != nil {
+		t.Fatalf("check must not surface the storage error: %v", err)
+	}
+	if status != featureCenterDomain.HealthUnavailable {
+		t.Fatalf("status = %q, want unavailable", status)
+	}
+}
+
+func TestChildMemoryReadinessProbeUnavailableWithoutService(t *testing.T) {
+	probe := childMemoryReadinessProbe(nil)
+	status, err := probe.Check(context.Background(), "child_memory")
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if status != featureCenterDomain.HealthUnavailable {
+		t.Fatalf("status = %q, want unavailable", status)
 	}
 }

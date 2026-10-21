@@ -884,6 +884,292 @@ paths:
           $ref: "#/components/responses/ChildUnprocessable"
         "500":
           $ref: "#/components/responses/ChildServiceError"
+  /api/v1/families/{family_id}/memories:
+    get:
+      summary: 读取本家庭各儿童的长期记忆概览
+      description: |
+        返回每个儿童已保存的记忆标识、来源、置信度和版本号，不返回记忆内容。
+        记忆内容属于儿童个人信息，只能在单个儿童的记忆列表中查看、编辑或删除。
+        没有记忆的儿童不会出现在结果中。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+      responses:
+        "200":
+          description: 各儿童的记忆概览
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryFamilyOverviewEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 家庭不存在或不是当前账号所属家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/families/{family_id}/children/{child_id}/memories:
+    get:
+      summary: 读取一个儿童的全部长期记忆
+      description: |
+        监护人数据访问权：返回记忆中保存的原始内容。列表按记忆标识排序，
+        每条记忆带有 revision，家长端可以据此判断设备是否已同步。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/ChildId"
+      responses:
+        "200":
+          description: 该儿童的全部记忆
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryListEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 儿童不存在或不属于当前家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: 新增或修改一条儿童记忆
+      description: |
+        记忆标识使用小写字母、数字和下划线（例如 favorite_color、pet_name）。
+        家长写入的记忆以 guardian 来源、置信度 1 保存，并覆盖设备此前上报的同名记忆；
+        之后设备再上报同一标识不会覆盖家长的说法。达到单儿童条数上限时返回
+        409 memory_limit_exceeded。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/ChildId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryUpdateRequest"
+      responses:
+        "200":
+          description: 保存后的记忆
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 儿童不存在或不属于当前家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: 记忆条数已达单儿童上限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: 记忆标识、内容或置信度不合法
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    delete:
+      summary: 删除一个儿童的全部长期记忆
+      description: |
+        监护人“让机器人忘记这个孩子的一切”的操作。删除后同步版本号前移，
+        已绑定设备下次拉取时会清空本地对应记忆。该操作不可恢复。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/ChildId"
+      responses:
+        "200":
+          description: 已删除全部记忆
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryDeletedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 儿童不存在或不属于当前家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/families/{family_id}/children/{child_id}/memories/{memory_key}:
+    delete:
+      summary: 删除一个儿童的一条长期记忆
+      description: |
+        删除后该儿童的同步版本号前移，设备通过增量拉取得知这条记忆已被删除。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/ChildId"
+        - name: memory_key
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[a-z][a-z0-9_]{1,63}$"
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryDeletedEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 记忆或儿童不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: 记忆标识不合法
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/memories:
+    get:
+      summary: 设备按版本号增量拉取绑定儿童的记忆
+      description: |
+        设备会话鉴权。family 与 child 由设备绑定关系在服务端解析，请求不能指定。
+        since_revision 由设备保存；服务端返回该版本之后写入或删除的记忆。
+        revision 是下一次拉取应保存的游标：即使本次返回为空也要更新，否则
+        删除墓碑会被反复下发。deleted_keys 列出家长已删除的记忆标识。
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: since_revision
+          in: query
+          required: false
+          description: 设备已应用的最高版本号，缺省表示首次全量拉取
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      responses:
+        "200":
+          description: 增量记忆与新的同步版本号
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemorySyncEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "404":
+          description: 设备未绑定儿童档案
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: 家庭有多个儿童档案，无法确定设备对应的儿童
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: since_revision 不是非负整数
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    post:
+      summary: 设备批量上报绑定儿童的记忆
+      description: |
+        设备会话鉴权。整批校验：任意一条不合法则整批拒绝，不会写一半。
+        家长已写入的记忆不会被设备覆盖，设备上报只更新强化时间。
+        单次最多 200 条；单儿童达到条数上限时返回 409 memory_limit_exceeded。
+        响应中的 revision 可直接作为下一次拉取的 since_revision。
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryBatchRequest"
+      responses:
+        "200":
+          description: 已保存的记忆与新的同步版本号
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemorySyncEnvelope"
+        "400":
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "404":
+          description: 设备未绑定儿童档案
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: 记忆条数已达单儿童上限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: 批次为空、超过单次上限或存在不合法的记忆
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
   /api/v1/auth/register:
     post:
       summary: Register a guardian account and bootstrap its family
@@ -21837,6 +22123,229 @@ components:
               properties:
                 record_id:
                   type: string
+    MemorySource:
+      type: string
+      enum:
+        - conversation
+        - guardian
+        - device
+    MemoryKey:
+      type: string
+      description: 记忆标识，小写 snake_case，用于设备与家长端定位同一条事实。
+      pattern: "^[a-z][a-z0-9_]{1,63}$"
+    MemoryRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - child_id
+        - memory_key
+        - memory_value
+        - confidence
+        - source
+        - revision
+        - created_at
+        - updated_at
+        - last_reinforced_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        child_id:
+          type: string
+        memory_key:
+          $ref: "#/components/schemas/MemoryKey"
+        memory_value:
+          type: string
+          description: 记忆内容，可能是儿童个人信息，前端不得写入日志或埋点。
+          maxLength: 280
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        source:
+          $ref: "#/components/schemas/MemorySource"
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        last_reinforced_at:
+          type: string
+          format: date-time
+          description: 最近一次被再次确认的时间，保留期从这里计算。
+    MemoryUpdateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - memory_key
+        - memory_value
+      properties:
+        memory_key:
+          $ref: "#/components/schemas/MemoryKey"
+        memory_value:
+          type: string
+          minLength: 1
+          maxLength: 280
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+    MemoryBatchRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - memories
+      properties:
+        memories:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/MemoryUpdateRequest"
+    MemorySummary:
+      type: object
+      additionalProperties: false
+      required:
+        - memory_key
+        - source
+        - confidence
+        - revision
+        - updated_at
+        - last_reinforced_at
+      properties:
+        memory_key:
+          $ref: "#/components/schemas/MemoryKey"
+        source:
+          $ref: "#/components/schemas/MemorySource"
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        revision:
+          type: integer
+          format: int64
+        updated_at:
+          type: string
+          format: date-time
+        last_reinforced_at:
+          type: string
+          format: date-time
+    MemoryEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - memory
+              properties:
+                memory:
+                  $ref: "#/components/schemas/MemoryRecord"
+    MemoryListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - child_id
+                - memories
+              properties:
+                child_id:
+                  type: string
+                memories:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/MemoryRecord"
+    MemoryFamilyOverviewEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - children
+              properties:
+                children:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required:
+                      - child_id
+                      - memories
+                    properties:
+                      child_id:
+                        type: string
+                      memories:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/MemorySummary"
+    MemorySyncEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - child_id
+                - revision
+                - memories
+              properties:
+                child_id:
+                  type: string
+                since_revision:
+                  type: integer
+                  format: int64
+                revision:
+                  type: integer
+                  format: int64
+                  description: 下一次拉取应保存的同步游标。
+                memories:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/MemoryRecord"
+                deleted_keys:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/MemoryKey"
+    MemoryDeletedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - deleted
+              properties:
+                child_id:
+                  type: string
+                memory_key:
+                  $ref: "#/components/schemas/MemoryKey"
+                deleted:
+                  type: boolean
+                count:
+                  type: integer
+                  minimum: 0
+                revision:
+                  type: integer
+                  format: int64
     CompanionshipWeekday:
       type: integer
       minimum: 1

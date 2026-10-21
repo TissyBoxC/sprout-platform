@@ -12,6 +12,7 @@ import (
 	billingdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/domain"
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
+	memorydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/domain"
 	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 )
@@ -318,6 +319,43 @@ func familySpendingLimitProbe(
 			return featureCenterDomain.HealthHealthy, nil
 		},
 	)
+}
+
+// childMemoryReadinessProbe verifies that the child memory table is readable.
+//
+// It is a real read, not a configuration inspection: if migration
+// 0079_child_memories is missing, guardians cannot see a child's memories and
+// devices cannot sync them, so the console must show the feature as
+// unavailable rather than healthy. The probe reports degraded when a child has
+// saturated the per-child cap, because new facts for that child are refused.
+func childMemoryReadinessProbe(
+	service interface {
+		Readiness(ctx context.Context) (memorydomain.Readiness, error)
+	},
+) featureCenterService.HealthProbe {
+	return featureCenterService.HealthProbeFunc(
+		func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+			if service == nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			return mapMemoryReadiness(ctx, service)
+		},
+	)
+}
+
+// mapMemoryReadiness keeps the readiness-to-health mapping in one place so the
+// probe and its tests cannot drift.
+func mapMemoryReadiness(
+	ctx context.Context,
+	service interface {
+		Readiness(ctx context.Context) (memorydomain.Readiness, error)
+	},
+) (featureCenterDomain.HealthStatus, error) {
+	readiness, err := service.Readiness(ctx)
+	if err != nil {
+		return featureCenterDomain.HealthUnavailable, nil
+	}
+	return mapReadinessStatus(string(readiness.State)), nil
 }
 
 // notificationReadinessProbe validates the durable notification store without

@@ -861,6 +861,14 @@ class _SettingsCard extends StatelessWidget {
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(
+            leading: const Icon(Icons.insights_outlined),
+            title: const Text('成长报告'),
+            subtitle: const Text('每周、每月自动汇总练习与使用情况'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => context.push('/me/growth-reports'),
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
             leading: const Icon(Icons.mark_email_unread_outlined),
             title: const Text('消息通知'),
             subtitle: const Text('查看平台通知，给设备留言'),

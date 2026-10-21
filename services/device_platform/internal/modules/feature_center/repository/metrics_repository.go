@@ -402,6 +402,23 @@ func (r *MetricsRepository) FeatureMetrics(
 			"memory_child_count",
 			"memory_retention_days",
 		)
+	case "growth_report":
+		// The staleness column is what tells an operator whether the generator
+		// is still producing; a report count alone would look healthy forever.
+		// No report yet reports -1 so "never generated" differs from "fresh".
+		return r.triad(
+			ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM growth_reports),
+				(SELECT COUNT(DISTINCT child_id) FROM growth_reports),
+				(SELECT COALESCE(
+					EXTRACT(DAY FROM NOW() - MAX(generated_at))::bigint,
+					-1
+				) FROM growth_reports)`,
+			"growth_report_count",
+			"growth_report_child_count",
+			"growth_report_stale_days",
+		)
 	case "local_command":
 		return r.scalar(ctx,
 			"SELECT COUNT(*) FROM local_commands",

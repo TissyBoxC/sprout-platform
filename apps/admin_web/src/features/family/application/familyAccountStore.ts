@@ -6,6 +6,10 @@ import {
   readApiNotice,
   type ApiNotice,
 } from '@/api/apiNotice'
+import {
+  toGrowthReport,
+  type AdminGrowthReport,
+} from '@/features/family/application/growthReportRow'
 import { mapApiError, type ApiError } from '@/api/apiError'
 import {
   createAdminOperationsClient,
@@ -118,6 +122,8 @@ export interface AdminFamilySpendingLimit {
   updatedAt: string
 }
 
+export type { AdminGrowthReport }
+
 export interface AdminFamilyPagination {
   page: number
   pageSize: number
@@ -146,6 +152,11 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   const spendingLimitByFamily = ref<Record<string, AdminFamilySpendingLimit>>({})
   const spendingLimitErrorsByFamily = ref<Record<string, ApiError | null>>({})
   const spendingLimitLoadingCounts = ref<Record<string, number>>({})
+  /// Growth reports are keyed by family and hold the newest page only, which is
+  /// enough to answer whether the generator is producing for that household.
+  const growthReportsByFamily = ref<Record<string, AdminGrowthReport[]>>({})
+  const growthReportErrorsByFamily = ref<Record<string, ApiError | null>>({})
+  const growthReportLoadingCounts = ref<Record<string, number>>({})
   const isLoading = ref(false)
   const isLoadingModels = ref(false)
   const isSubmitting = ref(false)
@@ -177,6 +188,8 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
   const aiUsageLoadingSequences = new Map<string, number>()
   const spendingLimitRequestSequences = new Map<string, number>()
   const spendingLimitLoadingSequences = new Map<string, number>()
+  const growthReportRequestSequences = new Map<string, number>()
+  const growthReportLoadingSequences = new Map<string, number>()
   const pageStart = computed(() =>
     pagination.value.total === 0
       ? 0
@@ -486,11 +499,72 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
     }
   }
 
-  async function loadFamilies(
-    page: number,
-    reportError: boolean,
+  /// Loads the newest growth reports for one family so an operator can see
+  /// whether the generator has produced anything for this household.
+  async function loadFamilyGrowthReports(
+    parentAccountId: string,
   ): Promise<ApiError | null> {
-    return loadFamiliesWithPageSize(page, reportError, pagination.value.pageSize)
+    if (!parentAccountId) {
+      return null
+    }
+    const sequence = (growthReportRequestSequences.get(parentAccountId) ?? 0) + 1
+    growthReportRequestSequences.set(parentAccountId, sequence)
+    const loadingSequence = advanceLoadingSequence(
+      growthReportLoadingSequences,
+      parentAccountId,
+    )
+    updateCount(growthReportLoadingCounts, parentAccountId, 1)
+    setGrowthReportError(parentAccountId, null)
+    try {
+      const response = await httpClient.get(
+        `/api/v1/admin/families/${encodeURIComponent(parentAccountId)}/growth-reports`,
+        { params: { limit: 10 } },
+      )
+      if (growthReportRequestSequences.get(parentAccountId) !== sequence) {
+        return null
+      }
+      const reports = response.data?.data?.reports
+      growthReportsByFamily.value = {
+        ...growthReportsByFamily.value,
+        [parentAccountId]: Array.isArray(reports)
+          ? reports.map(toGrowthReport)
+          : [],
+      }
+      return null
+    } catch (caught: unknown) {
+      const mapped = mapApiError(caught)
+      if (growthReportRequestSequences.get(parentAccountId) === sequence) {
+        setGrowthReportError(parentAccountId, mapped)
+        return mapped
+      }
+      return null
+    } finally {
+      if (growthReportLoadingSequences.get(parentAccountId) === loadingSequence) {
+        resetCount(growthReportLoadingCounts, parentAccountId)
+      }
+    }
+  }
+
+  function setGrowthReportError(
+    parentAccountId: string,
+    value: ApiError | null,
+  ): void {
+    growthReportErrorsByFamily.value = {
+      ...growthReportErrorsByFamily.value,
+      [parentAccountId]: value,
+    }
+  }
+
+  function growthReportsFor(parentAccountId: string): AdminGrowthReport[] {
+    return growthReportsByFamily.value[parentAccountId] ?? []
+  }
+
+  function growthReportErrorFor(parentAccountId: string): ApiError | null {
+    return growthReportErrorsByFamily.value[parentAccountId] ?? null
+  }
+
+  function isGrowthReportLoading(parentAccountId: string): boolean {
+    return (growthReportLoadingCounts.value[parentAccountId] ?? 0) > 0
   }
 
   async function loadFamiliesWithPageSize(
@@ -782,6 +856,10 @@ export const useFamilyAccountStore = defineStore('admin-families', () => {
     spendingLimitFor,
     spendingLimitErrorFor,
     isSpendingLimitLoading,
+    loadFamilyGrowthReports,
+    growthReportsFor,
+    growthReportErrorFor,
+    isGrowthReportLoading,
     create,
     deviceErrorFor,
     devicesFor,

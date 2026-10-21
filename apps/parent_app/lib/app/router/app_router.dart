@@ -14,6 +14,7 @@ import '../../features/billing/presentation/billing_orders_page.dart';
 import '../../features/billing/presentation/billing_plans_page.dart';
 import '../../features/billing/presentation/spending_limit_page.dart';
 import '../../features/memory/presentation/memory_page.dart';
+import '../../features/growth_report/presentation/growth_report_page.dart';
 import '../../features/bluetooth_audio/presentation/bluetooth_audio_page.dart';
 import '../../features/child_profile/presentation/child_profile_page.dart';
 import '../../features/companionship/presentation/companionship_page.dart';
@@ -167,6 +168,11 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/memories',
         builder: (context, state) => const MemoryPage(),
+      ),
+      // 成长报告由平台按周/按月自动生成，家长只读回看。
+      GoRoute(
+        path: '/me/growth-reports',
+        builder: (context, state) => const GrowthReportPage(),
       ),
       // 结算页必须带着选中的套餐进入；直接打开链接时没有可结算的内容。
       GoRoute(

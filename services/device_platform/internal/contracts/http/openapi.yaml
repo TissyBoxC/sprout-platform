@@ -914,6 +914,122 @@ paths:
                 $ref: "#/components/schemas/ResponseEnvelope"
         "500":
           $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/families/{family_id}/children/{child_id}/growth-reports:
+    get:
+      summary: 读取一个儿童的成长报告列表
+      description: |
+        按周期倒序返回成长报告。报告只包含聚合统计与摘要文案，不包含对话原文、
+        记忆内容或任何媒体文件。period_type 省略时返回全部周期类型。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/ChildId"
+        - name: period_type
+          in: query
+          required: false
+          description: 只看周报或只看月报。
+          schema:
+            $ref: "#/components/schemas/GrowthReportPeriodType"
+        - name: limit
+          in: query
+          required: false
+          description: 返回条数，默认 12，最大 60。
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 60
+      responses:
+        "200":
+          description: 该儿童的成长报告
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrowthReportListEnvelope"
+        "400":
+          description: 周期类型无法识别
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/families/{family_id}/children/{child_id}/growth-reports/{report_id}:
+    get:
+      summary: 读取一份成长报告
+      description: |
+        返回属于该家庭与该儿童的指定报告。报告不存在或不属于该家庭时都返回同样的
+        404，避免用错误差异判断其他家庭是否存在某份报告。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/ChildId"
+        - name: report_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 一份成长报告
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrowthReportEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 报告不存在或不属于当前家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/admin/families/{family_id}/growth-reports:
+    get:
+      summary: 运营端查询一个家庭的成长报告
+      description: |
+        按生成时间倒序返回该家庭的成长报告，供运营核查生成情况。
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - name: limit
+          in: query
+          required: false
+          description: 返回条数，默认 12，最大 60。
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 60
+      responses:
+        "200":
+          description: 该家庭的成长报告
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrowthReportListEnvelope"
+        "400":
+          description: 参数无法识别
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/DeviceServiceError"
   /api/v1/families/{family_id}/children/{child_id}/memories:
     get:
       summary: 读取一个儿童的全部长期记忆
@@ -22133,6 +22249,175 @@ components:
       type: string
       description: 记忆标识，小写 snake_case，用于设备与家长端定位同一条事实。
       pattern: "^[a-z][a-z0-9_]{1,63}$"
+    GrowthReportPeriodType:
+      type: string
+      description: 报告周期。周报按 UTC 周一开始，月报按自然月。
+      enum:
+        - weekly
+        - monthly
+    GrowthReportPeriodTotals:
+      type: object
+      additionalProperties: false
+      required:
+        - attempts
+        - passed
+        - average_score
+        - accuracy
+      properties:
+        attempts:
+          type: integer
+          minimum: 0
+        passed:
+          type: integer
+          minimum: 0
+        average_score:
+          type: number
+          minimum: 0
+          maximum: 100
+        accuracy:
+          type: number
+          minimum: 0
+          maximum: 100
+    GrowthReportUsage:
+      type: object
+      additionalProperties: false
+      required:
+        - active_seconds
+        - conversation_count
+        - conversation_seconds
+      properties:
+        active_seconds:
+          type: integer
+          minimum: 0
+          description: 家庭内设备的累计使用时长；用量按设备记录，不含儿童维度。
+        conversation_count:
+          type: integer
+          minimum: 0
+        conversation_seconds:
+          type: integer
+          minimum: 0
+    GrowthReportCounts:
+      type: object
+      additionalProperties: false
+      required:
+        - growth_records
+        - memories
+      properties:
+        growth_records:
+          type: integer
+          minimum: 0
+        memories:
+          type: integer
+          minimum: 0
+          description: 本期新增记忆条数，不含记忆内容。
+    GrowthReportDeltas:
+      type: object
+      additionalProperties: false
+      required:
+        - practice
+        - accuracy
+        - active_seconds
+      properties:
+        practice:
+          type: integer
+          description: 练习次数相对上一周期的变化。
+        accuracy:
+          type: number
+          description: 完成率相对上一周期的百分点变化。
+        active_seconds:
+          type: integer
+    GrowthReportMetrics:
+      type: object
+      additionalProperties: false
+      required:
+        - practice
+        - previous_practice
+        - usage
+        - counts
+        - deltas
+        - accuracy_phrase
+      properties:
+        practice:
+          $ref: "#/components/schemas/GrowthReportPeriodTotals"
+        previous_practice:
+          $ref: "#/components/schemas/GrowthReportPeriodTotals"
+        usage:
+          $ref: "#/components/schemas/GrowthReportUsage"
+        counts:
+          $ref: "#/components/schemas/GrowthReportCounts"
+        deltas:
+          $ref: "#/components/schemas/GrowthReportDeltas"
+        accuracy_phrase:
+          type: string
+          description: 便于列表展示的完成率文字，同时给出样本量。
+          maxLength: 40
+    GrowthReport:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - family_id
+        - child_id
+        - period_type
+        - period_start
+        - period_end
+        - metrics
+        - summary
+        - generated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        family_id:
+          type: string
+        child_id:
+          type: string
+        period_type:
+          $ref: "#/components/schemas/GrowthReportPeriodType"
+        period_start:
+          type: string
+          format: date
+        period_end:
+          type: string
+          format: date
+          description: 周期的开区间终点，报告覆盖 [period_start, period_end)。
+        metrics:
+          $ref: "#/components/schemas/GrowthReportMetrics"
+        summary:
+          type: string
+          description: 中文摘要，只描述统计事实，不评价孩子，也不与其他人比较。
+          maxLength: 600
+        generated_at:
+          type: string
+          format: date-time
+    GrowthReportListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - reports
+              properties:
+                reports:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/GrowthReport"
+    GrowthReportEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required:
+                - report
+              properties:
+                report:
+                  $ref: "#/components/schemas/GrowthReport"
     MemoryRecord:
       type: object
       additionalProperties: false

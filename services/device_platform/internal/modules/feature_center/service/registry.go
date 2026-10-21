@@ -241,6 +241,13 @@ func DefaultRegistry() []Definition {
 				"memory_child_count", "已设置记忆的儿童", "个",
 				"memory_retention_days", "保留天数", "天",
 			)),
+		readOnlyFeatureDef("growth_report", "成长报告", "按周和按月自动汇总孩子的练习与使用情况，并给出与上一周期的对比。", "family", "家庭平台",
+			"报告只包含聚合统计与摘要文案，不包含对话原文、记忆内容或任何媒体文件；家长可回看历史报告，功能中心只展示生成数量与更新时间。",
+			metrics(
+				"growth_report_count", "报告总数", "份",
+				"growth_report_child_count", "已生成报告的儿童", "个",
+				"growth_report_stale_days", "距上次生成", "天",
+			)),
 		readOnlyFeatureDef("local_command", "本地指令", "断网可用的本地设备指令。", "content", "内容平台",
 			"本地指令随离线内容下发并由设备执行，功能中心只提供能力状态和统计。",
 			metrics(

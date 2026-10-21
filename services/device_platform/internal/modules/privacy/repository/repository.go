@@ -746,6 +746,10 @@ func (r *PostgresRepository) PurgeParentData(
 		// account itself is anonymized.
 		{`DELETE FROM child_memory_tombstones WHERE family_id = $1`, "child memory tombstones"},
 		{`DELETE FROM child_memories WHERE family_id = $1`, "child memories"},
+		// A growth report describes one child's week; it is derived data but
+		// still identifiable, so a deleted account must not leave the summaries
+		// behind.
+		{`DELETE FROM growth_reports WHERE family_id = $1`, "growth reports"},
 		{`DELETE FROM alarm_reminder_events WHERE family_id = $1`, "alarm reminder events"},
 		{`DELETE FROM alarm_reminders WHERE family_id = $1`, "alarm reminders"},
 		{`DELETE FROM english_practice_attempts WHERE family_id = $1`, "english practice attempts"},

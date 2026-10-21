@@ -77,6 +77,8 @@ import (
 	localCommandService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
 	memoryRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/repository"
 	memoryService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/service"
+	growthReportRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/repository"
+	growthReportService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/service"
 	motionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/repository"
 	motionRuntimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
 	notificationDelivery "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/delivery"
@@ -252,6 +254,18 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create child memory service: %w", err)
 	}
+	// Growth reports are built from stored aggregates on a timer; the service is
+	// created here so the generator worker and the HTTP routes share one
+	// instance and one consistency window.
+	growthReportPersistence := growthReportRepository.NewRepository(
+		databaseStore.Pool(),
+	)
+	growthReports := growthReportService.NewService(
+		growthReportPersistence,
+		logger,
+		nil,
+		0,
+	)
 	childProfileService, err := childService.New(childService.Options{
 		Repository:        childPersistence,
 		PolicyProvisioner: parentPolicyService,
@@ -650,6 +664,9 @@ func Run() error {
 	)
 	featureCenterHealthProbes["family_spending_limit"] = familySpendingLimitProbe(
 		billing.SpendingLimits,
+	)
+	featureCenterHealthProbes["growth_report"] = growthReportReadinessProbe(
+		growthReports,
 	)
 	privacy, err := privacyService.New(privacyService.Options{
 		Repository:     privacyRepository.NewPostgresRepository(databaseStore.Pool()),
@@ -1051,6 +1068,7 @@ func Run() error {
 			ScreenService:                screen,
 			MemoryService:                childMemory,
 			MemoryChildResolver:          memoryRepository.NewDeviceChildResolver(databaseStore.Pool()),
+			GrowthReportService:          growthReports,
 			AuditRecorder:                privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -1070,6 +1088,9 @@ func Run() error {
 
 	go runDeletionWorker(runtimeCtx, logger, privacy)
 	go runRetentionWorker(runtimeCtx, logger, privacy, vision, childMemory)
+	// The generator runs on its own goroutine so a slow aggregation over a large
+	// family table cannot delay the HTTP server becoming ready.
+	go growthReportService.NewWorker(growthReports, time.Hour).Run(runtimeCtx)
 	go runFeatureHealthScheduler(runtimeCtx, logger, featureCenter)
 	go runNotificationDeliveryWorker(
 		runtimeCtx,

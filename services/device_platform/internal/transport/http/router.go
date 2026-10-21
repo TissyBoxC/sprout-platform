@@ -43,6 +43,7 @@ import (
 	learningvisualizationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/learning_visualization/service"
 	localcommandservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
 	memoryservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/service"
+	growthreportservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/service"
 	motionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
 	notificationhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/handler"
 	notificationservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/service"
@@ -124,6 +125,7 @@ type RouterOptions struct {
 	DeviceMeshService            *devicemeshservice.Service
 	ScreenService                *screenservice.Service
 	MemoryService                *memoryservice.Service
+	GrowthReportService          *growthreportservice.Service
 	// MemoryChildResolver maps a device's family to its child profile for the
 	// memory sync routes. The routes are registered only when it is set, so a
 	// deployment that does not wire it keeps answering 404 instead of syncing a
@@ -593,6 +595,40 @@ func NewRouter(options RouterOptions) http.Handler {
 					requireDeviceSession(options.BindingService, deviceMemoryEndpoints.upsertForDevice),
 				)
 			}
+		}
+		if options.GrowthReportService != nil {
+			guardianReports := guardianHandler{service: options.GrowthReportService}
+			requireReportRead := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionChildRead,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
+			mux.HandleFunc(
+				"GET /api/v1/families/{family_id}/children/{child_id}/growth-reports",
+				requireReportRead(guardianReports.list),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/families/{family_id}/children/{child_id}/growth-reports/{report_id}",
+				requireReportRead(guardianReports.get),
+			)
+			adminReports := adminGrowthReportHandler{service: options.GrowthReportService}
+			mux.HandleFunc(
+				"GET /api/v1/admin/families/{family_id}/growth-reports",
+				authHandler.requireAdminPermission(
+					authdomain.AdminPermissionFamilyRead,
+					adminReports.list,
+				),
+			)
 		}
 		if options.AlarmReminderService != nil {
 			alarmReminderHandler := alarmReminderHandler{service: options.AlarmReminderService}

@@ -13,6 +13,7 @@ import (
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	memorydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/domain"
+	growthReportDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/domain"
 	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 )
@@ -356,6 +357,31 @@ func mapMemoryReadiness(
 		return featureCenterDomain.HealthUnavailable, nil
 	}
 	return mapReadinessStatus(string(readiness.State)), nil
+}
+
+// growthReportReadinessProbe verifies that reports are actually being produced.
+//
+// It reads the report table instead of trusting the generator's process state:
+// the worker can be alive while its queries fail, and a console that showed the
+// feature healthy while every period produced nothing would hide exactly the
+// fault an operator needs to see.
+func growthReportReadinessProbe(
+	service interface {
+		Readiness(ctx context.Context) (growthReportDomain.Readiness, error)
+	},
+) featureCenterService.HealthProbe {
+	return featureCenterService.HealthProbeFunc(
+		func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+			if service == nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			readiness, err := service.Readiness(ctx)
+			if err != nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			return mapReadinessStatus(string(readiness.State)), nil
+		},
+	)
 }
 
 // notificationReadinessProbe validates the durable notification store without

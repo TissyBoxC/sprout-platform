@@ -110,6 +110,24 @@ const spendingLimitError = computed(() =>
     ? null
     : store.spendingLimitErrorFor(selectedFamily.value.parentAccountId),
 )
+const growthReports = computed(() =>
+  selectedFamily.value === null
+    ? []
+    : store.growthReportsFor(selectedFamily.value.parentAccountId),
+)
+const isGrowthReportLoading = computed(
+  () =>
+    selectedFamily.value !== null &&
+    store.isGrowthReportLoading(selectedFamily.value.parentAccountId),
+)
+const growthReportError = computed(() =>
+  selectedFamily.value === null
+    ? null
+    : store.growthReportErrorFor(selectedFamily.value.parentAccountId),
+)
+/// The panel lists the newest reports across both periods; a family with many
+/// children would otherwise bury the most recent week under old monthlies.
+const visibleGrowthReports = computed(() => growthReports.value.slice(0, 6))
 const membershipReadiness = computed(() => (membershipStore.isReadOnly ? '只读' : '可管理'))
 const canManageFamily = computed(() =>
   canManageFamilyAccount(authStore.can(ADMIN_PERMISSIONS.familyManage)),
@@ -209,6 +227,7 @@ async function openFamily(family: AdminFamily): Promise<void> {
       ? Promise.resolve(null)
       : store.loadFamilyAIUsage(family.parentAccountId),
     store.loadFamilySpendingLimit(family.parentAccountId),
+    store.loadFamilyGrowthReports(family.parentAccountId),
     membershipStore.load(family.parentAccountId),
   ])
 }
@@ -384,6 +403,13 @@ async function reloadSpendingLimit(): Promise<void> {
     return
   }
   await store.loadFamilySpendingLimit(selectedFamily.value.parentAccountId)
+}
+
+async function reloadGrowthReports(): Promise<void> {
+  if (selectedFamily.value === null) {
+    return
+  }
+  await store.loadFamilyGrowthReports(selectedFamily.value.parentAccountId)
 }
 
 async function saveProfile(): Promise<void> {
@@ -1445,6 +1471,76 @@ function emptySectionFeedback(): {
                   class="field-hint"
                 >
                   本月消费已达到上限，新的下单会被拒绝，直到监护人调高上限或进入次月。
+                </p>
+              </template>
+            </section>
+
+            <section class="detail-card">
+              <div class="section-heading">
+                <div>
+                  <h3>成长报告</h3>
+                  <p>
+                    平台按周和按月自动汇总的练习与使用情况。这里只看生成结果，
+                    报告内容不包含对话原文与记忆内容。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="text-button"
+                  :disabled="isGrowthReportLoading"
+                  @click="reloadGrowthReports"
+                >
+                  {{ isGrowthReportLoading ? '正在更新…' : '更新报告' }}
+                </button>
+              </div>
+              <div v-if="isGrowthReportLoading" class="inline-state">正在加载…</div>
+              <div v-else-if="growthReportError" class="inline-state error">
+                {{ growthReportError.message }}
+              </div>
+              <div
+                v-else-if="visibleGrowthReports.length === 0"
+                class="empty-section"
+              >
+                这个家庭还没有生成报告。报告会在每周或每月结束时自动生成。
+              </div>
+              <template v-else>
+                <ul class="report-list">
+                  <li
+                    v-for="report in visibleGrowthReports"
+                    :key="report.id"
+                    class="report-item"
+                  >
+                    <div class="report-heading">
+                      <span class="report-period">
+                        {{ report.periodType === 'monthly' ? '月报' : '周报' }}
+                      </span>
+                      <span class="report-window">
+                        {{ report.periodStart }} 至 {{ report.periodEnd }}
+                      </span>
+                    </div>
+                    <p class="report-summary">{{ report.summary }}</p>
+                    <dl class="report-metrics">
+                      <div>
+                        <dt>完成率</dt>
+                        <dd>{{ report.accuracyPhrase || '没有练习' }}</dd>
+                      </div>
+                      <div>
+                        <dt>练习次数</dt>
+                        <dd>{{ report.practiceAttempts }}</dd>
+                      </div>
+                      <div>
+                        <dt>设备使用</dt>
+                        <dd>{{ report.activeMinutes }} 分钟</dd>
+                      </div>
+                      <div>
+                        <dt>成长记录</dt>
+                        <dd>{{ report.growthRecords }} 条</dd>
+                      </div>
+                    </dl>
+                  </li>
+                </ul>
+                <p class="field-hint">
+                  报告按周期窗口划分，相邻两个周期不会重复计入同一天。
                 </p>
               </template>
             </section>
@@ -2707,6 +2803,68 @@ tbody tr:hover {
 .model-option-main small {
   flex: 0 0 auto;
   color: #6b4f5a;
+}
+
+.report-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.report-item {
+  padding: 14px 16px;
+  border: 1px solid #f6dbe4;
+  border-radius: 16px;
+  background: #fffdfd;
+}
+
+.report-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.report-period {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #fff0f5;
+  color: #a8557a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.report-window {
+  color: #8a6b76;
+  font-size: 12px;
+}
+
+.report-summary {
+  margin: 0 0 10px;
+  color: #4a2e3b;
+  line-height: 1.7;
+}
+
+.report-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+}
+
+.report-metrics dt {
+  color: #8a6b76;
+  font-size: 12px;
+}
+
+.report-metrics dd {
+  margin: 2px 0 0;
+  color: #4a2e3b;
+  font-weight: 600;
 }
 
 .inline-state,

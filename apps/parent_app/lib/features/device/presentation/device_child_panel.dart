@@ -68,7 +68,7 @@ class DeviceChildPanel extends ConsumerWidget {
         children: <Widget>[
           Text('当前使用的儿童', style: theme.textTheme.titleSmall),
           const SizedBox(height: 6),
-          const Text('这个家庭还没有儿童档案。添加儿童后，Robot 才知道在和谁对话。'),
+          const Text('这个家庭还没有儿童档案。添加儿童后，初芽才知道在和谁对话。'),
         ],
       );
     }
@@ -80,7 +80,7 @@ class DeviceChildPanel extends ConsumerWidget {
         const SizedBox(height: 6),
         Text(
           activeChild != null
-              ? '这台 Robot 现在和 ${activeChild.nickname} 对话。'
+              ? '初芽现在和 ${activeChild.nickname} 对话。'
               : '还没有选择儿童。选一个之后，对话和记忆都会记到该儿童名下。',
         ),
         const SizedBox(height: 12),
@@ -141,7 +141,7 @@ class DeviceChildPanel extends ConsumerWidget {
       builder: (dialogContext) => AlertDialog(
         title: const Text('取消儿童绑定'),
         content: Text(
-          '取消后这台 Robot 将不再属于某个儿童，直到重新选择。'
+          '取消后初芽将不再属于某个儿童，直到重新选择。'
           '${child.nickname}的对话记忆不会被删除。',
         ),
         actions: <Widget>[

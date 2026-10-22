@@ -54,6 +54,42 @@ instead of running without enforcement. Set
 `VOICE_GATEWAY_CONTENT_POLICY_ENABLED=false` only for local diagnostics where
 no child traffic exists.
 
+## Guardian Intercom Relay
+
+Intercom is a guardian-initiated call that the child must accept on the device
+before any audio flows. `device_platform` owns the call record and the accept
+step; the gateway only validates the call and relays frames.
+
+Set `VOICE_GATEWAY_INTERCOM_ENABLED=true` to mount the relay. It requires the
+internal API to be enabled with a service token of at least 32 characters,
+because authorization is an internal endpoint that `device_platform` calls.
+
+1. After the child accepts, `device_platform` calls
+   `POST /internal/v1/intercom/sessions/{session_id}/relay` with `device_id`
+   and the short-lived `device_token` (Bearer internal service token).
+2. The gateway re-reads the call from
+   `GET {device_platform}/internal/v1/devices/{device_id}/intercom-calls/{session_id}`
+   and refuses anything whose state is not `active`. A `ringing` call never
+   opens a relay, so the accept step cannot be bypassed by a caller that merely
+   claims the call is active.
+3. The guardian connects to `GET /v1/intercom/{session_id}?device_id=...`. That
+   route only attaches to an already authorized relay and accepts exactly one
+   guardian socket per call.
+4. Binary frames are relayed in both directions; text control frames are
+   limited to `{"type":"hangup"}` and `{"type":"ping"}`.
+
+Limits: the relay closes after the smaller of
+`VOICE_GATEWAY_INTERCOM_MAX_CALL_DURATION_SECONDS` (maximum 600, matching the
+platform domain limit) and the platform call deadline. A hangup from either
+side, a dead socket, or the cap closes both sides immediately and releases the
+relay buffers. No audio is recorded, persisted, or logged; the close record
+contains only the session id, device id, duration, and a fixed close reason.
+
+Stable error codes: `intercom_session_not_found`, `intercom_session_not_active`,
+`intercom_session_expired`, `intercom_invalid_request`,
+`intercom_session_already_open`, `intercom_limit_reached`,
+`intercom_relay_invalid`, `intercom_unavailable`.
+
 ## Platform AI Execution
 
 The gateway never receives a global Sub2API or upstream provider key. It calls

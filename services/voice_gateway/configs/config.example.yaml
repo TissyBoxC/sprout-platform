@@ -39,3 +39,20 @@ websocket:
   allowed_origins: []
   # Keep a completed conversation reusable for this short follow-up window.
   continuity_window_seconds: 60
+
+intercom:
+  # Guardian-to-device voice intercom relay. Keep it disabled until the internal
+  # API token below is configured, because relay authorization is an internal
+  # endpoint that device_platform calls with that token.
+  enabled: false
+  path: "/v1/intercom"
+  # Bounded by the platform domain limit of 600 seconds.
+  max_call_duration_seconds: 600
+  max_frame_bytes: 4096
+  max_frames_per_second: 80
+  max_bytes_per_second: 131072
+  write_queue_depth: 64
+  max_relays: 256
+  write_timeout_seconds: 10
+  pong_wait_seconds: 60
+  ping_interval_seconds: 25

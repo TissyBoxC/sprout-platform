@@ -22,6 +22,7 @@ type Config struct {
 	Vision    VisionConfig
 	Security  SecurityConfig
 	WebSocket WebSocketConfig
+	Intercom  IntercomConfig
 	Audio     AudioConfig
 }
 
@@ -301,6 +302,7 @@ func Load() (Config, error) {
 			IdleTimeoutSeconds:        envInt("VOICE_GATEWAY_WS_IDLE_TIMEOUT_SECONDS", 60),
 			SessionMaxDurationSeconds: envInt("VOICE_GATEWAY_WS_SESSION_MAX_DURATION_SECONDS", 900),
 		},
+		Intercom: loadIntercomConfig(),
 		Audio: AudioConfig{
 			VadSpeechThreshold:      envFloatRequired("VOICE_GATEWAY_VAD_SPEECH_THRESHOLD", 2.8),
 			VadHangoverFrames:       envInt("VOICE_GATEWAY_VAD_HANGOVER_FRAMES", 15),
@@ -417,6 +419,9 @@ func Load() (Config, error) {
 			cfg.WebSocket.SessionMaxDurationSeconds < cfg.WebSocket.IdleTimeoutSeconds {
 			return Config{}, fmt.Errorf("VOICE_GATEWAY_WS timing and queue limits are invalid")
 		}
+	}
+	if err := validateIntercomConfig(cfg); err != nil {
+		return Config{}, err
 	}
 	if cfg.Security.MaxInputRunes < 64 || cfg.Security.MaxInputRunes > 8000 {
 		return Config{}, fmt.Errorf("VOICE_GATEWAY_MAX_INPUT_RUNES must be between 64 and 8000")

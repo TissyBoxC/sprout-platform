@@ -2,10 +2,13 @@
 package http
 
 import (
+	"bufio"
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -14,6 +17,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/packages/go/observability"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/buildinfo"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/config"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/intercom"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/session"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/usage"
 )
@@ -42,6 +46,21 @@ type RouterOptions struct {
 	// bounded symbolic task metadata and returns short-lived labels; image
 	// bytes never pass through this transport.
 	VisionService VisionService
+	// IntercomResolver re-reads the authoritative call state from
+	// device_platform before a guardian relay may carry audio.
+	IntercomResolver IntercomSessionResolver
+	// IntercomRelays admits and tracks guardian relays. It is shared with the
+	// shutdown path so no relay survives process exit.
+	IntercomRelays *intercom.RelayManager
+	// IntercomConnector attaches a relay to the device side of a call.
+	IntercomConnector intercom.DeviceConnector
+	// IntercomTransport bounds the guardian relay endpoint. It is only used
+	// when the resolver, relays, and connector are all set.
+	IntercomTransport IntercomTransportConfig
+	// IntercomEnabled reports whether the guardian intercom feature is
+	// configured. Readiness surfaces it so the management plane can tell a
+	// disabled relay from a broken one.
+	IntercomEnabled bool
 }
 
 // NewRouter returns the HTTP router for the voice gateway.
@@ -57,11 +76,12 @@ func NewRouter(options RouterOptions) http.Handler {
 		writeJSON(response, http.StatusOK, map[string]any{
 			"status":           "ready",
 			"realtime_enabled": options.RealtimeEnabled,
+			"intercom_enabled": options.IntercomEnabled,
 		})
 	})
 
 	if options.RealtimeHandler != nil && options.RealtimePath != "" {
-		mux.Handle(options.RealtimePath, options.RealtimeHandler)
+		mux.Handle(options.RealtimePath, withHijackSupport(options.RealtimeHandler))
 	}
 
 	if options.InternalAPIConfig.Enabled {
@@ -119,9 +139,54 @@ func NewRouter(options RouterOptions) http.Handler {
 				),
 			)
 		}
+		if options.IntercomResolver != nil &&
+			options.IntercomRelays != nil &&
+			options.IntercomConnector != nil {
+			intercom := intercomHandler{
+				resolver:  options.IntercomResolver,
+				relays:    options.IntercomRelays,
+				connector: options.IntercomConnector,
+				logger:    logger,
+				config:    options.IntercomTransport,
+			}
+			// device_platform authorizes the relay after the child accepted.
+			mux.Handle(
+				"POST /internal/v1/intercom/sessions/{session_id}/relay",
+				requireServiceToken(
+					options.InternalAPIConfig.AuthToken,
+					http.HandlerFunc(intercom.authorize),
+				),
+			)
+		}
 	}
 
-	return observability.WithRequestLabels(observability.WithRequestMetadata(
+	// The guardian relay is a public WebSocket route, but it only attaches to
+	// a relay the internal authorize endpoint already opened for an active
+	// call. It is mounted on its own path so the device conversation endpoint
+	// is untouched.
+	if options.IntercomResolver != nil &&
+		options.IntercomRelays != nil &&
+		options.IntercomConnector != nil &&
+		options.IntercomTransport.Path != "" {
+		guardian := intercomHandler{
+			resolver:  options.IntercomResolver,
+			relays:    options.IntercomRelays,
+			connector: options.IntercomConnector,
+			logger:    logger,
+			config:    options.IntercomTransport,
+		}
+		mux.Handle(
+			options.IntercomTransport.Path+"/{session_id}",
+			withHijackSupport(http.HandlerFunc(guardian.relayGuardian)),
+		)
+	}
+
+	// The shared access log wraps the response writer to record the status.
+	// That wrapper now forwards http.Hijacker, but the gateway keeps its own
+	// recovery path as defence in depth: a future middleware that drops the
+	// interface again must not silently turn every WebSocket upgrade into 500.
+	// The raw server writer is captured before the chain wraps it.
+	return withServerConnection(observability.WithRequestLabels(observability.WithRequestMetadata(
 		observability.WithAccessLog(
 			mux,
 			observability.AccessLogOptions{
@@ -130,7 +195,56 @@ func NewRouter(options RouterOptions) http.Handler {
 				Audit:       observability.NewSlogAuditSink(logger),
 			},
 		),
-	))
+	)))
+}
+
+// serverConnectionKey stores the raw server response writer in the request
+// context so a downstream handler can recover connection hijacking.
+type serverConnectionKey struct{}
+
+// withServerConnection records the raw server writer before middleware wraps it.
+func withServerConnection(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		contextWithConnection := context.WithValue(request.Context(), serverConnectionKey{}, response)
+		next.ServeHTTP(response, request.WithContext(contextWithConnection))
+	})
+}
+
+// hijackableResponse forwards connection hijacking to the raw server writer
+// captured at the start of the middleware chain.
+//
+// gorilla/websocket needs http.Hijacker to take over the socket. The shared
+// access-log middleware swaps in a status-recording writer that does not
+// implement it, so a WebSocket route behind that middleware answers 500. The
+// raw writer recorded by withServerConnection is the only layer that still
+// owns the connection.
+type hijackableResponse struct {
+	http.ResponseWriter
+	connection http.ResponseWriter
+}
+
+func (response hijackableResponse) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := response.connection.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("server response writer does not support connection hijacking")
+	}
+	return hijacker.Hijack()
+}
+
+// withHijackSupport restores http.Hijacker on a WebSocket route whose response
+// writer was wrapped by a status-recording middleware.
+func withHijackSupport(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if _, ok := response.(http.Hijacker); ok {
+			next.ServeHTTP(response, request)
+			return
+		}
+		connection, _ := request.Context().Value(serverConnectionKey{}).(http.ResponseWriter)
+		if connection == nil {
+			connection = response
+		}
+		next.ServeHTTP(hijackableResponse{ResponseWriter: response, connection: connection}, request)
+	})
 }
 
 type conversationUsageRequest struct {

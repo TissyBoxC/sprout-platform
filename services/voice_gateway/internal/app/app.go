@@ -21,6 +21,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/buildinfo"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/config"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/conversation"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/intercom"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/pipeline"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/platform/cache"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/security/audit"
@@ -76,6 +77,11 @@ func Run() error {
 		safetyReader = securitysettings.NewPostgresReader(databaseStore)
 	}
 
+	// The registry is the only rendezvous between the device conversation
+	// transport and the guardian intercom relay; it holds live device
+	// frame sinks and never audio.
+	deviceConnections := intercom.NewDeviceConnectionRegistry()
+
 	realtimeHandler, realtimeManager, realtimeShutdown, err := buildRealtimeTransport(
 		cfg,
 		logger,
@@ -83,11 +89,15 @@ func Run() error {
 		deviceAuthorizer,
 		safetyReader,
 		redisCache.Client(),
+		deviceConnections,
 	)
 	if err != nil {
 		return err
 	}
 	defer realtimeShutdown()
+
+	intercomRelays := intercom.NewRelayManager(cfg.Intercom.MaxRelays)
+	defer intercomRelays.CloseAll()
 
 	routerOptions := gatewayhttp.RouterOptions{
 		Logger:            logger,
@@ -95,6 +105,38 @@ func Run() error {
 		UsageRecorder:     usageRecorder,
 		SessionMetrics:    realtimeManager,
 		RealtimeEnabled:   realtimeHandler != nil,
+		IntercomEnabled:   cfg.Intercom.Enabled,
+		IntercomRelays:    intercomRelays,
+	}
+	if cfg.Intercom.Enabled {
+		resolver, err := intercom.NewPlatformSessionResolver(intercom.PlatformResolverConfig{
+			BaseURL:      cfg.AI.DevicePlatformBaseURL,
+			ServiceToken: cfg.AI.DevicePlatformServiceToken,
+		})
+		if err != nil {
+			return fmt.Errorf("build intercom session resolver: %w", err)
+		}
+		routerOptions.IntercomResolver = resolver
+		routerOptions.IntercomConnector = intercom.NewRealtimeDeviceConnector(
+			intercom.RealtimeConnectorConfig{
+				Source:        deviceConnections,
+				MaxFrameBytes: cfg.Intercom.MaxFrameBytes,
+			},
+		)
+		routerOptions.IntercomTransport = gatewayhttp.IntercomTransportConfig{
+			Path:                 cfg.Intercom.Path,
+			MaxCallDuration:      cfg.Intercom.MaxCallDuration(),
+			MaxFrameBytes:        int64(cfg.Intercom.MaxFrameBytes),
+			MaxFramesPerSecond:   cfg.Intercom.MaxFramesPerSecond,
+			MaxBytesPerSecond:    cfg.Intercom.MaxBytesPerSecond,
+			WriteQueueDepth:      cfg.Intercom.WriteQueueDepth,
+			WriteTimeout:         seconds(cfg.Intercom.WriteTimeoutSeconds),
+			PongWait:             seconds(cfg.Intercom.PongWaitSeconds),
+			PingInterval:         seconds(cfg.Intercom.PingIntervalSeconds),
+			RelayWriteQueueDepth: cfg.Intercom.WriteQueueDepth,
+			AllowedOrigins:       cfg.WebSocket.AllowedOrigins,
+		}
+		logger.Info("guardian intercom relay enabled", "path", cfg.Intercom.Path)
 	}
 	if cfg.Vision.Enabled {
 		visionService, err := vision.New(vision.Options{
@@ -162,6 +204,7 @@ func buildRealtimeTransport(
 	deviceAuthorizer websocket.DeviceAuthorizer,
 	safetyReader securitysettings.Reader,
 	redisClient *redis.Client,
+	deviceConnections *intercom.DeviceConnectionRegistry,
 ) (http.Handler, *session.Manager, func(), error) {
 	if !cfg.WebSocket.Enabled {
 		logger.Info("device realtime endpoint is disabled")
@@ -258,6 +301,9 @@ func buildRealtimeTransport(
 		Verifier:            verifier,
 		Authorizer:          deviceAuthorizer,
 		TokenRevoker:        verifier.RevokeIdentity,
+		OnDeviceConnected: func(deviceID string, connection websocket.DeviceFrameSink) func() {
+			return deviceConnections.Register(deviceID, connection)
+		},
 		DetectorFactory: func() vad.Detector {
 			return vad.NewEnergyDetector(detectorConfig)
 		},

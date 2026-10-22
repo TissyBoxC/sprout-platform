@@ -52,6 +52,96 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResponseEnvelope"
+  /internal/v1/intercom/sessions/{session_id}/relay:
+    post:
+      summary: Authorize and open one guardian intercom relay
+      description: "Called by device_platform after the child accepted the call. The
+        gateway re-reads the authoritative call state from device_platform and
+        refuses any call that is not active, so a ringing call can never start
+        carrying audio. A call that already has an open relay is reused rather
+        than duplicated."
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - device_token
+              properties:
+                session_id:
+                  type: string
+                  description: Optional; when present it must equal the path value.
+                device_id:
+                  type: string
+                device_token:
+                  type: string
+                  description: Short-lived device credential. Never logged.
+      responses:
+        "200":
+          description: Relay authorized and open
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntercomRelayEnvelope"
+        "400":
+          description: Malformed request body (intercom_invalid_request)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          description: Service authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "404":
+          description: Unknown call or device (intercom_session_not_found)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Call is not active (intercom_session_not_active) or its deadline
+            has passed (intercom_session_expired)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "410":
+          description: Call deadline has passed (intercom_session_expired)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "422":
+          description: Invalid identifiers (intercom_invalid_request)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "429":
+          description: Gateway relay capacity exhausted (intercom_limit_reached)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          description: Device not connected or platform unavailable (intercom_unavailable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
   /internal/v1/vision/tasks:
     post:
       summary: Run one bounded camera/vision task
@@ -175,6 +265,52 @@ components:
           type: integer
           minimum: 0
           maximum: 8388608
+    IntercomRelayEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - request_id
+        - data
+        - error
+      properties:
+        schema_version:
+          type: string
+          const: 1.0.0
+        request_id:
+          type: string
+        data:
+          $ref: "#/components/schemas/IntercomRelay"
+        error:
+          type: "null"
+    IntercomRelay:
+      type: object
+      additionalProperties: false
+      required:
+        - session_id
+        - device_id
+        - state
+        - relay_path
+        - expires_at
+        - max_duration_seconds
+      properties:
+        session_id:
+          type: string
+        device_id:
+          type: string
+        state:
+          type: string
+          const: active
+        relay_path:
+          type: string
+          description: Guardian WebSocket route. It carries no credential.
+        expires_at:
+          type: string
+          format: date-time
+        max_duration_seconds:
+          type: integer
+          minimum: 1
+          maximum: 600
     ResponseEnvelope:
       type: object
       additionalProperties: false

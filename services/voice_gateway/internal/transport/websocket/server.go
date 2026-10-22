@@ -115,6 +115,21 @@ type ServerConfig struct {
 	// onPlaybackScheduler observes the per-connection scheduler once it is
 	// created. Test-only seam; production leaves it nil.
 	onPlaybackScheduler func(*playback.Scheduler)
+	// OnDeviceConnected registers the live connection of an authenticated
+	// device so another transport (the guardian intercom relay) can write
+	// frames to it. It is called once after the upgrade and its returned
+	// release function is called once when the connection ends. A nil value
+	// keeps other transports from writing to devices.
+	OnDeviceConnected func(deviceID string, connection DeviceFrameSink) (release func())
+}
+
+// DeviceFrameSink accepts a binary frame write on behalf of another transport.
+//
+// The realtime server owns the single writer goroutine per connection, so the
+// sink serializes with control frames and reply audio instead of writing to the
+// socket directly. Implementations must be safe for concurrent use.
+type DeviceFrameSink interface {
+	SendDeviceFrame(payload []byte) error
 }
 
 // AudioSink accepts one synthesized PCM frame for the connected device.
@@ -293,6 +308,15 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 
 	writer := newConnectionWriter(connection, s.config.WriteQueueDepth, s.config.WriteTimeout)
 	defer writer.Close()
+	if s.config.OnDeviceConnected != nil {
+		// Register before the reader loop so an intercom relay that starts at
+		// the same instant as the device connection still finds the sink.
+		// Release runs last so no relay frame can be queued to a closed
+		// writer after the device is gone.
+		if release := s.config.OnDeviceConnected(identity.DeviceID, writer); release != nil {
+			defer release()
+		}
+	}
 
 	var currentSession *session.Session
 	var continuityGeneration atomic.Uint64
@@ -1225,6 +1249,21 @@ func (writer *connectionWriter) enqueueText(control ControlFrame) error {
 func (writer *connectionWriter) enqueueControl(messageType int, payload []byte) error {
 	return writer.enqueue(outboundMessage{messageType: messageType, payload: payload})
 }
+
+// SendDeviceFrame queues one binary frame produced by another transport.
+//
+// The payload is queued through the same bounded channel as reply audio, so a
+// relay cannot outrun the device's read loop and the send-queue policy stays
+// identical for every writer.
+func (writer *connectionWriter) SendDeviceFrame(payload []byte) error {
+	if len(payload) == 0 {
+		return errors.New("device frame is empty")
+	}
+	frame := append([]byte(nil), payload...)
+	return writer.enqueue(outboundMessage{messageType: websocket.BinaryMessage, payload: frame})
+}
+
+var _ DeviceFrameSink = (*connectionWriter)(nil)
 
 func (writer *connectionWriter) enqueue(message outboundMessage) error {
 	select {

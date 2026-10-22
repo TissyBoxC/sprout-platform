@@ -3064,6 +3064,19 @@ func NewRouter(options RouterOptions) http.Handler {
 					http.HandlerFunc(internalHandler.aiExecutionTicket),
 				),
 			)
+			if options.IntercomService != nil {
+				// The voice gateway re-reads call state here before relaying
+				// audio. It is service-token protected because only the gateway
+				// may ask, and it answers for the owning device only.
+				internalIntercom := internalIntercomHandler{service: options.IntercomService}
+				mux.Handle(
+					"GET /internal/v1/devices/{device_id}/intercom-calls/{call_id}",
+					requireServiceToken(
+						options.InternalAPIConfig.AuthToken,
+						http.HandlerFunc(internalIntercom.session),
+					),
+				)
+			}
 			mux.Handle(
 				"POST /internal/v1/ai-execution",
 				requireServiceToken(

@@ -37,6 +37,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResponseEnvelope"
+  /internal/v1/devices/{device_id}/intercom-calls/{call_id}:
+    get:
+      summary: 供语音网关读取一次对讲通话的权威状态
+      description: |
+        语音网关在转发音频前用它重新确认通话状态，避免只信任授权时的快照。
+        只有进行中的通话才允许音频；响铃、已结束等状态会被拒绝。
+      security:
+        - serviceToken: []
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 128
+        - $ref: "#/components/parameters/IntercomCallId"
+      responses:
+        "200":
+          description: 通话状态与最晚结束时刻
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntercomCallEnvelope"
+        "404":
+          description: 通话不存在或不属于该设备
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /internal/v1/devices/{device_id}/ai-execution-ticket:
     get:
       summary: Issue one single-use AI execution ticket for a bound device
@@ -46,14 +76,6 @@ paths:
         short-lived opaque ticket. Provider credentials are never returned to
         the relay, guardians, administrators, or firmware clients.
       parameters:
-    IntercomCallId:
-      name: call_id
-      in: path
-      required: true
-      description: 通话标识
-      schema:
-        type: string
-        format: uuid
         - name: device_id
           in: path
           required: true
@@ -12467,6 +12489,15 @@ components:
       scheme: bearer
       bearerFormat: device-session-token
   parameters:
+    IntercomCallId:
+      name: call_id
+      in: path
+      required: true
+      description: 通话标识
+      schema:
+        type: string
+        format: uuid
+
     BillingOrderNo:
       name: order_no
       in: path

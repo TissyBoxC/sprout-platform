@@ -152,6 +152,32 @@ func (handler deviceIntercomHandler) hangUp(response http.ResponseWriter, reques
 	writeSuccess(response, request, http.StatusOK, callResponse(call))
 }
 
+// internalIntercomHandler answers the voice gateway's state re-read.
+//
+// The gateway must not trust a state carried from an earlier authorize call, so
+// it asks the service that owns the call before relaying any audio.
+type internalIntercomHandler struct {
+	service *intercomservice.Service
+}
+
+// session returns the authoritative state of one call.
+func (handler internalIntercomHandler) session(response http.ResponseWriter, request *http.Request) {
+	call, err := handler.service.GetForDevice(
+		request.Context(),
+		request.PathValue("device_id"),
+		request.PathValue("call_id"),
+	)
+	if err != nil {
+		writeIntercomError(response, request, err)
+		return
+	}
+	payload := callResponse(call)
+	// The gateway bounds its relay by this instant, so a call that already ran
+	// past its limit cannot keep carrying audio.
+	payload["expires_at"] = call.Deadline()
+	writeSuccess(response, request, http.StatusOK, payload)
+}
+
 // callResponse exposes lifecycle only. No audio, transcript, or token is ever
 // part of a call response.
 func callResponse(call domain.Call) map[string]any {

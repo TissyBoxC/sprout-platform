@@ -651,6 +651,11 @@ func NewRouter(options RouterOptions) http.Handler {
 			guardianBindings := guardianBindingHandler{
 				service: options.DeviceChildService,
 			}
+			// A switch tells the device to reload so the new child's level applies
+			// immediately instead of after the next background refresh.
+			if options.RuntimeService != nil {
+				guardianBindings.commands = options.RuntimeService
+			}
 			requireBindingManage := func(next http.HandlerFunc) http.HandlerFunc {
 				return authHandler.requireAuthentication(
 					parentScopedFor(

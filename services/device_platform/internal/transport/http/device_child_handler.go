@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 
+	runtimeDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/devicechild/domain"
 )
 
@@ -26,9 +27,45 @@ type bindingService interface {
 	History(ctx context.Context, deviceID string) ([]domain.History, error)
 }
 
+// bindingCommandSender queues a command for a device. A switch asks the device
+// to reload its policy at once instead of waiting out the background refresh,
+// which can be fifteen minutes away.
+type bindingCommandSender interface {
+	CreateCommand(
+		ctx context.Context,
+		deviceID string,
+		commandType runtimeDomain.CommandType,
+		requestedBy string,
+		payload map[string]any,
+	) (*runtimeDomain.Command, error)
+}
+
 // guardianBindingHandler serves binding management for one family's device.
 type guardianBindingHandler struct {
-	service bindingService
+	service  bindingService
+	commands bindingCommandSender
+}
+
+// notifyConfigurationChanged asks the device to reload its configuration.
+//
+// A failure is not fatal: the change is already stored, and the device picks it
+// up on its next background refresh. Reporting an error here would tell the
+// guardian the switch failed when it did not.
+func (handler guardianBindingHandler) notifyConfigurationChanged(
+	ctx context.Context,
+	deviceID string,
+	childID string,
+) {
+	if handler.commands == nil {
+		return
+	}
+	_, _ = handler.commands.CreateCommand(
+		ctx,
+		deviceID,
+		runtimeDomain.CommandRefreshConfiguration,
+		"system",
+		map[string]any{"reason": "child_switched", "child_id": childID},
+	)
 }
 
 // history answers with the children this device has served.
@@ -90,6 +127,13 @@ func (handler guardianBindingHandler) activate(
 		writeBindingError(response, request, err)
 		return
 	}
+	// The device keeps serving the previous child's level until it reloads, so
+	// ask it to reload now rather than at its next background check.
+	handler.notifyConfigurationChanged(
+		request.Context(),
+		binding.DeviceID,
+		binding.ChildID,
+	)
 	writeSuccess(response, request, http.StatusOK, map[string]any{
 		"binding": map[string]any{
 			"device_id":    binding.DeviceID,

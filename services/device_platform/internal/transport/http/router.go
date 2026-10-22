@@ -787,13 +787,19 @@ func NewRouter(options RouterOptions) http.Handler {
 				"POST /api/v1/families/{family_id}/assessment-sessions/{session_id}/finish",
 				requireAssessmentManage(guardianAssessment.finish),
 			)
-			// The device only reads the assessment it was asked to show. Answering
-			// stays on the guardian route so a child cannot move their own level.
+			// The device reads the assessment it was asked to show and reports the
+			// answers it observed, so practice does not need a guardian holding a
+			// phone. Starting, finishing, and changing the level stay with the
+			// guardian routes.
 			if options.BindingService != nil {
 				deviceAssessment := deviceAssessmentHandler{service: options.AssessmentService}
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/assessment-sessions/{session_id}",
 					requireDeviceSession(options.BindingService, deviceAssessment.current),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/assessment-sessions/{session_id}/answers",
+					requireDeviceSession(options.BindingService, deviceAssessment.answer),
 				)
 			}
 		}

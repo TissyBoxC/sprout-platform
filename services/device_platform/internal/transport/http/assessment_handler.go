@@ -15,9 +15,10 @@ type guardianAssessmentHandler struct {
 	service *assessmentservice.Service
 }
 
-// deviceAssessmentHandler answers the device with the assessment it was asked to
-// show. It is read-only: answers are recorded through the guardian route, so a
-// child cannot move their own difficulty curve by pressing buttons.
+// deviceAssessmentHandler serves the device that is running an assessment. The
+// device reads the run it was asked to show and reports each answer it observed;
+// starting and finishing stay with the guardian, and a guardian can still record
+// an answer from the phone when they are the one listening.
 type deviceAssessmentHandler struct {
 	service *assessmentservice.Service
 }
@@ -187,6 +188,48 @@ func (handler deviceAssessmentHandler) current(
 		}
 	}
 	writeSuccess(response, request, http.StatusOK, body)
+}
+
+// answer records one answer the device observed and replies with the next item.
+//
+// The device reports what it heard and how well it matched, so practice does not
+// depend on a guardian standing by with a phone. It never chooses its own
+// position: the next slot is whatever the stored answer count says, which keeps
+// a retry from skipping a question or duplicating one.
+func (handler deviceAssessmentHandler) answer(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	var payload struct {
+		ItemID     string `json:"item_id"`
+		ItemType   string `json:"item_type"`
+		TargetText string `json:"target_text"`
+		Score      int    `json:"score"`
+	}
+	if err := decodeJSON(request, &payload); err != nil {
+		writeError(response, request, http.StatusBadRequest, "invalid_request", "请求格式不正确")
+		return
+	}
+	result, err := handler.service.AnswerForDevice(
+		request.Context(),
+		request.PathValue("device_id"),
+		request.PathValue("session_id"),
+		assessmentdomain.AnswerInput{
+			ItemID:     payload.ItemID,
+			ItemType:   payload.ItemType,
+			TargetText: payload.TargetText,
+			Score:      payload.Score,
+		},
+	)
+	if err != nil {
+		writeAssessmentError(response, request, err)
+		return
+	}
+	body := assessmentResponse(result.Session)
+	if !result.NextItem.Empty() {
+		body["next_item"] = assessmentItemResponse(result.NextItem)
+	}
+	writeSuccess(response, request, http.StatusCreated, body)
 }
 
 // assessmentResponse exposes the run's lifecycle and progress.

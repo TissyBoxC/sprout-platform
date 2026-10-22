@@ -554,6 +554,112 @@ func TestDeviceAssessmentReturnsNextItem(t *testing.T) {
 	}
 }
 
+// TestDeviceAssessmentAnswerAdvancesProgress records an answer the device heard
+// itself, so practice does not need a guardian holding a phone.
+func TestDeviceAssessmentAnswerAdvancesProgress(t *testing.T) {
+	store := newAssessmentMemoryStore()
+	service := assessmentservice.NewService(assessmentservice.Options{
+		Store:   store,
+		Lessons: assessmentTestCatalog{items: 10},
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	guardian := guardianAssessmentHandler{service: service}
+	startRequest := withOwnerFamilyContext(assessmentRequest(
+		http.MethodPost,
+		"/api/v1/families/family-1/assessment-sessions",
+		`{"lesson_id":"greetings_basic","child_id":"child-1"}`,
+	), "parent-1")
+	startRecorder := httptest.NewRecorder()
+	guardian.start(startRecorder, startRequest)
+	startBody := decodeAssessmentSession(t, startRecorder)
+	sessionID := startBody["session_id"].(string)
+	firstItem := startBody["next_item"].(map[string]any)
+
+	device := deviceAssessmentHandler{service: service}
+	answerRequest := assessmentRequest(
+		http.MethodPost,
+		"/api/v1/devices/device-1/assessment-sessions/"+sessionID+"/answers",
+		`{"item_id":"`+firstItem["item_id"].(string)+
+			`","item_type":"word","target_text":"hello","score":90}`,
+	)
+	answerRequest.SetPathValue("device_id", "device-1")
+	answerRequest.SetPathValue("session_id", sessionID)
+	answerRecorder := httptest.NewRecorder()
+	device.answer(answerRecorder, answerRequest)
+	if answerRecorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s",
+			answerRecorder.Code, answerRecorder.Body.String())
+	}
+	body := decodeAssessmentSession(t, answerRecorder)
+	if got := body["answered_count"].(float64); got != 1 {
+		t.Fatalf("answered_count = %v, want 1", got)
+	}
+	if body["next_item"] == nil {
+		t.Fatal("the device answer must carry the next item")
+	}
+
+	// Another device must not be able to answer for this session.
+	foreignRequest := assessmentRequest(
+		http.MethodPost,
+		"/api/v1/devices/device-9/assessment-sessions/"+sessionID+"/answers",
+		`{"item_id":"word-2","item_type":"word","target_text":"hi","score":80}`,
+	)
+	foreignRequest.SetPathValue("device_id", "device-9")
+	foreignRequest.SetPathValue("session_id", sessionID)
+	foreignRecorder := httptest.NewRecorder()
+	device.answer(foreignRecorder, foreignRequest)
+	if foreignRecorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", foreignRecorder.Code)
+	}
+}
+
+// TestDeviceAssessmentAnswerRejectsAFinishedRun stops a late write from landing
+// on a session that is already over.
+func TestDeviceAssessmentAnswerRejectsAFinishedRun(t *testing.T) {
+	store := newAssessmentMemoryStore()
+	service := assessmentservice.NewService(assessmentservice.Options{
+		Store:   store,
+		Lessons: assessmentTestCatalog{items: 10},
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	guardian := guardianAssessmentHandler{service: service}
+	startRequest := withOwnerFamilyContext(assessmentRequest(
+		http.MethodPost,
+		"/api/v1/families/family-1/assessment-sessions",
+		`{"lesson_id":"greetings_basic","child_id":"child-1"}`,
+	), "parent-1")
+	startRecorder := httptest.NewRecorder()
+	guardian.start(startRecorder, startRequest)
+	startBody := decodeAssessmentSession(t, startRecorder)
+	sessionID := startBody["session_id"].(string)
+	firstItem := startBody["next_item"].(map[string]any)
+
+	finishRequest := assessmentRequest(
+		http.MethodPost,
+		"/api/v1/families/family-1/assessment-sessions/"+sessionID+"/finish",
+		"",
+	)
+	finishRequest.SetPathValue("family_id", "family-1")
+	finishRequest.SetPathValue("session_id", sessionID)
+	guardian.finish(httptest.NewRecorder(), finishRequest)
+
+	device := deviceAssessmentHandler{service: service}
+	answerRequest := assessmentRequest(
+		http.MethodPost,
+		"/api/v1/devices/device-1/assessment-sessions/"+sessionID+"/answers",
+		`{"item_id":"`+firstItem["item_id"].(string)+
+			`","item_type":"word","target_text":"hello","score":90}`,
+	)
+	answerRequest.SetPathValue("device_id", "device-1")
+	answerRequest.SetPathValue("session_id", sessionID)
+	answerRecorder := httptest.NewRecorder()
+	device.answer(answerRecorder, answerRequest)
+	if answerRecorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s",
+			answerRecorder.Code, answerRecorder.Body.String())
+	}
+}
+
 // assertAssessmentErrorCode checks the stable machine code the client switches on.
 func assertAssessmentErrorCode(t *testing.T, recorder *httptest.ResponseRecorder, want string) {
 	t.Helper()

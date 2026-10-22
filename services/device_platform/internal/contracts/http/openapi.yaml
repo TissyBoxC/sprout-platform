@@ -12845,12 +12845,62 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/devices/{device_id}/assessment-sessions/{session_id}/answers:
+    post:
+      summary: 设备上报一次作答
+      description: |
+        设备把听到的内容与评分上报，平台记录并返回下一道题，孩子练完不必等家长
+        在旁边拿手机。位置由平台按已存答案数决定，设备不能指定，重试不会跳题或重
+        复计数。开始与结束测评仍由家长端发起。
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssessmentAnswerRequest"
+      responses:
+        "201":
+          description: 已记录，返回最新进度与下一道题
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssessmentSessionEnvelope"
+        "400":
+          description: 作答内容不完整或超出范围
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "404":
+          description: 未找到该测评
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 测评已结束或已过期，不能再作答
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /api/v1/devices/{device_id}/assessment-sessions/{session_id}:
     get:
       summary: 设备查询当前要展示的测评
       description: |
-        只读接口，供设备显示当前测评与下一道题。设备只能查询绑定在当前设备上的
-        儿童所属的测评，其他测评返回 404。作答仍由家长端提交。
+        设备只能查询绑定在当前设备上的儿童所属的测评，其他测评返回 404。
+        开始、结束与难度调整仍由家长端控制。
       security:
         - deviceSessionToken: []
       parameters:

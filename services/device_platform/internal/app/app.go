@@ -81,6 +81,8 @@ import (
 	growthReportService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/service"
 	deviceChildRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/devicechild/repository"
 	deviceChildService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/devicechild/service"
+	careViewRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/care_view/repository"
+	careViewService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/care_view/service"
 	intercomRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/repository"
 	intercomService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/service"
 	motionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/repository"
@@ -360,6 +362,18 @@ func Run() error {
 		Devices:  intercomDeviceLookup{pool: databaseStore.Pool()},
 		Switches: intercomFamilySettings{pool: databaseStore.Pool()},
 		Notifier: intercomCallNotifier{commands: deviceRuntimeService},
+		Logger:   logger,
+	})
+	// Live care view reuses the device command channel for control and the voice
+	// gateway for frames. It is off until a family turns it on and grants image
+	// consent, because watching a child's room is never a default.
+	careViewRepositoryInstance := careViewRepository.NewRepository(databaseStore.Pool())
+	careViews := careViewService.NewService(careViewService.Options{
+		Store:    careViewStore{repository: careViewRepositoryInstance},
+		Devices:  intercomDeviceLookup{pool: databaseStore.Pool()},
+		Switches: careViewSwitch{pool: databaseStore.Pool()},
+		Consent:  careViewConsentReader{pool: databaseStore.Pool()},
+		Notifier: careViewNotifier{commands: deviceRuntimeService},
 		Logger:   logger,
 	})
 	fleetTelemetry, err := telemetryService.New(telemetryService.Options{
@@ -694,6 +708,7 @@ func Run() error {
 		deviceChildPersistence,
 	)
 	featureCenterHealthProbes["voice_intercom"] = intercomProbe(intercoms)
+	featureCenterHealthProbes["care_view"] = careViewProbe(careViews)
 
 	privacy, err := privacyService.New(privacyService.Options{
 		Repository:     privacyRepository.NewPostgresRepository(databaseStore.Pool()),
@@ -1098,6 +1113,7 @@ func Run() error {
 			GrowthReportService:          growthReports,
 			DeviceChildService:           deviceChildren,
 			IntercomService:              intercoms,
+			CareViewService:              careViews,
 			AuditRecorder:                privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -1124,6 +1140,9 @@ func Run() error {
 	// closed. The sweep runs often because a stuck ringing call blocks the
 	// device from receiving the next one.
 	go intercomService.NewExpiryWorker(intercoms, 15*time.Second).Run(runtimeCtx)
+	// A care view must stop even when the guardian's app disappears, so the
+	// platform closes overdue sessions and tells the device to stop capturing.
+	go careViewService.NewExpiryWorker(careViews, 10*time.Second).Run(runtimeCtx)
 	go runFeatureHealthScheduler(runtimeCtx, logger, featureCenter)
 	go runNotificationDeliveryWorker(
 		runtimeCtx,

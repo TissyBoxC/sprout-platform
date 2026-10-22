@@ -446,6 +446,18 @@ func (r *MetricsRepository) FeatureMetrics(
 			"intercom_open_call_count",
 			"intercom_calls_24h",
 		)
+	case "care_view":
+		// Counts only: how many views are in flight and how many opened today. The
+		// table holds no frames, so there is nothing else to report.
+		return r.pair(
+			ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM care_view_sessions WHERE state IN ('requested', 'streaming')),
+				(SELECT COUNT(*) FROM care_view_sessions
+				 WHERE started_at >= now() - interval '24 hours')`,
+			"care_view_open_session_count",
+			"care_view_sessions_24h",
+		)
 	case "local_command":
 		return r.scalar(ctx,
 			"SELECT COUNT(*) FROM local_commands",

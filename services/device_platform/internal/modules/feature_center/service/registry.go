@@ -260,6 +260,12 @@ func DefaultRegistry() []Definition {
 				"intercom_open_call_count", "进行中的通话", "路",
 				"intercom_calls_24h", "24 小时通话数", "次",
 			)),
+		readOnlyFeatureDef("care_view", "实时查看画面", "家长在家长端查看设备的实时摄像头画面。", "family", "家庭平台",
+			"查看需要家长显式开启并具备图片授权；设备端必须显示可闻可见提示，孩子可按键立即关闭，单次查看有强制时限，画面实时转发、不落盘、不留存。功能中心只展示进行中的查看数与 24 小时查看次数。",
+			metrics(
+				"care_view_open_session_count", "进行中的查看", "路",
+				"care_view_sessions_24h", "24 小时查看数", "次",
+			)),
 		readOnlyFeatureDef("local_command", "本地指令", "断网可用的本地设备指令。", "content", "内容平台",
 			"本地指令随离线内容下发并由设备执行，功能中心只提供能力状态和统计。",
 			metrics(

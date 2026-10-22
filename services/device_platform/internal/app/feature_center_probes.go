@@ -12,6 +12,7 @@ import (
 	billingdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/domain"
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
+	careviewservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/care_view/service"
 	intercomservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/service"
 	memorydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/domain"
 	growthReportDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/domain"
@@ -424,6 +425,26 @@ func intercomProbe(
 				return featureCenterDomain.HealthUnavailable, nil
 			}
 			if _, err := service.ReadMetrics(ctx); err != nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			return featureCenterDomain.HealthHealthy, nil
+		},
+	)
+}
+
+// careViewProbe reads the live view table so the reported health is real state,
+// not an assumption that the feature exists.
+func careViewProbe(
+	service interface {
+		Metrics(ctx context.Context) (careviewservice.Metrics, error)
+	},
+) featureCenterService.HealthProbe {
+	return featureCenterService.HealthProbeFunc(
+		func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+			if service == nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			if _, err := service.Metrics(ctx); err != nil {
 				return featureCenterDomain.HealthUnavailable, nil
 			}
 			return featureCenterDomain.HealthHealthy, nil

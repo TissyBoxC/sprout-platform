@@ -756,6 +756,10 @@ func (r *PostgresRepository) PurgeParentData(
 		// Call history reveals when a household was contacted, so it goes too.
 		{`DELETE FROM intercom_calls WHERE family_id = $1`, "intercom calls"},
 		{`DELETE FROM intercom_family_settings WHERE family_id = $1`, "intercom settings"},
+		// A record of when a child's room was watched is itself sensitive, so the
+		// viewing history goes with the family.
+		{`DELETE FROM care_view_sessions WHERE family_id = $1`, "care view sessions"},
+		{`DELETE FROM care_view_settings WHERE family_id = $1`, "care view settings"},
 		{`DELETE FROM alarm_reminder_events WHERE family_id = $1`, "alarm reminder events"},
 		{`DELETE FROM alarm_reminders WHERE family_id = $1`, "alarm reminders"},
 		{`DELETE FROM english_practice_attempts WHERE family_id = $1`, "english practice attempts"},

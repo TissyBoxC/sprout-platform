@@ -212,6 +212,15 @@ const (
 	// Only hangup and decline are accepted; an "accept" sent from the platform is
 	// ignored on the device, because consent has to be the child's own action.
 	CommandVoiceIntercomCallControl CommandType = "voice_intercom_call_control"
+	// CommandCareViewStart asks the device to show its visible and audible
+	// indication and begin sending camera frames to the relay.
+	//
+	// The payload carries the session id and the deadline the device enforces on
+	// its own. A device that cannot show the indication must refuse.
+	CommandCareViewStart CommandType = "care_view_start"
+	// CommandCareViewStop tells the device to stop capturing and clear its
+	// indication. The child may also send this by pressing the device button.
+	CommandCareViewStop CommandType = "care_view_stop"
 )
 
 // CommandTypeIsValid reports whether a command is part of the stable contract.
@@ -225,7 +234,9 @@ func CommandTypeIsValid(commandType CommandType) bool {
 		CommandSyncPrivacyConsent,
 		CommandFirmwareUpdate,
 		CommandVoiceIntercomCall,
-		CommandVoiceIntercomCallControl:
+		CommandVoiceIntercomCallControl,
+		CommandCareViewStart,
+		CommandCareViewStop:
 		return true
 	default:
 		return false

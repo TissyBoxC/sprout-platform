@@ -45,6 +45,7 @@ import (
 	memoryservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/service"
 	growthreportservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/service"
 	devicechildservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/devicechild/service"
+	careviewservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/care_view/service"
 	intercomservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/service"
 	motionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
 	notificationhandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/handler"
@@ -133,6 +134,10 @@ type RouterOptions struct {
 	// is nil the routes are not registered, so a deployment without intercom
 	// answers 404 rather than half-serving a call.
 	IntercomService *intercomservice.Service
+	// CareViewService serves the guardian live camera view. When it is nil the
+	// care-view routes are not registered at all, so a deployment that does not
+	// offer live viewing answers 404 instead of exposing half a feature.
+	CareViewService *careviewservice.Service
 	// MemoryChildResolver maps a device's family to its child profile for the
 	// memory sync routes. The routes are registered only when it is set, so a
 	// deployment that does not wire it keeps answering 404 instead of syncing a
@@ -677,6 +682,64 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"GET /api/v1/devices/{device_id}/child",
 					requireDeviceSession(options.BindingService, deviceChildBindings.current),
+				)
+			}
+		}
+		if options.CareViewService != nil {
+			guardianCareView := guardianCareViewHandler{service: options.CareViewService}
+			// Looking into a child's room is the most sensitive action a guardian
+			// can take here, so it carries the same family management permission
+			// as calling the device.
+			requireCareViewManage := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionChildManage,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
+			mux.HandleFunc(
+				"POST /api/v1/families/{family_id}/devices/{device_id}/care-view-sessions",
+				requireCareViewManage(guardianCareView.start),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/families/{family_id}/care-view-sessions",
+				requireCareViewManage(guardianCareView.history),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/families/{family_id}/care-view-sessions/{session_id}",
+				requireCareViewManage(guardianCareView.get),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/families/{family_id}/care-view-sessions/{session_id}/end",
+				requireCareViewManage(guardianCareView.end),
+			)
+			// The device answers with its own session token: the child closes the
+			// view on the robot, not on a phone.
+			if options.BindingService != nil {
+				deviceCareView := deviceCareViewHandler{service: options.CareViewService}
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/care-view-sessions/{session_id}",
+					requireDeviceSession(options.BindingService, deviceCareView.current),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/care-view-sessions/{session_id}/accept",
+					requireDeviceSession(options.BindingService, deviceCareView.accept),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/care-view-sessions/{session_id}/decline",
+					requireDeviceSession(options.BindingService, deviceCareView.decline),
+				)
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/care-view-sessions/{session_id}/end",
+					requireDeviceSession(options.BindingService, deviceCareView.end),
 				)
 			}
 		}
@@ -3064,6 +3127,19 @@ func NewRouter(options RouterOptions) http.Handler {
 					http.HandlerFunc(internalHandler.aiExecutionTicket),
 				),
 			)
+			if options.CareViewService != nil {
+				// The voice gateway re-reads session state here before relaying a
+				// single frame, so it never trusts the state carried by an earlier
+				// authorize call. Service-token protected: only the relay may ask.
+				internalCareView := internalCareViewHandler{service: options.CareViewService}
+				mux.Handle(
+					"GET /internal/v1/devices/{device_id}/care-view-sessions/{session_id}",
+					requireServiceToken(
+						options.InternalAPIConfig.AuthToken,
+						http.HandlerFunc(internalCareView.session),
+					),
+				)
+			}
 			if options.IntercomService != nil {
 				// The voice gateway re-reads call state here before relaying
 				// audio. It is service-token protected because only the gateway

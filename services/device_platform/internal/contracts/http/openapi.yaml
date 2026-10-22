@@ -12308,6 +12308,355 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/families/{family_id}/devices/{device_id}/care-view-sessions:
+    post:
+      summary: 家长对自家设备发起一次实时查看
+      description: |
+        仅能查看本家庭绑定的设备。创建后会话处于“已请求”状态，设备必须确认
+        已显示可见可闻提示后才进入推流，因此请求本身不会打开摄像头。
+        需要家长显式开启查看开关并具备图片授权，否则拒绝。
+      security:
+        - userToken: []
+      parameters:
+        - name: family_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 128
+      responses:
+        "201":
+          description: 已创建查看请求
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareViewSessionEnvelope"
+        "403":
+          description: 未开启查看或缺少图片授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 设备不存在或不属于本家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 该设备正在被查看
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: 查看过于频繁
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/families/{family_id}/care-view-sessions:
+    get:
+      summary: 家庭的历史查看记录
+      description: |
+        只返回会话信封（时间、时长、结束原因），从不包含画面内容。
+      security:
+        - userToken: []
+      parameters:
+        - name: family_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: 查看记录，最新在前
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareViewSessionListEnvelope"
+  /api/v1/families/{family_id}/care-view-sessions/{session_id}:
+    get:
+      summary: 查询一次实时查看的状态
+      security:
+        - userToken: []
+      parameters:
+        - name: family_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 查看状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareViewSessionEnvelope"
+        "404":
+          description: 未找到该查看
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/families/{family_id}/care-view-sessions/{session_id}/end:
+    post:
+      summary: 家长结束实时查看
+      description: |
+        结束查看会同时通知设备停止抓帧并清除提示，避免家长关闭应用后
+        摄像头继续工作。
+      security:
+        - userToken: []
+      parameters:
+        - name: family_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 已结束
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareViewSessionEnvelope"
+        "404":
+          description: 未找到该查看
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 状态已变化，需刷新
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/devices/{device_id}/care-view-sessions/{session_id}:
+    get:
+      summary: 设备查询自己被要求执行的查看
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 128
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 查看状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareViewSessionEnvelope"
+        "404":
+          description: 未找到该查看
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/devices/{device_id}/care-view-sessions/{session_id}/accept:
+    post:
+      summary: 设备确认已显示提示并开始推流
+      description: |
+        只有在设备确实显示了可见可闻提示后才可以调用。平台以此作为
+        “画面已开始”的唯一依据，未确认的会话不允许传输任何画面。
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 128
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 已进入推流状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareViewSessionEnvelope"
+        "404":
+          description: 未找到该查看
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 状态不允许确认（已结束或已超时）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/devices/{device_id}/care-view-sessions/{session_id}/decline:
+    post:
+      summary: 设备拒绝这次查看
+      description: |
+        孩子按键关闭、摄像头不可用或设备忙时调用。拒绝后不会传输任何画面。
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 128
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 32
+      responses:
+        "200":
+          description: 已拒绝
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareViewSessionEnvelope"
+        "404":
+          description: 未找到该查看
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/devices/{device_id}/care-view-sessions/{session_id}/end:
+    post:
+      summary: 设备结束实时查看
+      description: |
+        孩子在设备上按键要求停止被查看时调用。
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 128
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 32
+      responses:
+        "200":
+          description: 已结束
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareViewSessionEnvelope"
+        "404":
+          description: 未找到该查看
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /internal/v1/devices/{device_id}/care-view-sessions/{session_id}:
+    get:
+      summary: 供语音网关读取一次实时查看的权威状态
+      description: |
+        语音网关在转发任何画面帧之前用它重新确认会话状态，避免只信任
+        授权时的快照。只有推流中的会话才允许画面通过。
+      security:
+        - serviceToken: []
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 128
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 查看状态与截止时刻
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareViewSessionEnvelope"
+        "404":
+          description: 未找到该查看或不属于该设备
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /api/v1/families/{family_id}/intercom-calls:
     get:
       summary: 查看家庭最近的通话记录
@@ -13055,6 +13404,69 @@ components:
           schema:
             $ref: "#/components/schemas/ResponseEnvelope"
   schemas:
+    CareViewSession:
+      type: object
+      description: 一次实时查看的信封。只包含生命周期信息，从不包含画面内容。
+      required:
+        - session_id
+        - device_id
+        - state
+        - started_at
+        - deadline
+        - allows_frames
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+        child_id:
+          type: string
+        state:
+          type: string
+          enum: [requested, streaming, ended, declined, failed]
+          description: 只有 streaming 状态允许传输画面。
+        started_at:
+          type: string
+          format: date-time
+        deadline:
+          type: string
+          format: date-time
+          description: 设备与转发层各自强制执行的截止时刻。
+        finished_at:
+          type: string
+          format: date-time
+        duration_seconds:
+          type: integer
+        finish_reason:
+          type: string
+        frames_delivered:
+          type: integer
+          format: int64
+        allows_frames:
+          type: boolean
+          description: 客户端据此判断是否应渲染画面。
+
+    CareViewSessionEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/CareViewSession"
+
+    CareViewSessionListEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [sessions]
+          properties:
+            sessions:
+              type: array
+              items:
+                $ref: "#/components/schemas/CareViewSession"
+
     IntercomCall:
       type: object
       description: |

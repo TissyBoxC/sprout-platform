@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS intercom_family_settings (
 CREATE TABLE IF NOT EXISTS intercom_calls (
     id UUID PRIMARY KEY,
     family_id UUID NOT NULL REFERENCES parent_accounts (id) ON DELETE CASCADE,
-    device_id UUID NOT NULL REFERENCES device_bindings (device_id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL REFERENCES device_bindings (device_id) ON DELETE CASCADE,
     child_id UUID REFERENCES child_profiles (id) ON DELETE SET NULL,
     state TEXT NOT NULL CHECK (
         state IN ('ringing', 'active', 'ended', 'missed', 'declined', 'cancelled')

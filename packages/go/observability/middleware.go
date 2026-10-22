@@ -1,7 +1,9 @@
 package observability
 
 import (
+	"bufio"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 )
@@ -153,4 +155,26 @@ func (recorder *responseRecorder) WriteHeader(status int) {
 
 func (recorder *responseRecorder) Write(payload []byte) (int, error) {
 	return recorder.ResponseWriter.Write(payload)
+}
+
+// Hijack forwards the connection takeover a WebSocket upgrade needs.
+//
+// Without this method the wrapped writer no longer satisfies http.Hijacker, so
+// every upgrade handled behind this middleware failed with HTTP 500 while the
+// handlers themselves were correct. The status is left untouched: a hijacked
+// connection writes its own protocol frames, not an HTTP response.
+func (recorder *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := recorder.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	return hijacker.Hijack()
+}
+
+// Flush forwards the flush used by streaming responses for the same reason:
+// wrapping a writer must not silently drop optional interfaces.
+func (recorder *responseRecorder) Flush() {
+	if flusher, ok := recorder.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }

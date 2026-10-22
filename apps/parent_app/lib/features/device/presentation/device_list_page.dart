@@ -6,6 +6,7 @@ import '../../../core/error/app_exception.dart';
 import '../../../core/theme/app_motion.dart';
 import '../../../shared/widgets/app_reveal.dart';
 import '../../../shared/widgets/app_state_switcher.dart';
+import '../../care_view/presentation/care_view_panel.dart';
 import '../../ota/device_firmware/presentation/device_firmware_update_panel.dart';
 import '../../intercom/presentation/intercom_panel.dart';
 import '../application/device_binding_controller.dart';
@@ -264,6 +265,20 @@ class DeviceListPage extends ConsumerWidget {
     );
   }
 
+  /// Opens the full-size live view, keeping the device sheet underneath.
+  void _openCareView(
+    BuildContext sheetContext,
+    BuildContext pageContext,
+    String deviceId,
+    String deviceName,
+  ) {
+    Navigator.of(sheetContext).pop();
+    pageContext.push(
+      '/devices/${Uri.encodeComponent(deviceId)}/care-view'
+      '?name=${Uri.encodeQueryComponent(deviceName)}',
+    );
+  }
+
   Future<void> _openDiscoveredDevice(
     BuildContext context,
     String deviceName,
@@ -375,6 +390,23 @@ class DeviceListPage extends ConsumerWidget {
                 IntercomPanel(
                   deviceId: device.deviceId,
                   deviceName: device.deviceName,
+                ),
+                CareViewPanel(
+                  deviceId: device.deviceId,
+                  deviceName: device.deviceName,
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => _openCareView(
+                      sheetContext,
+                      context,
+                      device.deviceId,
+                      device.deviceName,
+                    ),
+                    icon: const Icon(Icons.aspect_ratio_rounded),
+                    label: const Text('全屏查看'),
+                  ),
                 ),
                 const SizedBox(height: 20),
                 Text(

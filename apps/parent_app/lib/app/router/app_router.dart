@@ -13,6 +13,7 @@ import '../../features/billing/presentation/billing_consent_page.dart';
 import '../../features/billing/presentation/billing_orders_page.dart';
 import '../../features/billing/presentation/billing_plans_page.dart';
 import '../../features/billing/presentation/spending_limit_page.dart';
+import '../../features/care_view/presentation/care_view_page.dart';
 import '../../features/memory/presentation/memory_page.dart';
 import '../../features/growth_report/presentation/growth_report_page.dart';
 import '../../features/bluetooth_audio/presentation/bluetooth_audio_page.dart';
@@ -328,6 +329,17 @@ GoRouter createAppRouter(ProviderContainer container) {
             return const _RouteNotFoundPage();
           }
           return VisionPage(deviceId: deviceId);
+        },
+      ),
+      GoRoute(
+        path: '/devices/:deviceId/care-view',
+        builder: (context, state) {
+          final deviceId = state.pathParameters['deviceId'];
+          if (deviceId == null || deviceId.isEmpty) {
+            return const _RouteNotFoundPage();
+          }
+          final deviceName = state.uri.queryParameters['name']?.trim() ?? '';
+          return CareViewPage(deviceId: deviceId, deviceName: deviceName);
         },
       ),
       GoRoute(

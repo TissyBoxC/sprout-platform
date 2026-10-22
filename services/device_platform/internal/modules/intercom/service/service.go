@@ -73,28 +73,56 @@ type IntercomSwitch interface {
 	IntercomEnabled(ctx context.Context, familyID string) (bool, error)
 }
 
+// CallNotifier tells the device that someone is calling it, and when the call
+// is over.
+//
+// The device learns about a call through this push. It is best effort: a device
+// that is offline still sees the ringing call when it next asks the platform,
+// so a failed notification delays the ring but never loses the call.
+type CallNotifier interface {
+	NotifyIntercomCall(ctx context.Context, call domain.Call) error
+	// NotifyIntercomCallEnded tells the device to stop ringing or drop the call.
+	// A ringing call that ends and is never reported would keep prompting the
+	// child until its own timeout, so this is sent for every terminal state.
+	NotifyIntercomCallEnded(ctx context.Context, call domain.Call) error
+}
+
 // Service implements intercom call lifecycle.
 type Service struct {
-	store      Store
-	devices    DeviceLookup
-	switches   IntercomSwitch
-	logger     *slog.Logger
-	now        func() time.Time
-	newID      func() (string, error)
+	store    Store
+	devices  DeviceLookup
+	switches IntercomSwitch
+	notifier CallNotifier
+	logger   *slog.Logger
+	now      func() time.Time
+	newID    func() (string, error)
+}
+
+// Options are the collaborators the service needs.
+type Options struct {
+	Store    Store
+	Devices  DeviceLookup
+	Switches IntercomSwitch
+	// Notifier pushes the ring to the device. When it is nil the device only
+	// learns about the call by asking, which still works but rings later.
+	Notifier CallNotifier
+	Logger   *slog.Logger
 }
 
 // NewService builds the service.
 //
 // A nil switch means intercom is allowed for every family; production wiring
 // always supplies the real one.
-func NewService(store Store, devices DeviceLookup, switches IntercomSwitch, logger *slog.Logger) *Service {
+func NewService(options Options) *Service {
+	logger := options.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Service{
-		store:    store,
-		devices:  devices,
-		switches: switches,
+		store:    options.Store,
+		devices:  options.Devices,
+		switches: options.Switches,
+		notifier: options.Notifier,
 		logger:   logger,
 		now:      func() time.Time { return time.Now().UTC() },
 		newID:    newCallID,
@@ -159,7 +187,24 @@ func (service *Service) Start(ctx context.Context, request domain.Request) (doma
 	// Log the lifecycle only: never audio, never the child's speech.
 	service.logger.Info("intercom call ringing",
 		"call_id", call.ID, "family_id", call.FamilyID, "device_id", call.DeviceID)
+	// Push the ring after the row exists, so a device that reacts instantly
+	// always finds its call when it asks for the details.
+	service.notify(ctx, call)
 	return call, nil
+}
+
+// notify pushes the ring without failing the call.
+//
+// A device that is offline or slow must not turn the guardian's call into an
+// error: the call is already stored and will still ring when the device asks.
+func (service *Service) notify(ctx context.Context, call domain.Call) {
+	if service.notifier == nil {
+		return
+	}
+	if err := service.notifier.NotifyIntercomCall(ctx, call); err != nil {
+		service.logger.Warn("intercom ring push failed",
+			"call_id", call.ID, "device_id", call.DeviceID, "error", err)
+	}
 }
 
 // Accept lets the device report that the child pressed accept.
@@ -271,6 +316,7 @@ func (service *Service) ExpireDue(ctx context.Context) (int, error) {
 		closed++
 		service.logger.Info("intercom call closed by deadline",
 			"call_id", call.ID, "state", call.State, "reason", call.DeclineReason)
+		service.notifyEnded(ctx, call)
 	}
 	return closed, nil
 }
@@ -335,7 +381,19 @@ func (service *Service) applyTransition(
 	}
 	service.logger.Info("intercom call finished",
 		"call_id", updated.ID, "state", updated.State, "reason", updated.DeclineReason)
+	service.notifyEnded(ctx, updated)
 	return updated, nil
+}
+
+// notifyEnded tells the device the call is over without failing the transition.
+func (service *Service) notifyEnded(ctx context.Context, call domain.Call) {
+	if service.notifier == nil {
+		return
+	}
+	if err := service.notifier.NotifyIntercomCallEnded(ctx, call); err != nil {
+		service.logger.Warn("intercom end push failed",
+			"call_id", call.ID, "device_id", call.DeviceID, "error", err)
+	}
 }
 
 const (

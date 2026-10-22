@@ -3,9 +3,13 @@ package app
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/domain"
+	runtimeDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
 )
 
 // intercomDeviceLookup resolves which family owns a device and which child the
@@ -89,4 +93,75 @@ func (settings intercomFamilySettings) SetIntercomEnabled(
 
 func isNoRows(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
+}
+
+// intercomCallNotifier pushes a ring to the device through the existing device
+// command channel.
+//
+// The command is stored before it is published, so a device that is offline
+// still receives the ring on its next poll. A silent, never-stored push would
+// make a call disappear whenever the network hiccuped.
+type intercomCallNotifier struct {
+	commands interface {
+		CreateCommand(
+			ctx context.Context,
+			deviceID string,
+			commandType runtimeDomain.CommandType,
+			requestedBy string,
+			payload map[string]any,
+		) (*runtimeDomain.Command, error)
+	}
+	// cancelCommand ends a call from the platform side.
+	clock func() time.Time
+}
+
+// NotifyIntercomCall sends the ring command for one call.
+func (notifier intercomCallNotifier) NotifyIntercomCall(ctx context.Context, call domain.Call) error {
+	if notifier.commands == nil {
+		return nil
+	}
+	payload := map[string]any{
+		"call_id": call.ID,
+		// The device stops ringing at this instant even if it stops hearing from
+		// the platform, so a lost cancel cannot ring forever.
+		"ring_deadline": call.Deadline().Format(time.RFC3339),
+	}
+	if call.ChildID != "" {
+		payload["child_id"] = call.ChildID
+	}
+	_, err := notifier.commands.CreateCommand(
+		ctx,
+		call.DeviceID,
+		runtimeDomain.CommandVoiceIntercomCall,
+		"guardian",
+		payload,
+	)
+	return err
+}
+
+// NotifyIntercomCallEnded tells the device to stop ringing or to drop an active
+// call.
+//
+// A call that was never accepted ends by ringing out on the device, so this is
+// sent for every terminal state.
+func (notifier intercomCallNotifier) NotifyIntercomCallEnded(ctx context.Context, call domain.Call) error {
+	if notifier.commands == nil {
+		return nil
+	}
+	action := "hangup"
+	if call.State == domain.StateCancelled || call.State == domain.StateMissed {
+		action = "decline"
+	}
+	payload := map[string]any{
+		"call_id": call.ID,
+		"action":  action,
+	}
+	_, err := notifier.commands.CreateCommand(
+		ctx,
+		call.DeviceID,
+		runtimeDomain.CommandVoiceIntercomCallControl,
+		"guardian",
+		payload,
+	)
+	return err
 }

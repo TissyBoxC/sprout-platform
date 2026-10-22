@@ -170,9 +170,37 @@ func (switcher fakeSwitch) IntercomEnabled(_ context.Context, familyID string) (
 	return !switcher.disabled[familyID], nil
 }
 
+// fakeNotifier records what the platform told the device.
+type fakeNotifier struct {
+	rings    []string
+	ends     []string
+	failWith error
+}
+
+func (notifier *fakeNotifier) NotifyIntercomCall(_ context.Context, call domain.Call) error {
+	if notifier.failWith != nil {
+		return notifier.failWith
+	}
+	notifier.rings = append(notifier.rings, call.ID)
+	return nil
+}
+
+func (notifier *fakeNotifier) NotifyIntercomCallEnded(_ context.Context, call domain.Call) error {
+	if notifier.failWith != nil {
+		return notifier.failWith
+	}
+	notifier.ends = append(notifier.ends, call.ID)
+	return nil
+}
+
 func newService(store *fakeStore, devices fakeDevices, switcher fakeSwitch) *service.Service {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return service.NewService(store, devices, switcher, logger)
+	return service.NewService(service.Options{
+		Store:    store,
+		Devices:  devices,
+		Switches: switcher,
+		Logger:   logger,
+	})
 }
 
 func defaultFixtures() (*fakeStore, fakeDevices, fakeSwitch) {
@@ -182,6 +210,73 @@ func defaultFixtures() (*fakeStore, fakeDevices, fakeSwitch) {
 			child: map[string]string{"device-1": "child-1"},
 		},
 		fakeSwitch{disabled: map[string]bool{}}
+}
+
+func TestStartNotifiesTheDevice(t *testing.T) {
+	store, devices, switcher := defaultFixtures()
+	notifier := &fakeNotifier{}
+	svc := service.NewService(service.Options{
+		Store:    store,
+		Devices:  devices,
+		Switches: switcher,
+		Notifier: notifier,
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+
+	call, err := svc.Start(context.Background(), domain.Request{FamilyID: "family-1", DeviceID: "device-1"})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	// The device only rings because it was told; a silent start is a dead call.
+	if len(notifier.rings) != 1 || notifier.rings[0] != call.ID {
+		t.Fatalf("ring notifications = %v, want [%s]", notifier.rings, call.ID)
+	}
+}
+
+func TestNotifyFailureDoesNotFailTheCall(t *testing.T) {
+	store, devices, switcher := defaultFixtures()
+	svc := service.NewService(service.Options{
+		Store:    store,
+		Devices:  devices,
+		Switches: switcher,
+		Notifier: &fakeNotifier{failWith: errors.New("broker down")},
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+
+	// A device that cannot be reached must not turn the guardian's call into an
+	// error: the call is stored and still rings when the device asks.
+	call, err := svc.Start(context.Background(), domain.Request{FamilyID: "family-1", DeviceID: "device-1"})
+	if err != nil {
+		t.Fatalf("start with failing notifier: %v", err)
+	}
+	if call.State != domain.StateRinging {
+		t.Fatalf("state = %s, want ringing", call.State)
+	}
+}
+
+func TestHangUpNotifiesTheDeviceToStopRinging(t *testing.T) {
+	store, devices, switcher := defaultFixtures()
+	notifier := &fakeNotifier{}
+	svc := service.NewService(service.Options{
+		Store:    store,
+		Devices:  devices,
+		Switches: switcher,
+		Notifier: notifier,
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+
+	call, err := svc.Start(context.Background(), domain.Request{FamilyID: "family-1", DeviceID: "device-1"})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	// A ringing call is cancelled, not hung up: the two are distinct transitions.
+	if _, err := svc.Cancel(context.Background(), "family-1", call.ID); err != nil {
+		t.Fatalf("hangup: %v", err)
+	}
+	// Without this the prompt keeps sounding on the device until its own timeout.
+	if len(notifier.ends) != 1 || notifier.ends[0] != call.ID {
+		t.Fatalf("end notifications = %v, want [%s]", notifier.ends, call.ID)
+	}
 }
 
 func TestStartRequiresOwnDevice(t *testing.T) {

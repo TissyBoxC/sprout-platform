@@ -201,6 +201,17 @@ const (
 	// device's active deployment. Release existence, hardware, rollout,
 	// signature, and rollback checks remain owned by the OTA module.
 	CommandFirmwareUpdate CommandType = "firmware_update"
+	// CommandVoiceIntercomCall tells the device that a guardian is calling it.
+	//
+	// It is the ring, not the call: the device shows and sounds a prompt and
+	// captures nothing. Audio only starts after the child accepts on the device.
+	// The payload carries the call identifier and the ring deadline, never audio.
+	CommandVoiceIntercomCall CommandType = "voice_intercom_call"
+	// CommandVoiceIntercomCallControl ends a call from the guardian side.
+	//
+	// Only hangup and decline are accepted; an "accept" sent from the platform is
+	// ignored on the device, because consent has to be the child's own action.
+	CommandVoiceIntercomCallControl CommandType = "voice_intercom_call_control"
 )
 
 // CommandTypeIsValid reports whether a command is part of the stable contract.
@@ -212,7 +223,9 @@ func CommandTypeIsValid(commandType CommandType) bool {
 		CommandFactoryReset,
 		CommandDisplayMessage,
 		CommandSyncPrivacyConsent,
-		CommandFirmwareUpdate:
+		CommandFirmwareUpdate,
+		CommandVoiceIntercomCall,
+		CommandVoiceIntercomCallControl:
 		return true
 	default:
 		return false

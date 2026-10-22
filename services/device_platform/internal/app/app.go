@@ -276,16 +276,6 @@ func Run() error {
 		databaseStore.Pool(),
 	)
 	deviceChildren := deviceChildService.NewService(deviceChildPersistence, logger)
-	// Voice intercom is guardian-initiated and child-accepted. The switch is
-	// read on every call so turning it off takes effect immediately.
-	intercomRepositoryInstance := intercomRepository.NewRepository(databaseStore.Pool())
-	intercomSettings := intercomFamilySettings{pool: databaseStore.Pool()}
-	intercoms := intercomService.NewService(
-		intercomStore{repository: intercomRepositoryInstance},
-		intercomDeviceLookup{pool: databaseStore.Pool()},
-		intercomSettings,
-		logger,
-	)
 	childProfileService, err := childService.New(childService.Options{
 		Repository:        childPersistence,
 		PolicyProvisioner: parentPolicyService,
@@ -360,6 +350,18 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create device runtime service: %w", err)
 	}
+	// Voice intercom is guardian-initiated and child-accepted. The switch is
+	// read on every call so turning it off takes effect immediately, and the
+	// ring reaches the device through the durable command channel so a device
+	// that is briefly offline still rings on its next poll.
+	intercomRepositoryInstance := intercomRepository.NewRepository(databaseStore.Pool())
+	intercoms := intercomService.NewService(intercomService.Options{
+		Store:    intercomStore{repository: intercomRepositoryInstance},
+		Devices:  intercomDeviceLookup{pool: databaseStore.Pool()},
+		Switches: intercomFamilySettings{pool: databaseStore.Pool()},
+		Notifier: intercomCallNotifier{commands: deviceRuntimeService},
+		Logger:   logger,
+	})
 	fleetTelemetry, err := telemetryService.New(telemetryService.Options{
 		Repository: telemetryRepository.NewPostgresRepository(
 			databaseStore.Pool(),

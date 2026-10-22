@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../shared/widgets/app_reveal.dart';
 import '../../../shared/widgets/app_state_switcher.dart';
+import '../../assessment/presentation/assessment_page.dart';
 import '../../child_profile/application/child_profile_controller.dart';
 import '../../child_profile/domain/child_profile.dart';
 import '../application/english_controller.dart';
@@ -86,6 +87,12 @@ class _EnglishContent extends ConsumerWidget {
         children: [
           AppReveal(
             child: _ProgressSummary(state: state, children: children),
+          ),
+          const SizedBox(height: 12),
+          AppReveal(
+            child: AssessmentEntryCard(
+              onOpen: () => context.push<void>('/me/english/assessment'),
+            ),
           ),
           const SizedBox(height: 12),
           AppReveal(

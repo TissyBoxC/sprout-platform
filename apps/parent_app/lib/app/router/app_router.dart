@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/alarm_reminder/presentation/alarm_reminder_page.dart';
+import '../../features/assessment/presentation/assessment_page.dart';
 import '../../features/auth/application/auth_controller.dart';
 import '../../features/auth/presentation/bind_email_page.dart';
 import '../../features/auth/presentation/login_page.dart';
@@ -209,6 +210,11 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/english',
         builder: (context, state) => const EnglishPage(),
+      ),
+      // 测评从英语学习页进入；直接打开链接时只展示课程列表，不会开始任何测评。
+      GoRoute(
+        path: '/me/english/assessment',
+        builder: (context, state) => const AssessmentGate(),
       ),
       GoRoute(
         path: '/me/playback',

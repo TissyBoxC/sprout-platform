@@ -770,6 +770,12 @@ func (r *PostgresRepository) PurgeParentData(
 			SELECT id FROM assessment_sessions WHERE family_id = $1
 		)`, "assessment answers"},
 		{`DELETE FROM assessment_sessions WHERE family_id = $1`, "assessment sessions"},
+		// Mood samples describe a child's inner state over time, so they are the
+		// most personal rows this module keeps. The observations are deleted
+		// before the settings row that scopes them, and both leave with the
+		// family rather than surviving as an orphaned history.
+		{`DELETE FROM emotion_observations WHERE family_id = $1`, "emotion observations"},
+		{`DELETE FROM emotion_settings WHERE family_id = $1`, "emotion settings"},
 		{`DELETE FROM local_commands WHERE family_id = $1`, "local commands"},
 		{`DELETE FROM local_command_revisions WHERE family_id = $1`, "local command revisions"},
 		{`DELETE FROM content_favorites WHERE parent_account_id = $1`, "content favorites"},

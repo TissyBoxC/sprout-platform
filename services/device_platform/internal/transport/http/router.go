@@ -36,6 +36,7 @@ import (
 	runtimeservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
 	devicechildservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/devicechild/service"
 	displayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/display/service"
+	emotionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/emotion/service"
 	englishservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/service"
 	familydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/domain"
 	familyservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/family/service"
@@ -64,6 +65,7 @@ import (
 	screenservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/screen/service"
 	serviceversionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
 	telemetryservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/telemetry/service"
+	timelineservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/timeline/service"
 	ui_textservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ui_text/service"
 	usagereportservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/usage_report/service"
 	videoservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/video_companion/service"
@@ -143,6 +145,15 @@ type RouterOptions struct {
 	// assessment routes are not registered at all, so a deployment that does
 	// not offer assessments answers 404 instead of half a feature.
 	AssessmentService *assessmentservice.Service
+	// EmotionService serves mood sensing. When it is nil the routes are not
+	// registered at all, so a deployment that does not offer the feature answers
+	// 404 instead of exposing half of it.
+	EmotionService *emotionservice.Service
+	// TimelineService serves the growth timeline. When it is nil the timeline
+	// routes are not registered at all, so a deployment that does not assemble
+	// one answers 404 instead of serving an empty story that looks like a child
+	// with no history.
+	TimelineService *timelineservice.Service
 	// MemoryChildResolver maps a device's family to its child profile for the
 	// memory sync routes. The routes are registered only when it is set, so a
 	// deployment that does not wire it keeps answering 404 instead of syncing a
@@ -805,6 +816,79 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/assessment-sessions/{session_id}/answers",
 					requireDeviceSession(options.BindingService, deviceAssessment.answer),
+				)
+			}
+		}
+		if options.TimelineService != nil {
+			guardianTimeline := guardianTimelineHandler{service: options.TimelineService}
+			// The timeline gathers records about one child, so reading it is the
+			// same family action as managing that child's data.
+			requireTimelineManage := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionChildManage,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
+			mux.HandleFunc(
+				"GET /api/v1/families/{family_id}/timeline",
+				requireTimelineManage(guardianTimeline.list),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/families/{family_id}/timeline-milestones",
+				requireTimelineManage(guardianTimeline.milestones),
+			)
+		}
+		if options.EmotionService != nil {
+			guardianEmotion := guardianEmotionHandler{service: options.EmotionService}
+			// The switch decides whether a child's feelings are recorded at all,
+			// so changing it carries the child-management permission rather than
+			// a lighter one.
+			requireEmotionManage := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionChildManage,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
+			mux.HandleFunc(
+				"GET /api/v1/families/{family_id}/emotion-settings",
+				requireEmotionManage(guardianEmotion.settings),
+			)
+			mux.HandleFunc(
+				"PUT /api/v1/families/{family_id}/emotion-settings",
+				requireEmotionManage(guardianEmotion.updateSettings),
+			)
+			// The summary is aggregate-only by construction; there is no route
+			// that lists individual observations, and that absence is the feature
+			// contract rather than an unfinished endpoint.
+			mux.HandleFunc(
+				"GET /api/v1/families/{family_id}/emotion-summary",
+				requireEmotionManage(guardianEmotion.summary),
+			)
+			// The device reports with its own session token: it is the device
+			// looking at the child, not a guardian's phone.
+			if options.BindingService != nil {
+				deviceEmotion := deviceEmotionHandler{service: options.EmotionService}
+				mux.HandleFunc(
+					"POST /api/v1/devices/{device_id}/emotion-observations",
+					requireDeviceSession(options.BindingService, deviceEmotion.record),
 				)
 			}
 		}

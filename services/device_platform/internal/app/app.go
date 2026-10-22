@@ -61,6 +61,8 @@ import (
 	deviceChildService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/devicechild/service"
 	displayRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/display/repository"
 	displayService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/display/service"
+	emotionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/emotion/repository"
+	emotionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/emotion/service"
 	englishdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/domain"
 	englishRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/repository"
 	englishService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/service"
@@ -117,6 +119,8 @@ import (
 	serviceVersionService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/service_version/service"
 	telemetryRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/telemetry/repository"
 	telemetryService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/telemetry/service"
+	timelineRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/timeline/repository"
+	timelineService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/timeline/service"
 	ui_textdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ui_text/domain"
 	ui_textRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ui_text/repository"
 	ui_textService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ui_text/service"
@@ -394,6 +398,24 @@ func Run() error {
 			cfg.Internal.AuthToken,
 		)),
 		Logger: logger,
+	})
+	// The growth timeline is a read-only view over records other features
+	// already store, so it owns no table and starts with no worker.
+	timelines := timelineService.NewService(timelineService.Options{
+		Source: timelineSource{
+			repository: timelineRepository.NewRepository(databaseStore.Pool()),
+		},
+		Logger: logger,
+	})
+	// Mood sensing is off until a guardian turns it on, stores only a label, a
+	// confidence and an instant, and is read back as an aggregate over a period.
+	// Nothing here keeps media, text, or a moment-by-moment record a guardian
+	// could use to watch a child's feelings in real time.
+	emotions := emotionService.NewService(emotionService.Options{
+		Store:    emotionStore{repository: emotionRepository.NewRepository(databaseStore.Pool())},
+		Switches: emotionSwitches{pool: databaseStore.Pool()},
+		Devices:  emotionDevices{pool: databaseStore.Pool()},
+		Logger:   logger,
 	})
 	fleetTelemetry, err := telemetryService.New(telemetryService.Options{
 		Repository: telemetryRepository.NewPostgresRepository(
@@ -729,6 +751,8 @@ func Run() error {
 	featureCenterHealthProbes["voice_intercom"] = intercomProbe(intercoms)
 	featureCenterHealthProbes["care_view"] = careViewProbe(careViews)
 	featureCenterHealthProbes["assessment"] = assessmentProbe(assessments)
+	featureCenterHealthProbes["emotion"] = emotionProbe(emotions)
+	featureCenterHealthProbes["growth_timeline"] = timelineProbe(timelines)
 
 	privacy, err := privacyService.New(privacyService.Options{
 		Repository:     privacyRepository.NewPostgresRepository(databaseStore.Pool()),
@@ -1135,6 +1159,8 @@ func Run() error {
 			IntercomService:              intercoms,
 			CareViewService:              careViews,
 			AssessmentService:            assessments,
+			TimelineService:              timelines,
+			EmotionService:               emotions,
 			AuditRecorder:                privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -1167,6 +1193,9 @@ func Run() error {
 	// An assessment left open on a sleeping device must not stay active and block
 	// the next session, so overdue runs are closed and counted.
 	go assessmentService.NewExpiryWorker(assessments, 30*time.Second).Run(runtimeCtx)
+	// Samples past each family's retention window must not survive because a
+	// guardian never revisited the setting, so the sweep enforces the promise.
+	go emotionService.NewRetentionWorker(emotions, emotionService.DefaultRetentionInterval).Run(runtimeCtx)
 	go runFeatureHealthScheduler(runtimeCtx, logger, featureCenter)
 	go runNotificationDeliveryWorker(
 		runtimeCtx,

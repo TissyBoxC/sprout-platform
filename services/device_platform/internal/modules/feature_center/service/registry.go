@@ -272,6 +272,19 @@ func DefaultRegistry() []Definition {
 				"assessment_active_session_count", "进行中的测评", "个",
 				"assessment_sessions_24h", "24 小时测评数", "次",
 			)),
+		readOnlyFeatureDef("growth_timeline", "成长时间轴", "把测评、英语练习、成长报告等已有记录按时间顺序汇成一条孩子的成长故事线。", "family", "家庭平台",
+			"时间轴只是既有记录的聚合视图，不新建事件表：只收录已完成的事件（完成测评、通过的跟读练习、生成的报告、家长标记的里程碑、完整听完的内容），未完成和放弃的记录不会计入。每条事件只包含稳定的类型和中文标题说明，不包含评分明细、识别文本、音频或学习内容原文；跨家庭查询一律按未找到处理。",
+			metrics(
+				"timeline_event_count_24h", "24 小时事件数", "条",
+				"timeline_active_family_count", "24 小时活跃家庭", "个",
+			)),
+		readOnlyFeatureDef("emotion", "情绪感知", "家长了解孩子近期的大致情绪状态，用于调整陪伴方式。", "family", "家庭平台",
+			"默认关闭，由家长在家长端显式开启并选择保留天数。只保存情绪标签、置信度和时间，不保存任何图像、音频或对话文本；家长端只能看到一段时间内的情绪分布与趋势，看不到某个时刻孩子的情绪明细；数据随家庭删除。"+
+				"功能中心只展示开启家庭数和 24 小时样本数，不展示任何标签分布。",
+			metrics(
+				"emotion_enabled_family_count", "已开启家庭", "个",
+				"emotion_observations_24h", "24 小时样本数", "条",
+			)),
 		readOnlyFeatureDef("local_command", "本地指令", "断网可用的本地设备指令。", "content", "内容平台",
 			"本地指令随离线内容下发并由设备执行，功能中心只提供能力状态和统计。",
 			metrics(

@@ -719,6 +719,8 @@ func TestDefaultRegistryCoversRequiredFeatures(t *testing.T) {
 		"voice_intercom",
 		"care_view",
 		"assessment",
+		"emotion",
+		"growth_timeline",
 		"local_command",
 		"offline_content",
 		"content_engagement",
@@ -944,6 +946,10 @@ func TestDefaultRegistryMetricsHaveVerifiableSource(t *testing.T) {
 		"care_view_sessions_24h":                {},
 		"assessment_active_session_count":       {},
 		"assessment_sessions_24h":               {},
+		"emotion_enabled_family_count":          {},
+		"emotion_observations_24h":              {},
+		"timeline_event_count_24h":              {},
+		"timeline_active_family_count":          {},
 	}
 	for _, definition := range DefaultRegistry() {
 		for _, metric := range definition.Feature.ReadOnlyMetrics {

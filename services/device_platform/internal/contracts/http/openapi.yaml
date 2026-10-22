@@ -13127,6 +13127,215 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/families/{family_id}/emotion-settings:
+    get:
+      summary: 读取家庭的「情绪感知」设置
+      description: |
+        情绪感知默认关闭。家长从未修改过时，这里返回关闭状态和默认保留天数，
+        而不是报错。返回的 max_retention_days 用于家长端展示可选范围。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+      responses:
+        "200":
+          description: 当前设置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmotionSettingsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+    put:
+      summary: 修改家庭的「情绪感知」设置
+      description: |
+        只有家长显式开启后，设备上报的情绪样本才会被接受。关闭会立即停止接受新
+        样本，但不会删除已经保存的样本；删除数据走隐私清理和注销流程。
+        保留天数范围为 1 到 90 天；不传 retention_days 时沿用已保存的值。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmotionSettingsUpdateRequest"
+      responses:
+        "200":
+          description: 已保存的设置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmotionSettingsEnvelope"
+        "400":
+          description: 请求格式不正确，或没有说明是否开启
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          description: 保留天数超出 1 到 90 天的范围
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/families/{family_id}/timeline:
+    get:
+      summary: 读取一个孩子的成长时间轴
+      description: |
+        按时间正序返回孩子做过的事：完成测评、跟读练习、生成报告、标记里程碑、
+        听完内容。这是聚合视图，不新建事件表，也不返回评分明细、识别文本或音频。
+
+        游标按事件标识而不是单纯的时间戳定位，所以后来入库但发生时间更早的事件
+        不会被跳过。缺少 child_id 时返回 422，因为把两个孩子的历史混在一起讲
+        不成一个孩子的故事。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/TimelineChildId"
+        - $ref: "#/components/parameters/TimelineBefore"
+        - $ref: "#/components/parameters/TimelineLimit"
+      responses:
+        "200":
+          description: 一页时间轴事件
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimelineEventsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          description: 缺少儿童或分页参数超出范围
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/families/{family_id}/timeline-milestones:
+    get:
+      summary: 读取一个孩子的里程碑计数
+      description: |
+        返回完成测评、练习天数、当前与最长连续天数等计数，供时间轴上方展示。
+        只返回计数，不返回明细。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/TimelineChildId"
+      responses:
+        "200":
+          description: 里程碑计数
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimelineMilestonesEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          description: 缺少儿童
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/families/{family_id}/emotion-summary:
+    get:
+      summary: 读取孩子近期的情绪分布与趋势
+      description: |
+        只返回聚合结果：每类情绪的次数与占比、总样本数、平均置信度，以及与
+        上一个同样长度周期的趋势对比。接口不返回任何单条样本，也不返回可以
+        定位到某一时刻的明细；「某个时刻孩子是什么情绪」在设计上不可查询。
+        每个周期样本少于 20 条时趋势为 unknown，避免用少量样本得出结论。
+      security:
+        - userToken: []
+      parameters:
+        - $ref: "#/components/parameters/FamilyId"
+        - $ref: "#/components/parameters/EmotionChildId"
+        - $ref: "#/components/parameters/EmotionSummaryDays"
+      responses:
+        "200":
+          description: 聚合后的情绪分布与趋势
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmotionSummaryEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          description: 统计天数超出 1 到 90 天的范围
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: 暂时无法汇总情绪数据
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/devices/{device_id}/emotion-observations:
+    post:
+      summary: 设备上报一条情绪样本
+      description: |
+        设备只上报情绪标签、置信度和观测时刻，不上报图像、音频或对话文本，
+        平台也不会保存这些内容。家庭未开启情绪感知时返回 403，设备应停止上报
+        而不是重试。设备只能上报自己当前绑定的孩子，其他孩子一律拒绝。
+        观测时刻允许比平台时间快 5 分钟（时钟误差），不能早于 90 天前。
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmotionObservationRequest"
+      responses:
+        "201":
+          description: 已接受这条样本
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmotionObservationEnvelope"
+        "400":
+          description: 请求格式不正确
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "403":
+          description: 家庭还没有开启情绪感知
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 设备不存在或不属于任何家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: 情绪类型、置信度、观测时刻或绑定的孩子不合法
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
 components:
   securitySchemes:
     serviceToken:
@@ -13590,6 +13799,50 @@ components:
         minimum: 1
         maximum: 90
         default: 7
+    TimelineChildId:
+      name: child_id
+      in: query
+      required: true
+      description: 读取哪个孩子的时间轴。
+      schema:
+        type: string
+        format: uuid
+    TimelineBefore:
+      name: before
+      in: query
+      required: false
+      description: 上一页返回的游标；省略时从最新一条开始。
+      schema:
+        type: string
+        maxLength: 200
+    TimelineLimit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 30
+    EmotionChildId:
+      name: child_id
+      in: query
+      required: false
+      description: 只看这个孩子的样本；不传时统计整个家庭。
+      schema:
+        type: string
+        format: uuid
+    EmotionSummaryDays:
+      name: days
+      in: query
+      required: false
+      description: 统计最近多少天；不传时默认 7 天。
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 90
+        default: 7
+
   responses:
     Unauthorized:
       description: Authentication missing, expired, or invalid
@@ -13708,6 +13961,236 @@ components:
           schema:
             $ref: "#/components/schemas/ResponseEnvelope"
   schemas:
+    EmotionLabel:
+      type: string
+      description: 固定的情绪词表；不接受任何自由文本。
+      enum: [calm, happy, curious, tired, frustrated, sad, upset]
+    EmotionTrend:
+      type: string
+      description: |
+        与上一个同样长度周期相比的走势。两个周期任一少于 20 条样本时为
+        unknown，不用少量样本给孩子下结论。
+      enum: [up, down, flat, unknown]
+    EmotionSettings:
+      type: object
+      additionalProperties: false
+      description: 家庭的「情绪感知」设置。没有记录时等同于关闭。
+      required:
+        - is_enabled
+        - retention_days
+        - updated_at
+      properties:
+        is_enabled:
+          type: boolean
+          description: 是否开启；默认 false，必须由家长显式开启。
+        retention_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+          description: 样本保留天数，超过后由后台清理。
+        updated_at:
+          type: string
+          format: date-time
+        summary_default_days:
+          type: integer
+          description: 家长端默认展示的天数。
+        max_retention_days:
+          type: integer
+          description: 家长端可选的保留天数上限。
+    EmotionSettingsEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EmotionSettings"
+    EmotionSettingsUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [is_enabled]
+      properties:
+        is_enabled:
+          type: boolean
+          description: 必填；省略时返回 400，避免旧客户端误把感知打开。
+        retention_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+          description: 省略时沿用已保存的保留天数。
+    EmotionLabelSummary:
+      type: object
+      additionalProperties: false
+      required: [label, count, percentage, trend]
+      properties:
+        label:
+          $ref: "#/components/schemas/EmotionLabel"
+        count:
+          type: integer
+          description: 该周期内这一类情绪的次数。
+        percentage:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: 占该周期总样本数的百分比，已四舍五入。
+        trend:
+          $ref: "#/components/schemas/EmotionTrend"
+    EmotionSummary:
+      type: object
+      additionalProperties: false
+      description: |
+        只包含聚合结果。没有任何字段可以定位到某一时刻、某台设备或某一条样本，
+        这是接口契约的一部分，不是尚未实现的部分。
+      required:
+        - days
+        - period_start
+        - period_end
+        - total_samples
+        - labels
+      properties:
+        child_id:
+          type: string
+          description: 统计的孩子；为空表示整个家庭。
+        days:
+          type: integer
+        period_start:
+          type: string
+          format: date-time
+          description: 统计窗口的起点，描述窗口本身，而不是任何一条样本。
+        period_end:
+          type: string
+          format: date-time
+          description: 统计窗口的终点。
+        total_samples:
+          type: integer
+        average_confidence:
+          type: integer
+          minimum: 0
+          maximum: 100
+        labels:
+          type: array
+          description: 固定包含全部情绪类型，没有样本的显示为 0。
+          items:
+            $ref: "#/components/schemas/EmotionLabelSummary"
+        previous_total_samples:
+          type: integer
+          description: 上一个同长度周期的样本数，用于解释 unknown 趋势。
+        is_enabled:
+          type: boolean
+        retention_days:
+          type: integer
+    TimelineEvent:
+      type: object
+      required: [event_id, kind, occurred_at, title, description]
+      properties:
+        event_id:
+          type: string
+          description: 跨页稳定的标识，可用于去重。
+        kind:
+          type: string
+          enum:
+            - assessment_completed
+            - english_practice
+            - report_published
+            - milestone
+            - content_completed
+        occurred_at:
+          type: string
+          format: date-time
+        title:
+          type: string
+        description:
+          type: string
+        subject:
+          type: string
+          description: 可选的补充说明，例如内容主题。
+    TimelineEventsEnvelope:
+      type: object
+      required: [schema_version, data]
+      properties:
+        schema_version:
+          type: string
+        data:
+          type: object
+          required: [events, next_cursor]
+          properties:
+            events:
+              type: array
+              items:
+                $ref: "#/components/schemas/TimelineEvent"
+            next_cursor:
+              type: string
+              description: 为空表示已经到最新一条。
+    TimelineMilestonesEnvelope:
+      type: object
+      required: [schema_version, data]
+      properties:
+        schema_version:
+          type: string
+        data:
+          type: object
+          properties:
+            completed_assessments:
+              type: integer
+            practice_days:
+              type: integer
+            current_streak_days:
+              type: integer
+            longest_streak_days:
+              type: integer
+            published_reports:
+              type: integer
+            marked_milestones:
+              type: integer
+            completed_content:
+              type: integer
+            total:
+              type: integer
+    EmotionSummaryEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EmotionSummary"
+    EmotionObservationRequest:
+      type: object
+      additionalProperties: false
+      required: [label, confidence, observed_at]
+      properties:
+        child_id:
+          type: string
+          format: uuid
+          description: 可选；省略时使用设备当前绑定的孩子。
+        label:
+          $ref: "#/components/schemas/EmotionLabel"
+        confidence:
+          type: integer
+          minimum: 0
+          maximum: 100
+        observed_at:
+          type: string
+          format: date-time
+          description: 观测时刻，RFC 3339。允许比平台时间快 5 分钟。
+    EmotionObservationAck:
+      type: object
+      additionalProperties: false
+      description: 只有接收结果，不回传任何关于孩子的内容。
+      required: [accepted, label, confidence, received_at]
+      properties:
+        accepted:
+          type: boolean
+          const: true
+        label:
+          $ref: "#/components/schemas/EmotionLabel"
+        confidence:
+          type: integer
+        received_at:
+          type: string
+          format: date-time
+    EmotionObservationEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EmotionObservationAck"
     AssessmentStartRequest:
       type: object
       additionalProperties: false

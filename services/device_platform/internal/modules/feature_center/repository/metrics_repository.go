@@ -471,6 +471,62 @@ func (r *MetricsRepository) FeatureMetrics(
 			"assessment_active_session_count",
 			"assessment_sessions_24h",
 		)
+	case "growth_timeline":
+		// The timeline owns no table, so both numbers are summed over the
+		// source tables with exactly the filters the timeline itself applies.
+		// A finished assessment, a passed practice, a generated report, a
+		// guardian-marked milestone, and a completed playback are the only
+		// events that exist; counting anything else would report a story the
+		// guardian cannot see.
+		return r.pair(ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM assessment_sessions
+				  WHERE state = 'completed' AND finished_at >= NOW() - INTERVAL '24 hours')
+			  + (SELECT COUNT(*) FROM english_practice_attempts
+				  WHERE passed AND practiced_at >= NOW() - INTERVAL '24 hours')
+			  + (SELECT COUNT(*) FROM growth_reports
+				  WHERE generated_at >= NOW() - INTERVAL '24 hours')
+			  + (SELECT COUNT(*) FROM companionship_growth_records
+				  WHERE category = 'milestone'
+				    AND recorded_at >= NOW() - INTERVAL '24 hours')
+			  + (SELECT COUNT(*) FROM content_play_history
+				  WHERE outcome = 'completed'
+				    AND played_at >= NOW() - INTERVAL '24 hours'),
+				(SELECT COUNT(*) FROM (
+					SELECT family_id FROM assessment_sessions
+					  WHERE state = 'completed' AND finished_at >= NOW() - INTERVAL '24 hours'
+					UNION
+					SELECT family_id FROM english_practice_attempts
+					  WHERE passed AND practiced_at >= NOW() - INTERVAL '24 hours'
+					UNION
+					SELECT family_id FROM growth_reports
+					  WHERE generated_at >= NOW() - INTERVAL '24 hours'
+					UNION
+					SELECT family_id FROM companionship_growth_records
+					  WHERE category = 'milestone'
+					    AND recorded_at >= NOW() - INTERVAL '24 hours'
+					UNION
+					SELECT family_id FROM content_play_history
+					  WHERE outcome = 'completed'
+					    AND played_at >= NOW() - INTERVAL '24 hours'
+				 ) active_families)`,
+			"timeline_event_count_24h",
+			"timeline_active_family_count",
+		)
+	case "emotion":
+		// Counts only: how many families opted in and how many samples arrived
+		// in the last day. A platform-wide label histogram would describe
+		// children as a population, which is a profiling use this feature does
+		// not permit, so it is deliberately not aggregated here.
+		return r.pair(
+			ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM emotion_settings WHERE is_enabled),
+				(SELECT COUNT(*) FROM emotion_observations
+				 WHERE observed_at >= NOW() - INTERVAL '24 hours')`,
+			"emotion_enabled_family_count",
+			"emotion_observations_24h",
+		)
 	case "local_command":
 		return r.scalar(ctx,
 			"SELECT COUNT(*) FROM local_commands",

@@ -12,12 +12,14 @@ import (
 	billingchannel "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/channel"
 	billingdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/domain"
 	careviewservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/care_view/service"
+	emotionservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/emotion/service"
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	growthReportDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/domain"
 	intercomservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/service"
 	memorydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/domain"
 	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
+	timelinedomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/timeline/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 )
 
@@ -473,6 +475,56 @@ func assessmentProbe(
 				return featureCenterDomain.HealthUnavailable, nil
 			}
 			return mapReadinessStatus(string(readiness.State)), nil
+		},
+	)
+}
+
+// timelineProbe reads the real timeline sources.
+//
+// The timeline owns no table of its own: it is assembled from assessment,
+// practice, report, playback, and growth-record rows. Reading one of them is the
+// only honest check, because a missing source table (a half-applied migration)
+// would make every guardian's story silently shorter rather than empty.
+func timelineProbe(
+	service interface {
+		Readiness(ctx context.Context) (timelinedomain.Readiness, error)
+	},
+) featureCenterService.HealthProbe {
+	return featureCenterService.HealthProbeFunc(
+		func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+			if service == nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			readiness, err := service.Readiness(ctx)
+			if err != nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			return mapReadinessStatus(string(readiness.State)), nil
+		},
+	)
+}
+
+// emotionProbe reads the settings and observation tables.
+//
+// It is a real read on two axes: without the settings table nobody can turn
+// sensing on, and without the observation table a device report has nowhere to
+// go. Either failure must surface instead of a green row that hides a broken
+// migration. The probe reports only whether the tables answer; it never returns
+// a family, a label distribution, or a sample count for one household.
+func emotionProbe(
+	service interface {
+		Metrics(ctx context.Context) (emotionservice.Metrics, error)
+	},
+) featureCenterService.HealthProbe {
+	return featureCenterService.HealthProbeFunc(
+		func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+			if service == nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			if _, err := service.Metrics(ctx); err != nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			return featureCenterDomain.HealthHealthy, nil
 		},
 	)
 }

@@ -266,6 +266,12 @@ func DefaultRegistry() []Definition {
 				"care_view_open_session_count", "进行中的查看", "路",
 				"care_view_sessions_24h", "24 小时查看数", "次",
 			)),
+		readOnlyFeatureDef("assessment", "学习测评", "基于英语课程的短测评，按孩子的答题表现自动调整难度。", "content", "学习平台",
+			"测评使用已发布的英语课程内容，一次十题或十分钟先到者结束；难度按连续答对与答错自动升降，同一儿童同一时间只有一个进行中的测评。功能中心只展示进行中的测评数与 24 小时测评次数，不展示题目内容或孩子的语音。",
+			metrics(
+				"assessment_active_session_count", "进行中的测评", "个",
+				"assessment_sessions_24h", "24 小时测评数", "次",
+			)),
 		readOnlyFeatureDef("local_command", "本地指令", "断网可用的本地设备指令。", "content", "内容平台",
 			"本地指令随离线内容下发并由设备执行，功能中心只提供能力状态和统计。",
 			metrics(

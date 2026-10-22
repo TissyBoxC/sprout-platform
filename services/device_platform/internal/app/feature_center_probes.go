@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	assessmentservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/assessment/service"
 	billingchannel "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/channel"
 	billingdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/domain"
 	careviewservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/care_view/service"
@@ -448,6 +449,30 @@ func careViewProbe(
 				return featureCenterDomain.HealthUnavailable, nil
 			}
 			return featureCenterDomain.HealthHealthy, nil
+		},
+	)
+}
+
+// assessmentProbe reads both the course catalog and the session table.
+//
+// It is a real read on two axes: without a published lesson there is nothing to
+// assess, and without a readable session table nobody can start one. Either
+// failure must surface instead of a green row that hides a broken migration.
+func assessmentProbe(
+	service interface {
+		Readiness(ctx context.Context) (assessmentservice.Readiness, error)
+	},
+) featureCenterService.HealthProbe {
+	return featureCenterService.HealthProbeFunc(
+		func(ctx context.Context, _ string) (featureCenterDomain.HealthStatus, error) {
+			if service == nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			readiness, err := service.Readiness(ctx)
+			if err != nil {
+				return featureCenterDomain.HealthUnavailable, nil
+			}
+			return mapReadinessStatus(string(readiness.State)), nil
 		},
 	)
 }

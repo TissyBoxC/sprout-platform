@@ -12622,6 +12622,260 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/families/{family_id}/assessment-sessions:
+    post:
+      summary: 家庭为某个孩子开始一次学习测评
+      description: |
+        测评从已发布的英语课程中出题，一次十题或十分钟先到者结束。
+        难度初始为 2 级：连续答对两题升一级，答错一题降一级，范围 1-5 级。
+        同一孩子（未指定孩子时为整个家庭）同时只能有一次进行中的测评，
+        已有进行中的测评时返回 409，需要先完成或结束它。
+        同一家庭一小时内最多开始 20 次测评，超出返回 429。
+      security:
+        - userToken: []
+      parameters:
+        - name: family_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssessmentStartRequest"
+      responses:
+        "201":
+          description: 已开始测评，并返回第一道题
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssessmentSessionEnvelope"
+        "400":
+          description: 请求格式不正确
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 课程不存在或孩子不属于本家庭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 已有进行中的测评
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: 课程或孩子选择不合法
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: 开始测评过于频繁
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    get:
+      summary: 家庭的历史测评记录
+      description: |
+        返回测评的信封（时间、等级、正确数、掌握度），最新在前。
+        单条记录不含逐题作答；逐题内容通过单个测评的查询接口返回。
+      security:
+        - userToken: []
+      parameters:
+        - name: family_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/EnglishChildId"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: 测评记录，最新在前
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssessmentSessionListEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+  /api/v1/families/{family_id}/assessment-sessions/{session_id}:
+    get:
+      summary: 查询一次测评的状态与逐题作答
+      security:
+        - userToken: []
+      parameters:
+        - name: family_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 测评状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssessmentSessionDetailEnvelope"
+        "404":
+          description: 未找到该测评（含其他家庭的测评）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/families/{family_id}/assessment-sessions/{session_id}/answers:
+    post:
+      summary: 提交一道题的作答
+      description: |
+        只有进行中的测评能作答；已完成、已放弃或已过截止时间的测评返回 409。
+        position 必须等于当前已答题数，重复提交同一 position 返回 409。
+        分数低于 60 视为答错。答满十题时测评自动完成。
+      security:
+        - userToken: []
+      parameters:
+        - name: family_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssessmentAnswerRequest"
+      responses:
+        "201":
+          description: 已记录作答，并返回下一道题（测评完成时不含 next_item）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssessmentSessionEnvelope"
+        "400":
+          description: 请求格式不正确
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: 未找到该测评
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 测评已完成、已超时或作答顺序不一致
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: 题目不属于当前课程，或分数、类型不合法
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/families/{family_id}/assessment-sessions/{session_id}/finish:
+    post:
+      summary: 家长结束一次测评
+      description: |
+        结束测评会写入完成状态与掌握度。已结束的测评再次结束返回 409。
+      security:
+        - userToken: []
+      parameters:
+        - name: family_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 已结束的测评
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssessmentSessionEnvelope"
+        "404":
+          description: 未找到该测评
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: 测评已经结束
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/devices/{device_id}/assessment-sessions/{session_id}:
+    get:
+      summary: 设备查询当前要展示的测评
+      description: |
+        只读接口，供设备显示当前测评与下一道题。设备只能查询绑定在当前设备上的
+        儿童所属的测评，其他测评返回 404。作答仍由家长端提交。
+      security:
+        - deviceSessionToken: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 测评状态与下一道题
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssessmentSessionEnvelope"
+        "401":
+          $ref: "#/components/responses/DeviceSessionExpired"
+        "404":
+          description: 未找到该测评
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /internal/v1/devices/{device_id}/care-view-sessions/{session_id}:
     get:
       summary: 供语音网关读取一次实时查看的权威状态
@@ -13404,6 +13658,224 @@ components:
           schema:
             $ref: "#/components/schemas/ResponseEnvelope"
   schemas:
+    AssessmentStartRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - lesson_id
+      properties:
+        lesson_id:
+          type: string
+          pattern: "^[a-z][a-z0-9]*(?:_[a-z0-9]+){1,7}$"
+          description: 已发布的英语课程编号
+        child_id:
+          type: string
+          format: uuid
+          description: 参加测评的孩子；不填时按家庭维度限制同时只能有一次进行中的测评
+    AssessmentAnswerRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - position
+        - item_id
+        - item_type
+        - target_text
+        - score
+      properties:
+        position:
+          type: integer
+          minimum: 0
+          maximum: 9
+          description: 本次作答的位置，必须等于当前已答题数
+        item_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        item_type:
+          $ref: "#/components/schemas/EnglishItemType"
+        target_text:
+          type: string
+          minLength: 1
+          maxLength: 160
+          description: 课程要求孩子说出的内容，不是孩子的语音转写
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: 低于 60 视为答错
+    AssessmentNextItem:
+      type: object
+      additionalProperties: false
+      required:
+        - position
+        - item_id
+        - item_type
+        - text
+        - difficulty
+      properties:
+        position:
+          type: integer
+          minimum: 0
+          maximum: 9
+        item_id:
+          type: string
+        item_type:
+          $ref: "#/components/schemas/EnglishItemType"
+        text:
+          type: string
+          maxLength: 160
+        difficulty:
+          type: integer
+          minimum: 1
+          maximum: 5
+    AssessmentAnswer:
+      type: object
+      additionalProperties: false
+      required:
+        - position
+        - item_id
+        - item_type
+        - target_text
+        - score
+        - is_correct
+        - answered_at
+      properties:
+        position:
+          type: integer
+          minimum: 0
+          maximum: 9
+        item_id:
+          type: string
+        item_type:
+          $ref: "#/components/schemas/EnglishItemType"
+        target_text:
+          type: string
+          maxLength: 160
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        is_correct:
+          type: boolean
+        answered_at:
+          type: string
+          format: date-time
+    AssessmentSession:
+      type: object
+      description: |
+        一次学习测评的信封。只含生命周期、等级与统计，不含音频或语音转写。
+      required:
+        - session_id
+        - lesson_id
+        - state
+        - difficulty
+        - item_index
+        - correct_count
+        - answered_count
+        - mastery
+        - progress
+        - started_at
+        - expires_at
+        - accepts_answers
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        child_id:
+          type: string
+          format: uuid
+          description: 未指定孩子时为空
+        lesson_id:
+          type: string
+        state:
+          type: string
+          enum: [active, completed, abandoned]
+          description: 只有 active 允许继续作答
+        difficulty:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: 当前难度等级
+        item_index:
+          type: integer
+          minimum: 0
+          maximum: 10
+        correct_count:
+          type: integer
+          minimum: 0
+          maximum: 10
+        answered_count:
+          type: integer
+          minimum: 0
+          maximum: 10
+        streak:
+          type: integer
+          minimum: 0
+          maximum: 10
+          description: 当前连续答对题数
+        mastery:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: 正确数占已答数的百分比，四舍五入
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: 已答数占十题上限的百分比
+        max_items:
+          type: integer
+          minimum: 1
+        started_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          description: 超过该时刻的作答一律拒绝
+        finished_at:
+          type: string
+          format: date-time
+        finish_reason:
+          type: string
+          enum: ["", completed, item_limit, expired, abandoned]
+        accepts_answers:
+          type: boolean
+          description: 客户端据此判断是否还应该展示题目
+        started_by:
+          type: string
+          description: 仅创建响应返回，发起测评的家长账号
+        next_item:
+          $ref: "#/components/schemas/AssessmentNextItem"
+        answers:
+          type: array
+          description: 仅单个测评查询返回
+          items:
+            $ref: "#/components/schemas/AssessmentAnswer"
+    AssessmentSessionEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/AssessmentSession"
+    AssessmentSessionDetailEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/AssessmentSession"
+    AssessmentSessionListEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [sessions]
+          properties:
+            sessions:
+              type: array
+              items:
+                $ref: "#/components/schemas/AssessmentSession"
     CareViewSession:
       type: object
       description: 一次实时查看的信封。只包含生命周期信息，从不包含画面内容。

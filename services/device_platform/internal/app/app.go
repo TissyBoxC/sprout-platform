@@ -23,6 +23,8 @@ import (
 	alarmReminderDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/alarm_reminder/domain"
 	alarmReminderRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/alarm_reminder/repository"
 	alarmReminderService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/alarm_reminder/service"
+	assessmentRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/assessment/repository"
+	assessmentService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/assessment/service"
 	auditRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/repository"
 	auditService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/service"
 	authdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
@@ -317,6 +319,17 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("create english learning service: %w", err)
 	}
+	// An assessment draws its items from the English course catalog and keeps its
+	// own bounded session lifecycle, so the difficulty curve can move a child up
+	// and down without rewriting the lesson itself.
+	assessmentStoreInstance := assessmentStore{
+		repository: assessmentRepository.NewRepository(databaseStore.Pool()),
+	}
+	assessments := assessmentService.NewService(assessmentService.Options{
+		Store:   assessmentStoreInstance,
+		Lessons: newAssessmentCatalog(englishLearningService),
+		Logger:  logger,
+	})
 	var voiceTokenIssuer bindingService.VoiceTokenIssuer
 	if strings.TrimSpace(cfg.VoiceGateway.WSTokenSecret) != "" {
 		signer, signerErr := bindingService.NewVoiceTokenSigner(
@@ -715,6 +728,7 @@ func Run() error {
 	)
 	featureCenterHealthProbes["voice_intercom"] = intercomProbe(intercoms)
 	featureCenterHealthProbes["care_view"] = careViewProbe(careViews)
+	featureCenterHealthProbes["assessment"] = assessmentProbe(assessments)
 
 	privacy, err := privacyService.New(privacyService.Options{
 		Repository:     privacyRepository.NewPostgresRepository(databaseStore.Pool()),
@@ -1120,6 +1134,7 @@ func Run() error {
 			DeviceChildService:           deviceChildren,
 			IntercomService:              intercoms,
 			CareViewService:              careViews,
+			AssessmentService:            assessments,
 			AuditRecorder:                privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -1149,6 +1164,9 @@ func Run() error {
 	// A care view must stop even when the guardian's app disappears, so the
 	// platform closes overdue sessions and tells the device to stop capturing.
 	go careViewService.NewExpiryWorker(careViews, 10*time.Second).Run(runtimeCtx)
+	// An assessment left open on a sleeping device must not stay active and block
+	// the next session, so overdue runs are closed and counted.
+	go assessmentService.NewExpiryWorker(assessments, 30*time.Second).Run(runtimeCtx)
 	go runFeatureHealthScheduler(runtimeCtx, logger, featureCenter)
 	go runNotificationDeliveryWorker(
 		runtimeCtx,

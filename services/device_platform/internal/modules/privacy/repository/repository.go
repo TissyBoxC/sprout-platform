@@ -763,6 +763,13 @@ func (r *PostgresRepository) PurgeParentData(
 		{`DELETE FROM alarm_reminder_events WHERE family_id = $1`, "alarm reminder events"},
 		{`DELETE FROM alarm_reminders WHERE family_id = $1`, "alarm reminders"},
 		{`DELETE FROM english_practice_attempts WHERE family_id = $1`, "english practice attempts"},
+		// An assessment answer names the lesson text a child was asked to say and
+		// how they scored on it, so it goes with the family. The answers are
+		// deleted first: the session row is their parent.
+		{`DELETE FROM assessment_answers WHERE session_id IN (
+			SELECT id FROM assessment_sessions WHERE family_id = $1
+		)`, "assessment answers"},
+		{`DELETE FROM assessment_sessions WHERE family_id = $1`, "assessment sessions"},
 		{`DELETE FROM local_commands WHERE family_id = $1`, "local commands"},
 		{`DELETE FROM local_command_revisions WHERE family_id = $1`, "local command revisions"},
 		{`DELETE FROM content_favorites WHERE parent_account_id = $1`, "content favorites"},

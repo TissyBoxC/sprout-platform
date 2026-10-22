@@ -17,6 +17,7 @@ import (
 	gatewaydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/domain"
 	gatewayservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/ai_gateway/service"
 	alarmreminderservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/alarm_reminder/service"
+	assessmentservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/assessment/service"
 	auditdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/domain"
 	audithandler "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/audit/handler"
 	authdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/auth/domain"
@@ -138,6 +139,10 @@ type RouterOptions struct {
 	// care-view routes are not registered at all, so a deployment that does not
 	// offer live viewing answers 404 instead of exposing half a feature.
 	CareViewService *careviewservice.Service
+	// AssessmentService serves the learning assessment. When it is nil the
+	// assessment routes are not registered at all, so a deployment that does
+	// not offer assessments answers 404 instead of half a feature.
+	AssessmentService *assessmentservice.Service
 	// MemoryChildResolver maps a device's family to its child profile for the
 	// memory sync routes. The routes are registered only when it is set, so a
 	// deployment that does not wire it keeps answering 404 instead of syncing a
@@ -740,6 +745,55 @@ func NewRouter(options RouterOptions) http.Handler {
 				mux.HandleFunc(
 					"POST /api/v1/devices/{device_id}/care-view-sessions/{session_id}/end",
 					requireDeviceSession(options.BindingService, deviceCareView.end),
+				)
+			}
+		}
+		if options.AssessmentService != nil {
+			guardianAssessment := guardianAssessmentHandler{service: options.AssessmentService}
+			// Starting or answering an assessment is a family action on a child's
+			// learning data, so it carries the child-management permission.
+			requireAssessmentManage := func(next http.HandlerFunc) http.HandlerFunc {
+				return authHandler.requireAuthentication(
+					parentScopedFor(
+						options.FamilyService,
+						familydomain.ActionChildManage,
+						func(
+							response http.ResponseWriter,
+							request *http.Request,
+							_ string,
+						) {
+							next(response, request)
+						},
+					),
+				)
+			}
+			mux.HandleFunc(
+				"POST /api/v1/families/{family_id}/assessment-sessions",
+				requireAssessmentManage(guardianAssessment.start),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/families/{family_id}/assessment-sessions",
+				requireAssessmentManage(guardianAssessment.history),
+			)
+			mux.HandleFunc(
+				"GET /api/v1/families/{family_id}/assessment-sessions/{session_id}",
+				requireAssessmentManage(guardianAssessment.get),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/families/{family_id}/assessment-sessions/{session_id}/answers",
+				requireAssessmentManage(guardianAssessment.answer),
+			)
+			mux.HandleFunc(
+				"POST /api/v1/families/{family_id}/assessment-sessions/{session_id}/finish",
+				requireAssessmentManage(guardianAssessment.finish),
+			)
+			// The device only reads the assessment it was asked to show. Answering
+			// stays on the guardian route so a child cannot move their own level.
+			if options.BindingService != nil {
+				deviceAssessment := deviceAssessmentHandler{service: options.AssessmentService}
+				mux.HandleFunc(
+					"GET /api/v1/devices/{device_id}/assessment-sessions/{session_id}",
+					requireDeviceSession(options.BindingService, deviceAssessment.current),
 				)
 			}
 		}

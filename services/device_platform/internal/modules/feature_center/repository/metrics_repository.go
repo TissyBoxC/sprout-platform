@@ -458,6 +458,19 @@ func (r *MetricsRepository) FeatureMetrics(
 			"care_view_open_session_count",
 			"care_view_sessions_24h",
 		)
+	case "assessment":
+		// Counts only: how many assessments are running and how many started in
+		// the last day. Answers and item text are child learning data and are
+		// never aggregated into an operator metric.
+		return r.pair(
+			ctx,
+			`SELECT
+				(SELECT COUNT(*) FROM assessment_sessions WHERE state = 'active'),
+				(SELECT COUNT(*) FROM assessment_sessions
+				 WHERE started_at >= now() - interval '24 hours')`,
+			"assessment_active_session_count",
+			"assessment_sessions_24h",
+		)
 	case "local_command":
 		return r.scalar(ctx,
 			"SELECT COUNT(*) FROM local_commands",

@@ -64,6 +64,37 @@ const (
 	LabelUpset      Label = "upset"
 )
 
+// deviceLabelAliases maps the buckets the device already reports to the
+// platform vocabulary.
+//
+// The device's companionship module has shipped with neutral/angry/scared since
+// before this table existed and those names are part of its stored contract, so
+// the platform translates rather than forcing a firmware vocabulary change on
+// devices already in the field. Every alias here is lossless in meaning: a
+// scared child is recorded as upset, an angry one as frustrated, and neutral
+// reads as calm.
+var deviceLabelAliases = map[string]Label{
+	"neutral": LabelCalm,
+	"angry":   LabelFrustrated,
+	"scared":  LabelUpset,
+}
+
+// NormaliseDeviceLabel translates a device-reported bucket into the platform
+// vocabulary. Unknown names pass through unchanged so the caller still rejects
+// them with ErrInvalidLabel instead of silently dropping the observation.
+//
+// Only the aliases are matched, and only exactly: platform labels stay
+// case-sensitive so "CALM" is still refused rather than quietly accepted as a
+// different spelling. The device sends lowercase constants, so this costs the
+// firmware nothing while keeping the wire contract strict.
+func NormaliseDeviceLabel(raw string) Label {
+	trimmed := strings.TrimSpace(raw)
+	if alias, ok := deviceLabelAliases[trimmed]; ok {
+		return alias
+	}
+	return Label(trimmed)
+}
+
 // AllLabels returns the complete vocabulary in a stable order.
 //
 // The order is the one a guardian reads: settled and positive first, then
@@ -236,7 +267,7 @@ func (input RecordInput) Validate(now time.Time) (RecordInput, error) {
 	normalised := RecordInput{
 		DeviceID:   strings.TrimSpace(input.DeviceID),
 		ChildID:    strings.TrimSpace(input.ChildID),
-		Label:      strings.TrimSpace(input.Label),
+		Label:      string(NormaliseDeviceLabel(input.Label)),
 		Confidence: input.Confidence,
 		ObservedAt: input.ObservedAt.UTC(),
 	}

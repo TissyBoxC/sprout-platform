@@ -331,7 +331,9 @@ func TestEmotionRecordRejectsUnknownLabel(t *testing.T) {
 	}
 	request := httptest.NewRequest(http.MethodPost,
 		"/api/v1/devices/device-1/emotion-observations", strings.NewReader(
-			`{"label":"angry","confidence":70,"observed_at":"`+
+			// A word the platform has never heard of; "angry" would be accepted
+			// because it is a translated device bucket.
+			`{"label":"elated","confidence":70,"observed_at":"`+
 				time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)+`"}`))
 	request.SetPathValue("device_id", "device-1")
 	recorder := httptest.NewRecorder()
@@ -341,6 +343,39 @@ func TestEmotionRecordRejectsUnknownLabel(t *testing.T) {
 	}
 	if code := decodeEmotionError(t, recorder); code != "emotion_invalid_label" {
 		t.Fatalf("code = %q, want emotion_invalid_label", code)
+	}
+}
+
+// TestEmotionRecordAcceptsADeviceBucket covers the firmware names already on
+// devices: they must be translated rather than rejected, or every report from
+// a shipped unit fails the label check.
+func TestEmotionRecordAcceptsADeviceBucket(t *testing.T) {
+	_, device, store := newEmotionHandlersForTest(t)
+	store.settings["parent-1"] = emotiondomain.Settings{
+		FamilyID: "parent-1", Enabled: true, RetentionDays: 30,
+	}
+	for _, bucket := range []string{"neutral", "angry", "scared"} {
+		request := httptest.NewRequest(http.MethodPost,
+			"/api/v1/devices/device-1/emotion-observations", strings.NewReader(
+				`{"label":"`+bucket+`","confidence":70,"observed_at":"`+
+					time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)+`"}`))
+		request.SetPathValue("device_id", "device-1")
+		recorder := httptest.NewRecorder()
+		device.record(recorder, request)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("bucket %q status = %d, want 201: %s",
+				bucket, recorder.Code, recorder.Body.String())
+		}
+	}
+	if len(store.samples) != 3 {
+		t.Fatalf("stored %d observations, want 3", len(store.samples))
+	}
+	// The stored rows must carry the platform vocabulary, never the firmware
+	// name: the column has a check constraint listing exactly those labels.
+	for _, stored := range store.samples {
+		if !emotiondomain.IsLabel(string(stored.Label)) {
+			t.Fatalf("stored label %q is not a platform label", stored.Label)
+		}
 	}
 }
 

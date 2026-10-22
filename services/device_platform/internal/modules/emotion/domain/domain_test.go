@@ -79,13 +79,29 @@ func TestNormaliseRetentionUsesDefaultOnlyForZero(t *testing.T) {
 
 func TestValidateRejectsUnknownLabel(t *testing.T) {
 	// An open vocabulary would let a device store a free-text description of a
-	// child, which is exactly what this module refuses to keep.
-	for _, label := range []string{"", "angry", "CALM", "excited", "生气"} {
+	// child, which is exactly what this module refuses to keep. "angry" is
+	// absent on purpose: it is a translated device bucket, not free text.
+	for _, label := range []string{"", "CALM", "excited", "生气"} {
 		input := validInput()
 		input.Label = label
 		if _, err := input.Validate(referenceNow); !errors.Is(err, domain.ErrInvalidLabel) {
 			t.Errorf("label %q err = %v, want ErrInvalidLabel", label, err)
 		}
+	}
+}
+
+// TestValidateTranslatesADeviceBucket proves the alias is applied by Validate
+// itself, so every entry point records the platform vocabulary rather than a
+// firmware name reaching the database check constraint.
+func TestValidateTranslatesADeviceBucket(t *testing.T) {
+	input := validInput()
+	input.Label = "angry"
+	normalised, err := input.Validate(referenceNow)
+	if err != nil {
+		t.Fatalf("validate(angry) = %v, want it translated", err)
+	}
+	if normalised.Label != string(domain.LabelFrustrated) {
+		t.Fatalf("label = %q, want %q", normalised.Label, domain.LabelFrustrated)
 	}
 }
 
@@ -334,5 +350,38 @@ func TestSettingsCutoffFollowsRetention(t *testing.T) {
 	broken := domain.Settings{RetentionDays: 0}
 	if got := broken.Cutoff(referenceNow); !got.Equal(referenceNow.AddDate(0, 0, -domain.DefaultRetentionDays)) {
 		t.Fatalf("broken cutoff = %s, want the default window", got)
+	}
+}
+
+// TestDeviceLabelAliases covers the vocabulary the device already ships. The
+// firmware names predate this table and cannot be renamed on units in the field,
+// so the platform must translate them or every such report is rejected.
+func TestDeviceLabelAliases(t *testing.T) {
+	cases := map[string]domain.Label{
+		"neutral": domain.LabelCalm,
+		"angry":   domain.LabelFrustrated,
+		"scared":  domain.LabelUpset,
+		" angry ": domain.LabelFrustrated,
+		"happy":   domain.LabelHappy,
+		"tired":   domain.LabelTired,
+		"sad":     domain.LabelSad,
+	}
+	for raw, want := range cases {
+		if got := domain.NormaliseDeviceLabel(raw); got != want {
+			t.Fatalf("normalise(%q) = %q, want %q", raw, got, want)
+		}
+	}
+	// An unknown bucket must survive normalisation so validation still rejects
+	// it; silently mapping it to calm would record an emotion nobody measured.
+	if got := domain.NormaliseDeviceLabel("elated"); got != domain.Label("elated") {
+		t.Fatalf("unknown label = %q, want it unchanged", got)
+	}
+	if domain.IsLabel("elated") {
+		t.Fatal("an unknown bucket must not be accepted as a label")
+	}
+	// Platform labels stay case-sensitive: an all-caps spelling is a client bug,
+	// not a variant to quietly accept.
+	if domain.IsLabel(string(domain.NormaliseDeviceLabel("CALM"))) {
+		t.Fatal("an uppercase platform label must not be accepted")
 	}
 }

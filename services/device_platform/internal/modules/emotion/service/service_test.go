@@ -393,7 +393,9 @@ func TestRecordRejectsInvalidInput(t *testing.T) {
 		mutate func(*domain.RecordInput)
 		want   error
 	}{
-		{"unknown label", func(input *domain.RecordInput) { input.Label = "angry" },
+		// "angry" is not used here because it is a translated device bucket;
+		// this case needs a name the platform has never heard of.
+		{"unknown label", func(input *domain.RecordInput) { input.Label = "elated" },
 			domain.ErrInvalidLabel},
 		{"confidence high", func(input *domain.RecordInput) { input.Confidence = 101 },
 			domain.ErrInvalidConfidence},

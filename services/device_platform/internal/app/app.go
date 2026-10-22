@@ -1164,10 +1164,15 @@ func Run() error {
 			AuditRecorder:                privacy,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       90 * time.Second,
-		MaxHeaderBytes:    64 << 10,
+		// A whole-request read timeout would also cap the body, and the release
+		// pipeline streams tens of megabytes over the public internet: at 30
+		// seconds a slow upload is killed mid-body and the publisher sees only
+		// "please resubmit". The upload handlers widen the connection deadline
+		// themselves, so the slow-header guard above is what stays in force here.
+		ReadTimeout:    0,
+		WriteTimeout:   60 * time.Second,
+		IdleTimeout:    90 * time.Second,
+		MaxHeaderBytes: 64 << 10,
 	}
 
 	errCh := make(chan error, 1)

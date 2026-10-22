@@ -90,6 +90,57 @@ Stable error codes: `intercom_session_not_found`, `intercom_session_not_active`,
 `intercom_session_already_open`, `intercom_limit_reached`,
 `intercom_relay_invalid`, `intercom_unavailable`.
 
+## Guardian Care View Relay
+
+The care view forwards a live camera picture from a device to the guardian who
+opened the view. `device_platform` owns the session record, the guardian's
+consent, and the device acknowledgement that the camera indication is showing;
+the gateway owns only the transport. Frames are relayed in memory and are never
+recorded, persisted, or written to a log.
+
+Set `VOICE_GATEWAY_CARE_VIEW_ENABLED=true` to mount the relay (default `false`).
+It requires the internal API to be enabled with a service token of at least 32
+characters; otherwise startup is refused.
+
+1. After the device confirms its indication, `device_platform` calls
+   `POST /internal/v1/care-view/sessions/{session_id}/stream` with `device_id`
+   and the short-lived `device_token` (Bearer internal service token). The
+   response carries `stream_path`, `expires_at`, and `max_fps`; it never carries
+   the token or a frame.
+2. The gateway re-reads the session from
+   `GET {device_platform}/internal/v1/devices/{device_id}/care-view-sessions/{session_id}`
+   and refuses anything whose state is not `streaming`. A `requested` session
+   never opens a stream, so the device acknowledgement cannot be bypassed by a
+   caller that merely claims the session is streaming. The rule is enforced once
+   at parse time (the resolver returns only streaming sessions) and again on
+   every frame path (the relay re-checks the state it last observed).
+3. The parent application connects to `GET /v1/care-view/{session_id}?device_id=...`.
+   That route only attaches to an already authorized stream and accepts exactly
+   one guardian socket per session.
+4. Binary frames are relayed in both directions; text control frames are limited
+   to `{"type":"hangup"}`, `{"type":"ping"}`, and `{"type":"pong"}`.
+5. While frames flow, the relay re-reads the platform state every
+   `VOICE_GATEWAY_CARE_VIEW_STATE_RECHECK_SECONDS` (default 15). A session that
+   stopped streaming, or a state read that fails, closes the stream.
+
+Limits: the relay closes at the earlier of
+`VOICE_GATEWAY_CARE_VIEW_MAX_DURATION_SECONDS` (maximum 300, matching the
+platform domain limit) and the platform session deadline. A deadline timer runs
+in its own goroutine, so the stream ends on time even while the handler is
+blocked reading the guardian socket. A frame above
+`VOICE_GATEWAY_CARE_VIEW_MAX_FRAME_BYTES` (default 262144) or a guardian rate
+above `VOICE_GATEWAY_CARE_VIEW_MAX_FRAMES_PER_SECOND` (default 8) closes the
+stream instead of silently dropping pictures. A hangup from either side, a dead
+socket, or the cap closes both sides and releases the relay buffers. The close
+record contains only the session id, device id, duration, frame counters, and a
+fixed close reason.
+
+Stable error codes: `care_view_session_not_found` (404), `care_view_not_active`
+(409), `care_view_expired` (410), `care_view_invalid_request` (400),
+`care_view_limit_reached` (429), `care_view_unavailable` (503). The guardian
+attachment answers `care_view_relay_invalid` (400), `care_view_session_occupied`
+(409), and the same not-found/not-active codes before upgrading.
+
 ## Platform AI Execution
 
 The gateway never receives a global Sub2API or upstream provider key. It calls

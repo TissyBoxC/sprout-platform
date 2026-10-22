@@ -52,6 +52,125 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResponseEnvelope"
+  /internal/v1/care-view/sessions/{session_id}/stream:
+    post:
+      summary: Authorize and open one guardian live camera view
+      description: "Called by device_platform after the device confirmed its visible and
+        audible indication. The gateway re-reads the authoritative session state from
+        device_platform and refuses any session that is not streaming, so a requested
+        session can never start carrying frames. The parent application then connects to
+        stream_path with its own guardian credential; the path carries no token. Frames
+        are relayed live and are never written to disk or to a log. A session that
+        already has an open stream is reused rather than duplicated."
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - device_id
+                - device_token
+              properties:
+                device_id:
+                  type: string
+                  pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                device_token:
+                  type: string
+                  description: Short-lived device credential. Never logged or returned.
+      responses:
+        "200":
+          description: Stream authorized and open
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareViewStreamEnvelope"
+        "400":
+          description: Malformed request body or identifier (care_view_invalid_request)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          description: Service authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "404":
+          description: Unknown session or device (care_view_session_not_found)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "409":
+          description: Session is not streaming (care_view_not_active)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "410":
+          description: Session deadline has passed (care_view_expired)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "429":
+          description: Gateway stream capacity exhausted (care_view_limit_reached)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "503":
+          description: Device not connected or platform unavailable (care_view_unavailable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+  /v1/care-view/{session_id}:
+    get:
+      summary: Guardian live camera view WebSocket (binary frames)
+      description: "Parent-facing upgrade path. Requires an already authorized stream and an
+        active, unoccupied guardian connection. The relay re-reads the platform state while
+        frames flow and closes both sides on the first hangup, on the earlier of the
+        configured duration cap and the platform deadline, and when the platform stops
+        reporting streaming. Text messages carry only content-free control (hangup, ping,
+        pong). Failure to attach is answered as an error envelope before the upgrade:
+        invalid identifiers are care_view_relay_invalid (400), an unknown or unauthorized
+        session is care_view_session_not_found (404), a session that is no longer streaming
+        is care_view_not_active (409), and a second parent connection is
+        care_view_session_occupied (409)."
+      security: []
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        - name: device_id
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      responses:
+        "101":
+          description: Upgraded to a WebSocket that carries binary frames
+        "400":
+          description: Invalid identifiers (care_view_relay_invalid)
+        "404":
+          description: Unknown, unauthorized, or ended session (care_view_session_not_found)
+        "409":
+          description: Not streaming (care_view_not_active) or already occupied (care_view_session_occupied)
   /internal/v1/intercom/sessions/{session_id}/relay:
     post:
       summary: Authorize and open one guardian intercom relay
@@ -311,6 +430,55 @@ components:
           type: integer
           minimum: 1
           maximum: 600
+    CareViewStreamEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - request_id
+        - data
+        - error
+      properties:
+        schema_version:
+          type: string
+          const: 1.0.0
+        request_id:
+          type: string
+        data:
+          $ref: "#/components/schemas/CareViewStream"
+        error:
+          type: "null"
+    CareViewStream:
+      type: object
+      additionalProperties: false
+      required:
+        - session_id
+        - device_id
+        - state
+        - stream_path
+        - expires_at
+        - max_fps
+      properties:
+        session_id:
+          type: string
+        device_id:
+          type: string
+        state:
+          type: string
+          const: streaming
+        stream_path:
+          type: string
+          description: Guardian WebSocket route. It carries no credential.
+        expires_at:
+          type: string
+          format: date-time
+          description: The earlier of the gateway duration cap and the platform
+            session deadline. The relay closes both sides at this instant.
+        max_fps:
+          type: integer
+          minimum: 1
+          maximum: 30
+          description: Frames per second the relay accepts from the guardian.
     ResponseEnvelope:
       type: object
       additionalProperties: false

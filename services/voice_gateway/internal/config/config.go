@@ -23,6 +23,7 @@ type Config struct {
 	Security  SecurityConfig
 	WebSocket WebSocketConfig
 	Intercom  IntercomConfig
+	CareView  CareViewConfig
 	Audio     AudioConfig
 }
 
@@ -303,6 +304,7 @@ func Load() (Config, error) {
 			SessionMaxDurationSeconds: envInt("VOICE_GATEWAY_WS_SESSION_MAX_DURATION_SECONDS", 900),
 		},
 		Intercom: loadIntercomConfig(),
+		CareView: loadCareViewConfig(),
 		Audio: AudioConfig{
 			VadSpeechThreshold:      envFloatRequired("VOICE_GATEWAY_VAD_SPEECH_THRESHOLD", 2.8),
 			VadHangoverFrames:       envInt("VOICE_GATEWAY_VAD_HANGOVER_FRAMES", 15),
@@ -421,6 +423,9 @@ func Load() (Config, error) {
 		}
 	}
 	if err := validateIntercomConfig(cfg); err != nil {
+		return Config{}, err
+	}
+	if err := validateCareViewConfig(cfg); err != nil {
 		return Config{}, err
 	}
 	if cfg.Security.MaxInputRunes < 64 || cfg.Security.MaxInputRunes > 8000 {

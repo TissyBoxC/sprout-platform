@@ -19,6 +19,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/reference"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/audio/vad"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/buildinfo"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/careview"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/config"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/conversation"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/intercom"
@@ -78,9 +79,9 @@ func Run() error {
 	}
 
 	// The registry is the only rendezvous between the device conversation
-	// transport and the guardian intercom relay; it holds live device
-	// frame sinks and never audio.
-	deviceConnections := intercom.NewDeviceConnectionRegistry()
+	// transport and every guardian relay; it holds live device frame sinks and
+	// never audio or image bytes.
+	deviceConnections := careview.NewDeviceConnectionRegistry()
 
 	realtimeHandler, realtimeManager, realtimeShutdown, err := buildRealtimeTransport(
 		cfg,
@@ -99,6 +100,9 @@ func Run() error {
 	intercomRelays := intercom.NewRelayManager(cfg.Intercom.MaxRelays)
 	defer intercomRelays.CloseAll()
 
+	careViewRelays := careview.NewRelayManager(cfg.CareView.MaxRelays)
+	defer careViewRelays.CloseAll()
+
 	routerOptions := gatewayhttp.RouterOptions{
 		Logger:            logger,
 		InternalAPIConfig: cfg.Internal,
@@ -107,6 +111,8 @@ func Run() error {
 		RealtimeEnabled:   realtimeHandler != nil,
 		IntercomEnabled:   cfg.Intercom.Enabled,
 		IntercomRelays:    intercomRelays,
+		CareViewEnabled:   cfg.CareView.Enabled,
+		CareViewRelays:    careViewRelays,
 	}
 	if cfg.Intercom.Enabled {
 		resolver, err := intercom.NewPlatformSessionResolver(intercom.PlatformResolverConfig{
@@ -119,7 +125,10 @@ func Run() error {
 		routerOptions.IntercomResolver = resolver
 		routerOptions.IntercomConnector = intercom.NewRealtimeDeviceConnector(
 			intercom.RealtimeConnectorConfig{
-				Source:        deviceConnections,
+				// The intercom relay keeps its own source interface; the shared
+				// registry is adapted once so both relays write through the same
+				// device writer.
+				Source:        intercomDeviceSource{connections: deviceConnections},
 				MaxFrameBytes: cfg.Intercom.MaxFrameBytes,
 			},
 		)
@@ -137,6 +146,35 @@ func Run() error {
 			AllowedOrigins:       cfg.WebSocket.AllowedOrigins,
 		}
 		logger.Info("guardian intercom relay enabled", "path", cfg.Intercom.Path)
+	}
+	if cfg.CareView.Enabled {
+		resolver, err := careview.NewPlatformSessionResolver(careview.PlatformResolverConfig{
+			BaseURL:      cfg.AI.DevicePlatformBaseURL,
+			ServiceToken: cfg.AI.DevicePlatformServiceToken,
+		})
+		if err != nil {
+			return fmt.Errorf("build care view session resolver: %w", err)
+		}
+		routerOptions.CareViewResolver = resolver
+		routerOptions.CareViewConnector = careview.NewRealtimeDeviceConnector(
+			careview.RealtimeConnectorConfig{
+				Source:        deviceConnections,
+				MaxFrameBytes: cfg.CareView.MaxFrameBytes,
+			},
+		)
+		routerOptions.CareViewTransport = gatewayhttp.CareViewTransportConfig{
+			Path:                 cfg.CareView.Path,
+			MaxViewDuration:      cfg.CareView.MaxViewDuration(),
+			MaxFrameBytes:        int64(cfg.CareView.MaxFrameBytes),
+			MaxFramesPerSecond:   cfg.CareView.MaxFramesPerSecond,
+			WriteQueueDepth:      cfg.CareView.WriteQueueDepth,
+			WriteTimeout:         seconds(cfg.CareView.WriteTimeoutSeconds),
+			PongWait:             seconds(cfg.CareView.PongWaitSeconds),
+			PingInterval:         seconds(cfg.CareView.PingIntervalSeconds),
+			StateRecheckInterval: seconds(cfg.CareView.StateRecheckSeconds),
+			AllowedOrigins:       cfg.WebSocket.AllowedOrigins,
+		}
+		logger.Info("guardian care view relay enabled", "path", cfg.CareView.Path)
 	}
 	if cfg.Vision.Enabled {
 		visionService, err := vision.New(vision.Options{
@@ -204,7 +242,7 @@ func buildRealtimeTransport(
 	deviceAuthorizer websocket.DeviceAuthorizer,
 	safetyReader securitysettings.Reader,
 	redisClient *redis.Client,
-	deviceConnections *intercom.DeviceConnectionRegistry,
+	deviceConnections *careview.DeviceConnectionRegistry,
 ) (http.Handler, *session.Manager, func(), error) {
 	if !cfg.WebSocket.Enabled {
 		logger.Info("device realtime endpoint is disabled")
@@ -353,4 +391,29 @@ func buildRealtimeTransport(
 
 func seconds(value int) time.Duration {
 	return time.Duration(value) * time.Second
+}
+
+// intercomDeviceSource adapts the shared device registry to the intercom
+// relay's device source interface.
+//
+// The registry is declared once and both guardian relays write through it. The
+// two relay packages each declare their own DeviceConnection interface, and Go
+// method signatures are invariant, so the bridge lives here in the composition
+// root instead of forcing either package to export a duplicate type.
+type intercomDeviceSource struct {
+	connections *careview.DeviceConnectionRegistry
+}
+
+// DeviceConnection returns the live device connection of one device.
+func (source intercomDeviceSource) DeviceConnection(
+	deviceID string,
+) (intercom.DeviceConnection, error) {
+	if source.connections == nil {
+		return nil, intercom.ErrDeviceNotConnected
+	}
+	connection, err := source.connections.DeviceConnection(deviceID)
+	if err != nil {
+		return nil, err
+	}
+	return connection, nil
 }

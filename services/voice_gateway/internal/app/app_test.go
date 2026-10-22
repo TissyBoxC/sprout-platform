@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/careview"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/config"
-	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/intercom"
 )
 
 // An enabled realtime endpoint without a device authorizer would fail open on
@@ -18,7 +18,7 @@ func TestBuildRealtimeTransportRejectsMissingAuthorizer(t *testing.T) {
 	cfg := config.Config{}
 	cfg.WebSocket.Enabled = true
 
-	_, _, _, err := buildRealtimeTransport(cfg, logger, nil, nil, nil, nil, intercom.NewDeviceConnectionRegistry())
+	_, _, _, err := buildRealtimeTransport(cfg, logger, nil, nil, nil, nil, careview.NewDeviceConnectionRegistry())
 	if err == nil {
 		t.Fatal("expected a missing device authorizer to fail the realtime transport build")
 	}
@@ -28,7 +28,7 @@ func TestBuildRealtimeTransportRejectsMissingAuthorizer(t *testing.T) {
 // working without the platform database.
 func TestBuildRealtimeTransportDisabledIsNoOp(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	handler, manager, shutdown, err := buildRealtimeTransport(config.Config{}, logger, nil, nil, nil, nil, intercom.NewDeviceConnectionRegistry())
+	handler, manager, shutdown, err := buildRealtimeTransport(config.Config{}, logger, nil, nil, nil, nil, careview.NewDeviceConnectionRegistry())
 	if err != nil {
 		t.Fatalf("buildRealtimeTransport() error = %v", err)
 	}
@@ -51,7 +51,7 @@ func TestBuildRealtimeTransportRejectsIncompleteConversationPipeline(t *testing.
 	cfg.AI.DevicePlatformBaseURL = "http://device-platform:8081"
 	cfg.AI.DevicePlatformServiceToken = strings.Repeat("t", 32)
 
-	_, _, _, err := buildRealtimeTransport(cfg, logger, nil, stubAuthorizer{}, nil, nil, intercom.NewDeviceConnectionRegistry())
+	_, _, _, err := buildRealtimeTransport(cfg, logger, nil, stubAuthorizer{}, nil, nil, careview.NewDeviceConnectionRegistry())
 	if err == nil {
 		t.Fatal("expected an incomplete conversation pipeline to fail the realtime transport build")
 	}

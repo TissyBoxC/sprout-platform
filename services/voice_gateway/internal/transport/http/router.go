@@ -16,6 +16,7 @@ import (
 	"github.com/TissyBoxC/sprout-platform/packages/go/httpapi"
 	"github.com/TissyBoxC/sprout-platform/packages/go/observability"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/buildinfo"
+	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/careview"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/config"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/intercom"
 	"github.com/TissyBoxC/sprout-platform/services/voice_gateway/internal/session"
@@ -61,6 +62,21 @@ type RouterOptions struct {
 	// configured. Readiness surfaces it so the management plane can tell a
 	// disabled relay from a broken one.
 	IntercomEnabled bool
+	// CareViewResolver re-reads the authoritative care-view state from
+	// device_platform before the guardian stream may carry a single frame.
+	CareViewResolver CareViewSessionResolver
+	// CareViewRelays admits and tracks guardian live-view streams. It is shared
+	// with the shutdown path so no stream survives process exit.
+	CareViewRelays *careview.RelayManager
+	// CareViewConnector attaches a stream to the live device write path.
+	CareViewConnector careview.DeviceConnector
+	// CareViewTransport bounds the guardian live-view endpoint. It is only used
+	// when the resolver, relays, and connector are all set.
+	CareViewTransport CareViewTransportConfig
+	// CareViewEnabled reports whether the live-view relay is configured.
+	// Readiness surfaces it so the management plane can tell a disabled
+	// feature from a broken one.
+	CareViewEnabled bool
 }
 
 // NewRouter returns the HTTP router for the voice gateway.
@@ -74,9 +90,10 @@ func NewRouter(options RouterOptions) http.Handler {
 	mux.HandleFunc("GET /healthz", healthHandler(options.BuildVersion))
 	mux.HandleFunc("GET /readyz", func(response http.ResponseWriter, _ *http.Request) {
 		writeJSON(response, http.StatusOK, map[string]any{
-			"status":           "ready",
-			"realtime_enabled": options.RealtimeEnabled,
-			"intercom_enabled": options.IntercomEnabled,
+			"status":            "ready",
+			"realtime_enabled":  options.RealtimeEnabled,
+			"intercom_enabled":  options.IntercomEnabled,
+			"care_view_enabled": options.CareViewEnabled,
 		})
 	})
 
@@ -158,6 +175,26 @@ func NewRouter(options RouterOptions) http.Handler {
 				),
 			)
 		}
+		if options.CareViewResolver != nil &&
+			options.CareViewRelays != nil &&
+			options.CareViewConnector != nil {
+			careView := careViewHandler{
+				resolver:  options.CareViewResolver,
+				relays:    options.CareViewRelays,
+				connector: options.CareViewConnector,
+				logger:    logger,
+				config:    options.CareViewTransport,
+			}
+			// device_platform authorizes the stream after the device confirmed
+			// its visible indication.
+			mux.Handle(
+				"POST /internal/v1/care-view/sessions/{session_id}/stream",
+				requireServiceToken(
+					options.InternalAPIConfig.AuthToken,
+					http.HandlerFunc(careView.authorize),
+				),
+			)
+		}
 	}
 
 	// The guardian relay is a public WebSocket route, but it only attaches to
@@ -178,6 +215,29 @@ func NewRouter(options RouterOptions) http.Handler {
 		mux.Handle(
 			options.IntercomTransport.Path+"/{session_id}",
 			withHijackSupport(http.HandlerFunc(guardian.relayGuardian)),
+		)
+	}
+
+	// The parent live-view stream is a public WebSocket route, but it only
+	// attaches to a stream the internal authorize endpoint already opened for a
+	// streaming platform session. It is mounted on its own path, so the device
+	// conversation endpoint and the intercom relay are untouched. The route
+	// must go through withHijackSupport or the upgrade fails with HTTP 500
+	// behind the access-log middleware.
+	if options.CareViewResolver != nil &&
+		options.CareViewRelays != nil &&
+		options.CareViewConnector != nil &&
+		options.CareViewTransport.Path != "" {
+		careView := careViewHandler{
+			resolver:  options.CareViewResolver,
+			relays:    options.CareViewRelays,
+			connector: options.CareViewConnector,
+			logger:    logger,
+			config:    options.CareViewTransport,
+		}
+		mux.Handle(
+			options.CareViewTransport.Path+"/{session_id}",
+			withHijackSupport(http.HandlerFunc(careView.relayGuardian)),
 		)
 	}
 

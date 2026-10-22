@@ -10,12 +10,12 @@ import (
 
 	billingchannel "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/channel"
 	billingdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/domain"
+	careviewservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/care_view/service"
 	featureCenterDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/domain"
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
-	careviewservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/care_view/service"
+	growthReportDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/domain"
 	intercomservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/service"
 	memorydomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/domain"
-	growthReportDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/domain"
 	notificationDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/domain"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/platform/featurehealth"
 )

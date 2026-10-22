@@ -27,8 +27,8 @@ func (handler guardianCareViewHandler) start(response http.ResponseWriter, reque
 		return
 	}
 	session, err := handler.service.Start(request.Context(), domain.Request{
-		FamilyID: request.PathValue("family_id"),
-		DeviceID: request.PathValue("device_id"),
+		FamilyID:   request.PathValue("family_id"),
+		DeviceID:   request.PathValue("device_id"),
 		GuardianID: guardianID,
 		// Consent is re-read from the stored decision inside the service; this
 		// flag carries the caller's affirmation and the service cross-checks it.
@@ -42,6 +42,10 @@ func (handler guardianCareViewHandler) start(response http.ResponseWriter, reque
 }
 
 // get answers with one session owned by the family.
+//
+// A streaming session also carries the relay path the parent app connects to.
+// Asking for it here, rather than at accept time, means a view nobody opens
+// never holds the device's uplink open.
 func (handler guardianCareViewHandler) get(response http.ResponseWriter, request *http.Request) {
 	session, err := handler.service.Get(
 		request.Context(),
@@ -52,7 +56,26 @@ func (handler guardianCareViewHandler) get(response http.ResponseWriter, request
 		writeCareViewError(response, request, err)
 		return
 	}
-	writeSuccess(response, request, http.StatusOK, careViewResponse(session))
+	payload := careViewResponse(session)
+	if session.State.AllowsFrames() {
+		streamPath, pathErr := handler.service.StreamPath(
+			request.Context(),
+			request.PathValue("family_id"),
+			request.PathValue("session_id"),
+		)
+		if pathErr == nil {
+			payload["stream_path"] = streamPath
+		} else if errors.Is(pathErr, careviewservice.ErrRelayUnavailable) {
+			// The session is genuinely streaming but no relay is wired. Reporting
+			// the session as-is lets the app say the picture is unavailable
+			// without pretending the view failed.
+			payload["stream_unavailable"] = true
+		} else {
+			writeCareViewError(response, request, pathErr)
+			return
+		}
+	}
+	writeSuccess(response, request, http.StatusOK, payload)
 }
 
 // end closes a session from the guardian side.
@@ -228,6 +251,10 @@ func writeCareViewError(response http.ResponseWriter, request *http.Request, err
 		writeError(response, request, http.StatusForbidden, "care_view_consent_required", "需要先同意图片授权才能查看")
 	case errors.Is(err, domain.ErrRateLimited):
 		writeError(response, request, http.StatusTooManyRequests, "care_view_rate_limited", "查看太频繁了，请稍后再试")
+	case errors.Is(err, domain.ErrNotStreaming):
+		writeError(response, request, http.StatusConflict, "care_view_not_streaming", "这次查看还没有开始传送画面")
+	case errors.Is(err, careviewservice.ErrRelayUnavailable):
+		writeError(response, request, http.StatusServiceUnavailable, "care_view_relay_unavailable", "暂时无法传送画面，请稍后再试")
 	case errors.Is(err, careviewservice.ErrBusy):
 		writeError(response, request, http.StatusConflict, "care_view_device_busy", "这台设备正在被查看，请稍后再试")
 	case errors.Is(err, careviewservice.ErrConflict):

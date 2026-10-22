@@ -180,8 +180,8 @@ func metricsResponse(metrics domain.Metrics) map[string]any {
 			"memories":       metrics.Counts.Memories,
 		},
 		"deltas": map[string]any{
-			"practice":     metrics.PracticeDelta,
-			"accuracy":     metrics.AccuracyDelta,
+			"practice":       metrics.PracticeDelta,
+			"accuracy":       metrics.AccuracyDelta,
 			"active_seconds": metrics.ActiveSecondsDiff,
 		},
 		"accuracy_phrase": domain.AccuracyPhrase(metrics),

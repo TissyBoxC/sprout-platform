@@ -175,6 +175,9 @@ type VoiceGatewayConfig struct {
 	WSTokenSecret string
 	WSTokenTTL    time.Duration
 	WebSocketURL  string
+	// InternalAPIURL is the service-to-service base URL used to open media
+	// relays. It is never exposed to clients.
+	InternalAPIURL string
 }
 
 // NotificationChannelConfig points at one outbound provider endpoint. The
@@ -351,6 +354,9 @@ func Load() (Config, error) {
 				"DEVICE_PLATFORM_VOICE_GATEWAY_WS_URL",
 				"wss://voice.clarkhub.cn/v1/voice",
 			),
+			// Service-to-service base URL for relay control. Empty disables live
+			// frames while leaving the view lifecycle served.
+			InternalAPIURL: env("DEVICE_PLATFORM_VOICE_GATEWAY_INTERNAL_URL", ""),
 		},
 		Notification: NotificationConfig{
 			Push: NotificationChannelConfig{

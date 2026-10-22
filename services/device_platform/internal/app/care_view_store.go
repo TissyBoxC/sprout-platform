@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	careviewrepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/care_view/repository"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/care_view/domain"
+	careviewrepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/care_view/repository"
 	careviewservice "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/care_view/service"
 )
 

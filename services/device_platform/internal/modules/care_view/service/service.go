@@ -30,6 +30,9 @@ var (
 	ErrConflict = errors.New("care view session state conflict")
 	// ErrBusy means the device already serves an open session.
 	ErrBusy = errors.New("care view device busy")
+	// ErrRelayUnavailable means the media relay is not configured or refused to
+	// open a stream. The view itself is fine; only the frames are missing.
+	ErrRelayUnavailable = errors.New("care view relay unavailable")
 )
 
 var (
@@ -81,24 +84,26 @@ type DeviceNotifier interface {
 
 // Options are the collaborators the service needs.
 type Options struct {
-	Store    Store
-	Devices  DeviceLookup
-	Switches ViewSwitch
-	Consent  ConsentReader
-	Notifier DeviceNotifier
-	Logger   *slog.Logger
+	Store      Store
+	Devices    DeviceLookup
+	Switches   ViewSwitch
+	Consent    ConsentReader
+	Notifier   DeviceNotifier
+	Authorizer StreamAuthorizer
+	Logger     *slog.Logger
 }
 
 // Service owns care-view lifecycle.
 type Service struct {
-	store    Store
-	devices  DeviceLookup
-	switches ViewSwitch
-	consent  ConsentReader
-	notifier DeviceNotifier
-	logger   *slog.Logger
-	now      func() time.Time
-	newID    func() (string, error)
+	store      Store
+	devices    DeviceLookup
+	switches   ViewSwitch
+	consent    ConsentReader
+	notifier   DeviceNotifier
+	authorizer StreamAuthorizer
+	logger     *slog.Logger
+	now        func() time.Time
+	newID      func() (string, error)
 }
 
 // NewService builds the service.
@@ -108,14 +113,15 @@ func NewService(options Options) *Service {
 		logger = slog.Default()
 	}
 	return &Service{
-		store:    options.Store,
-		devices:  options.Devices,
-		switches: options.Switches,
-		consent:  options.Consent,
-		notifier: options.Notifier,
-		logger:   logger,
-		now:      func() time.Time { return time.Now().UTC() },
-		newID:    newSessionID,
+		store:      options.Store,
+		devices:    options.Devices,
+		switches:   options.Switches,
+		consent:    options.Consent,
+		notifier:   options.Notifier,
+		authorizer: options.Authorizer,
+		logger:     logger,
+		now:        func() time.Time { return time.Now().UTC() },
+		newID:      newSessionID,
 	}
 }
 
@@ -267,6 +273,33 @@ func (service *Service) Get(ctx context.Context, familyID, sessionID string) (do
 		return domain.Session{}, err
 	}
 	return session, nil
+}
+
+// StreamAuthorizer opens the frame relay for a streaming session and returns the
+// path the parent app connects to.
+type StreamAuthorizer interface {
+	AuthorizeStream(ctx context.Context, session domain.Session, deviceToken string) (string, error)
+}
+
+// StreamPath asks the relay for a viewing path for a session that is already
+// streaming.
+//
+// It is called when the guardian asks for the session rather than when the device
+// confirms, so a view nobody opens never occupies the device's uplink. The path
+// is not stored anywhere: it is derived per request from the session state the
+// gateway re-reads.
+func (service *Service) StreamPath(ctx context.Context, familyID, sessionID string) (string, error) {
+	session, err := service.Get(ctx, familyID, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if !session.State.AllowsFrames() {
+		return "", domain.ErrNotStreaming
+	}
+	if service.authorizer == nil {
+		return "", ErrRelayUnavailable
+	}
+	return service.authorizer.AuthorizeStream(ctx, session, "")
 }
 
 // GetForDevice returns one session to the device it addresses.

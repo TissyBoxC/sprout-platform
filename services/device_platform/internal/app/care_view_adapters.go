@@ -118,7 +118,7 @@ func (notifier careViewNotifier) NotifyCareViewStop(ctx context.Context, session
 
 // Compile-time proof the adapters satisfy the service contracts.
 var (
-	_ careviewservice.ViewSwitch    = careViewSwitch{}
-	_ careviewservice.ConsentReader = careViewConsentReader{}
+	_ careviewservice.ViewSwitch     = careViewSwitch{}
+	_ careviewservice.ConsentReader  = careViewConsentReader{}
 	_ careviewservice.DeviceNotifier = careViewNotifier{}
 )

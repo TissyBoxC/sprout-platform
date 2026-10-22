@@ -13446,6 +13446,14 @@ components:
         allows_frames:
           type: boolean
           description: 客户端据此判断是否应渲染画面。
+        stream_path:
+          type: string
+          description: |
+            仅在推流中返回，家长端用它连接画面转发。路径中不含任何凭证，
+            连接的合法性由家长自己的登录态决定；画面只转发不保存。
+        stream_unavailable:
+          type: boolean
+          description: 推流中但转发服务暂不可用，界面应提示稍后重试。
 
     CareViewSessionEnvelope:
       type: object

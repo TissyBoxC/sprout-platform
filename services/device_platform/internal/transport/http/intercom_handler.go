@@ -182,10 +182,10 @@ func (handler internalIntercomHandler) session(response http.ResponseWriter, req
 // part of a call response.
 func callResponse(call domain.Call) map[string]any {
 	payload := map[string]any{
-		"call_id":   call.ID,
-		"device_id": call.DeviceID,
-		"child_id":  call.ChildID,
-		"state":     string(call.State),
+		"call_id":    call.ID,
+		"device_id":  call.DeviceID,
+		"child_id":   call.ChildID,
+		"state":      string(call.State),
 		"started_at": call.StartedAt,
 		// The client uses this to render a countdown instead of guessing the
 		// remaining time from its own clock.

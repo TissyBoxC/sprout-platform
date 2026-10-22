@@ -8,8 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/domain"
 	runtimeDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/domain"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/domain"
 )
 
 // intercomDeviceLookup resolves which family owns a device and which child the

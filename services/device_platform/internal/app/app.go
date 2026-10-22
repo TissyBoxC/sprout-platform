@@ -33,6 +33,8 @@ import (
 	billingService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/service"
 	bluetoothAudioRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/bluetooth_audio/repository"
 	bluetoothAudioService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/bluetooth_audio/service"
+	careViewRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/care_view/repository"
+	careViewService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/care_view/service"
 	childdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/domain"
 	childRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/repository"
 	childService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/child/service"
@@ -53,6 +55,8 @@ import (
 	deviceMeshService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_mesh/service"
 	runtimeRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/repository"
 	runtimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/device_runtime/service"
+	deviceChildRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/devicechild/repository"
+	deviceChildService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/devicechild/service"
 	displayRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/display/repository"
 	displayService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/display/service"
 	englishdomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/english/domain"
@@ -66,10 +70,14 @@ import (
 	featureCenterService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/feature_center/service"
 	formFactorRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/form_factor/repository"
 	formFactorService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/form_factor/service"
+	growthReportRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/repository"
+	growthReportService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/service"
 	imagePrivacyRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/image_privacy/repository"
 	imagePrivacyService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/image_privacy/service"
 	inputRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/repository"
 	inputService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/input/service"
+	intercomRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/repository"
+	intercomService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/service"
 	learningVisualizationRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/learning_visualization/repository"
 	learningVisualizationService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/learning_visualization/service"
 	localCommandDomain "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/domain"
@@ -77,14 +85,6 @@ import (
 	localCommandService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/local_command/service"
 	memoryRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/repository"
 	memoryService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/memory/service"
-	growthReportRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/repository"
-	growthReportService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/growthreport/service"
-	deviceChildRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/devicechild/repository"
-	deviceChildService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/devicechild/service"
-	careViewRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/care_view/repository"
-	careViewService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/care_view/service"
-	intercomRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/repository"
-	intercomService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/intercom/service"
 	motionRepository "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/repository"
 	motionRuntimeService "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/motion/service"
 	notificationDelivery "github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/notification/delivery"
@@ -374,7 +374,13 @@ func Run() error {
 		Switches: careViewSwitch{pool: databaseStore.Pool()},
 		Consent:  careViewConsentReader{pool: databaseStore.Pool()},
 		Notifier: careViewNotifier{commands: deviceRuntimeService},
-		Logger:   logger,
+		// The same service token the gateway already validates. Without a relay
+		// endpoint the service reports frames as unavailable rather than failing.
+		Authorizer: newCareViewRelayAuthorizer(NewCareViewStreamAuthorizer(
+			cfg.VoiceGateway.InternalAPIURL,
+			cfg.Internal.AuthToken,
+		)),
+		Logger: logger,
 	})
 	fleetTelemetry, err := telemetryService.New(telemetryService.Options{
 		Repository: telemetryRepository.NewPostgresRepository(

@@ -96,10 +96,10 @@ func (handler learningVisualizationHandler) current(
 	}
 	styles, animations, states := handler.service.Catalog()
 	writeSuccess(response, request, http.StatusOK, map[string]any{
-		"policy":          learningVisualizationPolicyResponse(policy),
-		"feedback_styles": styles,
+		"policy":           learningVisualizationPolicyResponse(policy),
+		"feedback_styles":  styles,
 		"animation_levels": animations,
-		"visual_states":   states,
+		"visual_states":    states,
 	})
 }
 

@@ -26,6 +26,8 @@ import '../../features/device/presentation/device_list_page.dart';
 import '../../features/device/domain/device_payload.dart';
 import '../../features/device/presentation/device_provisioning_page.dart';
 import '../../features/device/presentation/device_qr_scan_page.dart';
+import '../../features/emotion/presentation/emotion_page.dart';
+import '../../features/timeline/presentation/timeline_page.dart';
 import '../../features/english/presentation/english_page.dart';
 import '../../features/family/presentation/family_home_page.dart';
 import '../../features/family/presentation/family_invite_accept_page.dart';
@@ -175,6 +177,16 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/growth-reports',
         builder: (context, state) => const GrowthReportPage(),
+      ),
+      // 情绪感知默认关闭，入口放在「我的」里，家长先读到说明再决定是否开启。
+      GoRoute(
+        path: '/me/emotion',
+        builder: (context, state) => const EmotionPage(),
+      ),
+      // 时间轴按孩子记录，页面顶部先选孩子，选择结果在平台侧是必填参数。
+      GoRoute(
+        path: '/me/timeline',
+        builder: (context, state) => const TimelinePageView(),
       ),
       // 结算页必须带着选中的套餐进入；直接打开链接时没有可结算的内容。
       GoRoute(

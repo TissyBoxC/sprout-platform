@@ -95,6 +95,8 @@ class ProfilePage extends ConsumerWidget {
                     onVideoCompanion: () => context.push('/me/video-companion'),
                     onWearable: () => context.push('/me/wearable'),
                     onMultiDevice: () => context.push('/me/multi-device'),
+                    onEmotion: () => context.push('/me/emotion'),
+                    onTimeline: () => context.push('/me/timeline'),
                     onUsageReports: () => context.push('/me/usage-reports'),
                     onSpendingLimit: () =>
                         context.push('/me/billing/spending-limit'),
@@ -620,6 +622,8 @@ class _SettingsCard extends StatelessWidget {
     required this.onVideoCompanion,
     required this.onWearable,
     required this.onMultiDevice,
+    required this.onEmotion,
+    required this.onTimeline,
     required this.onUsageReports,
     required this.onSpendingLimit,
     required this.onNotifications,
@@ -652,6 +656,8 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onVideoCompanion;
   final VoidCallback onWearable;
   final VoidCallback onMultiDevice;
+  final VoidCallback onEmotion;
+  final VoidCallback onTimeline;
   final VoidCallback onUsageReports;
   final VoidCallback onSpendingLimit;
   final VoidCallback onNotifications;
@@ -834,6 +840,22 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('管理设备分组、家庭联动和内容同步'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onMultiDevice,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.emoji_emotions_outlined),
+            title: const Text('情绪感知'),
+            subtitle: const Text('记录大致情绪分布，默认关闭'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onEmotion,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.timeline_rounded),
+            title: const Text('成长时间轴'),
+            subtitle: const Text('按时间看测评、练习和听完的内容'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onTimeline,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

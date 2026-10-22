@@ -7,6 +7,7 @@ import '../../../core/theme/app_motion.dart';
 import '../../../shared/widgets/app_reveal.dart';
 import '../../../shared/widgets/app_state_switcher.dart';
 import '../../ota/device_firmware/presentation/device_firmware_update_panel.dart';
+import '../../intercom/presentation/intercom_panel.dart';
 import '../application/device_binding_controller.dart';
 import '../data/device_binding_api.dart';
 import '../domain/device_provisioning_status.dart';
@@ -371,6 +372,10 @@ class DeviceListPage extends ConsumerWidget {
                 ),
                 const SizedBox(height: 20),
                 DeviceChildPanel(deviceId: device.deviceId),
+                IntercomPanel(
+                  deviceId: device.deviceId,
+                  deviceName: device.deviceName,
+                ),
                 const SizedBox(height: 20),
                 Text(
                   '设备能力',

@@ -60,6 +60,30 @@ class NotificationApi {
       },
     );
   }
+
+  /// What this device received, newest first.
+  ///
+  /// A guardian who sent a message has no other way to learn whether the device
+  /// ever got it: delivery is silent, so without this read the composer can only
+  /// claim success for a send the device never displayed.
+  Future<List<DeviceMessage>> deviceMessages(
+    String deviceId, {
+    int limit = 20,
+  }) async {
+    final response = await _apiClient.get(
+      '/api/v1/notifications/devices/${Uri.encodeComponent(deviceId)}/messages',
+      queryParameters: {'limit': limit.toString()},
+    );
+    final data = _requiredMap(response['data'], 'data');
+    final raw = data['messages'];
+    if (raw is! List) {
+      return const <DeviceMessage>[];
+    }
+    return raw
+        .whereType<Map<Object?, Object?>>()
+        .map((entry) => DeviceMessage.fromJson(Map<String, Object?>.from(entry)))
+        .toList(growable: false);
+  }
 }
 
 Map<String, Object?> _requiredMap(Object? value, String field) {

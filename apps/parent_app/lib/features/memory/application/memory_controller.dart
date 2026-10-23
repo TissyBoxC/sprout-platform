@@ -26,6 +26,25 @@ final memoryApiProvider = Provider<MemoryApi?>((ref) {
   return HttpMemoryApi(ref.watch(apiClientProvider), familyId);
 });
 
+/// How many memories each child in the family has.
+///
+/// A read failure yields an empty map rather than an error state: the counts
+/// only annotate the child chips, and a screen that cannot draw its chips
+/// because a badge failed would hide the memories that did load.
+final familyMemoryCountsProvider = FutureProvider<Map<String, int>>((
+  ref,
+) async {
+  final api = ref.watch(memoryApiProvider);
+  if (api == null) {
+    return const <String, int>{};
+  }
+  try {
+    return await api.fetchFamilyMemoryCounts();
+  } on Object {
+    return const <String, int>{};
+  }
+});
+
 /// One child the guardian may inspect memories for.
 class MemoryChild {
   const MemoryChild({required this.id, required this.name});

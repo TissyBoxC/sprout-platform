@@ -201,6 +201,14 @@ class _InboxApi implements NotificationApi {
     required bool sendToDevice,
     int displayDurationSeconds = 30,
   }) async {}
+
+  @override
+  Future<List<DeviceMessage>> deviceMessages(
+    String deviceId, {
+    int limit = 20,
+  }) async {
+    return const <DeviceMessage>[];
+  }
 }
 
 GuardianNotification _notification({

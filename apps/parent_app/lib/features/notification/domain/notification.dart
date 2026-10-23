@@ -139,3 +139,35 @@ List<Map<String, Object?>> _mapList(Object? value) {
       .map((item) => Map<String, Object?>.from(item))
       .toList(growable: false);
 }
+
+/// One message the device actually received and displayed.
+///
+/// This is the delivery record, not the guardian's draft. A message that never
+/// reached the device is absent here, which is the only evidence a guardian can
+/// act on.
+class DeviceMessage {
+  const DeviceMessage({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.category,
+    required this.durationSeconds,
+  });
+
+  final String id;
+  final String title;
+  final String body;
+  final String category;
+  final int durationSeconds;
+
+  factory DeviceMessage.fromJson(Map<String, Object?> json) {
+    final seconds = json['duration_seconds'];
+    return DeviceMessage(
+      id: _stringOr(json['id'], ''),
+      title: _stringOr(json['title'], ''),
+      body: _stringOr(json['body'], ''),
+      category: _stringOr(json['category'], ''),
+      durationSeconds: seconds is num ? seconds.toInt() : 0,
+    );
+  }
+}

@@ -113,20 +113,6 @@ void main() {
     expect(activeCodecLabel('aac'), 'AAC');
   });
 
-  test('forwards the admin stats window', () async {
-    final client = _FakeApiClient(
-      response: <String, Object?>{
-        'data': <String, Object?>{'window_days': 30, 'device_count': 5},
-      },
-    );
-    final api = HttpBluetoothAudioApi(client);
-
-    final stats = await api.fetchAdminStats(windowDays: 30);
-
-    expect(stats['device_count'], 5);
-    expect(client.lastQueryParameters, <String, String>{'window_days': '30'});
-  });
-
   test('defaults unknown codec and adapter labels safely', () {
     expect(BluetoothCodec.fromApiValue('aptx'), BluetoothCodec.auto);
     expect(adapterStateLabel('sleeping'), '未知');
@@ -138,7 +124,6 @@ class _FakeApiClient implements ApiClient {
   _FakeApiClient({required this.response});
 
   final Map<String, Object?> response;
-  Map<String, String>? lastQueryParameters;
   String? lastPutPath;
   Object? lastPutBody;
 
@@ -147,7 +132,6 @@ class _FakeApiClient implements ApiClient {
     String path, {
     Map<String, String>? queryParameters,
   }) async {
-    lastQueryParameters = queryParameters;
     return response;
   }
 

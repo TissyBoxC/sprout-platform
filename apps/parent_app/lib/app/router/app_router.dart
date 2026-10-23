@@ -49,6 +49,7 @@ import '../../features/usage_report/presentation/usage_report_page.dart';
 import '../../features/vision/presentation/vision_page.dart';
 import '../../features/form_factor/presentation/form_factor_page.dart';
 import '../../features/video_companion/presentation/video_companion_page.dart';
+import '../../features/video_session/presentation/video_session_page.dart';
 import '../../features/wearable/presentation/wearable_page.dart';
 import '../../features/display/presentation/display_settings_page.dart';
 import '../../features/touch/presentation/touch_settings_page.dart';
@@ -267,6 +268,11 @@ GoRouter createAppRouter(ProviderContainer container) {
       GoRoute(
         path: '/me/video-companion',
         builder: (context, state) => const VideoCompanionPage(),
+      ),
+      // 视频通话是一套由家长设定的通话规则，通话本身不在手机上接打。
+      GoRoute(
+        path: '/me/video-session',
+        builder: (context, state) => const VideoSessionPage(),
       ),
       GoRoute(
         path: '/me/wearable',

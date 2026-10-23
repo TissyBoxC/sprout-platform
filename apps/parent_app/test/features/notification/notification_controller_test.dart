@@ -394,4 +394,12 @@ class _FakeNotificationApi implements NotificationApi {
     required bool sendToDevice,
     int displayDurationSeconds = 30,
   }) async {}
+
+  @override
+  Future<List<DeviceMessage>> deviceMessages(
+    String deviceId, {
+    int limit = 20,
+  }) async {
+    return const <DeviceMessage>[];
+  }
 }

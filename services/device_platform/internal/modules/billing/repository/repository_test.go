@@ -578,6 +578,47 @@ func TestApproveRefundRequiresOperator(t *testing.T) {
 	}
 }
 
+// ===== refund listings =====
+
+// TestListRefundsQueriesTheFilteredPage proves the operator listing pushes the
+// status filter and the window into SQL, so one page never loads the whole
+// refund table and the page boundary is what the console asked for.
+func TestListRefundsQueriesTheFilteredPage(t *testing.T) {
+	database := &scriptedDatabase{rowsErr: nil}
+	repository := newTestRepository(database)
+
+	_, _, err := repository.ListRefunds(context.Background(), RefundFilter{
+		Status: domain.RefundStatusRequested,
+		Limit:  25,
+		Offset: 50,
+	})
+	if err != nil {
+		t.Fatalf("list refunds: %v", err)
+	}
+	if len(database.execCalls) != 1 {
+		t.Fatalf("executed %d statements, want 1", len(database.execCalls))
+	}
+	call := database.execCalls[0]
+	if !execMentions(call, "status = $1") {
+		t.Fatalf("expected the status filter in the query: %s", call.sql)
+	}
+	if !execMentions(call, "LIMIT $2 OFFSET $3") {
+		t.Fatalf("expected the window in the query: %s", call.sql)
+	}
+	if !execMentions(call, "COUNT(*) OVER ()") {
+		t.Fatalf("expected the total to come from the same statement: %s", call.sql)
+	}
+	if !execMentions(call, "orders.order_no") {
+		t.Fatalf("expected the order number to be joined in: %s", call.sql)
+	}
+	if len(call.args) != 3 ||
+		call.args[0] != string(domain.RefundStatusRequested) ||
+		call.args[1] != 25 ||
+		call.args[2] != 50 {
+		t.Fatalf("query arguments = %#v, want the status, limit, and offset", call.args)
+	}
+}
+
 // ===== subscriptions and consents =====
 
 // TestUpsertActiveSubscriptionExtendsExistingPeriod proves a second purchase of

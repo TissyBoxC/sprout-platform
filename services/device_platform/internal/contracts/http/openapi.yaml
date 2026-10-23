@@ -11910,6 +11910,60 @@ paths:
         "500":
           $ref: "#/components/responses/DeviceServiceError"
 
+  /api/v1/admin/billing/refunds:
+    get:
+      summary: 退款申请列表
+      description: |
+        运营端退款审批队列，按申请时间倒序。只读：审批或拒绝仍需 billing.manage。
+        界面按 status=requested 翻页读取待审批申请。
+      security:
+        - adminToken: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [requested, approved, processing, succeeded, failed, rejected]
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 20
+      responses:
+        "200":
+          description: 退款分页；没有匹配记录时 refunds 是空数组
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingRefundsEnvelope"
+        "400":
+          description: 筛选或分页参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: 缺少 billing.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "500":
+          $ref: "#/components/responses/DeviceServiceError"
+
   /api/v1/admin/billing/refunds/{refund_no}/approve:
     post:
       summary: 批准退款
@@ -12867,7 +12921,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AssessmentAnswerRequest"
+              $ref: "#/components/schemas/DeviceAssessmentAnswerRequest"
       responses:
         "201":
           description: 已记录，返回最新进度与下一道题
@@ -14236,6 +14290,35 @@ components:
           minimum: 0
           maximum: 100
           description: 低于 60 视为答错
+    # The device does not track a position. It is the guardian's phone that keeps
+    # the cursor and tells the device which item is on screen, so a device that
+    # also sent a position could disagree with the stored progress and be
+    # rejected for a reason it cannot observe or fix.
+    DeviceAssessmentAnswerRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - item_id
+        - item_type
+        - target_text
+        - score
+      properties:
+        item_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        item_type:
+          $ref: "#/components/schemas/EnglishItemType"
+        target_text:
+          type: string
+          minLength: 1
+          maxLength: 160
+          description: 课程要求孩子说出的内容，不是孩子的语音转写
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: 低于 60 视为答错
     AssessmentNextItem:
       type: object
       additionalProperties: false
@@ -14771,6 +14854,62 @@ components:
               format: date-time
             - type: "null"
 
+    BillingAdminRefund:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - refund_no
+        - order_no
+        - order_id
+        - amount_cny_cents
+        - reason
+        - operator_account_id
+        - status
+        - channel_refund_no
+        - requested_at
+        - approved_at
+        - completed_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        refund_no:
+          type: string
+          pattern: "^SR[0-9]{8}[A-Z2-7]{8}$"
+        order_no:
+          type: string
+          description: 关联订单的单号；由订单表连接得出。
+        order_id:
+          type: string
+          format: uuid
+        amount_cny_cents:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+          maxLength: 500
+        operator_account_id:
+          type: string
+          description: 审批退款的运营账号；尚未审批时为空字符串。
+        status:
+          type: string
+          enum: [requested, approved, processing, succeeded, failed, rejected]
+        channel_refund_no:
+          type: string
+          description: 渠道退款单号；尚未提交渠道时为空字符串。
+        requested_at:
+          type: string
+          format: date-time
+        approved_at:
+          type: string
+          format: date-time
+          description: 尚未审批时为空字符串，界面据此显示「暂无记录」。
+        completed_at:
+          type: string
+          format: date-time
+          description: 尚未退款完成时为空字符串。
+
     BillingConsent:
       type: object
       additionalProperties: false
@@ -15092,6 +15231,26 @@ components:
               properties:
                 refund:
                   $ref: "#/components/schemas/BillingRefund"
+
+    BillingRefundsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/ResponseEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+              required: [refunds, total]
+              properties:
+                refunds:
+                  type: array
+                  description: 没有匹配记录时是空数组，不会是 null。
+                  items:
+                    $ref: "#/components/schemas/BillingAdminRefund"
+                total:
+                  type: integer
+                  minimum: 0
+                  description: 匹配筛选条件的总条数，不受当前页限制。
 
     BillingConsentEnvelope:
       allOf:

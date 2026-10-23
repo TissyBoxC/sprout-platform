@@ -108,7 +108,33 @@ class DeviceChildPanel extends ConsumerWidget {
             child: const Text('取消这台设备的儿童绑定'),
           ),
         ],
+        const SizedBox(height: 4),
+        TextButton(
+          onPressed: () => _showHistory(context, ref, profiles),
+          child: const Text('查看这台设备用过哪些儿童'),
+        ),
       ],
+    );
+  }
+
+  /// Shows who this device has served. A guardian switching between siblings
+  /// otherwise has no way to tell whether an earlier child's records followed
+  /// them, and the history is the only place that answers it.
+  Future<void> _showHistory(
+    BuildContext context,
+    WidgetRef ref,
+    List<ChildProfile> profiles,
+  ) async {
+    final nameOf = <String, String>{
+      for (final child in profiles) child.childId: child.nickname,
+    };
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => _ChildHistorySheet(
+        deviceId: deviceId,
+        nameOf: nameOf,
+      ),
     );
   }
 
@@ -196,4 +222,127 @@ String _errorMessage(Object? error) {
     return error.message;
   }
   return '暂时无法读取设备当前使用的儿童，请稍后重试。';
+}
+
+/// The children this device has served, newest first.
+class _ChildHistorySheet extends ConsumerWidget {
+  const _ChildHistorySheet({required this.deviceId, required this.nameOf});
+
+  final String deviceId;
+  final Map<String, String> nameOf;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final history = ref.watch(deviceChildHistoryProvider(deviceId));
+    final theme = Theme.of(context);
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('这台设备用过的儿童', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 12),
+            history.when(
+              loading: () => const Text('正在读取使用记录…'),
+              error: (error, _) => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  const Text('暂时无法读取使用记录，请稍后重试。'),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () => ref.invalidate(
+                      deviceChildHistoryProvider(deviceId),
+                    ),
+                    child: const Text('重新读取'),
+                  ),
+                ],
+              ),
+              data: (entries) => entries.isEmpty
+                  ? const Text('这台设备还没有换过儿童。')
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        for (final entry in entries)
+                          _ChildHistoryRow(
+                            // An unbind leaves no name on the record, and showing
+                            // the raw identifier would tell the guardian nothing.
+                            name: nameOf[entry.childId] ?? '已删除的儿童档案',
+                            isActive: entry.isActive,
+                            activatedAt: entry.activatedAt,
+                            deactivatedAt: entry.deactivatedAt,
+                          ),
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ChildHistoryRow extends StatelessWidget {
+  const _ChildHistoryRow({
+    required this.name,
+    required this.isActive,
+    required this.activatedAt,
+    required this.deactivatedAt,
+  });
+
+  final String name;
+  final bool isActive;
+  final DateTime? activatedAt;
+  final DateTime? deactivatedAt;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final span = _spanText();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(name, style: theme.textTheme.bodyMedium),
+                if (span != null)
+                  Text(
+                    span,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (isActive)
+            Text('当前使用中', style: theme.textTheme.labelSmall),
+        ],
+      ),
+    );
+  }
+
+  String? _spanText() {
+    final start = activatedAt;
+    if (start == null) {
+      return null;
+    }
+    final end = deactivatedAt;
+    final startText = _dayText(start);
+    if (end == null) {
+      return '从 $startText 开始使用';
+    }
+    return '$startText 至 ${_dayText(end)}';
+  }
+
+  String _dayText(DateTime value) {
+    final local = value.toLocal();
+    return '${local.year}年${local.month}月${local.day}日';
+  }
 }

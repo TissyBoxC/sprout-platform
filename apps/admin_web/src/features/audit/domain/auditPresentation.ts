@@ -48,6 +48,24 @@ const ACTION_LABELS: Record<string, string> = {
   'admin.service.upgrade.started': '开始升级服务',
   'admin.service.upgrade.completed': '完成升级服务',
   'admin.service.upgrade.failed': '升级服务失败',
+  // Billing and device copy are audited with the same store as everything else.
+  // Without these labels the operator sees a raw identifier such as
+  // admin.billing.refund.approve, which says nothing about what was approved.
+  'admin.billing.plan.created': '新建资费方案',
+  'admin.billing.plan.updated': '调整资费方案',
+  'admin.billing.refund.approve': '同意退款',
+  'admin.billing.refund.reject': '拒绝退款',
+  'admin.billing.reconciliation.started': '发起对账',
+  'admin.ui_text.draft.created': '新建文案草稿',
+  'admin.ui_text.draft.updated': '修改文案草稿',
+  'admin.ui_text.submit': '提交文案审核',
+  'admin.ui_text.withdraw': '撤回文案审核',
+  'admin.ui_text.approve': '通过文案审核',
+  'admin.ui_text.review.rejected': '驳回文案审核',
+  'admin.ui_text.published': '发布文案',
+  'admin.feature_center.updated': '修改功能配置',
+  'admin.ota.deployment.created': '发起 OTA 部署',
+  'admin.ota.updated': '调整 OTA 版本',
 }
 
 const DETAIL_LABELS: Record<string, string> = {

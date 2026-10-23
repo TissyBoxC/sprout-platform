@@ -85,6 +85,7 @@ type Repository interface {
 	GetRefundByNo(ctx context.Context, refundNo string) (*domain.Refund, error)
 	LockRefund(ctx context.Context, tx pgx.Tx, refundID string) (*domain.Refund, error)
 	ListRefundsByOrder(ctx context.Context, orderID string) ([]domain.Refund, error)
+	ListRefunds(ctx context.Context, filter RefundFilter) ([]RefundListing, int, error)
 	SumRefundCentsByStatus(
 		ctx context.Context,
 		tx pgx.Tx,

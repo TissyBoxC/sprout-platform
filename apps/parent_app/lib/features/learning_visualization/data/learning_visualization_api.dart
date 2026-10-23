@@ -14,9 +14,6 @@ abstract interface class LearningVisualizationApi {
 
   /// Lists each family device's latest bounded visualization status.
   Future<List<LearningVisualizationDevice>> fetchDevices();
-
-  /// Reads the fleet summary for the admin console.
-  Future<Map<String, Object?>> fetchAdminStats({int windowDays = 7});
 }
 
 /// Production implementation backed by the authenticated API client.
@@ -65,19 +62,6 @@ class HttpLearningVisualizationApi implements LearningVisualizationApi {
           ),
         )
         .toList(growable: false);
-  }
-
-  @override
-  Future<Map<String, Object?>> fetchAdminStats({int windowDays = 7}) async {
-    final response = await _apiClient.get(
-      '/api/v1/admin/learning-visualization/stats',
-      queryParameters: <String, String>{'window_days': '$windowDays'},
-    );
-    final data = response['data'];
-    if (data is! Map) {
-      throw const FormatException('missing learning visualization stats');
-    }
-    return Map<String, Object?>.from(data);
   }
 }
 

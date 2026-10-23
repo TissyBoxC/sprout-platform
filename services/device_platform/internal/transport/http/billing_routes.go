@@ -206,6 +206,15 @@ func registerBillingRoutes(
 			handler.adminUpdatePlan,
 		),
 	)
+	// The approval queue is a read: an operator with billing.read may see which
+	// refunds wait for a decision, while acting on one still needs billing.manage.
+	mux.HandleFunc(
+		"GET /api/v1/admin/billing/refunds",
+		authHandler.requireAdminPermission(
+			authdomain.AdminPermissionBillingRead,
+			handler.adminListRefunds,
+		),
+	)
 	mux.HandleFunc(
 		"POST /api/v1/admin/billing/refunds/{refund_no}/approve",
 		authHandler.requireAdminPermissionAction(

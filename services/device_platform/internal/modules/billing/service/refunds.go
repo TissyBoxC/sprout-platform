@@ -8,6 +8,7 @@ import (
 
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/channel"
 	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/domain"
+	"github.com/TissyBoxC/sprout-platform/services/device_platform/internal/modules/billing/repository"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -371,6 +372,25 @@ func (s *RefundService) ListRefundsForParent(
 		return nil, fmt.Errorf("%w: order %s", domain.ErrCrossFamilyAccess, order.OrderNo)
 	}
 	return s.repository.ListRefundsByOrder(ctx, order.ID)
+}
+
+// ListRefunds returns a page of refunds for the operator console with the total
+// count of the matching rows.
+//
+// An unknown status is refused rather than passed through: the database would
+// match nothing and the console would render an empty queue as if no guardian
+// had asked for a refund.
+func (s *RefundService) ListRefunds(
+	ctx context.Context,
+	filter repository.RefundFilter,
+) ([]repository.RefundListing, int, error) {
+	if filter.Status != "" && !filter.Status.IsKnown() {
+		return nil, 0, invalidRequest("unknown refund status %q", filter.Status)
+	}
+	page := Page{Limit: filter.Limit, Offset: filter.Offset}.normalized()
+	filter.Limit = page.Limit
+	filter.Offset = page.Offset
+	return s.repository.ListRefunds(ctx, filter)
 }
 
 // lockRefundByNo resolves and locks one refund for a status change.

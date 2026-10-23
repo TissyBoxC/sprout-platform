@@ -57,6 +57,9 @@ class _MemoryPageState extends ConsumerState<MemoryPage> {
                 _ChildSelector(
                   children: profiles,
                   selectedId: selected,
+                  counts:
+                      ref.watch(familyMemoryCountsProvider).value ??
+                      const <String, int>{},
                   onSelected: (childId) {
                     setState(() => _childId = childId);
                     ref
@@ -368,11 +371,16 @@ class _ChildSelector extends StatelessWidget {
     required this.children,
     required this.selectedId,
     required this.onSelected,
+    required this.counts,
   });
 
   final List<ChildProfile> children;
   final String selectedId;
   final ValueChanged<String> onSelected;
+
+  /// Memories per child across the whole family. A child absent from the map has
+  /// none, which is why the label stays plain instead of showing a zero.
+  final Map<String, int> counts;
 
   @override
   Widget build(BuildContext context) {
@@ -385,7 +393,7 @@ class _ChildSelector extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: ChoiceChip(
-                label: Text(child.nickname),
+                label: Text(_labelFor(child)),
                 selected: child.childId == selectedId,
                 onSelected: (_) => onSelected(child.childId),
               ),
@@ -393,6 +401,14 @@ class _ChildSelector extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String _labelFor(ChildProfile child) {
+    final count = counts[child.childId] ?? 0;
+    if (count == 0) {
+      return child.nickname;
+    }
+    return '${child.nickname} · $count 条';
   }
 }
 

@@ -11,6 +11,13 @@ abstract interface class MemoryApi {
   /// Lists every memory stored for one child.
   Future<List<ChildMemory>> fetchMemories(String childId);
 
+  /// Counts the memories of every child in the family in one read.
+  ///
+  /// The per-child read cannot answer "which child does the device know
+  /// something about", and a guardian deciding what to review needs that
+  /// overview before opening any one child.
+  Future<Map<String, int>> fetchFamilyMemoryCounts();
+
   /// Creates or replaces one memory. A guardian write always wins over a value
   /// the device reported earlier for the same key.
   Future<ChildMemory> saveMemory({
@@ -64,6 +71,28 @@ class HttpMemoryApi implements MemoryApi {
         .whereType<Map>()
         .map((record) => ChildMemory.fromJson(record.cast<String, dynamic>()))
         .toList(growable: false);
+  }
+
+  @override
+  Future<Map<String, int>> fetchFamilyMemoryCounts() async {
+    final response = await _apiClient.get(
+      '/api/v1/families/${Uri.encodeComponent(_familyId)}/memories',
+    );
+    final data = response['data'];
+    final children = data is Map ? data['children'] : null;
+    if (children is! List) {
+      return const <String, int>{};
+    }
+    final counts = <String, int>{};
+    for (final child in children.whereType<Map>()) {
+      final childId = child['child_id']?.toString() ?? '';
+      if (childId.isEmpty) {
+        continue;
+      }
+      final memories = child['memories'];
+      counts[childId] = memories is List ? memories.length : 0;
+    }
+    return counts;
   }
 
   @override

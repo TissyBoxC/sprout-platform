@@ -485,6 +485,14 @@ func (s *Service) RejectRefund(
 	return s.Refunds.RejectRefund(ctx, operatorAccountID, refundNo)
 }
 
+// ListRefunds returns a page of refunds for the operator console.
+func (s *Service) ListRefunds(
+	ctx context.Context,
+	filter repository.RefundFilter,
+) ([]repository.RefundListing, int, error) {
+	return s.Refunds.ListRefunds(ctx, filter)
+}
+
 // GetSpendingLimit returns one family's monthly cap with this month's spend.
 func (s *Service) GetSpendingLimit(
 	ctx context.Context,

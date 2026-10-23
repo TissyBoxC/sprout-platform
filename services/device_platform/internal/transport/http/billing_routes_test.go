@@ -27,6 +27,7 @@ var billingRoutePatterns = []string{
 	"GET /api/v1/admin/billing/plans",
 	"POST /api/v1/admin/billing/plans",
 	"PUT /api/v1/admin/billing/plans/{plan_id}",
+	"GET /api/v1/admin/billing/refunds",
 	"POST /api/v1/admin/billing/refunds/{refund_no}/approve",
 	"POST /api/v1/admin/billing/refunds/{refund_no}/reject",
 	"GET /api/v1/admin/billing/reconciliation",

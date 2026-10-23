@@ -12,9 +12,6 @@ abstract interface class BluetoothAudioApi {
 
   /// Lists each family device's latest bounded adapter status.
   Future<List<BluetoothAudioDevice>> fetchDevices();
-
-  /// Reads the fleet summary for the admin console.
-  Future<Map<String, Object?>> fetchAdminStats({int windowDays = 7});
 }
 
 /// Production implementation backed by the authenticated API client.
@@ -56,19 +53,6 @@ class HttpBluetoothAudioApi implements BluetoothAudioApi {
               BluetoothAudioDevice.fromJson(Map<String, Object?>.from(item)),
         )
         .toList(growable: false);
-  }
-
-  @override
-  Future<Map<String, Object?>> fetchAdminStats({int windowDays = 7}) async {
-    final response = await _apiClient.get(
-      '/api/v1/admin/bluetooth-audio/stats',
-      queryParameters: <String, String>{'window_days': '$windowDays'},
-    );
-    final data = response['data'];
-    if (data is! Map) {
-      throw const FormatException('missing bluetooth audio stats');
-    }
-    return Map<String, Object?>.from(data);
   }
 }
 

@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 
 import { useAuthStore } from '@/features/auth/application/authStore'
 import { ADMIN_PERMISSIONS } from '@/features/auth/domain/adminPermission'
+import { useBillingChannelStore } from '@/features/billing/application/billingChannelStore'
 import { useBillingOrderStore } from '@/features/billing/application/billingOrderStore'
 import {
   formatCents,
@@ -20,6 +21,7 @@ import {
 import '@/features/billing/presentation/billingStyles.css'
 
 const store = useBillingOrderStore()
+const channelStore = useBillingChannelStore()
 const authStore = useAuthStore()
 const filterForm = reactive({
   status: store.filters.status,
@@ -53,6 +55,10 @@ const orderStatusOptions = [
 
 onMounted(() => {
   void store.load()
+  // Channel health loads alongside the orders because an empty order list is
+  // ambiguous on its own: it means "nobody bought" only when a channel is
+  // actually able to take money.
+  void channelStore.load()
 })
 
 async function applyFilters(): Promise<void> {
@@ -147,6 +153,11 @@ const detailOrder = computed(() => store.detail?.order ?? null)
     </header>
 
     <p v-if="!canManageBilling" class="billing-readonly">{{ readonlyNotice }}</p>
+
+    <p v-if="channelStore.isSellingUnavailable" class="billing-readonly">
+      已登记 {{ channelStore.registeredCount }} 个支付渠道，但目前都还不能收款。在渠道配置完成前，家长无法下单，
+      这里的空订单代表「收不了款」，不代表「没有人买」。
+    </p>
 
     <form class="billing-card billing-filters" aria-label="订单筛选" @submit.prevent="applyFilters">
       <label class="billing-field">

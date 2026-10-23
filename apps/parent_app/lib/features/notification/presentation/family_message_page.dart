@@ -199,6 +199,10 @@ class _FamilyMessagePageState extends ConsumerState<FamilyMessagePage> {
                     icon: const Icon(Icons.send_rounded),
                     label: Text(_isSubmitting ? '正在发送…' : '发送留言'),
                   ),
+                  const SizedBox(height: 28),
+                  _DeliveredSection(
+                    deviceId: _deviceId ?? devices.first.deviceId,
+                  ),
                 ],
               ),
             );
@@ -280,4 +284,47 @@ String _message(Object error) {
     return error.message;
   }
   return '留言没有发送成功，请稍后重试';
+}
+
+/// What this device has already received.
+///
+/// Sending a message only means it was accepted for delivery. A guardian who
+/// needs to know whether the child actually saw it has to read the delivery
+/// record, so this section shows exactly that and stays silent when it cannot be
+/// read rather than claiming the device ignored the message.
+class _DeliveredSection extends ConsumerWidget {
+  const _DeliveredSection({required this.deviceId});
+
+  final String deviceId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final delivered = ref.watch(deliveredMessagesProvider(deviceId));
+    final theme = Theme.of(context);
+
+    return delivered.maybeWhen(
+      data: (messages) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text('这台设备已收到', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          if (messages.isEmpty)
+            Text(
+              '还没有留言送达这台设备。设备联网后，发送的留言会自动显示。',
+              style: theme.textTheme.bodySmall,
+            )
+          else
+            for (final message in messages.take(5))
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  message.body.isEmpty ? message.title : message.body,
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ),
+        ],
+      ),
+      orElse: () => const SizedBox.shrink(),
+    );
+  }
 }

@@ -93,6 +93,7 @@ class ProfilePage extends ConsumerWidget {
                     onBattery: () => context.push('/me/battery'),
                     onMotion: () => context.push('/me/motion'),
                     onVideoCompanion: () => context.push('/me/video-companion'),
+                    onVideoSession: () => context.push('/me/video-session'),
                     onWearable: () => context.push('/me/wearable'),
                     onMultiDevice: () => context.push('/me/multi-device'),
                     onEmotion: () => context.push('/me/emotion'),
@@ -620,6 +621,7 @@ class _SettingsCard extends StatelessWidget {
     required this.onBattery,
     required this.onMotion,
     required this.onVideoCompanion,
+    required this.onVideoSession,
     required this.onWearable,
     required this.onMultiDevice,
     required this.onEmotion,
@@ -654,6 +656,7 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onBattery;
   final VoidCallback onMotion;
   final VoidCallback onVideoCompanion;
+  final VoidCallback onVideoSession;
   final VoidCallback onWearable;
   final VoidCallback onMultiDevice;
   final VoidCallback onEmotion;
@@ -824,6 +827,14 @@ class _SettingsCard extends StatelessWidget {
             subtitle: const Text('管理视频联系人，查看通话记录'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: onVideoCompanion,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.camera_front_outlined),
+            title: const Text('视频通话设置'),
+            subtitle: const Text('设置能不能视频、摄像头和麦克风权限'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onVideoSession,
           ),
           const Divider(height: 1, indent: 16, endIndent: 16),
           ListTile(

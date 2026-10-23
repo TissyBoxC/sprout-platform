@@ -155,9 +155,4 @@ class _FakeBluetoothAudioApi implements BluetoothAudioApi {
     );
     return _policy;
   }
-
-  @override
-  Future<Map<String, Object?>> fetchAdminStats({int windowDays = 7}) async {
-    return <String, Object?>{'window_days': windowDays};
-  }
 }

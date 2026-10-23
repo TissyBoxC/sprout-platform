@@ -164,9 +164,4 @@ class _FakeLearningVisualizationApi implements LearningVisualizationApi {
     );
     return _policy;
   }
-
-  @override
-  Future<Map<String, Object?>> fetchAdminStats({int windowDays = 7}) async {
-    return <String, Object?>{'window_days': windowDays};
-  }
 }

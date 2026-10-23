@@ -777,6 +777,40 @@ func (f *fakeRepository) ListRefundsByOrder(
 	return refunds, nil
 }
 
+// ListRefunds returns a filtered page of refunds for the operator console.
+//
+// The refund rows are ordered newest first so the page mirrors the SQL listing,
+// and the order number is resolved from the order map, exactly as the join does.
+func (f *fakeRepository) ListRefunds(
+	ctx context.Context,
+	filter repository.RefundFilter,
+) ([]repository.RefundListing, int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	listings := []repository.RefundListing{}
+	for _, existing := range f.refunds {
+		if filter.Status != "" && existing.Status != filter.Status {
+			continue
+		}
+		listings = append(listings, repository.RefundListing{Refund: *existing})
+	}
+	// Sorting here rather than relying on map iteration keeps "newest first"
+	// deterministic, so a test can assert the page boundary.
+	sort.Slice(listings, func(left, right int) bool {
+		leftRefund, rightRefund := listings[left].Refund, listings[right].Refund
+		if !leftRefund.CreatedAt.Equal(rightRefund.CreatedAt) {
+			return leftRefund.CreatedAt.After(rightRefund.CreatedAt)
+		}
+		return leftRefund.RefundNo > rightRefund.RefundNo
+	})
+	for index := range listings {
+		if order, ok := f.orders[listings[index].Refund.OrderID]; ok {
+			listings[index].OrderNo = order.OrderNo
+		}
+	}
+	return paginate(listings, filter.Limit, filter.Offset), len(listings), nil
+}
+
 // SumRefundCentsByStatus totals the refunds of an order in the given states.
 func (f *fakeRepository) SumRefundCentsByStatus(
 	ctx context.Context,

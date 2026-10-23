@@ -180,6 +180,21 @@ export interface BillingReconciliationInput {
   businessDate: string
 }
 
+// A registered payment provider and whether it can actually take money. The
+// console has to show unconfigured providers explicitly: an operator who cannot
+// see that every channel is unavailable will read an empty order list as "no one
+// bought anything" rather than "nothing can be sold".
+export interface BillingChannel {
+  channel: string
+  health: string
+}
+
+export interface BillingChannelSummary {
+  channels: BillingChannel[]
+  registeredChannelCount: number
+  configuredChannelCount: number
+}
+
 export interface BillingClient {
   listOrders(query: BillingOrderQuery): Promise<BillingOrderPage>
   loadOrder(orderNo: string): Promise<BillingOrderDetail>
@@ -189,6 +204,7 @@ export interface BillingClient {
   updatePlan(input: BillingPlanUpdateInput): Promise<ApiMutationResult<BillingPlan>>
   approveRefund(refundNo: string): Promise<ApiMutationResult<BillingRefund>>
   rejectRefund(refundNo: string): Promise<ApiMutationResult<BillingRefund>>
+  listChannels(): Promise<BillingChannelSummary>
   listReconciliationRuns(): Promise<BillingReconciliationRun[]>
   startReconciliation(
     input: BillingReconciliationInput,
@@ -274,6 +290,34 @@ export function createBillingClient(
       return arrayValue(payload.plans ?? payload.items)
         .map(toPlan)
         .filter((plan): plan is BillingPlan => plan !== null)
+    },
+
+    async listChannels(): Promise<BillingChannelSummary> {
+      const response = await httpClient.get(`${BASE_PATH}/channels`)
+      const payload = recordValue(response.data?.data)
+      const channels = arrayValue(payload.channels)
+        .map((entry) => {
+          const item = recordValue(entry)
+          const channel = stringValue(item.channel)
+          if (!channel) {
+            return null
+          }
+          return { channel, health: stringValue(item.health) || 'unknown' }
+        })
+        .filter((entry): entry is BillingChannel => entry !== null)
+      return {
+        channels,
+        // The server owns these counts; recomputing them here would drift as
+        // soon as a channel is registered but not yet configured.
+        registeredChannelCount: nonNegativeInteger(
+          payload.registered_channel_count,
+          channels.length,
+        ),
+        configuredChannelCount: nonNegativeInteger(
+          payload.configured_channel_count,
+          channels.filter((entry) => entry.health === 'healthy').length,
+        ),
+      }
     },
 
     async createPlan(input: BillingPlanInput): Promise<ApiMutationResult<BillingPlan>> {

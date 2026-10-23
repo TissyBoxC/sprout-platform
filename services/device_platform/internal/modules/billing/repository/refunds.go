@@ -16,6 +16,24 @@ const refundColumns = `
 	completed_at, created_at, updated_at
 `
 
+// refundListColumns is refundColumns plus the order number the operator queue
+// shows. It is resolved by the join rather than stored on the refund, so a
+// refund row never carries a second copy of its order's number.
+const refundListColumns = `
+	refunds.id, refunds.refund_no, refunds.order_id, refunds.payment_id,
+	refunds.amount_cny_cents, refunds.reason, refunds.operator_account_id,
+	refunds.status, refunds.channel_refund_no, refunds.requested_at,
+	refunds.approved_at, refunds.completed_at, refunds.created_at,
+	refunds.updated_at, orders.order_no
+`
+
+// RefundFilter narrows an administrative refund listing. Zero values mean "any".
+type RefundFilter struct {
+	Status domain.RefundStatus
+	Limit  int
+	Offset int
+}
+
 // CreateRefund inserts one refund request.
 //
 // It takes the caller's transaction because the over-refund guard is only sound
@@ -101,6 +119,35 @@ func (r *PostgresRepository) ListRefundsByOrder(
 		return nil, fmt.Errorf("iterate billing refunds: %w", err)
 	}
 	return refunds, nil
+}
+
+// ListRefunds returns a page of refunds for the operator console, newest first,
+// with the total count of the matching rows.
+//
+// The order is newest-first because an operator works down the queue from the
+// most recent request, and the order number is joined in rather than stored on
+// the refund so a refund row never carries a second copy of it.
+func (r *PostgresRepository) ListRefunds(
+	ctx context.Context,
+	filter RefundFilter,
+) ([]RefundListing, int, error) {
+	limit, offset := normalizePage(filter.Limit, filter.Offset)
+	rows, err := r.database.Query(ctx, `
+		SELECT `+refundListColumns+`, COUNT(*) OVER () AS total
+		FROM billing_refunds AS refunds
+		JOIN billing_orders AS orders ON orders.id = refunds.order_id
+		WHERE ($1 = '' OR refunds.status = $1)
+		ORDER BY refunds.created_at DESC, refunds.refund_no DESC
+		LIMIT $2 OFFSET $3
+	`,
+		string(filter.Status),
+		limit,
+		offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list billing refunds: %w", err)
+	}
+	return collectRefundListings(rows)
 }
 
 // SumRefundCentsByStatus sums refund amounts of one order in the given statuses.
@@ -279,40 +326,84 @@ func (r *PostgresRepository) ApplyOrderRefund(
 
 // scanRefund reads one refund row, mapping a missing row to the domain error.
 func scanRefund(row rowScanner) (*domain.Refund, error) {
-	var refund domain.Refund
-	var paymentID *string
-	var operatorID *string
-	var statusValue string
+	refund := &domain.Refund{}
 	var amount int64
-	err := row.Scan(
+	var statusValue string
+	if err := row.Scan(refundScanTargets(refund, &amount, &statusValue)...); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, domain.ErrOrderNotFound
+		}
+		return nil, fmt.Errorf("scan billing refund: %w", err)
+	}
+	applyRefundAmounts(refund, amount, statusValue)
+	return refund, nil
+}
+
+// refundScanTargets returns the destinations for refundColumns.
+//
+// PaymentID and OperatorAccountID are nullable columns sent to pointers to
+// pointers, so a NULL lands as nil and a present uuid as a value; the entity
+// keeps both as plain strings.
+func refundScanTargets(refund *domain.Refund, amount *int64, status *string) []any {
+	return []any{
 		&refund.ID,
 		&refund.RefundNo,
 		&refund.OrderID,
-		&paymentID,
-		&amount,
+		&refund.PaymentID,
+		amount,
 		&refund.Reason,
-		&operatorID,
-		&statusValue,
+		&refund.OperatorAccountID,
+		status,
 		&refund.ChannelRefundNo,
 		&refund.RequestedAt,
 		&refund.ApprovedAt,
 		&refund.CompletedAt,
 		&refund.CreatedAt,
 		&refund.UpdatedAt,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, domain.ErrOrderNotFound
 	}
-	if err != nil {
-		return nil, fmt.Errorf("scan billing refund: %w", err)
-	}
-	if paymentID != nil {
-		refund.PaymentID = *paymentID
-	}
-	if operatorID != nil {
-		refund.OperatorAccountID = *operatorID
-	}
-	refund.Status = domain.RefundStatus(statusValue)
+}
+
+// applyRefundAmounts copies the raw BIGINT and TEXT columns into their typed
+// fields, so a cent amount never leaves the database as anything but an int64.
+func applyRefundAmounts(refund *domain.Refund, amount int64, status string) {
+	refund.Status = domain.RefundStatus(status)
 	refund.AmountCents = domain.Cents(amount)
-	return &refund, nil
+}
+
+// collectRefundListings drains a refund page and returns its rows and total.
+func collectRefundListings(rows pgx.Rows) ([]RefundListing, int, error) {
+	defer rows.Close()
+	listings := make([]RefundListing, 0)
+	total := 0
+	for rows.Next() {
+		listing := RefundListing{}
+		var amount int64
+		var statusValue string
+		var rowTotal int
+		targets := append(
+			refundScanTargets(&listing.Refund, &amount, &statusValue),
+			&listing.OrderNo,
+			&rowTotal,
+		)
+		if err := rows.Scan(targets...); err != nil {
+			return nil, 0, fmt.Errorf("scan billing refund listing: %w", err)
+		}
+		total = rowTotal
+		applyRefundAmounts(&listing.Refund, amount, statusValue)
+		listings = append(listings, listing)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate billing refund listings: %w", err)
+	}
+	return listings, total, nil
+}
+
+// RefundListing is one refund row with the order number it belongs to.
+//
+// The number is carried beside the entity, not inside it: the refund aggregate
+// owns money and status only, and the operator console needs the order number
+// as a read-time projection.
+type RefundListing struct {
+	Refund  domain.Refund
+	OrderNo string
 }

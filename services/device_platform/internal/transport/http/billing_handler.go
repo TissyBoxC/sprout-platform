@@ -42,6 +42,7 @@ type billingService interface {
 	RequestRefund(ctx context.Context, request billingservice.RequestRefundRequest) (*billingdomain.Refund, error)
 	ApproveRefund(ctx context.Context, operatorAccountID string, refundNo string) (*billingdomain.Refund, error)
 	RejectRefund(ctx context.Context, operatorAccountID string, refundNo string) (*billingdomain.Refund, error)
+	ListRefunds(ctx context.Context, filter repository.RefundFilter) ([]repository.RefundListing, int, error)
 
 	GetActiveConsent(ctx context.Context, parentAccountID string, consentVersion string) (*billingdomain.SpendingConsent, error)
 	GrantConsent(ctx context.Context, parentAccountID string, consentVersion string, clientIP string) (*billingdomain.SpendingConsent, error)
@@ -137,6 +138,28 @@ type refundResponse struct {
 	RequestedAt    time.Time  `json:"requested_at"`
 	ApprovedAt     *time.Time `json:"approved_at,omitempty"`
 	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+}
+
+// adminRefundResponse is the operator console view of one refund.
+//
+// It is a separate shape from refundResponse because the console renders an
+// approval queue, not a guardian receipt: it needs the row identity, the order
+// number it belongs to, and empty strings where a column is NULL, so the page
+// never has to distinguish a missing field from an absent value. Every field
+// name is the one the console already reads; none is invented here.
+type adminRefundResponse struct {
+	ID                string `json:"id"`
+	RefundNo          string `json:"refund_no"`
+	OrderNo           string `json:"order_no"`
+	OrderID           string `json:"order_id"`
+	AmountCNYCents    int64  `json:"amount_cny_cents"`
+	Reason            string `json:"reason"`
+	OperatorAccountID string `json:"operator_account_id"`
+	Status            string `json:"status"`
+	ChannelRefundNo   string `json:"channel_refund_no"`
+	RequestedAt       string `json:"requested_at"`
+	ApprovedAt        string `json:"approved_at"`
+	CompletedAt       string `json:"completed_at"`
 }
 
 // consentResponse reports the guardian spending consent state.
@@ -725,6 +748,40 @@ func (handler billingHandler) adminUpdatePlan(response http.ResponseWriter, requ
 	writeSuccess(response, request, http.StatusOK, planResponseOf(*plan))
 }
 
+// adminListRefunds returns a page of refund requests for the operator console.
+//
+// The guardian request path and this queue share the same rows, so an approval
+// always acts on a refund the operator saw here; status, page, and page size
+// are parsed by the same helpers as the order listing.
+func (handler billingHandler) adminListRefunds(response http.ResponseWriter, request *http.Request) {
+	if handler.service == nil {
+		writeError(response, request, http.StatusServiceUnavailable, "service_unavailable", "退款暂时无法读取，请稍后重试")
+		return
+	}
+	page, ok := billingPageOf(response, request)
+	if !ok {
+		return
+	}
+	filter := repository.RefundFilter{
+		Status: billingdomain.RefundStatus(strings.TrimSpace(request.URL.Query().Get("status"))),
+		Limit:  page.Limit,
+		Offset: page.Offset,
+	}
+	listings, total, err := handler.service.ListRefunds(request.Context(), filter)
+	if err != nil {
+		writeBillingError(response, request, err)
+		return
+	}
+	items := make([]adminRefundResponse, 0, len(listings))
+	for _, listing := range listings {
+		items = append(items, adminRefundResponseOf(listing))
+	}
+	writeSuccess(response, request, http.StatusOK, map[string]any{
+		"refunds": items,
+		"total":   total,
+	})
+}
+
 // adminApproveRefund approves a requested refund in the operator's name.
 func (handler billingHandler) adminApproveRefund(response http.ResponseWriter, request *http.Request) {
 	handler.decideRefund(response, request, true)
@@ -1101,6 +1158,41 @@ func refundResponseOf(refund billingdomain.Refund) refundResponse {
 		ApprovedAt:     refund.ApprovedAt,
 		CompletedAt:    refund.CompletedAt,
 	}
+}
+
+// adminRefundResponseOf projects one refund listing onto the operator wire.
+func adminRefundResponseOf(listing repository.RefundListing) adminRefundResponse {
+	refund := listing.Refund
+	return adminRefundResponse{
+		ID:                refund.ID,
+		RefundNo:          refund.RefundNo,
+		OrderNo:           listing.OrderNo,
+		OrderID:           refund.OrderID,
+		AmountCNYCents:    int64(refund.AmountCents),
+		Reason:            refund.Reason,
+		OperatorAccountID: refund.OperatorAccountID,
+		Status:            string(refund.Status),
+		ChannelRefundNo:   refund.ChannelRefundNo,
+		RequestedAt:       billingTimestamp(refund.RequestedAt),
+		ApprovedAt:        billingOptionalTimestamp(refund.ApprovedAt),
+		CompletedAt:       billingOptionalTimestamp(refund.CompletedAt),
+	}
+}
+
+// billingTimestamp renders an instant the console can parse. The layout
+// includes the zone because the page formats it in the operator's local time.
+func billingTimestamp(moment time.Time) string {
+	return moment.UTC().Format(time.RFC3339)
+}
+
+// billingOptionalTimestamp renders a nullable instant as an empty string: the
+// console shows "" as "no record yet" and must not receive null for a field it
+// treats as text.
+func billingOptionalTimestamp(moment *time.Time) string {
+	if moment == nil {
+		return ""
+	}
+	return billingTimestamp(*moment)
 }
 
 // consentResponseOf reports the live consent, or the unconsented state when the

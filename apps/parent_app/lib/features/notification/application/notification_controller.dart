@@ -282,6 +282,15 @@ final notificationApiProvider = Provider<NotificationApi>((ref) {
   return NotificationApi(ref.read(apiClientProvider));
 });
 
+/// Messages one device has actually received, newest first.
+///
+/// Kept separate from the inbox because it answers a different question: the
+/// inbox is what the guardian was told, this is what the device displayed.
+final deliveredMessagesProvider =
+    FutureProvider.family<List<DeviceMessage>, String>((ref, deviceId) {
+      return ref.watch(notificationApiProvider).deviceMessages(deviceId);
+    });
+
 final notificationControllerProvider =
     AsyncNotifierProvider<NotificationController, NotificationInboxState>(
       NotificationController.new,

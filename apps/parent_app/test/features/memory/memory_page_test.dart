@@ -162,6 +162,11 @@ class _FakeMemoryApi implements MemoryApi {
   }
 
   @override
+  Future<Map<String, int>> fetchFamilyMemoryCounts() async {
+    return <String, int>{if (_memories.isNotEmpty) 'child-1': _memories.length};
+  }
+
+  @override
   Future<ChildMemory> saveMemory({
     required String childId,
     required String memoryKey,

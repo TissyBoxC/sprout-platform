@@ -1284,6 +1284,148 @@ func TestReconciliationRefusesDuplicateDay(t *testing.T) {
 	}
 }
 
+// ===== operator refund listing =====
+
+// TestListRefundsFiltersByStatusAndPages proves the operator queue is read through
+// one filtered page that carries the order number, and that the total counts the
+// matching rows rather than the page.
+func TestListRefundsFiltersByStatusAndPages(t *testing.T) {
+	harness := newHarness(t, nil)
+	order := seedOrderWithRefunds(t, harness)
+	pending := harness.requestRefund(t, order, 3000, "重复购买")
+	harness.requestRefund(t, order, 2000, "孩子误触购买")
+	if _, err := harness.refunds.ApproveRefund(context.Background(), "operator-1", pending.RefundNo); err != nil {
+		t.Fatalf("approve refund: %v", err)
+	}
+
+	listings, total, err := harness.refunds.ListRefunds(context.Background(), repository.RefundFilter{
+		Status: domain.RefundStatusApproved,
+	})
+	if err != nil {
+		t.Fatalf("list approved refunds: %v", err)
+	}
+	if total != 1 || len(listings) != 1 {
+		t.Fatalf("approved refunds = %d of total %d, want 1 of 1", len(listings), total)
+	}
+	if listings[0].Refund.RefundNo != pending.RefundNo {
+		t.Fatalf("refund = %s, want %s", listings[0].Refund.RefundNo, pending.RefundNo)
+	}
+	// The console shows the order next to the refund, so a missing join result
+	// would render an approval queue full of orphan rows.
+	if listings[0].OrderNo != order.OrderNo {
+		t.Fatalf("order no = %q, want %q", listings[0].OrderNo, order.OrderNo)
+	}
+
+	requested, requestedTotal, err := harness.refunds.ListRefunds(
+		context.Background(),
+		repository.RefundFilter{Status: domain.RefundStatusRequested, Limit: 1},
+	)
+	if err != nil {
+		t.Fatalf("list requested refunds: %v", err)
+	}
+	if requestedTotal != 1 || len(requested) != 1 {
+		t.Fatalf("requested refunds = %d of total %d, want 1 of 1", len(requested), requestedTotal)
+	}
+
+	all, allTotal, err := harness.refunds.ListRefunds(context.Background(), repository.RefundFilter{Limit: 1})
+	if err != nil {
+		t.Fatalf("list every refund: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("page length = %d, want 1", len(all))
+	}
+	if allTotal != 2 {
+		t.Fatalf("total = %d, want 2 matching rows behind a one-row page", allTotal)
+	}
+}
+
+// TestListRefundsReturnsEmptySliceWhenNothingMatches proves an empty queue is an
+// empty slice, never nil: a nil slice would serialise as null and the console
+// would have to special-case it.
+func TestListRefundsReturnsEmptySliceWhenNothingMatches(t *testing.T) {
+	harness := newHarness(t, nil)
+
+	listings, total, err := harness.refunds.ListRefunds(context.Background(), repository.RefundFilter{})
+	if err != nil {
+		t.Fatalf("list refunds: %v", err)
+	}
+	if listings == nil {
+		t.Fatal("an empty listing must be an empty slice, not nil")
+	}
+	if len(listings) != 0 || total != 0 {
+		t.Fatalf("listings = %d, total = %d, want 0 and 0", len(listings), total)
+	}
+}
+
+// TestListRefundsRefusesUnknownStatus proves a status the schema does not declare
+// is refused instead of silently matching nothing.
+func TestListRefundsRefusesUnknownStatus(t *testing.T) {
+	harness := newHarness(t, nil)
+
+	_, _, err := harness.refunds.ListRefunds(
+		context.Background(),
+		repository.RefundFilter{Status: domain.RefundStatus("cancelled")},
+	)
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+}
+
+// TestListRefundsClampsThePageSize proves an oversized page request is clamped to
+// the shared maximum, so one call cannot read the whole refund ledger.
+func TestListRefundsClampsThePageSize(t *testing.T) {
+	harness := newHarness(t, nil)
+	order := seedOrderWithRefunds(t, harness)
+	harness.requestRefund(t, order, 3000, "重复购买")
+	harness.requestRefund(t, order, 2000, "孩子误触购买")
+
+	listings, total, err := harness.refunds.ListRefunds(
+		context.Background(),
+		repository.RefundFilter{Limit: MaxPageSize + 500},
+	)
+	if err != nil {
+		t.Fatalf("list refunds: %v", err)
+	}
+	if len(listings) != 2 || total != 2 {
+		t.Fatalf("listings = %d, total = %d, want 2 and 2", len(listings), total)
+	}
+}
+
+// seedOrderWithRefunds seeds a paid order that refunds can be requested against.
+//
+// A refund needs a settled payment, so the order goes through a signed callback
+// rather than being written straight into the store.
+func seedOrderWithRefunds(t *testing.T, harness *testHarness) domain.Order {
+	t.Helper()
+	verifier := testVerifier(t)
+	harness.channels.channels["wechat"] = newTestChannel(t, verifier)
+	harness.seedPlan(t, "sprout_year", 19900, "20.000000")
+	harness.grantConsent(t, "parent-1")
+	order := harness.createOrder(t, "parent-1", "sprout_year")
+	harness.payOrder(t, verifier, order)
+	return order
+}
+
+// requestRefund records one refund request against the order.
+func (h *testHarness) requestRefund(
+	t *testing.T,
+	order domain.Order,
+	amountCents int64,
+	reason string,
+) *domain.Refund {
+	t.Helper()
+	refund, err := h.refunds.RequestRefund(context.Background(), RequestRefundRequest{
+		ParentAccountID: order.ParentAccountID,
+		OrderNo:         order.OrderNo,
+		AmountCents:     domain.Cents(amountCents),
+		Reason:          reason,
+	})
+	if err != nil {
+		t.Fatalf("request refund: %v", err)
+	}
+	return refund
+}
+
 // ===== helpers =====
 
 // payOrder settles an order through a real signed callback.

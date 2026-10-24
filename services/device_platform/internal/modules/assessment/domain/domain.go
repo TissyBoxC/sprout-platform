@@ -389,6 +389,10 @@ type StartRequest struct {
 	FamilyID string
 	ChildID  string
 	LessonID string
+	// DeviceID names the device the child will answer on. It is optional: a
+	// guardian who does not pick one still gets a session, and the device then
+	// reaches it through its own authenticated session id.
+	DeviceID string
 }
 
 // Validate checks the request names a family and a well-formed lesson.

@@ -83,6 +83,12 @@ func Run() error {
 	// never audio or image bytes.
 	deviceConnections := careview.NewDeviceConnectionRegistry()
 
+	// The relay manager is created before the realtime transport because the
+	// transport turns each inbound device still into a guardian frame, which
+	// needs the live relay for the session the still names.
+	careViewRelays := careview.NewRelayManager(cfg.CareView.MaxRelays)
+	defer careViewRelays.CloseAll()
+
 	realtimeHandler, realtimeManager, realtimeShutdown, err := buildRealtimeTransport(
 		cfg,
 		logger,
@@ -91,6 +97,7 @@ func Run() error {
 		safetyReader,
 		redisCache.Client(),
 		deviceConnections,
+		careViewRelays,
 	)
 	if err != nil {
 		return err
@@ -99,9 +106,6 @@ func Run() error {
 
 	intercomRelays := intercom.NewRelayManager(cfg.Intercom.MaxRelays)
 	defer intercomRelays.CloseAll()
-
-	careViewRelays := careview.NewRelayManager(cfg.CareView.MaxRelays)
-	defer careViewRelays.CloseAll()
 
 	routerOptions := gatewayhttp.RouterOptions{
 		Logger:            logger,
@@ -243,6 +247,7 @@ func buildRealtimeTransport(
 	safetyReader securitysettings.Reader,
 	redisClient *redis.Client,
 	deviceConnections *careview.DeviceConnectionRegistry,
+	careViewRelays *careview.RelayManager,
 ) (http.Handler, *session.Manager, func(), error) {
 	if !cfg.WebSocket.Enabled {
 		logger.Info("device realtime endpoint is disabled")
@@ -341,6 +346,24 @@ func buildRealtimeTransport(
 		TokenRevoker:        verifier.RevokeIdentity,
 		OnDeviceConnected: func(deviceID string, connection websocket.DeviceFrameSink) func() {
 			return deviceConnections.Register(deviceID, connection)
+		},
+		FrameSource: func(ctx context.Context, frame websocket.DeviceVideoFrame, sink websocket.DeviceVideoSink) {
+			// A still belongs to the care view session its envelope names. When
+			// that session has no live relay the frame is dropped rather than
+			// queued, because a picture from an ended view must never reach a
+			// guardian who is no longer watching.
+			relay, found := careViewRelays.Relay(frame.SessionID)
+			if !found {
+				return
+			}
+			if !relay.IsStreaming() {
+				return
+			}
+			if err := relay.ForwardToGuardian(frame.Payload); err != nil {
+				// A guardian who disconnected mid-view is the ordinary case; the
+				// relay closes itself and the next frame finds no relay.
+				return
+			}
 		},
 		DetectorFactory: func() vad.Detector {
 			return vad.NewEnergyDetector(detectorConfig)

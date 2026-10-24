@@ -109,20 +109,37 @@ type Item struct {
 	Text string
 }
 
+// SessionNotifier hands one freshly opened session to the device the child will
+// answer on.
+//
+// It is optional. The session row is always persisted first, and the device can
+// still read it through its own authenticated session id, so a notification
+// failure must never fail session creation. Implementations are expected to be
+// safe for concurrent use.
+type SessionNotifier interface {
+	NotifyAssessmentStarted(
+		ctx context.Context,
+		deviceID string,
+		session domain.Session,
+	) error
+}
+
 // Options are the collaborators the service needs.
 type Options struct {
-	Store   Store
-	Lessons LessonCatalog
-	Logger  *slog.Logger
+	Store    Store
+	Lessons  LessonCatalog
+	Logger   *slog.Logger
+	Notifier SessionNotifier
 }
 
 // Service owns assessment lifecycle.
 type Service struct {
-	store   Store
-	lessons LessonCatalog
-	logger  *slog.Logger
-	now     func() time.Time
-	newID   func() (string, error)
+	store    Store
+	lessons  LessonCatalog
+	logger   *slog.Logger
+	notifier SessionNotifier
+	now      func() time.Time
+	newID    func() (string, error)
 	// expiryFailures counts consecutive failed sweeps. A session that never
 	// closes keeps its slot and blocks the next assessment, so the health probe
 	// reports degraded instead of inspecting an empty table forever.
@@ -136,12 +153,23 @@ func NewService(options Options) *Service {
 		logger = slog.Default()
 	}
 	return &Service{
-		store:   options.Store,
-		lessons: options.Lessons,
-		logger:  logger,
-		now:     func() time.Time { return time.Now().UTC() },
-		newID:   newID,
+		store:    options.Store,
+		lessons:  options.Lessons,
+		logger:   logger,
+		notifier: options.Notifier,
+		now:      func() time.Time { return time.Now().UTC() },
+		newID:    newID,
 	}
+}
+
+// SetSessionNotifier wires the device notification port after both services have
+// been constructed.
+//
+// The assessment service is built before the runtime command service it notifies
+// through, so the seam is filled in once both exist instead of forcing a
+// constructor cycle.
+func (service *Service) SetSessionNotifier(notifier SessionNotifier) {
+	service.notifier = notifier
 }
 
 // Start opens an assessment for a lesson the family may practise.
@@ -225,6 +253,19 @@ func (service *Service) Start(
 		"session_id", session.ID, "family_id", session.FamilyID,
 		"child_id", session.ChildID, "lesson_id", session.LessonID,
 		"difficulty", session.Difficulty)
+
+	// A guardian who named a device wants the assessment to open on that device.
+	// The session is already durable, so a failed notification only means the
+	// child starts by tapping the entry point instead of being taken there.
+	if service.notifier != nil && request.DeviceID != "" {
+		if notifyErr := service.notifier.NotifyAssessmentStarted(
+			ctx, request.DeviceID, session,
+		); notifyErr != nil {
+			service.logger.Warn("assessment device notification failed",
+				"session_id", session.ID, "device_id", request.DeviceID,
+				"error", notifyErr)
+		}
+	}
 	return StartResult{Session: session, NextItem: item}, nil
 }
 

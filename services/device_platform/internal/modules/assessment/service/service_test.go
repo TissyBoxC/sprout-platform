@@ -825,3 +825,83 @@ func TestAnswerRetriesAfterAConcurrentWrite(t *testing.T) {
 		t.Fatalf("answers = %d, want 0", len(store.answers[started.Session.ID]))
 	}
 }
+
+// recordingNotifier captures the device notification a guardian's device choice
+// produces, so the test can assert on what the device is actually told.
+type recordingNotifier struct {
+	devices  []string
+	sessions []domain.Session
+	err      error
+}
+
+func (notifier *recordingNotifier) NotifyAssessmentStarted(
+	_ context.Context,
+	deviceID string,
+	session domain.Session,
+) error {
+	notifier.devices = append(notifier.devices, deviceID)
+	notifier.sessions = append(notifier.sessions, session)
+	return notifier.err
+}
+
+func TestStartNotifiesTheNamedDevice(t *testing.T) {
+	store := newFakeStore()
+	notifier := &recordingNotifier{}
+	instance := newService(store, newFakeCatalog(3))
+	instance.SetSessionNotifier(notifier)
+
+	request := startRequest()
+	request.DeviceID = "device-1"
+	started, err := instance.Start(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if len(notifier.devices) != 1 {
+		t.Fatalf("notifications = %d, want 1", len(notifier.devices))
+	}
+	if notifier.devices[0] != "device-1" {
+		t.Fatalf("device = %q, want device-1", notifier.devices[0])
+	}
+	if notifier.sessions[0].ID != started.Session.ID {
+		t.Fatalf(
+			"notified session = %q, want %q",
+			notifier.sessions[0].ID,
+			started.Session.ID,
+		)
+	}
+}
+
+// A guardian who does not choose a device still gets a usable session; the child
+// enters the assessment on the device itself.
+func TestStartWithoutDeviceNotifiesNothing(t *testing.T) {
+	store := newFakeStore()
+	notifier := &recordingNotifier{}
+	instance := newService(store, newFakeCatalog(3))
+	instance.SetSessionNotifier(notifier)
+
+	if _, err := instance.Start(context.Background(), startRequest()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if len(notifier.devices) != 0 {
+		t.Fatalf("notifications = %d, want 0", len(notifier.devices))
+	}
+}
+
+// A device that is offline must not fail the guardian's request: the session row
+// is already durable and the device can still open it by its own session id.
+func TestStartSurvivesNotificationFailure(t *testing.T) {
+	store := newFakeStore()
+	notifier := &recordingNotifier{err: errors.New("device offline")}
+	instance := newService(store, newFakeCatalog(3))
+	instance.SetSessionNotifier(notifier)
+
+	request := startRequest()
+	request.DeviceID = "device-1"
+	started, err := instance.Start(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Start() error = %v, want the session to survive", err)
+	}
+	if started.Session.State != domain.StateActive {
+		t.Fatalf("state = %q, want active", started.Session.State)
+	}
+}

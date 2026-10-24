@@ -47,6 +47,10 @@ const (
 	defaultMaxFramesPerSecond  = 80
 	defaultMaxBytesPerSecond   = 128 * 1024
 	defaultSendQueueDropPolicy = SendQueueDisconnect
+	// videoFrameQueueDepth bounds how far a slow view consumer may lag before
+	// new stills are dropped. It is deliberately shallow: a live view only
+	// needs the newest picture, and the queue also caps retained video bytes.
+	videoFrameQueueDepth = 2
 )
 
 // ServerConfig bounds one device connection and the sessions it may create.
@@ -121,6 +125,38 @@ type ServerConfig struct {
 	// release function is called once when the connection ends. A nil value
 	// keeps other transports from writing to devices.
 	OnDeviceConnected func(deviceID string, connection DeviceFrameSink) (release func())
+	// FrameSource, when set, receives every validated inbound device video
+	// (SRVD) still with a sink that writes frames back to the same device.
+	// Frames are delivered on a dedicated bounded queue owned by this
+	// connection; when that queue is full the still is dropped and counted as
+	// a backpressure drop instead of stalling the audio read loop, because a
+	// live view tolerates a lost picture far better than a broken utterance.
+	// Invocations for one device are serialised and may block while the
+	// provider answers, so implementations must return promptly on
+	// ctx cancellation. A nil value discards every video frame after decode.
+	FrameSource func(ctx context.Context, frame DeviceVideoFrame, sink DeviceVideoSink)
+}
+
+// DeviceVideoFrame is one decoded inbound still from a device camera.
+//
+// Payload is already bounded by maxVideoFrameBytes and copied away from the
+// socket buffer, so a consumer may retain it. The gateway never logs or stores
+// it; the transport hands it to exactly one FrameSource.
+type DeviceVideoFrame struct {
+	DeviceID   string
+	SessionID  string
+	Sequence   uint32
+	CapturedAt time.Time
+	Payload    []byte
+}
+
+// DeviceVideoSink lets a video consumer answer the device that sent a still.
+//
+// It is deliberately write-only and bound to one connection: a view relay can
+// acknowledge or reply to the camera without gaining a handle on another
+// device's connection.
+type DeviceVideoSink interface {
+	SendDeviceFrame(payload []byte) error
 }
 
 // DeviceFrameSink accepts a binary frame write on behalf of another transport.
@@ -588,6 +624,10 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 
 	limiter := newRateLimiter(s.config.MaxFramesPerSecond, s.config.MaxBytesPerSecond)
 	var disconnectReason string
+	videoFrames := make(chan DeviceVideoFrame, videoFrameQueueDepth)
+	if s.config.FrameSource != nil {
+		go s.consumeDeviceVideo(connectionContext, videoFrames, writer)
+	}
 
 	for {
 		messageType, payload, err := connection.ReadMessage()
@@ -791,6 +831,46 @@ func (s *Server) serveConnection(connection *websocket.Conn, identity DeviceIden
 				s.sendError(writer, getSession(), errorCodeInvalidControl, "控制信息格式不正确", false)
 			}
 		case websocket.BinaryMessage:
+			// The magic decides the path before any session lookup. A camera
+			// still is valid outside a voice session, so requiring one here
+			// would turn a correct device frame into a protocol error.
+			if isVideoEnvelope(payload) {
+				if !limiter.allowAudio(len(payload)) {
+					s.stats.malformedFrames.Add(1)
+					s.sendError(writer, getSession(), errorCodeRateLimited, "画面发送过快，请稍后重试", true)
+					continue
+				}
+				videoFrame, videoErr := DecodeVideoEnvelope(payload)
+				if videoErr != nil {
+					s.stats.malformedFrames.Add(1)
+					s.sendError(
+						writer,
+						getSession(),
+						mapVideoEnvelopeError(videoErr),
+						"画面数据格式不正确",
+						false,
+					)
+					continue
+				}
+				// Enqueue after decode so a rejected frame never occupies the
+				// view queue, and never block the reader: a delayed still is
+				// worth less than the next audio frame.
+				select {
+				case videoFrames <- DeviceVideoFrame{
+					DeviceID:   identity.DeviceID,
+					SessionID:  videoFrame.SessionID,
+					Sequence:   videoFrame.Sequence,
+					CapturedAt: videoFrame.CapturedAt,
+					Payload:    videoFrame.Payload,
+				}:
+				default:
+					s.stats.backpressureDrops.Add(1)
+					if s.config.OnBackpressure != nil {
+						s.config.OnBackpressure(identity.DeviceID, s.stats.backpressureDrops.Load())
+					}
+				}
+				continue
+			}
 			voiceSession := getSession()
 			if voiceSession == nil {
 				s.stats.malformedFrames.Add(1)
@@ -881,6 +961,41 @@ closed:
 			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "rate limited"),
 			time.Now().Add(s.config.WriteTimeout),
 		)
+	}
+}
+
+// consumeDeviceVideo hands validated stills to the configured FrameSource.
+//
+// The read loop only enqueues, so a slow view consumer can never delay audio.
+// Frames still queued when the connection ends are discarded: a picture whose
+// device is gone has no consumer, and retaining it would outlive its purpose.
+func (s *Server) consumeDeviceVideo(
+	ctx context.Context,
+	frames <-chan DeviceVideoFrame,
+	sink DeviceVideoSink,
+) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case frame, ok := <-frames:
+			if !ok {
+				return
+			}
+			// The handler is unexported and a panic here would take down the
+			// process for one malformed still.
+			func() {
+				defer func() {
+					if recovered := recover(); recovered != nil {
+						s.logger.Warn(
+							"device video frame handler panicked",
+							"device_id", frame.DeviceID,
+						)
+					}
+				}()
+				s.config.FrameSource(ctx, frame, sink)
+			}()
+		}
 	}
 }
 
@@ -1478,6 +1593,22 @@ func mapAudioEnvelopeError(err error) string {
 	}
 	return errorCodeInvalidAudio
 }
+
+// mapVideoEnvelopeError maps a video decode failure onto the static device
+// error vocabulary.
+//
+// The device control schema has no video-specific code, so an oversized still
+// is reported as a size violation and every other failure as an invalid audio
+// frame; both are non-retryable and the Chinese message the caller supplies
+// tells the device the frame was video, not audio.
+func mapVideoEnvelopeError(err error) string {
+	if errors.Is(err, ErrVideoEnvelopePayload) {
+		return errorCodeFrameTooLarge
+	}
+	return errorCodeInvalidAudio
+}
+
+var _ DeviceVideoSink = (*connectionWriter)(nil)
 
 func pcmBytes(pcm []int16) []byte {
 	data := make([]byte, len(pcm)*2)

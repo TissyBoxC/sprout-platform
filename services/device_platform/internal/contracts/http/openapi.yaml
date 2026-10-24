@@ -14259,6 +14259,10 @@ components:
           type: string
           format: uuid
           description: 参加测评的孩子；不填时按家庭维度限制同时只能有一次进行中的测评
+        device_id:
+          type: string
+          format: uuid
+          description: 在指定设备上开始测评；不填时由孩子自己在设备上进入测评
     AssessmentAnswerRequest:
       type: object
       additionalProperties: false

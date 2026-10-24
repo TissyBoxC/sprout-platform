@@ -221,6 +221,12 @@ const (
 	// CommandCareViewStop tells the device to stop capturing and clear its
 	// indication. The child may also send this by pressing the device button.
 	CommandCareViewStop CommandType = "care_view_stop"
+	// CommandAssessmentStart tells the device which assessment to open.
+	//
+	// The payload carries the session id and its deadline. The device fetches the
+	// first item itself over its own authenticated session, so the command never
+	// carries lesson content or any answer.
+	CommandAssessmentStart CommandType = "assessment_start"
 )
 
 // CommandTypeIsValid reports whether a command is part of the stable contract.
@@ -236,7 +242,8 @@ func CommandTypeIsValid(commandType CommandType) bool {
 		CommandVoiceIntercomCall,
 		CommandVoiceIntercomCallControl,
 		CommandCareViewStart,
-		CommandCareViewStop:
+		CommandCareViewStop,
+		CommandAssessmentStart:
 		return true
 	default:
 		return false

@@ -36,6 +36,7 @@ func (handler guardianAssessmentHandler) start(
 	var payload struct {
 		LessonID string `json:"lesson_id"`
 		ChildID  string `json:"child_id"`
+		DeviceID string `json:"device_id"`
 	}
 	if err := decodeJSON(request, &payload); err != nil {
 		writeError(response, request, http.StatusBadRequest, "invalid_request", "请求格式不正确")
@@ -45,6 +46,7 @@ func (handler guardianAssessmentHandler) start(
 		FamilyID: request.PathValue("family_id"),
 		ChildID:  payload.ChildID,
 		LessonID: payload.LessonID,
+		DeviceID: payload.DeviceID,
 	})
 	if err != nil {
 		writeAssessmentError(response, request, err)

@@ -492,6 +492,12 @@ func Run() error {
 	// command validation and OTA publication share one repository and one
 	// device eligibility policy.
 	deviceRuntimeService.SetFirmwareUpdateAuthorizer(ota)
+	// An assessment started for a named device has to reach that device. The
+	// assessment service is created before the runtime service, so the command
+	// seam is filled in here rather than through a constructor cycle.
+	assessments.SetSessionNotifier(assessmentNotifier{
+		commands: deviceRuntimeService,
+	})
 	// Health is assembled from the owning service rather than from a table
 	// existence query. Services that are created later start as explicit
 	// placeholders and are replaced below before ValidateHealthProbeCoverage.

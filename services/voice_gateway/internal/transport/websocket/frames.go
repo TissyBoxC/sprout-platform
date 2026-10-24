@@ -58,6 +58,14 @@ var (
 	ErrAudioEnvelopePayload = errors.New("audio envelope payload is invalid")
 )
 
+// Video envelope errors stay separate from the audio sentinels even though the
+// decode rules are shared, because the device side must distinguish "this
+// stream is not audio" from "this video frame is malformed".
+var (
+	ErrVideoEnvelopeInvalid = errors.New("video envelope is invalid")
+	ErrVideoEnvelopePayload = errors.New("video envelope payload is invalid")
+)
+
 var allowedCapabilities = map[string]struct{}{
 	"audio_input":     {},
 	"audio_output":    {},
@@ -159,11 +167,74 @@ type AudioEnvelope struct {
 }
 
 const (
-	binaryEnvelopeMagic           = "SRAW"
+	binaryEnvelopeMagic = "SRAW"
+	// binaryEnvelopeMagicVideo marks a device video frame carrying one JPEG
+	// still rather than Opus audio. The distinct magic keeps a camera frame
+	// out of the session audio path and an audio packet out of the view path.
+	binaryEnvelopeMagicVideo      = "SRVD"
 	serverEnvelopeMagic           = "SRSV"
 	binaryEnvelopeVersion    byte = 1
 	binaryEnvelopeHeaderSize      = 24
-	maxIdentifierLength           = 128
+	// A video still needs more than the 16-bit payload length an audio envelope
+	// carries, so the video envelope is version 2 with a 32-bit length field and
+	// a two-byte wider header. Version 2 exists only for the SRVD kind; every
+	// audio envelope stays on version 1 and its original layout.
+	binaryEnvelopeVideoVersion    byte = 2
+	binaryEnvelopeVideoHeaderSize      = 26
+	maxIdentifierLength                = 128
+	// maxVideoFrameBytes caps the payload of a video still at 256 KiB.
+	//
+	// The envelope's 16-bit payload-length field addresses at most 65535
+	// bytes, so this bound is a contract and a future format must widen that
+	// field before the cap can actually admit a larger still. The value is
+	// kept distinct from the audio cap so neither kind's limit can drift into
+	// the other. The audio cap stays at frame.MaxPayloadBytes.
+	maxVideoFrameBytes = 256 * 1024
+)
+
+// binaryEnvelopeKind describes one accepted inbound envelope magic and its
+// payload bound, so decode and error mapping stay identical across kinds. Both
+// sentinels of one kind must be distinct values: callers separate the two with
+// errors.Is.
+type binaryEnvelopeKind struct {
+	magic       string
+	maxPayload  int
+	invalidErr  error
+	payloadErr  error
+	payloadUnit string
+	// version is the envelope version this kind must carry.
+	version byte
+	// headerSize is the fixed header length before the session identifier.
+	//
+	// Video uses a wider header because a still does not fit the 16-bit payload
+	// length an audio envelope spends bytes [22:24] on. Widening the field for
+	// video only keeps the audio wire format byte-for-byte unchanged.
+	headerSize int
+	// payloadLengthBytes is 2 for audio and 4 for video.
+	payloadLengthBytes int
+}
+
+var (
+	audioEnvelopeKind = binaryEnvelopeKind{
+		magic:              binaryEnvelopeMagic,
+		maxPayload:         frame.MaxPayloadBytes,
+		invalidErr:         ErrAudioEnvelopeInvalid,
+		payloadErr:         ErrAudioEnvelopePayload,
+		payloadUnit:        "audio",
+		version:            binaryEnvelopeVersion,
+		headerSize:         binaryEnvelopeHeaderSize,
+		payloadLengthBytes: 2,
+	}
+	videoEnvelopeKind = binaryEnvelopeKind{
+		magic:              binaryEnvelopeMagicVideo,
+		maxPayload:         maxVideoFrameBytes,
+		invalidErr:         ErrVideoEnvelopeInvalid,
+		payloadErr:         ErrVideoEnvelopePayload,
+		payloadUnit:        "video",
+		version:            binaryEnvelopeVideoVersion,
+		headerSize:         binaryEnvelopeVideoHeaderSize,
+		payloadLengthBytes: 4,
+	}
 )
 
 // NewControlFrame returns a fully stamped control frame.
@@ -399,42 +470,74 @@ func EncodeAudioEnvelope(envelope AudioEnvelope) ([]byte, error) {
 // DecodeAudioEnvelope parses and validates one binary audio frame.
 //
 // Malformed headers, unknown versions, oversized payloads, and invalid session
-// identifiers return descriptive errors without allocating a large payload.
+// identifiers return descriptive errors without allocating a large payload. A
+// video frame is rejected here: the two kinds never cross-accept.
 func DecodeAudioEnvelope(data []byte) (AudioEnvelope, error) {
-	if len(data) < binaryEnvelopeHeaderSize {
-		return AudioEnvelope{}, fmt.Errorf("%w: truncated", ErrAudioEnvelopeInvalid)
+	return decodeBinaryEnvelope(audioEnvelopeKind, data)
+}
+
+// DecodeVideoEnvelope parses and validates one binary device video frame.
+//
+// The header is byte-identical to the audio envelope, so only the magic and
+// the payload bound differ. The decoded payload is left for the transport's
+// FrameSource handler; this package never parses JPEG itself.
+func DecodeVideoEnvelope(data []byte) (AudioEnvelope, error) {
+	return decodeBinaryEnvelope(videoEnvelopeKind, data)
+}
+
+// decodeBinaryEnvelope applies the shared envelope contract for one kind.
+//
+// Every bounds check runs before the payload is copied, so a lying header
+// cannot make the transport retain a buffer sized by the device.
+func decodeBinaryEnvelope(kind binaryEnvelopeKind, data []byte) (AudioEnvelope, error) {
+	if len(data) < kind.headerSize {
+		return AudioEnvelope{}, fmt.Errorf("%w: truncated", kind.invalidErr)
 	}
-	if string(data[:4]) != binaryEnvelopeMagic {
-		return AudioEnvelope{}, fmt.Errorf("%w: magic", ErrAudioEnvelopeInvalid)
+	if string(data[:4]) != kind.magic {
+		// A frame with a valid envelope but the other kind's magic is still
+		// a decode failure for this caller; callers that accept both kinds
+		// dispatch on the magic before choosing a decoder.
+		return AudioEnvelope{}, fmt.Errorf("%w: magic", kind.invalidErr)
 	}
-	if data[4] != binaryEnvelopeVersion {
-		return AudioEnvelope{}, fmt.Errorf("%w: version %d", ErrAudioEnvelopeInvalid, data[4])
+	if data[4] != kind.version {
+		return AudioEnvelope{}, fmt.Errorf("%w: version %d", kind.invalidErr, data[4])
 	}
 	if data[5] != 0 {
-		return AudioEnvelope{}, fmt.Errorf("%w: reserved flags", ErrAudioEnvelopeInvalid)
+		return AudioEnvelope{}, fmt.Errorf("%w: reserved flags", kind.invalidErr)
 	}
 
 	headerLength := int(binary.BigEndian.Uint16(data[6:8]))
 	sequence := binary.BigEndian.Uint32(data[8:12])
 	capturedAtMillis := int64(binary.BigEndian.Uint64(data[12:20]))
 	sessionIDLength := int(binary.BigEndian.Uint16(data[20:22]))
-	payloadLength := int(binary.BigEndian.Uint16(data[22:24]))
+	var payloadLength int
+	if kind.payloadLengthBytes == 4 {
+		payloadLength = int(binary.BigEndian.Uint32(data[22:26]))
+	} else {
+		payloadLength = int(binary.BigEndian.Uint16(data[22:24]))
+	}
 	if sessionIDLength == 0 || sessionIDLength > maxIdentifierLength {
-		return AudioEnvelope{}, fmt.Errorf("%w: session_id length", ErrAudioEnvelopeInvalid)
+		return AudioEnvelope{}, fmt.Errorf("%w: session_id length", kind.invalidErr)
 	}
-	if payloadLength == 0 || payloadLength > frame.MaxPayloadBytes {
-		return AudioEnvelope{}, fmt.Errorf("%w: %d bytes", ErrAudioEnvelopePayload, payloadLength)
+	if payloadLength == 0 || payloadLength > kind.maxPayload {
+		return AudioEnvelope{}, fmt.Errorf(
+			"%w: %s payload of %d bytes exceeds the %d byte limit",
+			kind.payloadErr,
+			kind.payloadUnit,
+			payloadLength,
+			kind.maxPayload,
+		)
 	}
-	if headerLength != binaryEnvelopeHeaderSize+sessionIDLength {
-		return AudioEnvelope{}, fmt.Errorf("%w: header length", ErrAudioEnvelopeInvalid)
+	if headerLength != kind.headerSize+sessionIDLength {
+		return AudioEnvelope{}, fmt.Errorf("%w: header length", kind.invalidErr)
 	}
 	if len(data) != headerLength+payloadLength {
-		return AudioEnvelope{}, fmt.Errorf("%w: message length", ErrAudioEnvelopeInvalid)
+		return AudioEnvelope{}, fmt.Errorf("%w: message length", kind.invalidErr)
 	}
 
-	sessionID := string(data[24:headerLength])
+	sessionID := string(data[kind.headerSize:headerLength])
 	if !validIdentifier(sessionID) {
-		return AudioEnvelope{}, fmt.Errorf("%w: session_id", ErrAudioEnvelopeInvalid)
+		return AudioEnvelope{}, fmt.Errorf("%w: session_id", kind.invalidErr)
 	}
 	payload := append([]byte(nil), data[headerLength:]...)
 	return AudioEnvelope{
@@ -447,6 +550,19 @@ func DecodeAudioEnvelope(data []byte) (AudioEnvelope, error) {
 
 func validIdentifier(value string) bool {
 	return identifierPattern.MatchString(value)
+}
+
+// isVideoEnvelope reports whether a binary frame carries the video magic.
+//
+// The read loop must classify on the magic alone: routing happens before
+// session lookup, because a camera still is accepted outside a voice session.
+func isVideoEnvelope(data []byte) bool {
+	return len(data) >= 4 && string(data[:4]) == binaryEnvelopeMagicVideo
+}
+
+// isAudioEnvelope reports whether a binary frame carries the audio magic.
+func isAudioEnvelope(data []byte) bool {
+	return len(data) >= 4 && string(data[:4]) == binaryEnvelopeMagic
 }
 
 // EncodeServerAudioEnvelope serializes one outbound synthesized audio frame.
